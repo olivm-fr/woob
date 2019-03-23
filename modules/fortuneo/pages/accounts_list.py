@@ -43,22 +43,22 @@ from weboob.tools.capabilities.bank.investments import is_isin_valid
 
 
 class Transaction(FrenchTransaction):
-    PATTERNS = [(re.compile(u'^(?P<category>CHEQUE)(?P<text>.*)'),        FrenchTransaction.TYPE_CHECK),
-                (re.compile('^(?P<category>FACTURE CARTE) DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*?)( CA?R?T?E? ?\d*X*\d*)?$'),
+    PATTERNS = [(re.compile(u'^(?P<category>CHE?QU?E?)(?P<text>[^|]*)'),        FrenchTransaction.TYPE_CHECK),
+                (re.compile('^(?P<category>FACTURE CARTE) DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>[^|]*?)( CA?R?T?E? ?\d*X*\d*)?$'),
                                                             FrenchTransaction.TYPE_CARD),
-                (re.compile('^(?P<category>CARTE)( DU)? (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'),
+                (re.compile('^(?P<category>CARTE)( DU)? (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>[^|]*)'),
                                                             FrenchTransaction.TYPE_CARD),
-                (re.compile('^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP|PRLV)) (?P<text>.*)'),
+                (re.compile('^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP|PRLV)) (?P<text>[^|]*)'),
                                                             FrenchTransaction.TYPE_ORDER),
-                (re.compile('^(?P<category>ECHEANCEPRET)(?P<text>.*)'),   FrenchTransaction.TYPE_LOAN_PAYMENT),
-                (re.compile('^(?P<category>RET(RAIT)? DAB) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})( (?P<HH>\d+)H(?P<MM>\d+))? (?P<text>.*)'),
+                (re.compile('^(?P<category>ECHEANCEPRET)(?P<text>[^|]*)'),   FrenchTransaction.TYPE_LOAN_PAYMENT),
+                (re.compile('^(?P<category>RET(RAIT)? DAB) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})( (?P<HH>\d+)H(?P<MM>\d+))? (?P<text>[^|]*)'),
                                                             FrenchTransaction.TYPE_WITHDRAWAL),
-                (re.compile('^(?P<category>VIR(EMEN)?T? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>.*)'),
+                (re.compile('^(?P<category>VIR(EMEN)?T? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>[^|]*)'),
                                                             FrenchTransaction.TYPE_TRANSFER),
-                (re.compile('^(?P<category>REMBOURST)(?P<text>.*)'),     FrenchTransaction.TYPE_PAYBACK),
-                (re.compile('^(?P<category>COMMISSIONS)(?P<text>.*)'),   FrenchTransaction.TYPE_BANK),
-                (re.compile('^(?P<text>(?P<category>REMUNERATION).*)'),   FrenchTransaction.TYPE_BANK),
-                (re.compile('^(?P<category>REMISE CHEQUES)(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+                (re.compile('^(?P<category>REMBOURST)(?P<text>[^|]*)'),     FrenchTransaction.TYPE_PAYBACK),
+                (re.compile('^(?P<category>COMMISSIONS)(?P<text>[^|]*)'),   FrenchTransaction.TYPE_BANK),
+                (re.compile('^(?P<text>(?P<category>REMUNERATION)[^|]*)'),   FrenchTransaction.TYPE_BANK),
+                (re.compile('^(?P<category>REMISE CHEQUES)(?P<text>[^|]*)'), FrenchTransaction.TYPE_DEPOSIT),
                ]
 
 
@@ -287,6 +287,9 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
             date_oper       = tables[i].xpath("./td[2]/text()")[0]
             date_val        = tables[i].xpath("./td[3]/text()")[0]
             label           = tables[i].xpath("./td[4]/text()")[0]
+            sublabels       = tables[i].xpath("./td[4]/div/text()")
+            if len(sublabels) > 0:
+                label       = sublabels[0].strip() + " | " + label.strip()
             label           = re.sub(r'\s+', ' ', label).strip()
             amount          = tables[i].xpath("./td[5]/text() | ./td[6]/text()")
 
