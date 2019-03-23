@@ -542,16 +542,17 @@ class IbanPage(LoggedPage, HTMLPage):
 class Transaction(FrenchTransaction):
     PATTERNS = [(re.compile(r'^(?P<text>RET DAB \w+ .*?) LE (?P<dd>\d{2})(?P<mm>\d{2})$'),
                                                             FrenchTransaction.TYPE_WITHDRAWAL),
-                (re.compile(r'^VIR(EMENT)?( INTERNET)?(\.| )?(DE)? (?P<text>.*)'),
+                (re.compile(r'^(E-)?VIR(EMENT)?( SEPA)?( INTERNET)?(\.| )?(DE)? (?P<text>.*?)( Motif ?:.*)?$'),
                                                             FrenchTransaction.TYPE_TRANSFER),
                 (re.compile(r'^PRLV (SEPA )?(DE )?(?P<text>.*?)( Motif :.*)?$'),
                                                             FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'^CB (?P<text>.*) LE (?P<dd>\d{2})\.?(?P<mm>\d{2})$'),
+                (re.compile(r'^CB( [0-9]+)? (?P<text>.*) LE (?P<dd>\d{2})\.?(?P<mm>\d{2})$'),
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^CHEQUE.*'),                  FrenchTransaction.TYPE_CHECK),
                 (re.compile(r'^(CONVENTION \d+ )?COTISATION (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_BANK),
-                (re.compile(r'^REM(ISE)?\.?( CHQ\.)? .*'),  FrenchTransaction.TYPE_DEPOSIT),
+                (re.compile(r'^DEP[^ ]* (?P<text>GAB .*?) LE (?P<dd>\d{2}).?(?P<mm>\d{2})$'),  FrenchTransaction.TYPE_DEPOSIT),
+                (re.compile(r'^REM(ISE)?\.?( CHE?Q(UE\.)?)? .*'),  FrenchTransaction.TYPE_DEPOSIT),
                 (re.compile(r'^(?P<text>.*?)( \d{2}.*)? LE (?P<dd>\d{2})\.?(?P<mm>\d{2})$'),
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^(?P<text>.*?) LE (?P<dd>\d{2}) (?P<mm>\d{2}) (?P<yy>\d{2})$'),
@@ -597,7 +598,7 @@ class TransactionsPage(LoggedPage, CDNBasePage):
         if t.date is NotAvailable:
             return True
 
-        t._is_coming = t.date > da.today()
+        t._is_coming = (t.date > da.today()) or (t.vdate is NotAvailable)
 
         if t.raw.startswith('TOTAL DES') or t.raw.startswith('ACHATS CARTE'):
             t.type = t.TYPE_CARD_SUMMARY
@@ -635,11 +636,11 @@ class TransactionsPage(LoggedPage, CDNBasePage):
             t.parse(date, raw, vdate=vdate)
             t.set_amount(line[self.COL_VALUE])
 
-            if t.amount == 0 and t.label.startswith('FRAIS DE '):
-                m = re.search(r'(\b\d+,\d+)E\b', t.label)
-                if m:
-                    t.amount = -CleanDecimal(replace_dots=True).filter(m.group(1))
-                    self.logger.info('parsing amount in transaction label: %r', t)
+            #if t.amount == 0 and t.label.startswith('FRAIS DE '):
+            #    m = re.search(r'(\b\d+,\d+)E\b', t.label)
+            #    if m:
+            #        t.amount = -CleanDecimal(replace_dots=True).filter(m.group(1))
+            #        self.logger.info('parsing amount in transaction label: %r', t)
 
             if self.condition(t, account.type):
                 continue
