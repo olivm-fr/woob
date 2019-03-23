@@ -174,6 +174,7 @@ class LabelsPage(LoggedPage, JsonPage):
     def get_labels(self):
         synthesis_labels = ["synthèse"]
         loan_labels = ["crédits en cours", "crédits perso et immo", "crédits", "crédits personnels et immobiliers"]
+        loan_label = "CREDITS"
         keys = [key for key in Dict('donnees')(self.doc) if key.get('label').lower() in ['crédits', 'comptes et cartes']]
         for key in keys:
             for element in Dict('submenu')(key):

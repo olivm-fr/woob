@@ -88,9 +88,9 @@ class CreditDuNordBrowser(LoginBrowser):
             raise BrowserIncorrectPassword()
 
     def _iter_accounts(self):
-        self.loans.go(account_type=self.account_type, loans_page_label=self.loans_page_label)
-        for a in self.page.get_list():
-            yield a
+        #self.loans.go(account_type=self.account_type, loans_page_label=self.loans_page_label)
+        #for a in self.page.get_list():
+        #    yield a
         self.accounts.go(account_type=self.account_type, accounts_page_label=self.accounts_page_label)
         self.multitype_av.go()
         if self.multitype_av.is_here():
