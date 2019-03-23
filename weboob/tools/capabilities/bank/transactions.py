@@ -93,7 +93,7 @@ def parse_with_patterns(raw, obj, patterns):
                         d = d.replace(year=d.year-1, month=mm, day=dd)
 
                     yy = d.year
-                    if d > obj.date:
+                    if d > obj.date + datetime.timedelta(days=30):
                         yy -= 1
 
                 if yy < 100:
