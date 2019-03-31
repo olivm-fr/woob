@@ -470,7 +470,7 @@ class AccountsList(LoggedPage, HTMLPage):
             if local_error_message:
                 raise BrowserUnavailable(CleanText('.')(local_error_message[0]))
 
-            number = RawText('./a[contains(@class, "synthese_numero_compte")]')(cpt).replace(u'N°', '')
+            number = Regexp(CleanText('./a[contains(@class, "numero_compte")]'), r'N° *([^ ]+)')(cpt)
 
             account.id = CleanText(None).filter(number).replace(u'N°', '')
             account._ca = CleanText('./a[contains(@class, "numero_compte")]/@rel')(cpt)
