@@ -296,11 +296,11 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
             operation.parse(date=date_oper, raw=label, vdate=date_val)
             # Needed because operation.parse overwrite operation.label
             # Theses lines must run after operation.parse.
-            if tables[i].xpath("./td[4]/div/text()"):
-                label = tables[i].xpath("./td[4]/div/text()")[0]
-            else:
-                label = tables[i].xpath("./td[4]/text()")[0]
-            operation.label = re.sub(r'\s+', ' ', label).strip()
+            #if tables[i].xpath("./td[4]/div/text()"):
+            #    label = tables[i].xpath("./td[4]/div/text()")[0]
+            #else:
+            #    label = tables[i].xpath("./td[4]/text()")[0]
+            #operation.label = re.sub(r'\s+', ' ', label).strip()
 
             if amount[1] == u'\xa0':
                 amount = amount[0]
