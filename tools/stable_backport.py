@@ -43,6 +43,7 @@ def create_compat_dir(name):
 
 
 MANUAL_PORTS = [
+    'weboob.tools.captcha.virtkeyboard',
 ]
 
 MANUAL_PORT_DIR = path.join(path.dirname(__file__), 'stable_backport_data')
@@ -147,6 +148,11 @@ class ImportErrorError(Error):
         self.reimport_module(module)
 
 
+class ManualBackport(Error):
+    def fixup(self):
+        self.reimport_module(self.message)
+
+
 def replace_all(expr, dest):
     system(r"""for file in $(git ls-files modules | grep '\.py$');
                do
@@ -180,7 +186,7 @@ class StableBackport(object):
             system('git add -u')
 
         with log('Lookup modules errors'):
-            r = check_output("pylint modules -f parseable -E -d all -e no-name-in-module,import-error; exit 0", shell=True, stderr=STDOUT).decode('utf-8')
+            r = check_output("pylint modules/* -f parseable -E -d all -e no-name-in-module,import-error; exit 0", shell=True, stderr=STDOUT).decode('utf-8')
 
         dirnames = defaultdict(list)
         for line in r.split('\n'):
@@ -194,6 +200,21 @@ class StableBackport(object):
             msg = m.group(4)
 
             dirnames[path.dirname(filename)].append(self.errors[error](filename, linenum, msg))
+
+        with log('Searching manual backports'):
+            for manual in MANUAL_PORTS:
+                r = check_output("grep -nEr '^from %s import ' modules" % manual, shell=True).strip().decode('utf-8')
+                for line in r.split('\n'):
+                    m = re.match(r'([\w\./]+):(\d+):.*', line)
+                    filename = m.group(1)
+                    linenum = m.group(2)
+                    target = dirnames[path.dirname(filename)]
+                    for err in target:
+                        if err.filename == filename and err.linenum == linenum:
+                            # an error was already spot on this line
+                            break
+                    else:
+                        target.append(ManualBackport(filename, linenum, manual))
 
         for dirname, errors in sorted(dirnames.items()):
             with log('Fixing up %s errors in %s' % (colored(str(len(errors)), 'magenta'),

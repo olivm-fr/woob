@@ -47,7 +47,7 @@ class CreditDuNordBrowser(LoginBrowser):
     transactions = URL('/vos-comptes/IPT/appmanager/transac/particuliers\?_nfpb=true(.*)', TransactionsPage)
     protransactions = URL('/vos-comptes/(.*)/transac/(professionnels|entreprises)', ProTransactionsPage)
     iban = URL('/vos-comptes/IPT/cdnProxyResource/transacClippe/RIB_impress.asp', IbanPage)
-    account_type_page = URL("/icd/zco/data/public-ws-menuespaceperso.json", AccountTypePage)
+    account_type_page = URL('/icd/zco/data/public-ws-menuespaceperso.json', AccountTypePage)
     labels_page = URL("/icd/zco/public-data/ws-menu.json", LabelsPage)
     profile_page = URL("/icd/zco/data/user.json", ProfilePage)
     bypass_rgpd = URL('/icd/zcd/data/gdpr-get-out-zs-client.json', RgpdPage)
@@ -57,16 +57,10 @@ class CreditDuNordBrowser(LoginBrowser):
         self.BASEURL = "https://%s" % website
         super(CreditDuNordBrowser, self).__init__(*args, **kwargs)
 
-    def is_logged(self):
+    @property
+    def logged(self):
         return self.page is not None and not self.login.is_here() and \
             not self.page.doc.xpath(u'//b[contains(text(), "vous devez modifier votre code confidentiel")]')
-
-    def home(self):
-        if self.is_logged():
-            self.location("/icd/zco/")
-            self.accounts.go(account_type=self.account_type)
-        else:
-            self.do_login()
 
     def do_login(self):
         self.login.go().login(self.username, self.password)
@@ -84,8 +78,11 @@ class CreditDuNordBrowser(LoginBrowser):
                 # we'll check what's happening.
                 assert False, "Still on login page."
 
-        if not self.is_logged():
+        if not self.logged:
             raise BrowserIncorrectPassword()
+
+        if self.page.doc.xpath('//head[title="Authentification"]/script[contains(text(), "_pageLabel=reinitialisation_mot_de_passe")]'):
+            raise BrowserPasswordExpired()
 
     def _iter_accounts(self):
         #self.loans.go(account_type=self.account_type, loans_page_label=self.loans_page_label)

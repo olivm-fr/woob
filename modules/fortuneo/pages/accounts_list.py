@@ -472,7 +472,7 @@ class AccountsList(LoggedPage, HTMLPage):
 
             number = Regexp(CleanText('./a[contains(@class, "numero_compte")]'), r'N° *([^ ]+)')(cpt)
 
-            account.id = CleanText(None).filter(number).replace(u'N°', '')
+            account.id = account.number = CleanText(None).filter(number).replace(u'N°', '')
             account._ca = CleanText('./a[contains(@class, "numero_compte")]/@rel')(cpt)
 
             account._card_links = []

@@ -30,3 +30,6 @@ class AmazonEnBrowser(AmazonBrowser):
     L_SIGNIN = 'Sign in'
     L_LOGIN = 'Login'
     L_SUBSCRIBER = 'Name: (.*) Edit E'
+
+    WRONGPASS_MESSAGES = ['Your password is incorrect', 'We cannot find an account with that email address']
+    WRONG_CAPTCHA_RESPONSE = "Enter the characters as they are given in the challenge."

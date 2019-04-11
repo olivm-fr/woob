@@ -5,16 +5,16 @@
 # This file is part of a weboob module.
 #
 # This weboob module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
+# it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
 # This weboob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
+# GNU Lesser General Public License for more details.
 #
-# You should have received a copy of the GNU Affero General Public License
+# You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
@@ -120,6 +120,9 @@ class AccountsPage(JsonBasePage):
         item_xpath = 'donnees'
 
         class item(ItemElement):
+            def condition(self):
+                return Dict('etatPrestation')(self) != 'INDISPONIBLE'
+
             klass = Account
 
             # There are more account type to find
@@ -129,11 +132,13 @@ class AccountsPage(JsonBasePage):
                 'CEL': Account.TYPE_SAVINGS,
                 'LDD': Account.TYPE_SAVINGS,
                 'LIVRETA': Account.TYPE_SAVINGS,
+                'SOGEMONDE': Account.TYPE_SAVINGS,
                 'LIVRET_JEUNE': Account.TYPE_SAVINGS,
                 'LIVRET_EUROKID': Account.TYPE_SAVINGS,
                 'COMPTE_SUR_LIVRET': Account.TYPE_SAVINGS,
                 'LIVRET_EPARGNE_PLUS': Account.TYPE_SAVINGS,
                 'PLAN_EPARGNE_BANCAIRE': Account.TYPE_SAVINGS,
+                'PLAN_EPARGNE_POPULAIRE': Account.TYPE_SAVINGS,
                 'LIVRET_EPARGNE_POPULAIRE': Account.TYPE_SAVINGS,
                 'BANQUE_FRANCAISE_MUTUALISEE': Account.TYPE_SAVINGS,
                 'PRET_GENERAL': Account.TYPE_LOAN,
@@ -184,6 +189,10 @@ class AccountsPage(JsonBasePage):
                 # For TYPE_REVOLVING_CREDIT, to get transaction
                 if Field('type')(self) == Account.TYPE_REVOLVING_CREDIT and \
                 not Dict('produit')(self) in ('COMPTE_ALTERNA', 'AVANCE_PATRIMOINE'):
+                    return True
+                # PLAN_EPARGNE_POPULAIRE account type history is not in json yet
+                if Field('type')(self) == Account.TYPE_SAVINGS and \
+                not Dict('produit')(self) in ('PLAN_EPARGNE_POPULAIRE', ):
                     return True
 
 class AccountsSynthesesPage(JsonBasePage):
@@ -304,6 +313,8 @@ class Transaction(FrenchTransaction):
                 (re.compile(r'^(?P<category>VIR(EMEN)?T? \w+) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_TRANSFER),
                 (re.compile(r'^(CHEQUE) (?P<text>.*)'),     FrenchTransaction.TYPE_CHECK),
+                (re.compile(r'^REMISE CHEQUE (?P<text>.*)'),
+                                                            FrenchTransaction.TYPE_CHECK),
                 (re.compile(r'^(FRAIS) (?P<text>.*)'),      FrenchTransaction.TYPE_BANK),
                 (re.compile(r'^(?P<category>ECHEANCEPRET)(?P<text>.*)'),
                                                             FrenchTransaction.TYPE_LOAN_PAYMENT),
@@ -316,6 +327,8 @@ class Transaction(FrenchTransaction):
                 (re.compile(r'^DEBIT MENSUEL CARTE (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD_SUMMARY),
                 (re.compile(r'^CREDIT MENSUEL CARTE (?P<text>.*)'),
+                                                            FrenchTransaction.TYPE_CARD_SUMMARY),
+                (re.compile(r'^Paiements CB (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD_SUMMARY),
                 (re.compile(r'^CARTE \w+ (?P<dd>\d{2})\/(?P<mm>\d{2}) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD),
@@ -415,6 +428,9 @@ class HistoryPage(JsonBasePage):
                     def condition(self):
                         return Dict('statutOperation')(self) == 'COMPTABILISE'
 
+                    obj_raw = Dict('libOpe')
+                    obj_type = Transaction.TYPE_DEFERRED_CARD
+
     @pagination
     @method
     class iter_intraday_comings(DictElement):
@@ -469,6 +485,7 @@ class CardHistoryPage(LoggedPage, HTMLPage):
             klass = Transaction
 
             obj_label = CleanText('.//td[@headers="Libelle"]/span')
+            obj_type = Transaction.TYPE_DEFERRED_CARD
 
             def obj_date(self):
                 if not 'TOTAL DES FACTURES' in Field('label')(self):
@@ -484,16 +501,16 @@ class CardHistoryPage(LoggedPage, HTMLPage):
 
             def obj_raw(self):
                 if not 'TOTAL DES FACTURES' in Field('label')(self):
-                    return Transaction.Raw(CleanText('.//td[@headers="Libelle"]/span'))(self)
+                    return CleanText('.//td[@headers="Libelle"]/span')(self)
                 return NotAvailable
 
 
 class CreditPage(LoggedPage, HTMLPage):
-    def go_history_page(self):
+    def get_history_url(self):
         redirection_script = CleanText('//script[contains(text(), "setPrestationURL")]')(self.doc)
         history_link = re.search(r'setPrestationURL\("(.*)"\)', redirection_script)
         if history_link:
-            self.browser.location(self.browser.absurl(history_link.group(1)))
+            return history_link.group(1)
 
 
 class CreditHistoryPage(LoggedPage, HTMLPage):
@@ -504,7 +521,7 @@ class CreditHistoryPage(LoggedPage, HTMLPage):
         return super(CreditHistoryPage, self).build_doc(content)
 
     @method
-    class iter_credit_history(ListElement):
+    class iter_history(ListElement):
         item_xpath = '//tr'
 
         class item(ItemElement):
@@ -518,6 +535,24 @@ class CreditHistoryPage(LoggedPage, HTMLPage):
                 if credit:
                     return credit
                 return MyDecimal(CleanText('./td[contains(@headers, "Debit")]', replace=[('&nbsp;', '')]))(self)
+
+
+class OldHistoryPage(LoggedPage, HTMLPage):
+    def get_history_url(self):
+        redirection = CleanText('//body/@onload')(self.doc)
+        history_link = re.search(r",'(/.*)',", redirection)
+        if history_link:
+            return history_link.group(1)
+
+    def iter_history(self):
+        is_no_transaction_msg = any((
+            self.doc.xpath(u'//div[contains(text(), "Aucune opération trouvée sur la période de restitution possible")]'),
+            self.doc.xpath(u'//div[contains(text(), "Aucune opération n\'a été réalisée depuis le dernier relevé")]'),
+        ))
+        assert is_no_transaction_msg, 'There are transactions, retrieve them !'
+
+        # waiting for account with history
+        return []
 
 
 class LifeInsurance(LoggedPage, HTMLPage):
@@ -537,8 +572,9 @@ class LifeInsurance(LoggedPage, HTMLPage):
     def has_link(self):
         return Link('//a[@href="asvcns20a.html"]', default=NotAvailable)(self.doc)
 
-    def get_history_link(self):
-        return Link('//a[img[@alt="Suivi des opérations"]]', default=NotAvailable)(self.doc)
+    def get_history_url(self):
+        history_url = Link('//a[img[@alt="Suivi des opérations"]]', default=NotAvailable)(self.doc)
+        return history_url
 
     def get_pages(self):
         pages = CleanText('//div[@class="net2g_asv_tableau_pager"]')(self.doc)
@@ -613,7 +649,7 @@ class LifeInsuranceInvest2(LifeInsuranceInvest):
 class LifeInsuranceHistory(LifeInsurance):
     @pagination
     @method
-    class iter_li_history(TableElement):
+    class iter_history(TableElement):
         def next_page(self):
             return self.page.li_pagination()
 

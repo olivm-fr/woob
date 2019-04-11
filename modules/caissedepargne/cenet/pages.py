@@ -125,27 +125,41 @@ class CenetLoanPage(LoggedPage, CenetJsonPage):
         class item(ItemElement):
             klass = Loan
 
-            obj_id = CleanText(Dict('IdentifiantUniqueContrat'))
+            obj_id = CleanText(Dict('IdentifiantUniqueContrat'), replace=[(' ', '-')])
             obj_label = CleanText(Dict('Libelle'))
             obj_total_amount = CleanDecimal(Dict('MontantInitial/Valeur'))
             obj_currency = Currency(Dict('MontantInitial/Devise'))
-            obj_balance = CleanDecimal(Dict('CapitalRestantDu/Valeur'))
             obj_type = Account.TYPE_LOAN
             obj_duration = CleanDecimal(Dict('Duree'))
             obj_rate = CleanDecimal.French(Dict('Taux'))
             obj_next_payment_amount = CleanDecimal(Dict('MontantProchaineEcheance/Valeur'))
 
+            def obj_balance(self):
+                balance = CleanDecimal(Dict('CapitalRestantDu/Valeur'))(self)
+                if balance > 0:
+                    balance *= -1
+                return balance
+
             def obj_subscription_date(self):
-                date = CleanDecimal(Dict('DateDebutEffet'))(self) / 1000
-                return datetime.fromtimestamp(date).date()
+                sub_date = Dict('DateDebutEffet')(self)
+                if sub_date:
+                    date = CleanDecimal().filter(sub_date) / 1000
+                    return datetime.fromtimestamp(date).date()
+                return NotAvailable
 
             def obj_maturity_date(self):
-                date = CleanDecimal(Dict('DateDerniereEcheance'))(self) / 1000
-                return datetime.fromtimestamp(date).date()
+                mat_date = Dict('DateDerniereEcheance')(self)
+                if mat_date:
+                    date = CleanDecimal().filter(mat_date) / 1000
+                    return datetime.fromtimestamp(date).date()
+                return NotAvailable
 
             def obj_next_payment_date(self):
-                date = CleanDecimal(Dict('DateProchaineEcheance'))(self) / 1000
-                return datetime.fromtimestamp(date).date()
+                next_date = Dict('DateProchaineEcheance')(self)
+                if next_date:
+                    date = CleanDecimal().filter(next_date) / 1000
+                    return datetime.fromtimestamp(date).date()
+                return NotAvailable
 
 
 class CenetCardsPage(LoggedPage, CenetJsonPage):

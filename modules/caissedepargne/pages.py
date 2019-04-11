@@ -34,7 +34,7 @@ from weboob.browser.filters.standard import Date, CleanDecimal, Regexp, CleanTex
 from weboob.browser.filters.html import Link, Attr, TableCell
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import (
-    Account, Investment, Recipient, TransferError, TransferBankError, Transfer,
+    Account, Investment, Recipient, TransferBankError, Transfer,
     AddRecipientBankError, Loan,
 )
 from weboob.capabilities.bill import DocumentTypes, Subscription, Document
@@ -589,6 +589,12 @@ class IndexPage(LoggedPage, HTMLPage):
 
         form.submit()
 
+    def is_history_of(self, account_id):
+        """
+        Check whether the displayed history is for the correct account
+        """
+        return bool(self.doc.xpath('//option[@value="%s" and @selected]' % account_id))
+
     def go_history(self, info, is_cbtab=False):
         form = self.get_form(id='main')
 
@@ -597,6 +603,20 @@ class IndexPage(LoggedPage, HTMLPage):
 
         if "MM$m_CH$IsMsgInit" in form and (form['MM$m_CH$IsMsgInit'] == "0" or info['type'] == 'ASSURANCE_VIE'):
             form['m_ScriptManager'] = "MM$m_UpdatePanel|MM$SYNTHESE"
+
+        fix_form(form)
+        return form.submit()
+
+    def go_history_netpro(self, info, ):
+        """
+        On the netpro website the go_history() does not work.
+        Even from a web browser the site does not work, and display the history of the first account
+        We use a different post to go through and display the history we need
+        """
+        form = self.get_form(id='main')
+        form['m_ScriptManager'] = 'MM$m_UpdatePanel|MM$HISTORIQUE_COMPTE$m_ExDropDownList'
+        form['MM$HISTORIQUE_COMPTE$m_ExDropDownList'] = info['id']
+        form['__EVENTTARGET'] = 'MM$HISTORIQUE_COMPTE$m_ExDropDownList'
 
         fix_form(form)
         return form.submit()
@@ -1016,8 +1036,7 @@ class TransferPage(TransferErrorPage, IndexPage):
     def get_origin_account_value(self, account):
         origin_value = [Attr('.', 'value')(o) for o in self.doc.xpath('//select[@id="MM_VIREMENT_SAISIE_VIREMENT_ddlCompteDebiter"]/option') if
                         Regexp(CleanText('.'), '- (\d+)')(o) in account.id]
-        if len(origin_value) != 1:
-            raise TransferError('error during origin account matching')
+        assert len(origin_value) == 1, 'error during origin account matching'
         return origin_value[0]
 
     def get_recipient_value(self, recipient):
@@ -1027,8 +1046,7 @@ class TransferPage(TransferErrorPage, IndexPage):
         elif recipient.category == u'Interne':
             recipient_value = [Attr('.', 'value')(o) for o in self.doc.xpath(self.RECIPIENT_XPATH) if
                                Regexp(CleanText('.'), '- (\d+)', default=NotAvailable)(o) and Regexp(CleanText('.'), '- (\d+)', default=NotAvailable)(o) in recipient.id]
-        if len(recipient_value) != 1:
-            raise TransferError('error during recipient matching')
+        assert len(recipient_value) == 1, 'error during recipient matching'
         return recipient_value[0]
 
     def init_transfer(self, account, recipient, transfer):
@@ -1047,15 +1065,30 @@ class TransferPage(TransferErrorPage, IndexPage):
     class iter_recipients(MyRecipients):
         pass
 
-    def continue_transfer(self, origin_label, recipient, label):
+    def get_transfer_type(self):
+        sepa_inputs = self.doc.xpath('//input[contains(@id, "MM_VIREMENT_SAISIE_VIREMENT_SEPA")]')
+        intra_inputs = self.doc.xpath('//input[contains(@id, "MM_VIREMENT_SAISIE_VIREMENT_INTRA")]')
+
+        assert not (len(sepa_inputs) and len(intra_inputs)), 'There are sepa and intra transfer forms'
+
+        transfer_type = None
+        if len(sepa_inputs):
+            transfer_type = 'sepa'
+        elif len(intra_inputs):
+            transfer_type = 'intra'
+        assert transfer_type, 'Sepa nor intra transfer form was found'
+        return transfer_type
+
+    def continue_transfer(self, origin_label, recipient_label, label):
         form = self.get_form(id='main')
-        type_ = 'intra' if recipient.category == u'Interne' else 'sepa'
+
+        transfer_type = self.get_transfer_type()
         fill = lambda s, t: s % (t.upper(), t.capitalize())
         form['__EVENTTARGET'] = 'MM$VIREMENT$m_WizardBar$m_lnkNext$m_lnkButton'
-        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtIdentBenef', type_)] = recipient.label
-        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtIdent', type_)] = origin_label
-        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtRef', type_)] = label
-        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtMotif', type_)] = label
+        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtIdentBenef', transfer_type)] = recipient_label
+        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtIdent', transfer_type)] = origin_label
+        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtRef', transfer_type)] = label
+        form[fill('MM$VIREMENT$SAISIE_VIREMENT_%s$m_Virement%s$txtMotif', transfer_type)] = label
         form.submit()
 
     def go_add_recipient(self):
@@ -1082,33 +1115,43 @@ class TransferConfirmPage(TransferErrorPage, IndexPage):
         form['__EVENTTARGET'] = 'MM$VIREMENT$m_WizardBar$m_lnkNext$m_lnkButton'
         form.submit()
 
-    def create_transfer(self, account, recipient, transfer):
-        transfer = Transfer()
-        transfer.currency = FrenchTransaction.Currency('.//tr[td[contains(text(), "Montant")]]/td[not(@class)] | \
-                                                        .//tr[th[contains(text(), "Montant")]]/td[not(@class)]')(self.doc)
+    def update_transfer(self, transfer, account=None, recipient=None):
+        """update `Transfer` object with web information to use transfer check"""
+
+        # transfer informations
+        transfer.label = (
+            CleanText(u'.//tr[td[contains(text(), "Motif de l\'opération")]]/td[not(@class)]')(self.doc) or
+            CleanText(u'.//tr[td[contains(text(), "Libellé")]]/td[not(@class)]')(self.doc) or
+            CleanText(u'.//tr[th[contains(text(), "Libellé")]]/td[not(@class)]')(self.doc)
+        )
+        transfer.exec_date = Date(CleanText('.//tr[th[contains(text(), "En date du")]]/td[not(@class)]'), dayfirst=True)(self.doc)
         transfer.amount = CleanDecimal('.//tr[td[contains(text(), "Montant")]]/td[not(@class)] | \
                                         .//tr[th[contains(text(), "Montant")]]/td[not(@class)]', replace_dots=True)(self.doc)
-        transfer.account_iban = account.iban
-        if recipient.category == u'Externe':
-            for word in Upper(CleanText(u'.//tr[th[contains(text(), "Compte à créditer")]]/td[not(@class)]'))(self.doc).split():
-                if is_iban_valid(word):
-                    transfer.recipient_iban = word
-                    break
+        transfer.currency = FrenchTransaction.Currency('.//tr[td[contains(text(), "Montant")]]/td[not(@class)] | \
+                                                        .//tr[th[contains(text(), "Montant")]]/td[not(@class)]')(self.doc)
+
+        # recipient transfer informations, update information if there is no OTP SMS validation
+        if recipient:
+            transfer.recipient_label = recipient.label
+            transfer.recipient_id = recipient.id
+
+            if recipient.category == u'Externe':
+                for word in Upper(CleanText(u'.//tr[th[contains(text(), "Compte à créditer")]]/td[not(@class)]'))(self.doc).split():
+                    if is_iban_valid(word):
+                        transfer.recipient_iban = word
+                        break
+                else:
+                    assert False, 'Unable to find IBAN (original was %s)' % recipient.iban
             else:
-                raise TransferError('Unable to find IBAN (original was %s)' % recipient.iban)
-        else:
-            transfer.recipient_iban = recipient.iban
-        transfer.account_id = unicode(account.id)
-        transfer.recipient_id = unicode(recipient.id)
-        transfer.exec_date = Date(CleanText('.//tr[th[contains(text(), "En date du")]]/td[not(@class)]'), dayfirst=True)(self.doc)
-        transfer.label = (CleanText(u'.//tr[td[contains(text(), "Motif de l\'opération")]]/td[not(@class)]')(self.doc) or
-                         CleanText(u'.//tr[td[contains(text(), "Libellé")]]/td[not(@class)]')(self.doc) or
-                         CleanText(u'.//tr[th[contains(text(), "Libellé")]]/td[not(@class)]')(self.doc))
-        transfer.account_label = account.label
-        transfer.recipient_label = recipient.label
-        transfer._account = account
-        transfer._recipient = recipient
-        transfer.account_balance = account.balance
+                transfer.recipient_iban = recipient.iban
+
+        # origin account transfer informations, update information if there is no OTP SMS validation
+        if account:
+            transfer.account_id = account.id
+            transfer.account_iban = account.iban
+            transfer.account_label = account.label
+            transfer.account_balance = account.balance
+
         return transfer
 
 
@@ -1133,7 +1176,7 @@ class ProTransferConfirmPage(TransferConfirmPage):
                     t.recipient_iban = word
                     break
             else:
-                raise TransferError('Unable to find IBAN (original was %s)' % recipient.iban)
+                assert False, 'Unable to find IBAN (original was %s)' % recipient.iban
         else:
             t.recipient_iban = recipient.iban
         t.recipient_iban = recipient.iban

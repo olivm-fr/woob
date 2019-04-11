@@ -26,7 +26,7 @@ from weboob.browser.filters.standard import (
 )
 from weboob.browser.pages import JsonPage, HTMLPage, LoggedPage
 from weboob.capabilities.bank import Investment, Transaction
-from weboob.capabilities.base import NotAvailable
+from weboob.capabilities.base import NotAvailable, empty
 from weboob.tools.capabilities.bank.investments import is_isin_valid
 
 
@@ -49,6 +49,12 @@ class PortfolioPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Investment
 
+            def condition(self):
+                # Some rows do not contain an expected item format,
+                # There is no valuation (mnt) because some buy/sell orders are not yet finished.
+                # We want invalid values to fail in the CleanDecimal filter so we catch only when mnt is missing
+                return Dict('mnt', default=NotAvailable)(self) is not NotAvailable
+
             obj_label = Dict('libval')
             obj_code = Dict('codval')
             obj_code_type = Eval(
@@ -59,7 +65,6 @@ class PortfolioPage(LoggedPage, JsonPage):
             obj_unitvalue = CleanDecimal(Dict('crs'))
             obj_valuation = CleanDecimal(Dict('mnt'))
             obj_vdate = Env('date')
-            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal(Dict('pourcentageActif')))
 
             def parse(self, el):
                 symbols = {
@@ -87,6 +92,12 @@ class PortfolioPage(LoggedPage, JsonPage):
                     return CleanDecimal(Dict('plvPourcentage'), sign=lambda x: Env('sign')(self))(self)
                 elif Dict('pourcentagePlv', default=None)(self):
                     return CleanDecimal(Dict('pourcentagePlv'), sign=lambda x: Env('sign')(self))(self)
+
+            def obj_portfolio_share(self):
+                active_percent = Dict('pourcentageActif', default=NotAvailable)(self)
+                if empty(active_percent):
+                    return NotAvailable
+                return Eval(lambda x: x / 100, CleanDecimal(active_percent))(self)
 
 
 class AccountCodesPage(LoggedPage, JsonPage):

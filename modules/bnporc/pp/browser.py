@@ -26,7 +26,10 @@ from requests.exceptions import ConnectionError
 
 from weboob.browser.browsers import LoginBrowser, URL, need_login
 from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import AccountNotFound, Account, TransferError, AddRecipientStep
+from weboob.capabilities.bank import (
+    AccountNotFound, Account, AddRecipientStep, AddRecipientTimeout,
+    TransferInvalidRecipient,
+)
 from weboob.capabilities.profile import ProfileMissing
 from weboob.tools.decorators import retry
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
@@ -34,7 +37,7 @@ from weboob.tools.json import json
 from weboob.browser.exceptions import ServerError
 from weboob.browser.elements import DataError
 from weboob.exceptions import BrowserIncorrectPassword
-from weboob.tools.value import Value
+from weboob.tools.value import Value, ValueBool
 
 from .pages import (
     LoginPage, AccountsPage, AccountsIBANPage, HistoryPage, TransferInitPage,
@@ -43,6 +46,7 @@ from .pages import (
     MarketListPage, MarketPage, MarketHistoryPage, MarketSynPage, BNPKeyboard,
     RecipientsPage, ValidateTransferPage, RegisterTransferPage, AdvisorPage,
     AddRecipPage, ActivateRecipPage, ProfilePage, ListDetailCardPage, ListErrorPage,
+    UselessPage, TransferAssertionError,
 )
 
 
@@ -77,6 +81,9 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
                 LoginPage)
 
     list_error_page = URL('https://mabanque.bnpparibas/rsc/contrib/document/properties/identification-fr-part-V1.json', ListErrorPage)
+
+    useless_page = URL('/fr/connexion/comptes-et-contrats', UselessPage)
+
     con_threshold = URL('/fr/connexion/100-connexions',
                         '/fr/connexion/mot-de-passe-expire',
                         '/fr/espace-prive/100-connexions.*',
@@ -105,7 +112,8 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
 
     recipients = URL('/virement-wspl/rest/listerBeneficiaire', RecipientsPage)
     add_recip = URL('/virement-wspl/rest/ajouterBeneficiaire', AddRecipPage)
-    activate_recip = URL('/virement-wspl/rest/activerBeneficiaire', ActivateRecipPage)
+    activate_recip_sms = URL('/virement-wspl/rest/activerBeneficiaire', ActivateRecipPage)
+    activate_recip_digital_key = URL('/virement-wspl/rest/verifierAuthentForte', ActivateRecipPage)
     validate_transfer = URL('/virement-wspl/rest/validationVirement', ValidateTransferPage)
     register_transfer = URL('/virement-wspl/rest/enregistrerVirement', RegisterTransferPage)
 
@@ -119,6 +127,7 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
         self.accounts_list = None
         self.card_to_transaction_type = {}
         self.rotating_password = config['rotating_password'].get()
+        self.digital_key = config['digital_key'].get()
 
     @retry(ConnectionError, tries=3)
     def open(self, *args, **kwargs):
@@ -167,7 +176,7 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
             # This page might be unavailable.
             try:
                 ibans.update(self.transfer_init.go(data=JSON({'modeBeneficiaire': '0'})).get_ibans_dict('Crediteur'))
-            except (TransferError, AttributeError):
+            except (TransferAssertionError, AttributeError):
                 pass
 
             accounts = list(self.accounts.go().iter_accounts(ibans))
@@ -324,7 +333,7 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
         try:
             if not origin_account_id in self.transfer_init.go(data=JSON({'modeBeneficiaire': '0'})).get_ibans_dict('Debiteur'):
                 raise NotImplementedError()
-        except TransferError:
+        except TransferAssertionError:
             return
 
         # avoid recipient with same iban
@@ -343,19 +352,95 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
     @need_login
     def new_recipient(self, recipient, **params):
         if 'code' in params:
+            # for sms authentication
             return self.send_code(recipient, **params)
-        # needed to get the phone number, enabling the possibility to send sms.
-        self.recipients.go(data=JSON({'type': 'TOUS'}))
-        # post recipient data sending sms with same request
+
+        # prepare commun data for all authentication method
         data = {}
         data['adresseBeneficiaire'] = ''
         data['iban'] = recipient.iban
         data['libelleBeneficiaire'] = recipient.label
         data['notification'] = True
         data['typeBeneficiaire'] = ''
-        data['typeEnvoi'] = 'SMS'
-        recipient = self.add_recip.go(data=json.dumps(data), headers={'Content-Type': 'application/json'}).get_recipient(recipient)
-        raise AddRecipientStep(recipient, Value('code', label='Saisissez le code.'))
+
+        # provisional
+        if self.digital_key:
+            if 'digital_key' in params:
+                return self.new_recipient_digital_key(recipient, data)
+
+        # need to be on recipient page send sms or mobile notification
+        # needed to get the phone number, enabling the possibility to send sms.
+        # all users with validated phone number can receive sms code
+        self.recipients.go(data=JSON({'type': 'TOUS'}))
+
+        # check type of recipient activation
+        type_activation = 'sms'
+
+        # provisional
+        if self.digital_key:
+            if self.page.has_digital_key():
+                # force users with digital key activated to use digital key authentication
+                type_activation = 'digital_key'
+
+        if type_activation == 'sms':
+            # post recipient data sending sms with same request
+            data['typeEnvoi'] = 'SMS'
+            recipient = self.add_recip.go(
+                data=json.dumps(data),
+                headers={'Content-Type': 'application/json'}
+            ).get_recipient(recipient)
+            raise AddRecipientStep(recipient, Value('code', label='Saisissez le code reçu par SMS.'))
+        elif type_activation == 'digital_key':
+            # recipient validated with digital key are immediatly available
+            recipient.enabled_date = datetime.today()
+            raise AddRecipientStep(
+                recipient,
+                ValueBool('digital_key', label='Validez pour recevoir une demande sur votre application bancaire. La validation de votre bénéficiaire peut prendre plusieurs minutes.')
+            )
+
+    @need_login
+    def send_code(self, recipient, **params):
+        """
+        add recipient with sms otp authentication
+        """
+        data = {}
+        data['idBeneficiaire'] = recipient._transfer_id
+        data['typeActivation'] = 1
+        data['codeActivation'] = params['code']
+        return self.activate_recip_sms.go(data=json.dumps(data), headers={'Content-Type': 'application/json'}).get_recipient(recipient)
+
+    @need_login
+    def new_recipient_digital_key(self, recipient, data):
+        """
+        add recipient with 'clé digitale' authentication
+        """
+        # post recipient data, sending app notification with same request
+        data['typeEnvoi'] = 'AF'
+        self.add_recip.go(data=json.dumps(data), headers={'Content-Type': 'application/json'})
+        recipient = self.page.get_recipient(recipient)
+
+        # prepare data for polling
+        assert recipient._id_transaction
+        polling_data = {}
+        polling_data['idBeneficiaire'] = recipient._transfer_id
+        polling_data['idTransaction'] = recipient._id_transaction
+        polling_data['typeActivation'] = 2
+
+        timeout = time.time() + 300.00 # float(second), like bnp website
+
+        # polling
+        while time.time() < timeout:
+            time.sleep(5) # like website
+            self.activate_recip_digital_key.go(
+                data = json.dumps(polling_data),
+                headers = {'Content-Type': 'application/json'}
+            )
+            if self.page.is_recipient_validated():
+                break
+        else:
+            raise AddRecipientTimeout()
+
+        return recipient
 
     @need_login
     def prepare_transfer(self, account, recipient, amount, reason, exec_date):
@@ -367,23 +452,18 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
         data['montant'] = str(amount)
         data['typeVirement'] = 'SEPA'
         if recipient.category == u'Externe':
-            data['idBeneficiaire'] = recipient.id
+            data['idBeneficiaire'] = recipient._transfer_id
         else:
             data['compteCrediteur'] = recipient.id
         return data
 
     @need_login
     def init_transfer(self, account, recipient, amount, reason, exec_date):
+        if recipient._web_state == 'En attente':
+            raise TransferInvalidRecipient(message="Le bénéficiaire sélectionné n'est pas activé")
+
         data = self.prepare_transfer(account, recipient, amount, reason, exec_date)
         return self.validate_transfer.go(data=JSON(data)).handle_response(account, recipient, amount, reason)
-
-    @need_login
-    def send_code(self, recipient, **params):
-        data = {}
-        data['idBeneficiaire'] = recipient.id
-        data['typeActivation'] = 1
-        data['codeActivation'] = params['code']
-        return self.activate_recip.go(data=json.dumps(data), headers={'Content-Type': 'application/json'}).get_recipient(recipient)
 
     @need_login
     def execute_transfer(self, transfer):

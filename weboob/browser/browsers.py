@@ -629,18 +629,26 @@ class PagesBrowser(DomainBrowser):
 
     Example:
 
-    >>> from .pages import Page
-    >>> class HomePage(Page):
-    ...     pass
+    >>> from .pages import HTMLPage
+    >>> class ListPage(HTMLPage):
+    ...     def get_items():
+    ...         return [el.attrib['id'] for el in self.doc.xpath('//div[@id="items"]/div')]
     ...
-    >>> class ListPage(Page):
+    >>> class ItemPage(HTMLPage):
     ...     pass
     ...
     >>> class MyBrowser(PagesBrowser):
-    ...     BASEURL = 'http://example.org'
-    ...     home = URL('/(index\.html)?', HomePage)
-    ...     list = URL('/list\.html', ListPage)
+    ...     BASEURL = 'http://example.org/'
+    ...     list = URL('list-items', ListPage)
+    ...     item = URL('item/view/(?P<id>\d+)', ItemPage)
     ...
+    >>> MyBrowser().list.stay_or_go().get_items() # doctest: +SKIP
+    >>> bool(MyBrowser().list.match('http://example.org/list-items'))
+    True
+    >>> bool(MyBrowser().list.match('http://example.org/'))
+    False
+    >>> str(MyBrowser().item.build(id=42))
+    'http://example.org/item/view/42'
 
     You can then use URL instances to go on pages.
     """
@@ -869,7 +877,7 @@ class StatesMixin(object):
         state = {}
         if hasattr(self, 'page') and self.page:
             state['url'] = self.page.url
-        state['cookies'] = base64.b64encode(zlib.compress(pickle.dumps(self.session.cookies, -1)))
+        state['cookies'] = base64.b64encode(zlib.compress(pickle.dumps(self.session.cookies, -1))).decode('ascii')
         for attrname in self.__states__:
             try:
                 state[attrname] = getattr(self, attrname)
@@ -1079,11 +1087,11 @@ class OAuth2PKCEMixin(OAuth2Mixin):
 
     # PKCE (Proof Key for Code Exchange) standard protocol methods:
     def code_verifier(self, bytes_number=64):
-        return base64.urlsafe_b64encode(os.urandom(bytes_number)).rstrip(b'=')
+        return base64.urlsafe_b64encode(os.urandom(bytes_number)).rstrip(b'=').decode('ascii')
 
     def code_challenge(self, verifier):
         digest = sha256(verifier).digest()
-        return base64.urlsafe_b64encode(digest).rstrip(b'=')
+        return base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
 
     def build_authorization_parameters(self):
         return {'redirect_uri':    self.redirect_uri,

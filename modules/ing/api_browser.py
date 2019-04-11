@@ -26,10 +26,11 @@ from functools import wraps
 from weboob.browser import LoginBrowser, URL
 from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded
 from weboob.browser.exceptions import ClientError
+from weboob.capabilities.bank import TransferBankError, TransferInvalidAmount
 
 from .api import (
     LoginPage, AccountsPage, HistoryPage, ComingPage,
-    DebitAccountsPage, CreditAccountsPage,
+    DebitAccountsPage, CreditAccountsPage, TransferPage,
     ProfilePage,
 )
 from .web import StopPage, ActionNeededPage
@@ -64,6 +65,15 @@ def need_to_be_on_website(website):
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
+            # if on other website than web or api, redirect to old website
+            if self.old_browser.url:
+                if 'https://bourse.ing.fr/' in self.old_browser.url:
+                    self.old_browser.return_from_titre_page.go()
+                elif 'https://ingdirectvie.ing.fr/' in self.old_browser.url:
+                    self.old_browser.lifeback.go()
+                elif 'https://subscribe.ing.fr/' in self.old_browser.url:
+                    self.old_browser.return_from_loan_site()
+
             if website == 'web' and self.is_on_new_website:
                 self.redirect_to_old_browser()
             elif website == 'api' and not self.is_on_new_website:
@@ -95,6 +105,8 @@ class IngAPIBrowser(LoginBrowser):
     # transfer
     credit_accounts = URL(r'/secure/api-v1/transfers/debitAccounts/(?P<account_uid>.*)/creditAccounts', CreditAccountsPage)
     debit_accounts = URL(r'/secure/api-v1/transfers/debitAccounts', DebitAccountsPage)
+    init_transfer_page = URL(r'/secure/api-v1/transfers/v2/new/validate', TransferPage)
+    exec_transfer_page = URL(r'/secure/api-v1/transfers/v2/new/execute/pin', TransferPage)
 
     # profile
     informations = URL(r'/secure/api-v1/customer/info', ProfilePage)
@@ -104,22 +116,25 @@ class IngAPIBrowser(LoginBrowser):
         super(IngAPIBrowser, self).__init__(*args, **kwargs)
 
         self.old_browser = IngBrowser(*args, **kwargs)
+        self.transfer_data = None
 
     def handle_login_error(self, r):
         error_page = r.response.json()
         assert 'error' in error_page, "Something went wrong in login"
         error = error_page['error']
 
-        if error['code'] == 'AUTHENTICATION.INVALID_PIN_CODE':
+        if error['code'] in ('AUTHENTICATION.INVALID_PIN_CODE', 'AUTHENTICATION.INVALID_CIF_AND_BIRTHDATE_COMBINATION'):
             raise BrowserIncorrectPassword(error['message'])
-        elif error['code'] == 'AUTHENTICATION.ACCOUNT_INACTIVE':
+        elif error['code'] in ('AUTHENTICATION.ACCOUNT_INACTIVE', 'AUTHENTICATION.ACCOUNT_LOCKED',
+                               'AUTHENTICATION.NO_COMPLETE_ACCOUNT_FOUND'):
             raise ActionNeeded(error['message'])
         assert error['code'] != 'INPUT_INVALID', error['message']
         raise BrowserUnavailable(error['message'])
 
     def do_login(self):
-        assert self.password.isdigit()
         assert self.birthday.isdigit()
+        if not self.password.isdigit():
+            raise BrowserIncorrectPassword()
 
         # login on new website
         # update cookies
@@ -213,6 +228,11 @@ class IngAPIBrowser(LoginBrowser):
             else:
                 assert False, 'There should be same account in web and api website'
 
+        # can use this to use export session on old browser
+        # new website is an API, export session is not relevant
+        if self.logger.settings.get('export_session'):
+            self.logger.debug('logged in with session: %s', json.dumps(self.export_session()))
+
     @need_to_be_on_website('web')
     def get_web_history(self, account):
         """iter history on old website"""
@@ -238,7 +258,7 @@ class IngAPIBrowser(LoginBrowser):
 
             for tr in self.page.iter_history():
                 # transaction id is decreasing
-                first_transaction_id = int(tr.id)
+                first_transaction_id = int(tr._web_id)
                 yield tr
 
             # like website, add 1 to the last transaction id of the list to get next transactions page
@@ -298,28 +318,75 @@ class IngAPIBrowser(LoginBrowser):
         for recipient in self.page.iter_recipients(acc_uid=account._uid):
             yield recipient
 
+    def handle_transfer_errors(self, r):
+        error_page = r.response.json()
+        assert 'error' in error_page, "Something went wrong, transfer is not created"
+
+        error = error_page['error']
+        error_msg = error['message']
+
+        if error['code'] == 'TRANSFER.INVALID_AMOUNT_MINIMUM':
+            raise TransferInvalidAmount(message=error_msg)
+        elif error['code'] == 'INPUT_INVALID' and len(error['values']):
+            for value in error['values']:
+                error_msg = '%s %s %s.' % (error_msg, value, error['values'][value])
+
+        raise TransferBankError(message=error_msg)
+
+    @need_to_be_on_website('api')
     @need_login
     def init_transfer(self, account, recipient, transfer):
-        raise NotImplementedError()
+        data = {
+            'amount': transfer.amount,
+            'executionDate': transfer.exec_date.strftime('%Y-%m-%d'),
+            'keyPadSize': {'width': 3800, 'height': 1520},
+            'label': transfer.label,
+            'fromAccount': account._uid,
+            'toAccount': recipient.id
+        }
+        try:
+            self.init_transfer_page.go(json=data, headers={'Referer': self.absurl('/secure/transfers/new')})
+        except ClientError as e:
+            self.handle_transfer_errors(e)
 
+        assert self.page.suggested_date == transfer.exec_date, "Transfer date is not valid"
+        self.transfer_data = data
+        self.transfer_data.pop('keyPadSize')
+        self.transfer_data['clickPositions'] = self.page.get_password_coord(self.password)
+
+        return transfer
+
+    @need_to_be_on_website('api')
     @need_login
     def execute_transfer(self, transfer):
-        raise NotImplementedError()
+        headers = {
+            'Referer': self.absurl('/secure/transfers/new'),
+            'Accept': 'application/json, text/plain, */*'
+        }
+        self.exec_transfer_page.go(json=self.transfer_data, headers=headers)
+
+        assert self.page.transfer_is_validated, "Transfer is not validated"
+        return transfer
 
     ############# CapDocument #############
     @need_login
+    @need_to_be_on_website('web')
     def get_subscriptions(self):
-        raise BrowserUnavailable()
+        return self.old_browser.get_subscriptions()
 
     @need_login
+    @need_to_be_on_website('web')
     def get_documents(self, subscription):
-        raise BrowserUnavailable()
+        return self.old_browser.get_documents(subscription)
 
+    @need_login
+    @need_to_be_on_website('web')
     def download_document(self, bill):
-        raise BrowserUnavailable()
+        return self.old_browser.download_document(bill)
 
     ############# CapProfile #############
     @need_login
+    @need_to_be_on_website('api')
     def get_profile(self):
         self.informations.go()
         return self.page.get_profile()

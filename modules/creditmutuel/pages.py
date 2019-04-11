@@ -35,13 +35,13 @@ from weboob.browser.filters.standard import (
 )
 from weboob.browser.filters.html import Link, Attr, TableCell, ColumnNotFound
 from weboob.exceptions import (
-    BrowserIncorrectPassword, ParseError, NoAccountsException, ActionNeeded, BrowserUnavailable,
+    BrowserIncorrectPassword, ParseError, ActionNeeded, BrowserUnavailable,
     AuthMethodNotImplemented,
 )
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.base import empty, find_object
 from weboob.capabilities.bank import (
-    Account, Investment, Recipient, TransferError, TransferBankError,
+    Account, Investment, Recipient, TransferBankError,
     Transfer, AddRecipientBankError, AddRecipientStep, Loan,
 )
 from weboob.capabilities.contact import Advisor
@@ -356,12 +356,8 @@ class item_account_generic(ItemElement):
 
 
 class AccountsPage(LoggedPage, HTMLPage):
-    def on_load(self):
-        super(AccountsPage, self).on_load()
-
-        no_account_message = CleanText('//td[contains(text(), "Votre contrat de banque à distance ne vous donne accès à aucun compte.")]')(self.doc)
-        if no_account_message:
-            raise NoAccountsException(no_account_message)
+    def has_no_account(self):
+        return CleanText('//td[contains(text(), "Votre contrat de banque à distance ne vous donne accès à aucun compte.")]')(self.doc)
 
     @method
     class iter_accounts(ListElement):
@@ -696,6 +692,9 @@ class OperationsPage(LoggedPage, HTMLPage):
             return None
         else:
             return a.attrib['href']
+
+    def has_more_operations(self):
+        return bool(self.doc.xpath('//a/span[contains(text(), "Plus d\'opérations")]'))
 
 
 class CardsOpePage(OperationsPage):
@@ -1105,9 +1104,15 @@ class LIAccountsPage(LoggedPage, HTMLPage):
             obj__is_inv = True
             obj__card_number = None
 
+    @pagination
     @method
     class iter_history(ListElement):
         item_xpath = '//table[has-class("liste")]/tbody/tr'
+
+        def next_page(self):
+            next_page = Link('//a[img[@alt="Page suivante"]]', default=None)(self.el)
+            if next_page:
+                return next_page
 
         class item(ItemElement):
             klass = FrenchTransaction
@@ -1352,7 +1357,7 @@ class InternalTransferPage(LoggedPage, HTMLPage):
             if account.endswith(acct):
                 return inp.attrib['value']
         else:
-            raise TransferError("account %s not found" % account)
+            assert False, 'Transfer origin account %s not found' % account
 
     def get_from_account_index(self, account):
         return self.get_account_index('data_input_indiceCompteADebiter', account)
@@ -1388,7 +1393,9 @@ class InternalTransferPage(LoggedPage, HTMLPage):
                     'Montant maximum autorisé au crédit pour ce compte',
                     'Débit interdit sur ce compte',
                     'Virement interdit sur compte clos',
-                    "L'intitulé du virement ne peut contenir le ou les caractères suivants",]
+                    "L'intitulé du virement ne peut contenir le ou les caractères suivants",
+                    'La date ne peut être inférieure à la date du jour. Veuillez la corriger',
+                   ]
 
         for message in messages:
             if message in content:
@@ -1400,8 +1407,8 @@ class InternalTransferPage(LoggedPage, HTMLPage):
 
     def check_success(self):
         # look for the known "all right" message
-        if not self.doc.xpath('//span[contains(text(), $msg)]', msg=self.READY_FOR_TRANSFER_MSG):
-            raise TransferError('The expected message "%s" was not found.' % self.READY_FOR_TRANSFER_MSG)
+        assert self.doc.xpath('//span[contains(text(), $msg)]', msg=self.READY_FOR_TRANSFER_MSG), \
+               'The expected transfer message "%s" was not found.' % self.READY_FOR_TRANSFER_MSG
 
     def check_data_consistency(self, account_id, recipient_id, amount, reason):
         assert account_id in CleanText('//div[div[p[contains(text(), "Compte à débiter")]]]',
@@ -1451,8 +1458,8 @@ class InternalTransferPage(LoggedPage, HTMLPage):
         transfer_ok_message = ['Votre virement a &#233;t&#233; ex&#233;cut&#233;',
                                'Ce virement a &#233;t&#233; enregistr&#233; ce jour',
                                'Ce virement a été enregistré ce jour']
-        if not any(msg for msg in transfer_ok_message if msg in content):
-            raise TransferError('The expected message "%s" was not found.' % transfer_ok_message)
+        assert any(msg for msg in transfer_ok_message if msg in content), \
+               'The expected transfer message "%s" was not found.' % transfer_ok_message
 
         exec_date, r_amount, currency = self.check_data_consistency(transfer.account_id, transfer.recipient_id, transfer.amount, transfer.label)
 
@@ -1465,7 +1472,7 @@ class InternalTransferPage(LoggedPage, HTMLPage):
             if valid_state in state:
                 break
         else:
-            raise TransferError('Transfer state is %r' % state)
+            assert False, 'Transfer state is %r' % state
 
         assert transfer.amount == r_amount
         assert transfer.exec_date == exec_date
@@ -1887,7 +1894,7 @@ class NewCardsListPage(LoggedPage, HTMLPage):
 
             def condition(self):
                 # Numerous cards are not differed card, we keep the card only if there is a coming
-                return CleanText('.//div[1]/p')(self) == 'Active' and 'Dépenses' in CleanText('.//tr[1]/td/a[contains(@id,"C:more-card")]')(self)
+                return 'Dépenses' in CleanText('.//tr[1]/td/a[contains(@id,"C:more-card")]')(self) and (CleanText('.//div[1]/p')(self) == 'Active' or Field('coming')(self) != 0)
 
             obj_balance = 0
             obj_type = Account.TYPE_CARD
@@ -1937,18 +1944,23 @@ class NewCardsListPage(LoggedPage, HTMLPage):
             def parse(self, el):
                 # We have to reach the good page with the information of the type of card
                 history_page = self.page.browser.open(Field('_link_id')(self)).page
-                card_type_page = Link('//div/ul/li/a[contains(text(), "Fonctions")]')(history_page.doc)
-                doc = self.page.browser.open(card_type_page).page.doc
-                card_type_line = doc.xpath('//tbody/tr[th[contains(text(), "Débit des paiements")]]')
-                if card_type_line:
-                    if CleanText('./td')(card_type_line[0]) != 'Différé':
-                        raise SkipItem()
-                elif doc.xpath('//div/p[contains(text(), "Vous n\'avez pas l\'autorisation")]'):
-                    self.logger.warning("The user can't reach this page")
-                elif doc.xpath('//td[contains(text(), "Problème technique")]'):
-                    raise BrowserUnavailable(CleanText(doc.xpath('//td[contains(text(), "Problème technique")]'))(self))
-                else:
-                    assert False, 'xpath for card type information could have changed'
+                card_type_page = Link('//div/ul/li/a[contains(text(), "Fonctions")]', default=NotAvailable)(history_page.doc)
+                if card_type_page:
+                    doc = self.page.browser.open(card_type_page).page.doc
+                    card_type_line = doc.xpath('//tbody/tr[th[contains(text(), "Débit des paiements")]]')
+                    if card_type_line:
+                        if CleanText('./td')(card_type_line[0]) != 'Différé':
+                            raise SkipItem()
+                    elif doc.xpath('//div/p[contains(text(), "Vous n\'avez pas l\'autorisation")]'):
+                        self.logger.warning("The user can't reach this page")
+                    elif doc.xpath('//td[contains(text(), "Problème technique")]'):
+                        raise BrowserUnavailable(CleanText(doc.xpath('//td[contains(text(), "Problème technique")]'))(self))
+                    else:
+                        assert False, 'xpath for card type information could have changed'
+                elif not CleanText('//ul//a[contains(@title, "Consulter le différé")]')(history_page.doc):
+                    # If the card is not active the "Fonction" button is absent.
+                    # However we can check "Consulter le différé" button is present
+                    raise SkipItem()
 
     def get_unavailable_cards(self):
         cards = []

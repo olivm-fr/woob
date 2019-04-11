@@ -21,7 +21,6 @@ from __future__ import unicode_literals
 
 import re
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from itertools import groupby
 from operator import attrgetter
 
@@ -33,7 +32,7 @@ from weboob.browser.profiles import Wget
 from weboob.browser.url import URL
 from weboob.browser.pages import FormNotFound
 from weboob.browser.exceptions import ClientError, ServerError
-from weboob.exceptions import BrowserIncorrectPassword, AuthMethodNotImplemented, BrowserUnavailable
+from weboob.exceptions import BrowserIncorrectPassword, AuthMethodNotImplemented, BrowserUnavailable, NoAccountsException
 from weboob.capabilities.bank import Account, AddRecipientStep, Recipient
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from weboob.capabilities import NotAvailable
@@ -243,12 +242,14 @@ class CreditMutuelBrowser(LoginBrowser, StatesMixin):
             # Populate accounts from old website
             if not self.is_new_website:
                 self.accounts.stay_or_go(subbank=self.currentSubBank)
+                has_no_account = self.page.has_no_account()
                 self.accounts_list.extend(self.page.iter_accounts())
                 self.iban.go(subbank=self.currentSubBank).fill_iban(self.accounts_list)
                 self.por.go(subbank=self.currentSubBank).add_por_accounts(self.accounts_list)
             # Populate accounts from new website
             else:
                 self.new_accounts.stay_or_go(subbank=self.currentSubBank)
+                has_no_account = self.page.has_no_account()
                 self.accounts_list.extend(self.page.iter_accounts())
                 self.iban.go(subbank=self.currentSubBank).fill_iban(self.accounts_list)
                 self.por.go(subbank=self.currentSubBank).add_por_accounts(self.accounts_list)
@@ -262,6 +263,8 @@ class CreditMutuelBrowser(LoginBrowser, StatesMixin):
 
             excluded_label = ['etalis', 'valorisation totale']
             self.accounts_list = [acc for acc in self.accounts_list if not any(w in acc.label.lower() for w in excluded_label)]
+            if has_no_account and not self.accounts_list:
+                raise NoAccountsException(has_no_account)
 
         return self.accounts_list
 
@@ -300,20 +303,18 @@ class CreditMutuelBrowser(LoginBrowser, StatesMixin):
         if account.type == Account.TYPE_SAVINGS and "Capital Expansion" in account.label:
             self.page.go_on_history_tab()
 
-        # Getting about 6 months history on new website
+        if self.li.is_here():
+            return self.page.iter_history()
+
         if self.is_new_website and self.page:
             try:
-                # Submit search form two times, at first empty, then filled based on available fields
-                for x in range(2):
-                    form = self.page.get_form(id="I1:fm", submit='//input[@name="_FID_DoActivateSearch"]')
-                    if x == 1:
-                        form.update({
-                            next(k for k in form.keys() if "DateStart" in k): (datetime.now() - relativedelta(months=7)).strftime('%d/%m/%Y'),
-                            next(k for k in form.keys() if "DateEnd" in k): datetime.now().strftime('%d/%m/%Y')
-                        })
-                        for k in form.keys():
-                            if "_FID_Do" in k and "DoSearch" not in k:
-                                form.pop(k, None)
+                for page in range(1, 50):
+                    # Need to reach the page with all transactions
+                    if not self.page.has_more_operations():
+                        break
+                    form = self.page.get_form(id="I1:P:F")
+                    form['_FID_DoLoadMoreTransactions'] = ''
+                    form['_wxf2_pseq'] = page
                     form.submit()
             # IndexError when form xpath returns [], StopIteration if next called on empty iterable
             except (StopIteration, FormNotFound):
@@ -338,9 +339,6 @@ class CreditMutuelBrowser(LoginBrowser, StatesMixin):
                 if exc.response.status_code == 413:
                     break
                 raise
-
-        if self.li.is_here():
-            return self.page.iter_history()
 
         if not self.operations.is_here():
             return iter([])

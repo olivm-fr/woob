@@ -23,6 +23,7 @@ import hashlib
 import time
 import json
 
+from decimal import Decimal
 from requests.exceptions import SSLError
 
 from weboob.browser import LoginBrowser, URL, need_login
@@ -108,6 +109,8 @@ class IngBrowser(LoginBrowser):
 
     # New website redirection
     api_redirection_url = URL(r'/general\?command=goToSecureUICommand&redirectUrl=transfers', ApiRedirectionPage)
+    # Old website redirection from bourse website
+    return_from_titre_page = URL(r'https://bourse.ing.fr/priv/redirectIng\.php\?pageIng=CC')
 
     __states__ = ['where']
 
@@ -176,6 +179,11 @@ class IngBrowser(LoginBrowser):
         if self.where != 'start':
             self.accountspage.go()
             self.where = 'start'
+
+        if account.balance == Decimal('0'):
+            # some market accounts link with null balance redirect to logout page
+            # avoid it because it can crash iter accounts
+            return
 
         self.change_space(account._space)
 
@@ -451,6 +459,7 @@ class IngBrowser(LoginBrowser):
                 self.titrerealtime.go()
             for inv in self.page.iter_investments(account):
                 yield inv
+            self.return_from_titre_page.go()
         elif self.page.asv_has_detail or account._jid:
             self.accountspage.stay_or_go()
             shares = {}
@@ -483,6 +492,7 @@ class IngBrowser(LoginBrowser):
         isin_codes = {}
         for tr in self.page.iter_history():
             transactions.append(tr)
+        self.return_from_titre_page.go()
         if self.asv_history.is_here():
             for tr in transactions:
                 page = tr._detail.result().page if tr._detail else None
@@ -513,11 +523,7 @@ class IngBrowser(LoginBrowser):
     @need_login
     def get_subscriptions(self):
         self.billpage.go()
-        if self.loginpage.is_here():
-            self.do_login()
-            subscriptions = list(self.billpage.go().iter_subscriptions())
-        else:
-            subscriptions = list(self.page.iter_subscriptions())
+        subscriptions = list(self.page.iter_subscriptions())
 
         self.cache['subscriptions'] = {}
         for sub in subscriptions:

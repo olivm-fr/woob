@@ -34,8 +34,8 @@ from weboob.browser.filters.html import TableCell
 from weboob.browser.pages import JsonPage, LoggedPage, HTMLPage
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import (
-    Account, Investment, Recipient, Transfer, TransferError, TransferBankError,
-    AddRecipientBankError,
+    Account, Investment, Recipient, Transfer, TransferBankError,
+    AddRecipientBankError, AddRecipientTimeout,
 )
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
@@ -47,6 +47,10 @@ from weboob.tools.date import parse_french_date
 from weboob.tools.capabilities.bank.investments import is_isin_valid
 from weboob.tools.compat import unquote_plus
 from weboob.tools.html import html2text
+
+
+class TransferAssertionError(Exception):
+    pass
 
 
 class ConnectionThresholdPage(HTMLPage):
@@ -362,7 +366,7 @@ class TransferInitPage(BNPPage):
     def on_load(self):
         message_code = BNPPage.on_load(self)
         if message_code is not None:
-            raise TransferError('%s, code=%s' % (message_code[0], message_code[1]))
+            raise TransferAssertionError('%s, code=%s' % (message_code[0], message_code[1]))
 
     def get_ibans_dict(self, account_type):
         return dict([(a['ibanCrypte'], a['iban']) for a in self.path('data.infoVirement.listeComptes%s.*' % account_type)])
@@ -381,6 +385,7 @@ class TransferInitPage(BNPPage):
             obj_label = Dict('libelleCompte')
             obj_iban = Dict('iban')
             obj_category = u'Interne'
+            obj__web_state = None
 
             def obj_bank_name(self):
                 return u'BNP PARIBAS'
@@ -398,16 +403,20 @@ class RecipientsPage(BNPPage):
             # For the moment, only yield ready to transfer on recipients.
             condition = lambda self: Dict('libelleStatut')(self.el) in [u'Activé', u'Temporisé', u'En attente']
 
-            obj_id = Dict('idBeneficiaire')
+            obj_id = obj_iban = Dict('ibanNumCompte')
+            obj__transfer_id = Dict('idBeneficiaire')
             obj_label = Dict('nomBeneficiaire')
-            obj_iban = Dict('ibanNumCompte')
             obj_category = u'Externe'
+            obj__web_state = Dict('libelleStatut')
 
             def obj_bank_name(self):
                 return Dict('nomBanque')(self) or NotAvailable
 
             def obj_enabled_at(self):
                 return datetime.now().replace(microsecond=0) if Dict('libelleStatut')(self) == u'Activé' else (datetime.now() + timedelta(days=5)).replace(microsecond=0)
+
+    def has_digital_key(self):
+        return Dict('data/infoBeneficiaire/authentForte')(self.doc) and Dict('data/infoBeneficiaire/nomDeviceAF', default=False)(self.doc)
 
 
 class ValidateTransferPage(BNPPage):
@@ -417,12 +426,12 @@ class ValidateTransferPage(BNPPage):
 
     def abort_if_unknown(self, transfer_data):
         try:
-            assert transfer_data['typeOperation'] in ['1', '2']
-            assert transfer_data['repartitionFrais'] == '0'
-            assert transfer_data['devise'] == 'EUR'
-            assert not transfer_data['montantDeviseEtrangere']
+            assert transfer_data['typeOperation'] in ['1', '2'], 'Transfer operation type is %s' % transfer_data['typeOperation']
+            assert transfer_data['repartitionFrais'] == '0', 'Transfer fees is not 0'
+            assert transfer_data['devise'] == 'EUR', "Transfer currency is not EUR, it's %s" % transfer_data['devise']
+            assert not transfer_data['montantDeviseEtrangere'], 'Transfer currency is foreign currency'
         except AssertionError as e:
-            raise TransferError(e)
+            raise TransferAssertionError(e)
 
     def handle_response(self, account, recipient, amount, reason):
         self.check_errors()
@@ -431,7 +440,7 @@ class ValidateTransferPage(BNPPage):
         self.abort_if_unknown(transfer_data)
 
         if 'idBeneficiaire' in transfer_data and transfer_data['idBeneficiaire'] is not None:
-            assert transfer_data['idBeneficiaire'] == recipient.id
+            assert transfer_data['idBeneficiaire'] == recipient._transfer_id
         elif transfer_data.get('ibanCompteCrediteur'):
             assert transfer_data['ibanCompteCrediteur'] == recipient.iban
 
@@ -830,9 +839,20 @@ class AddRecipPage(BNPPage):
         r.enabled_at = datetime.now().replace(microsecond=0) + timedelta(days=5)
         r.currency = u'EUR'
         r.bank_name = NotAvailable
+        r._id_transaction = self.get('data.gestionBeneficiaire.idTransactionAF') or NotAvailable
         return r
 
+
 class ActivateRecipPage(AddRecipPage):
+    def is_recipient_validated(self):
+        authent_state = self.doc['data']['verifAuthentForte']['authentForteDone']
+        assert authent_state in (0, 1, 2, 3), 'State of authent is %s' % authent_state
+        if authent_state == 2:
+            raise ActionNeeded("La demande d'ajout de bénéficiaire a été annulée.")
+        elif authent_state == 3:
+            raise AddRecipientTimeout()
+        return authent_state
+
     def get_recipient(self, recipient):
         r = Recipient()
         r.iban = recipient.iban
@@ -843,3 +863,7 @@ class ActivateRecipPage(AddRecipPage):
         r.currency = u'EUR'
         r.bank_name = self.get('data.activationBeneficiaire.nomBanque')
         return r
+
+
+class UselessPage(LoggedPage, HTMLPage):
+    pass
