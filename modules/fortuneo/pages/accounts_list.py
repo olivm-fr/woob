@@ -304,7 +304,7 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
             label           = tables[i].xpath("./td[4]/text()")[0]
             sublabels       = tables[i].xpath("./td[4]/div/text()")
             if len(sublabels) > 0:
-                label       = sublabels[0].strip() + " | " + label.strip()
+                label       = label.strip() + " | " + sublabels[0].strip()
             label           = re.sub(r'\s+', ' ', label).strip()
             amount          = tables[i].xpath("./td[5]/text() | ./td[6]/text()")
 
