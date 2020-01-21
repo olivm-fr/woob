@@ -17,7 +17,7 @@
 
 # flake8: compatible
 
-from woob.capabilities.base import find_object
+from woob.capabilities.base import NotAvailable, find_object
 from woob.capabilities.bill import (
     CapDocument,
     Document,
@@ -78,6 +78,9 @@ class AmeliModule(Module, CapDocument, CapProfile):
     def download_document(self, document):
         if not isinstance(document, Document):
             document = self.get_document(document)
+
+        if document.url is NotAvailable:
+            return
 
         return self.browser.open(document.url).content
 
