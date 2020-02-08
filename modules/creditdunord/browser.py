@@ -40,7 +40,7 @@ class CreditDuNordBrowser(LoginBrowser):
                 '/.*\?.*_pageLabel=reinitialisation_mot_de_passe',
                 LoginPage)
     redirect = URL('/swm/redirectCDN.html', RedirectPage)
-    entrypage = URL('/icd/zco/#zco', EntryPage)
+    entrypage = URL(r'/icd/zco/$', '/icd/zco/public-index.html#zco', EntryPage)
     multitype_av = URL('/vos-comptes/IPT/appmanager/transac/professionnels\?_nfpb=true&_eventName=onRestart&_pageLabel=synthese_contrats_assurance_vie', AVPage)
     loans = URL(r'/vos-comptes/IPT/appmanager/transac/(?P<account_type>.*)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<loans_page_label>(creditPersoImmobilier|credit_?_en_cours))', ProAccountsPage)
     proaccounts = URL(r'/vos-comptes/IPT/appmanager/transac/(professionnels|entreprises)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<accounts_page_label>(transac_tableau_de_bord|page_?_synthese_v1))',

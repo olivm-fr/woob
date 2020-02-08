@@ -122,7 +122,7 @@ class LoginPage(HTMLErrorPage):
     VIRTUALKEYBOARD = CDNVirtKeyboard
 
     def login(self, username, password):
-        login_selector = self.doc.xpath('//input[@id="codsec"]')
+        login_selector = True #self.doc.xpath('//input[@id="codsec"]')
         if login_selector:
             if not password.isdigit() or not len(password) == 6:
                 raise BrowserIncorrectPassword('The credentials have changed on website %s. Please update them.' % self.browser.BASEURL)
@@ -170,7 +170,6 @@ class AccountTypePage(LoggedPage, JsonPage):
             return "professionnels"
         elif account_type == "menu_espace_perso_ent":
             return "entreprises"
-
 
 class LabelsPage(LoggedPage, JsonPage):
     def on_load(self):
