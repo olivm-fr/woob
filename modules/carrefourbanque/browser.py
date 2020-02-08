@@ -16,6 +16,9 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import absolute_import, unicode_literals
+
 from time import sleep
 
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
@@ -73,6 +76,19 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
             self.incapsula_ressource.go(params={'SWCGHOEL': 'v2'}, data=data)
 
         self.login.go()
+        # remove 2 cookies that make next request fail with a 400 if not removed
+        # cookie name can change depend on ip, but seems to be constant on same ip
+        # example:
+        #     1st cookie        2nd cookie
+        # ___utmvafIuFLPmB, ___utmvbfIuFLPmB
+        # ___utmvaYauFLPmB, ___utmvbYauFLPmB
+        # it may have other names...
+        for cookie in self.session.cookies:
+            if '___utmva' in cookie.name or '___utmvb' in cookie.name:
+                # ___utmva... contains an ugly \x01
+                # ___utmvb... contains an ugly \n
+                self.session.cookies.pop(cookie.name)
+
         if self.incapsula_ressource.is_here():
             if self.page.is_javascript:
                 # wait several seconds and we'll get a recaptcha instead of obfuscated javascript code,
@@ -101,7 +117,16 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
         self.page.enter_password(self.password)
 
         if not self.home.is_here():
-            raise BrowserIncorrectPassword()
+            error = self.page.get_error_message()
+            # Sometimes some connections aren't able to login because of a
+            # maintenance randomly occuring.
+            if error:
+                if 'travaux de maintenance dans votre Espace Client.' in error:
+                    raise BrowserUnavailable(error)
+                elif 'saisies ne correspondent pas à l\'identifiant' in error:
+                    raise BrowserIncorrectPassword(error)
+                assert False, 'Unexpected error at login: "%s"' % error
+            assert False, 'Unexpected error at login'
 
     @need_login
     def get_account_list(self):

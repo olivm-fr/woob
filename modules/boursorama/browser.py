@@ -19,22 +19,23 @@
 
 
 import requests
+
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
-from dateutil import parser
 
 from weboob.browser.retry import login_method, retry_on_logout, RetryLoginBrowser
-from weboob.browser.browsers import need_login, StatesMixin
+from weboob.browser.browsers import need_login, TwoFactorBrowser
 from weboob.browser.url import URL
 from weboob.exceptions import BrowserIncorrectPassword, BrowserHTTPNotFound, NoAccountsException, BrowserUnavailable
 from weboob.browser.exceptions import LoggedOut, ClientError
 from weboob.capabilities.bank import (
     Account, AccountNotFound, TransferError, TransferInvalidAmount,
     TransferInvalidEmitter, TransferInvalidLabel, TransferInvalidRecipient,
-    AddRecipientStep, Recipient, Rate, TransferBankError,
+    AddRecipientStep, Rate, TransferBankError, AccountOwnership, RecipientNotFound,
+    AddRecipientTimeout,
 )
+from weboob.capabilities.base import empty, find_object
 from weboob.capabilities.contact import Advisor
-from weboob.tools.captcha.virtkeyboard import VirtKeyboardError
 from weboob.tools.value import Value
 from weboob.tools.compat import basestring, urlsplit
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
@@ -56,10 +57,11 @@ class BrowserIncorrectAuthenticationCode(BrowserIncorrectPassword):
     pass
 
 
-class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
+class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
     BASEURL = 'https://clients.boursorama.com'
     TIMEOUT = 60.0
-    STATE_DURATION = 10
+    HAS_CREDENTIALS_ONLY = True
+    TWOFA_DURATION = 60 * 24 * 90
 
     home = URL('/$', HomePage)
     keyboard = URL('/connexion/clavier-virtuel\?_hinclude=300000', VirtKeyboardPage)
@@ -109,13 +111,15 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
                          '/compte/pea-pme/.*/mouvements', SavingMarketPage)
     market = URL('/compte/(?!assurance|cav|epargne).*/(positions|mouvements)',
                  '/compte/ord/.*/positions', MarketPage)
-    loans = URL('/credit/immobilier/.*/informations',
-                '/credit/immobilier/.*/caracteristiques',
-                '/credit/consommation/.*/informations',
-                '/credit/lombard/.*/caracteristiques', LoanPage)
+    loans = URL(r'/credit/paiement-3x/.*/informations',
+                r'/credit/immobilier/.*/informations',
+                r'/credit/immobilier/.*/caracteristiques',
+                r'/credit/consommation/.*/informations',
+                r'/credit/lombard/.*/caracteristiques', LoanPage)
     authentication = URL('/securisation', AuthenticationPage)
     iban = URL('/compte/(?P<webid>.*)/rib', IbanPage)
     profile = URL('/mon-profil/', ProfilePage)
+    profile_children = URL('/mon-profil/coordonnees/enfants', ProfilePage)
 
     expert = URL('/compte/derive/', ExpertPage)
 
@@ -124,7 +128,7 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
     currencylist = URL('https://www.boursorama.com/bourse/devises/parite/_detail-parite', CurrencyListPage)
     currencyconvert = URL('https://www.boursorama.com/bourse/devises/convertisseur-devises/convertir', CurrencyConvertPage)
 
-    __states__ = ('auth_token',)
+    __states__ = ('auth_token', 'recipient_form',)
 
     def __init__(self, config=None, *args, **kwargs):
         self.config = config
@@ -132,9 +136,15 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
         self.accounts_list = None
         self.cards_list = None
         self.deferred_card_calendar = None
+        self.recipient_form = None
         kwargs['username'] = self.config['login'].get()
         kwargs['password'] = self.config['password'].get()
-        super(BoursoramaBrowser, self).__init__(*args, **kwargs)
+
+        self.AUTHENTICATION_METHODS = {
+            'pin_code': self.handle_sms,
+        }
+
+        super(BoursoramaBrowser, self).__init__(config, *args, **kwargs)
 
     def locate_browser(self, state):
         try:
@@ -143,12 +153,20 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
             pass
 
     def load_state(self, state):
-        if ('expire' in state and parser.parse(state['expire']) > datetime.now()) or state.get('auth_token'):
-            return super(BoursoramaBrowser, self).load_state(state)
+        # needed to continue the session while adding recipient with otp
+        # it keeps the form to continue to submit the otp
+        if state.get('recipient_form'):
+            state.pop('url', None)
+
+        super(BoursoramaBrowser, self).load_state(state)
 
     def handle_authentication(self):
         if self.authentication.is_here():
             if self.config['enable_twofactors'].get():
+                confirmation_link = self.page.get_confirmation_link()
+                if confirmation_link:
+                    self.location(confirmation_link)
+
                 self.page.sms_first_step()
                 self.page.sms_second_step()
             else:
@@ -157,35 +175,72 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
                     """ You will receive SMS code but are limited in request per day (around 15)"""
                 )
 
-    @login_method
-    def do_login(self):
+    def handle_sms(self):
+        # regular 2FA way
+        if self.auth_token:
+            self.page.authenticate()
+        # PSD2 way
+        else:
+            # we can't access form without sending a SMS again
+            self.location('/securisation/authentification/validation', data={
+                'strong_authentication_confirm[code]': self.config['pin_code'].get(),
+                'strong_authentication_confirm[type]': 'brs-otp-sms',
+            })
+
+        if self.authentication.is_here():
+            raise BrowserIncorrectAuthenticationCode()
+
+    def init_login(self):
         assert isinstance(self.config['device'].get(), basestring)
         assert isinstance(self.config['enable_twofactors'].get(), bool)
         if not self.password.isalnum():
             raise BrowserIncorrectPassword()
 
-        if self.auth_token and self.config['pin_code'].get():
-            self.page.authenticate()
-        else:
-            for _ in range(3):
-                self.login.go()
-                try:
-                    self.page.login(self.username, self.password)
-                except VirtKeyboardError:
-                    self.logger.error('Failed to process VirtualKeyboard')
-                else:
+        self.login.go()
+        self.page.login(self.username, self.password)
+
+        if self.login.is_here() or self.error.is_here():
+            raise BrowserIncorrectPassword()
+
+        # After login, we might be redirected to the two factor authentication page.
+        self.handle_authentication()
+
+    @login_method
+    def do_login(self):
+        return super(BoursoramaBrowser, self).do_login()
+
+    def ownership_guesser(self):
+        ownerless_accounts = [account for account in self.accounts_list if empty(account.ownership)]
+
+        # On Boursorama website, all mandatory accounts have the real owner name in their label, and
+        # children names are findable in the PSU profile.
+        self.profile_children.go()
+        children_names = self.page.get_children_firstnames()
+
+        for ownerless_account in ownerless_accounts:
+            for child_name in children_names:
+                if child_name in ownerless_account.label:
+                    ownerless_account.ownership = AccountOwnership.ATTORNEY
                     break
-            else:
-                raise VirtKeyboardError()
 
-            if self.login.is_here() or self.error.is_here():
-                raise BrowserIncorrectPassword()
+        # If there are two deferred card for with the same parent account, we assume that's the parent checking
+        # account is a 'CO_OWNER' account
+        parent_accounts = []
+        for account in self.accounts_list:
+            if account.type == Account.TYPE_CARD and empty(account.parent.ownership):
+                if account.parent in parent_accounts:
+                    account.parent.ownership = AccountOwnership.CO_OWNER
+                parent_accounts.append(account.parent)
 
-            # After login, we might be redirected to the two factor authentication page.
-            self.handle_authentication()
+        # We set all accounts without ownership as if they belong to the credential owner
+        for account in self.accounts_list:
+            if empty(account.ownership) and account.type != Account.TYPE_CARD:
+                account.ownership = AccountOwnership.OWNER
 
-        if self.authentication.is_here():
-            raise BrowserIncorrectAuthenticationCode('Invalid PIN code')
+        # Account cards should be set with the same ownership of their parents accounts
+        for account in self.accounts_list:
+            if account.type == Account.TYPE_CARD:
+                account.ownership = account.parent.ownership
 
     def go_cards_number(self, link):
         self.location(link)
@@ -268,6 +323,7 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
         if exc:
             raise exc
 
+        self.ownership_guesser()
         return self.accounts_list
 
     def get_account(self, id):
@@ -297,18 +353,18 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
         return self.get_regular_transactions(account, coming)
 
     def get_regular_transactions(self, account, coming):
-        # We look for 3 years of history.
-        params = {}
-        params['movementSearch[toDate]'] = (date.today() + relativedelta(days=40)).strftime('%d/%m/%Y')
-        params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
-        params['movementSearch[selectedAccounts][]'] = account._webid
-        self.location('%s/mouvements' % account.url.rstrip('/'), params=params)
-        for t in self.page.iter_history():
-                yield t
-        if coming and account.type == Account.TYPE_CHECKING:
-            self.location('%s/mouvements-a-venir' % account.url.rstrip('/'), params=params)
-            for t in self.page.iter_history(coming=True):
-                yield t
+        if not coming:
+            # We look for 3 years of history.
+            params = {}
+            params['movementSearch[toDate]'] = (date.today() + relativedelta(days=40)).strftime('%d/%m/%Y')
+            params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
+            params['movementSearch[selectedAccounts][]'] = account._webid
+            self.location('%s/mouvements' % account.url.rstrip('/'), params=params)
+            for transaction in self.page.iter_history():
+                yield transaction
+
+        # Note: Checking accounts have a 'Mes prélèvements à venir' tab,
+        # but these transactions have no date anymore so we ignore them.
 
     def get_card_transactions(self, account, coming):
         # All card transactions can be found in the CSV (history and coming),
@@ -320,6 +376,7 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
 
         if self.deferred_card_calendar is None:
             self.location(self.page.get_calendar_link())
+
         params = {}
         params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
         params['fullSearch'] = 1
@@ -333,7 +390,7 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
                 if coming and tr.date > date.today():
                     tr._is_coming = True
                     yield tr
-                elif not coming and tr.date < date.today():
+                elif not coming and tr.date <= date.today():
                     yield tr
 
     def get_invest_transactions(self, account, coming):
@@ -373,34 +430,35 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
         advisor.phone = u"0146094949"
         return iter([advisor])
 
-    @need_login
-    def iter_transfer_recipients(self, account):
-        if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE):
-            return []
-        assert account.url
-
+    def go_recipients_list(self, account_url, account_id):
         # url transfer preparation
-        url = urlsplit(account.url)
+        url = urlsplit(account_url)
         parts = [part for part in url.path.split('/') if part]
 
         assert len(parts) > 2, 'Account url missing some important part to iter recipient'
         account_type = parts[1] # cav, ord, epargne ...
         account_webid = parts[-1]
 
-        try:
-            self.transfer_main_page.go(acc_type=account_type, webid=account_webid)
-        except BrowserHTTPNotFound:
-            return []
+        self.transfer_main_page.go(acc_type=account_type, webid=account_webid)  # may raise a BrowserHTTPNotFound
 
         # can check all account available transfer option
         if self.transfer_main_page.is_here():
             self.transfer_accounts.go(acc_type=account_type, webid=account_webid)
 
         if self.transfer_accounts.is_here():
-            try:
-                self.page.submit_account(account.id)
-            except AccountNotFound:
-                return []
+            self.page.submit_account(account_id)  # may raise AccountNotFound
+
+
+    @need_login
+    def iter_transfer_recipients(self, account):
+        if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE):
+            return []
+        assert account.url
+
+        try:
+            self.go_recipients_list(account.url, account.id)
+        except (BrowserHTTPNotFound, AccountNotFound):
+            return []
 
         assert self.recipients_page.is_here()
         return self.page.iter_recipients()
@@ -444,10 +502,11 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
 
         # at this stage, the site doesn't show the real ids/ibans, we can only guess
         if recipients[0].label != ret.recipient_label:
-            if not recipients[0].label.startswith('%s - ' % ret.recipient_label):
-                # the label displayed here is just "<name>"
-                # but in the recipients list it is "<name> - <bank>"...
-                raise TransferError('Recipient label changed during transfer')
+            self.logger.info('Recipients from iter_recipient and from the transfer are diffent: "%s" and "%s"' % (recipients[0].label, ret.recipient_label))
+            if not ret.recipient_label.startswith('%s - ' % recipients[0].label):
+                # the label displayed here is  "<name> - <bank>"
+                # but in the recipients list it is "<name>"...
+                assert False, 'Recipient label changed during transfer (from "%s" to "%s")' % (recipients[0].label, ret.recipient_label)
         ret.recipient_id = recipients[0].id
         ret.recipient_iban = recipients[0].iban
 
@@ -467,31 +526,16 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
         assert self.transfer_sent.is_here()
         transfer_error = self.page.get_transfer_error()
         if transfer_error:
-            raise TransferBankError(transfer_error)
+            raise TransferBankError(message=transfer_error)
 
         # the last page contains no info, return the last transfer object from init_transfer
         return transfer
 
-    def build_recipient(self, recipient):
-        r = Recipient()
-        r.iban = recipient.iban
-        r.id = recipient.iban
-        r.label = recipient.label
-        r.category = recipient.category
-        r.enabled_at = date.today()
-        r.currency = u'EUR'
-        r.bank_name = recipient.bank_name
-        return r
-
     @need_login
-    def new_recipient(self, recipient, **kwargs):
-        if 'code' in kwargs:
-            assert self.rcpt_page.is_here()
-            assert self.page.is_confirm_sms()
+    def init_new_recipient(self, recipient):
+        self.recipient_form = None  # so it is reset when a new recipient is added
 
-            self.page.confirm_sms(kwargs['code'])
-            return self.rcpt_after_sms()
-
+        # get url
         account = None
         for account in self.get_accounts_list():
             if account.url:
@@ -504,26 +548,57 @@ class BoursoramaBrowser(RetryLoginBrowser, StatesMixin):
             target = account.url + '/' + suffix
 
         self.location(target)
-        assert self.page.is_charac()
+        assert self.page.is_charac(), 'Not on the page to add recipients.'
 
+        # fill recipient form
         self.page.submit_recipient(recipient)
+        recipient.origin_account_id = account.id
+
+        # confirm sending sms
+        assert self.page.is_confirm_send_sms(), 'Cannot reach the page asking to send a sms.'
+        self.page.confirm_send_sms()
 
         if self.page.is_send_sms():
+            # send sms
             self.page.send_sms()
-            assert self.page.is_confirm_sms()
-            raise AddRecipientStep(self.build_recipient(recipient), Value('code', label='Veuillez saisir le code'))
-        # if the add recipient is restarted after the sms has been confirmed recently, the sms step is not presented again
+            assert self.page.is_confirm_sms(), 'The sms was not send.'
 
+            self.recipient_form = self.page.get_confirm_sms_form()
+            self.recipient_form['account_url'] = account.url
+            raise AddRecipientStep(recipient, Value('code', label='Veuillez saisir le code'))
+
+        # if the add recipient is restarted after the sms has been confirmed recently, the sms step is not presented again
         return self.rcpt_after_sms()
 
-    def rcpt_after_sms(self):
-        assert self.page.is_confirm()
+    def new_recipient(self, recipient, **kwargs):
+        # step 2 of new_recipient
+        if 'code' in kwargs:
+            # there is no confirmation to check the recipient
+            # validating the sms code directly adds the recipient
+            if not self.recipient_form:  # the session expired
+                raise AddRecipientTimeout()
 
-        ret = self.page.get_recipient()
-        self.page.confirm()
+            url = self.recipient_form.pop('url')
+            account_url = self.recipient_form.pop('account_url')
+            self.recipient_form['strong_authentication_confirm[code]'] = kwargs['code']
+            self.location(url, data=self.recipient_form)
 
-        assert self.page.is_created()
-        return ret
+            self.recipient_form = None
+            return self.rcpt_after_sms(recipient, account_url)
+
+        # step 1 of new recipient
+        return self.init_new_recipient(recipient)
+
+    def rcpt_after_sms(self, recipient, account_url):
+        assert self.page.is_created(), 'The recipient was not added.'
+
+        # at this point, the recipient was added to the webiste
+        # we just want here to return the right Recipient object
+        # we are taking it from the recipient list page
+        # because there is no summary of the adding
+        self.go_recipients_list(account_url, recipient.origin_account_id)
+        rec = find_object(self.page.iter_recipients(), id=recipient.id, error=RecipientNotFound)
+        return rec
 
     def iter_currencies(self):
         return self.currencylist.go().get_currency_list()

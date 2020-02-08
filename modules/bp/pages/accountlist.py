@@ -19,20 +19,23 @@
 
 from __future__ import unicode_literals
 
-from io import BytesIO
 import re
 from decimal import Decimal
 
 from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Loan
+from weboob.capabilities.bank import Account, Loan, AccountOwnership
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person
 from weboob.browser.elements import ListElement, ItemElement, method, TableElement
 from weboob.browser.pages import LoggedPage, RawPage, PartialHTMLPage, HTMLPage
 from weboob.browser.filters.html import Link, TableCell, Attr
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Regexp, Env, Field, Currency, Async, Date, Format
+from weboob.browser.filters.standard import (
+    CleanText, CleanDecimal, Regexp, Env, Field, Currency,
+    Async, Date, Format, Coalesce,
+)
 from weboob.exceptions import BrowserUnavailable
 from weboob.tools.compat import urljoin, unicode
+from weboob.tools.pdf import extract_text
 
 from .base import MyHTMLPage
 
@@ -50,15 +53,28 @@ class item_account_generic(ItemElement):
     klass = Account
 
     def condition(self):
-        return len(self.el.xpath('.//span[@class="number"]')) > 0
+        # For some loans the following xpath is absent and we don't want to skip them
+        # Also a case of loan that is empty and has no information exists and will be ignored
+        return (
+            len(self.el.xpath('.//span[@class="number"]')) > 0 or
+            (
+                Field('type')(self) == Account.TYPE_LOAN and
+                (
+                    not bool(self.el.xpath('.//div//*[contains(text(),"pas la restitution de ces données.")]'))
+                    and not bool(self.el.xpath('.//div[@class="amount"]/span[contains(text(), "Contrat résilié")]'))
+                    and not bool(self.el.xpath('.//div[@class="amount"]/span[contains(text(), "Remboursé intégralement")]'))
+                    and not bool(self.el.xpath('.//div[@class="amount"]/span[contains(text(), "Prêt non débloqué")]'))
+                )
+            )
+        )
 
-    obj_id = CleanText('.//abbr/following-sibling::text()')
-    obj_currency = Currency('.//span[@class="number"]')
+    obj_id = obj_number = CleanText('.//abbr/following-sibling::text()')
+    obj_currency = Coalesce(Currency('.//span[@class="number"]'), Currency('.//span[@class="thick"]'))
 
     def obj_url(self):
-        url = Link(u'./a', default=NotAvailable)(self)
+        url = Link('./a', default=NotAvailable)(self)
         if not url:
-            url = Regexp(Attr(u'.//span', 'onclick', default=''), r'\'(https.*)\'', default=NotAvailable)(self)
+            url = Regexp(Attr('.//span', 'onclick', default=''), r'\'(https.*)\'', default=NotAvailable)(self)
         if url:
             if 'CreditRenouvelable' in url:
                 url = Link(u'.//a[contains(text(), "espace de gestion crédit renouvelable")]')(self.el)
@@ -68,9 +84,21 @@ class item_account_generic(ItemElement):
     def obj_label(self):
         return CleanText('.//div[@class="title"]/h3')(self).upper()
 
+    def obj_ownership(self):
+        account_holder = CleanText('.//div[@class="title"]/span')(self)
+        if re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou ?(m|mr|me|mme|mlle|mle|ml)?\b(.*)', account_holder, re.IGNORECASE):
+            return AccountOwnership.CO_OWNER
+        elif all([n in account_holder for n in self.env['name'].split(' ')]):
+            return AccountOwnership.OWNER
+        else:
+            return AccountOwnership.ATTORNEY
+
     def obj_balance(self):
         if Field('type')(self) == Account.TYPE_LOAN:
-            return -abs(CleanDecimal('.//span[@class="number"]', replace_dots=True)(self))
+            balance = CleanDecimal('.//span[@class="number"]', replace_dots=True, default=NotAvailable)(self)
+            if balance:
+                balance = -abs(balance)
+            return balance
         return CleanDecimal('.//span[@class="number"]', replace_dots=True, default=NotAvailable)(self)
 
     def obj_coming(self):
@@ -93,9 +121,9 @@ class item_account_generic(ItemElement):
                 has_coming = True
                 coming += CleanDecimal('//span[@id="amount_total"]', replace_dots=True)(coming_operations.page.doc)
 
-            if CleanText(u'.//dt[contains(., "Débit différé à débiter")]')(self):
+            if CleanText('.//dt[contains(., "Débit différé à débiter")]')(self):
                 has_coming = True
-                coming += CleanDecimal(u'.//dt[contains(., "Débit différé à débiter")]/following-sibling::dd[1]',
+                coming += CleanDecimal('.//dt[contains(., "Débit différé à débiter")]/following-sibling::dd[1]',
                                        replace_dots=True)(self)
 
             return coming if has_coming else NotAvailable
@@ -103,6 +131,8 @@ class item_account_generic(ItemElement):
 
     def obj_iban(self):
         if not Field('url')(self):
+            return NotAvailable
+        if Field('type')(self) not in (Account.TYPE_CHECKING, Account.TYPE_SAVINGS):
             return NotAvailable
 
         details_page = self.page.browser.open(Field('url')(self)).page
@@ -122,9 +152,11 @@ class item_account_generic(ItemElement):
 
     def obj_type(self):
         types = {'comptes? bancaires?': Account.TYPE_CHECKING,
+                 "plan d'epargne populaire": Account.TYPE_SAVINGS,
                  'livrets?': Account.TYPE_SAVINGS,
                  'epargnes? logement': Account.TYPE_SAVINGS,
                  "autres produits d'epargne": Account.TYPE_SAVINGS,
+                 'compte relais': Account.TYPE_SAVINGS,
                  'comptes? titres? et pea': Account.TYPE_MARKET,
                  'compte-titres': Account.TYPE_MARKET,
                  'assurances? vie': Account.TYPE_LIFE_INSURANCE,
@@ -133,6 +165,7 @@ class item_account_generic(ItemElement):
                  'plan d\'epargne en actions': Account.TYPE_PEA,
                  'comptes? attente': Account.TYPE_CHECKING,
                  'perp': Account.TYPE_PERP,
+                 'assurances? retraite': Account.TYPE_PERP,
                  }
 
         # first trying to match with label
@@ -149,14 +182,15 @@ class item_account_generic(ItemElement):
         return Account.TYPE_UNKNOWN
 
     def obj__has_cards(self):
-        return Link(u'.//a[contains(., "Débit différé")]', default=None)(self)
+        return Link('.//a[contains(@href, "consultationCarte")]', default=None)(self)
 
 
 class AccountList(LoggedPage, MyHTMLPage):
     def on_load(self):
         MyHTMLPage.on_load(self)
 
-        if self.doc.xpath(u'//h2[text()="ERREUR"]'): # website sometime crash
+        # website sometimes crash
+        if CleanText('//h2[text()="ERREUR"]')(self.doc):
             self.browser.location('https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/securite/authentification/initialiser-identif.ea')
 
             raise BrowserUnavailable()
@@ -172,33 +206,17 @@ class AccountList(LoggedPage, MyHTMLPage):
 
     @property
     def has_mandate_management_space(self):
-        return len(self.doc.xpath(u'//a[@title="Accéder aux Comptes Gérés Sous Mandat"]')) > 0
+        return len(self.doc.xpath('//a[@title="Accéder aux Comptes Gérés Sous Mandat"]')) > 0
 
     def mandate_management_space_link(self):
-        return Link(u'//a[@title="Accéder aux Comptes Gérés Sous Mandat"]')(self.doc)
+        return Link('//a[@title="Accéder aux Comptes Gérés Sous Mandat"]')(self.doc)
 
     @method
     class iter_accounts(ListElement):
-        item_xpath = u'//ul/li//div[contains(@class, "account-resume")]'
+        item_xpath = '//ul/li//div[contains(@class, "account-resume")]'
         class item_account(item_account_generic):
             def condition(self):
                 return item_account_generic.condition(self)
-
-
-    def get_revolving_attributes(self, account):
-        loan = Loan()
-        loan.id = account.id
-        loan.label = '%s - %s' %(account.label, account.id)
-        loan.currency = account.currency
-        loan.url = account.url
-
-        loan.available_amount = CleanDecimal('//tr[td[contains(text(), "Montant Maximum Autorisé") or contains(text(), "Montant autorisé")]]/td[2]')(self.doc)
-        loan.used_amount = loan.used_amount =  CleanDecimal('//tr[td[contains(text(), "Montant Utilisé") or contains(text(), "Montant utilisé")]]/td[2]')(self.doc)
-        loan.available_amount = CleanDecimal(Regexp(CleanText('//tr[td[contains(text(), "Montant Disponible") or contains(text(), "Montant disponible")]]/td[2]'), r'(.*) au'))(self.doc)
-        loan._has_cards = False
-        loan.type = Account.TYPE_REVOLVING_CREDIT
-        return loan
-
 
     @method
     class iter_revolving_loans(ListElement):
@@ -224,11 +242,11 @@ class AccountList(LoggedPage, MyHTMLPage):
         head_xpath = '//table[@id="pret" or @class="dataNum"]/thead//th'
         item_xpath = '//table[@id="pret"]/tbody/tr'
 
-        col_label = (u'Numéro du prêt', "Numéro de l'offre")
-        col_total_amount = u'Montant initial emprunté'
-        col_subscription_date = u'MONTANT INITIAL EMPRUNTÉ'
-        col_next_payment_amount = u'Montant prochaine échéance'
-        col_next_payment_date = u'Date prochaine échéance'
+        col_label = ('Numéro du prêt', "Numéro de l'offre")
+        col_total_amount = 'Montant initial emprunté'
+        col_subscription_date = 'MONTANT INITIAL EMPRUNTÉ'
+        col_next_payment_amount = 'Montant prochaine échéance'
+        col_next_payment_date = 'Date prochaine échéance'
         col_balance = re.compile('Capital')
         col_maturity_date = re.compile(u'Date dernière')
 
@@ -241,9 +259,9 @@ class AccountList(LoggedPage, MyHTMLPage):
             klass = Loan
 
             def condition(self):
-                if CleanText(TableCell('balance'))(self) != u'Prêt non débloqué':
+                if CleanText(TableCell('balance'))(self) != 'Prêt non débloqué':
                     return bool(not self.xpath('//caption[contains(text(), "Période de franchise du")]'))
-                return CleanText(TableCell('balance'))(self) != u'Prêt non débloqué'
+                return CleanText(TableCell('balance'))(self) != 'Prêt non débloqué'
 
             def load_details(self):
                 url = Link('.//a', default=NotAvailable)(self)
@@ -299,7 +317,7 @@ class AccountList(LoggedPage, MyHTMLPage):
             obj_next_payment_date = MyDate(CleanText(TableCell('next_payment_date')), default=NotAvailable)
 
             def obj_url(self):
-                url = Link(u'.//a', default=None)(self)
+                url = Link('.//a', default=None)(self)
                 if url:
                     return urljoin(self.page.url, url)
                 return self.page.url
@@ -399,55 +417,15 @@ class Advisor(LoggedPage, MyHTMLPage):
 class AccountRIB(LoggedPage, RawPage):
     iban_regexp = r'[A-Z]{2}\d{12}[0-9A-Z]{11}\d{2}'
 
-    def __init__(self, *args, **kwargs):
-        super(AccountRIB, self).__init__(*args, **kwargs)
-
-        self.parsed_text = b''
-
-        try:
-            try:
-                from pdfminer.pdfdocument import PDFDocument
-                from pdfminer.pdfpage import PDFPage
-                newapi = True
-            except ImportError:
-                from pdfminer.pdfparser import PDFDocument
-                newapi = False
-            from pdfminer.pdfparser import PDFParser, PDFSyntaxError
-            from pdfminer.converter import TextConverter
-            from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-        except ImportError:
-            self.logger.warning('Please install python-pdfminer to get IBANs')
-        else:
-            parser = PDFParser(BytesIO(self.doc))
-            try:
-                if newapi:
-                    doc = PDFDocument(parser)
-                else:
-                    doc = PDFDocument()
-                    parser.set_document(doc)
-                    doc.set_parser(parser)
-            except PDFSyntaxError:
-                return
-
-            rsrcmgr = PDFResourceManager()
-            out = BytesIO()
-            device = TextConverter(rsrcmgr, out)
-            interpreter = PDFPageInterpreter(rsrcmgr, device)
-            if newapi:
-                pages = PDFPage.create_pages(doc)
-            else:
-                doc.initialize()
-                pages = doc.get_pages()
-            for page in pages:
-                interpreter.process_page(page)
-
-            self.parsed_text = out.getvalue()
-
     def get_iban(self):
-        m = re.search(self.iban_regexp, self.parsed_text.decode('utf-8'))
+        m = re.search(self.iban_regexp, extract_text(self.data))
         if m:
             return unicode(m.group(0))
         return None
+
+
+class MarketHomePage(LoggedPage, HTMLPage):
+    pass
 
 
 class MarketLoginPage(LoggedPage, PartialHTMLPage):
@@ -455,7 +433,12 @@ class MarketLoginPage(LoggedPage, PartialHTMLPage):
         self.get_form(id='autoSubmit').submit()
 
 
-class UselessPage(LoggedPage, HTMLPage):
+class MarketCheckPage(LoggedPage, HTMLPage):
+    def on_load(self):
+        self.browser.market_login.go()
+
+
+class UselessPage(LoggedPage, RawPage):
     pass
 
 
@@ -469,3 +452,23 @@ class ProfilePage(LoggedPage, HTMLPage):
         profile.job = CleanText('//div[@id="persoIdentiteDetail"]//dd[4]')(self.doc)
 
         return profile
+
+
+class RevolvingAttributesPage(LoggedPage, HTMLPage):
+    def on_load(self):
+        if CleanText('//h1[contains(text(), "Erreur")]')(self.doc):
+            raise BrowserUnavailable()
+
+    def get_revolving_attributes(self, account):
+        loan = Loan()
+        loan.id = account.id
+        loan.label = '%s - %s' % (account.label, account.id)
+        loan.currency = account.currency
+        loan.url = account.url
+
+        loan.used_amount = CleanDecimal.US('//tr[td[contains(text(), "Montant Utilisé") or contains(text(), "Montant utilisé")]]/td[2]')(self.doc)
+        loan.available_amount = CleanDecimal.US(Regexp(CleanText('//tr[td[contains(text(), "Montant Disponible") or contains(text(), "Montant disponible")]]/td[2]'), r'(.*) au'))(self.doc)
+        loan.balance = -loan.used_amount
+        loan._has_cards = False
+        loan.type = Account.TYPE_REVOLVING_CREDIT
+        return loan

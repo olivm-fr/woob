@@ -26,13 +26,17 @@ import datetime as dt
 
 from collections import OrderedDict
 
+from weboob.exceptions import BrowserUnavailable
 from weboob.browser.pages import HTMLPage, JsonPage, RawPage, LoggedPage, pagination
 from weboob.browser.elements import DictElement, ItemElement, TableElement, SkipItem, method
-from weboob.browser.filters.standard import CleanText, Upper, Date, Regexp, Format, CleanDecimal, Filter, Env, Slugify, Field
+from weboob.browser.filters.standard import (
+    CleanText, Upper, Date, Regexp, Format, CleanDecimal, Filter, Env, Slugify,
+    Field, Currency,
+)
 from weboob.browser.filters.json import Dict
-from weboob.browser.filters.html import Attr, Link, TableCell
+from weboob.browser.filters.html import Attr, Link, TableCell, AbsoluteLink
 from weboob.browser.exceptions import ServerError
-from weboob.capabilities.bank import Account, Investment, Loan
+from weboob.capabilities.bank import Account, Investment, Loan, AccountOwnership
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.profile import Profile
@@ -55,32 +59,29 @@ class LogoutPage(RawPage):
     pass
 
 
-class InfosPage(LoggedPage, HTMLPage):
-    def get_typelist(self):
-        url = Attr(None, 'src').filter(self.doc.xpath('//script[contains(@src, "comptes/scripts")]'))
-        m = re.findall(r'synthesecomptes[^\w]+([^:]+)[^\w]+([^"]+)', self.browser.open(url).text)
-        for data in m:
-            if data[0] != 'method':
-                return {data[0]: data[1]}
-
-
 class AccountsPage(LoggedPage, JsonPage):
-    TYPES = OrderedDict([('courant',             Account.TYPE_CHECKING),
-                         ('pee',                 Account.TYPE_PEE),
-                         ('epargne en actions',  Account.TYPE_PEA),
-                         ('pea',                 Account.TYPE_PEA),
-                         ('preference',          Account.TYPE_LOAN),
-                         ('livret',              Account.TYPE_SAVINGS),
-                         ('vie',                 Account.TYPE_LIFE_INSURANCE),
-                         ('previ_option',        Account.TYPE_LIFE_INSURANCE),
-                         ('actions',             Account.TYPE_MARKET),
-                         ('titres',              Account.TYPE_MARKET),
-                         ('ldd cm',              Account.TYPE_SAVINGS),
-                         ('librissime',          Account.TYPE_SAVINGS),
-                         ('epargne logement',    Account.TYPE_SAVINGS),
-                         ('plan bleu',           Account.TYPE_SAVINGS),
-                         ('capital plus',        Account.TYPE_SAVINGS),
-                       ])
+    TYPES = OrderedDict([
+        ('courant', Account.TYPE_CHECKING),
+        ('pee', Account.TYPE_PEE),
+        ('epargne en actions', Account.TYPE_PEA),
+        ('pea', Account.TYPE_PEA),
+        ('p.e.a.', Account.TYPE_PEA),
+        ('preference', Account.TYPE_LOAN),
+        ('livret', Account.TYPE_SAVINGS),
+        ('vie', Account.TYPE_LIFE_INSURANCE),
+        ('previ_option', Account.TYPE_LIFE_INSURANCE),
+        ('avantage capitalisation', Account.TYPE_LIFE_INSURANCE),
+        ('actions', Account.TYPE_MARKET),
+        ('titres', Account.TYPE_MARKET),
+        ('ldd cm', Account.TYPE_SAVINGS),
+        ('librissime', Account.TYPE_SAVINGS),
+        ('epargne logement', Account.TYPE_SAVINGS),
+        ('plan bleu', Account.TYPE_SAVINGS),
+        ('capital plus', Account.TYPE_SAVINGS),
+        ('capital expansion', Account.TYPE_DEPOSIT),
+        ('carte', Account.TYPE_CARD),
+        ('previ-retraite', Account.TYPE_PERP),
+    ])
 
     def get_keys(self):
         """Returns the keys for which the value is a list or dict"""
@@ -146,6 +147,13 @@ class AccountsPage(LoggedPage, JsonPage):
 
             def obj_type(self):
                 return self.page.TYPES.get(Dict('accountType', default=None)(self).lower(), Account.TYPE_UNKNOWN)
+
+            def obj_ownership(self):
+                if Dict('accountListType')(self) == 'COMPTE_MANDATAIRE':
+                    return AccountOwnership.ATTORNEY
+                elif Dict('nomCotitulaire', default=None)(self):
+                    return AccountOwnership.CO_OWNER
+                return AccountOwnership.OWNER
 
     @method
     class iter_savings(DictElement):
@@ -218,6 +226,16 @@ class AccountsPage(LoggedPage, JsonPage):
                             return self.page.TYPES[key]
                     return Account.TYPE_UNKNOWN
 
+                def obj_ownership(self):
+                    if Dict('nomCotitulaire', default=None)(self):
+                        return AccountOwnership.CO_OWNER
+
+                    owner = Dict('nomTitulaire', default=None)(self)
+
+                    if owner and all(n in owner.upper() for n in self.env['name'].split()):
+                        return AccountOwnership.OWNER
+                    return AccountOwnership.ATTORNEY
+
                 def get_market_number(self):
                     label = Field('label')(self)
                     page = self.page.browser._go_market_history()
@@ -225,7 +243,7 @@ class AccountsPage(LoggedPage, JsonPage):
 
                 def get_lifenumber(self):
                     index = Dict('index')(self)
-                    data = json.loads(self.page.browser.lifeinsurance.open(accid=index).content)
+                    data = json.loads(self.page.browser.redirect_insurance.open(accid=index).text)
                     if not data:
                         raise SkipItem('account seems unavailable')
                     url = data['url']
@@ -280,6 +298,11 @@ class AccountsPage(LoggedPage, JsonPage):
             # only for revolving loans
             obj_available_amount = CleanDecimal(Dict('montantDisponible', default=None), default=NotAvailable)
 
+            def obj_ownership(self):
+                if Dict('nomCotitulaire', default=None)(self):
+                    return AccountOwnership.CO_OWNER
+                return AccountOwnership.OWNER
+
 
 class Transaction(FrenchTransaction):
     PATTERNS = [(re.compile(r'^CARTE (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
@@ -296,7 +319,7 @@ class Transaction(FrenchTransaction):
 
 class HistoryPage(LoggedPage, JsonPage):
     def has_deferred_cards(self):
-        return Dict('pendingDeferredDebitCardList/currentMonthCardList', default=None)
+        return Dict('pendingDeferredDebitCardList/currentMonthCardList', default=None)(self.doc)
 
     def get_keys(self):
         if 'exception' in self.doc:
@@ -315,6 +338,13 @@ class HistoryPage(LoggedPage, JsonPage):
                 return requests.Request('POST', data=json.dumps(data), headers={'Content-Type': 'application/json'})
 
         def parse(self, el):
+            exception = Dict('exception', default=None)(self)
+            if exception:
+                message = exception.get('message', '')
+                assert 'SERVICE_INDISPONIBLE' in message, 'Unknown error in history page: "%s"' % message
+                # The error message is a stack trace so we do not
+                # send it.
+                raise BrowserUnavailable()
             # Key only if coming
             key = Env('key', default=None)(self)
             if key:
@@ -341,6 +371,9 @@ class HistoryPage(LoggedPage, JsonPage):
             obj_raw = Transaction.Raw(Dict('libelleCourt'))
             obj_vdate = Date(Dict('dateValeur', NotAvailable), dayfirst=True, default=NotAvailable)
             obj_amount = CleanDecimal(Dict('montantEnEuro'), default=NotAvailable)
+            # DO NOT USE `OperationID` the ids aren't constant after 1 month. `clefDomirama` seems
+            # to be constant forever. Must be kept under watch though
+            obj_id = Dict('clefDomirama', default='')
 
             def parse(self, el):
                 key = Env('key', default=None)(self)
@@ -351,24 +384,41 @@ class HistoryPage(LoggedPage, JsonPage):
                             break
                     setattr(self.obj, '_deferred_date', self.FromTimestamp().filter(deferred_date))
 
-                # Skip duplicate transactions
-                amount = Dict('montantEnEuro', default=None)(self)
-                tr = Dict('libelleCourt')(self) + Dict('dateOperation', '')(self) + str(amount)
-                if amount is None or (tr in self.page.browser.trs['list'] and self.page.browser.trs['lastdate'] <= Field('date')(self)):
-                    raise SkipItem()
 
-                self.page.browser.trs['lastdate'] = Field('date')(self)
-                self.page.browser.trs['list'].append(tr)
+class RedirectInsurancePage(LoggedPage, JsonPage):
+    def get_url(self):
+        return Dict('url')(self.doc)
 
 
 class LifeinsurancePage(LoggedPage, HTMLPage):
     def get_account_id(self):
-        account_id = Regexp(CleanText('//h1[@class="portlet-title"]'), r'n° ([\d\s]+)', default=NotAvailable)(self.doc)
+        account_id = Regexp(CleanText('//h1[@class="portlet-title"]'), r'n° ([\s\w]+)', default=NotAvailable)(self.doc)
         if account_id:
             return re.sub(r'\s', '', account_id)
 
     def get_link(self, page):
         return Link(default=NotAvailable).filter(self.doc.xpath('//a[contains(text(), "%s")]' % page))
+
+    @method
+    class iter_accounts(TableElement):
+        item_xpath = '//div[@class="tabAssuranceVieCapi"]//table/tbody/tr[has-class("results-row")]'
+        head_xpath = '//div[@class="tabAssuranceVieCapi"]//table/thead/tr/th'
+
+        col_label = 'Contrat'
+        col_id = 'Numéro'
+        col_balance = 'Solde'
+
+        class item(ItemElement):
+            klass = Account
+
+            obj_id = CleanText(TableCell('id'), replace=[(' ', '')])
+            obj_label = CleanText(TableCell('label'))
+            obj_balance = CleanDecimal.French(TableCell('balance'))
+            obj_currency = Currency(TableCell('balance'))
+            obj_type = Account.TYPE_LIFE_INSURANCE
+
+            def obj_url(self):
+                return AbsoluteLink(TableCell('id')(self)[0].xpath('.//a'), default=NotAvailable)(self)
 
     @pagination
     @method

@@ -18,7 +18,7 @@
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 import datetime
 from dateutil.relativedelta import relativedelta
-from weboob.exceptions import BrowserIncorrectPassword
+from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.capabilities.bank import Account, AccountNotFound
 from weboob.capabilities.base import empty
@@ -30,7 +30,7 @@ from .pages import (
     LoginPage, ErrorPage, AccountsPage, HistoryPage, LoanHistoryPage, RibPage,
     LifeInsuranceList, LifeInsuranceIframe, LifeInsuranceRedir,
     BoursePage, CardHistoryPage, CardPage, UserValidationPage, BourseActionNeeded,
-    BourseDisconnectPage,
+    BourseDisconnectPage, ProfilePage,
 )
 from .spirica_browser import SpiricaBrowser
 
@@ -67,7 +67,8 @@ class BforbankBrowser(LoginBrowser):
                  BoursePage)
     bourse_titre = URL(r'https://bourse.bforbank.com/netfinca-titres/servlet/com.netfinca.frontcr.navigation.Titre', BoursePage)  # to get logout link
 
-    bourse_disco = URL(r'https://bourse.bforbank.com/netfinca-titres/servlet/com.netfinca.frontcr.login.ContextTransferDisconnect', BourseDisconnectPage)
+    bourse_disco = URL(r'https://bourse.bforbank.com/netfinca-titres/servlet/com.netfinca.frontcr.login.Logout', BourseDisconnectPage)
+    profile = URL(r'/espace-client/profil/informations', ProfilePage)
 
     def __init__(self, birthdate, username, password, *args, **kwargs):
         super(BforbankBrowser, self).__init__(username, password, *args, **kwargs)
@@ -89,14 +90,25 @@ class BforbankBrowser(LoginBrowser):
         self.login.stay_or_go()
         assert self.login.is_here()
         self.page.login(self.birthdate, self.username, self.password)
-        if self.error.is_here():
+        # When we try to login, the server return a json, if no error occurred
+        # `error` will be None otherwise it will be filled with the content of
+        # the error.
+        error = self.page.get_error_message()
+        if error == 'error.compte.bloque':
+            raise ActionNeeded('Compte bloqué')
+        elif error == 'error.authentification':
             raise BrowserIncorrectPassword()
+        elif error is not None:
+            assert False, 'Unexpected error at login: "%s"' % error
+        # We must go home after login otherwise do_login will be done twice.
+        self.home.go()
 
     @need_login
     def iter_accounts(self):
         if self.accounts is None:
-            self.home.stay_or_go()
-            accounts = list(self.page.iter_accounts())
+            owner_name = self.get_profile().name.upper().split(' ', 1)[1]
+            self.home.go()
+            accounts = list(self.page.iter_accounts(name=owner_name))
             if self.page.RIB_AVAILABLE:
                 self.rib.go().populate_rib(accounts)
 
@@ -111,7 +123,7 @@ class BforbankBrowser(LoginBrowser):
                     cards = self.page.get_cards(account.id)
                     account._cards = cards
                     if cards:
-                        self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/0')
+                        self.location(account.url.replace('operations', 'encoursCarte') + '/0')
                         indexes = dict(self.page.get_card_indexes())
 
                     for card in cards:
@@ -122,9 +134,9 @@ class BforbankBrowser(LoginBrowser):
                         card._checking_account = account
                         card._index = indexes[card.number]
 
-                        self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/%s' % card._index)
+                        self.location(account.url.replace('operations', 'encoursCarte') + '/%s' % card._index)
                         if self.page.get_debit_date().month == (datetime.date.today() + relativedelta(months=1)).month:
-                            self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/%s?month=1' % card._index)
+                            self.location(account.url.replace('operations', 'encoursCarte') + '/%s?month=1' % card._index)
                         card.balance = 0
                         card.coming = self.page.get_balance()
                         assert not empty(card.coming)
@@ -133,11 +145,6 @@ class BforbankBrowser(LoginBrowser):
                         self.accounts.append(card)
 
         return iter(self.accounts)
-
-    def _get_card_transactions(self, account):
-        self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/%s?month=1' % account._index)
-        assert self.card_history.is_here()
-        return self.page.get_operations()
 
     @need_login
     def get_history(self, account):
@@ -148,7 +155,9 @@ class BforbankBrowser(LoginBrowser):
             if not bourse_account:
                 return iter([])
 
-            self.location(bourse_account._link_id)
+            self.location(bourse_account._link_id, params={
+                'nump': bourse_account._market_id,
+            })
             assert self.bourse.is_here()
             history = list(self.page.iter_history())
             self.leave_espace_bourse()
@@ -161,7 +170,7 @@ class BforbankBrowser(LoginBrowser):
             return self.spirica.iter_history(account)
 
         if account.type != Account.TYPE_CARD:
-            self.location(account.url.replace('tableauDeBord', 'operations'))
+            self.location(account.url)
             assert self.history.is_here() or self.loan_history.is_here()
             transactions_list = []
             if account.type == Account.TYPE_CHECKING:
@@ -177,7 +186,7 @@ class BforbankBrowser(LoginBrowser):
             # for summary transactions, the transactions must be on both accounts:
             # negative amount on checking account, positive on card account
             transactions = []
-            self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/%s?month=1' % account._index)
+            self.location(account.url.replace('operations', 'encoursCarte') + '/%s?month=1' % account._index)
             if self.page.get_debit_date().month == (datetime.date.today() - relativedelta(months=1)).month:
                 transactions = list(self.page.get_operations())
                 summary = self.page.create_summary()
@@ -191,10 +200,10 @@ class BforbankBrowser(LoginBrowser):
             self.coming.go(account=account.id)
             return self.page.get_operations()
         elif account.type == Account.TYPE_CARD:
-            self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/%s' % account._index)
+            self.location(account.url.replace('operations', 'encoursCarte') + '/%s' % account._index)
             transactions = list(self.page.get_operations())
             if self.page.get_debit_date().month == (datetime.date.today() + relativedelta(months=1)).month:
-                self.location(account.url.replace('tableauDeBord', 'encoursCarte') + '/%s?month=1' % account._index)
+                self.location(account.url.replace('operations', 'encoursCarte') + '/%s?month=1' % account._index)
                 transactions += list(self.page.get_operations())
             return sorted_transactions(transactions)
         else:
@@ -249,6 +258,7 @@ class BforbankBrowser(LoginBrowser):
         return True
 
     def get_bourse_account(self, account):
+        owner_name = self.get_profile().name.upper().split(' ', 1)[1]
         self.bourse_login.go(id=account.id)  # "login" to bourse page
 
         self.bourse.go()
@@ -257,7 +267,7 @@ class BforbankBrowser(LoginBrowser):
         if self.page.password_required():
             return
         self.logger.debug('searching account matching %r', account)
-        for bourse_account in self.page.get_list():
+        for bourse_account in self.page.get_list(name=owner_name):
             self.logger.debug('iterating account %r', bourse_account)
             if bourse_account.id.startswith(account.id[3:]):
                 return bourse_account
@@ -299,4 +309,9 @@ class BforbankBrowser(LoginBrowser):
         if self.bourse.is_here():
             self.location(self.bourse_titre.build())
             self.location(self.page.get_logout_link())
-            self.location(self.page.get_relocation())
+            self.login.go()
+
+    @need_login
+    def get_profile(self):
+        self.profile.go()
+        return self.page.get_profile()

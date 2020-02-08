@@ -33,7 +33,7 @@ from weboob.tools.capabilities.bank.transactions import sorted_transactions
 
 from .pages import (
     LoginPage, AuthPage, AccountsPage, AccountHistoryViewPage, AccountHistoryPage,
-    ActionNeededPage, TransactionPage, MarketPage, InvestPage
+    PasswordExpiredPage, TransactionPage, MarketPage, InvestPage,
 )
 
 
@@ -63,7 +63,7 @@ class BNPEnterprise(LoginBrowser):
     # The Market page is used only if there are several market accounts
     market = URL(r'/opcvm/lister-portefeuilles/afficher.do', MarketPage)
 
-    renew_pass = URL('/sommaire/PseRedirectPasswordConnect', ActionNeededPage)
+    renew_pass = URL('/sommaire/PseRedirectPasswordConnect', PasswordExpiredPage)
 
     def __init__(self, config, *args, **kwargs):
         super(BNPEnterprise, self).__init__(config['login'].get(), config['password'].get(), *args, **kwargs)
@@ -124,29 +124,40 @@ class BNPEnterprise(LoginBrowser):
             return []
         return self._iter_history_base(account)
 
+    @need_login
+    def iter_documents(self, subscription):
+        raise NotImplementedError()
+
+    @need_login
+    def iter_subscription(self):
+        raise NotImplementedError()
+
     def _iter_history_base(self, account):
-        history = []
         dformat = "%Y%m%d"
 
-        for date in rrule(MONTHLY, dtstart=(datetime.now() - relativedelta(months=3)), until=datetime.now()):
-            self.account_history_view.go(
-                identifiant=account.iban, type_solde='C', type_releve='Previsionnel',
-                type_date='O', date_min=(date + relativedelta(days=1)).strftime(dformat),
-                date_max=(date + relativedelta(months=1)).strftime(dformat)
+        # We ask for more 12 months by default, but it may not be supported for somme account types.
+        # To avoid duplicated transactions we exit as soon a transaction is not within the expected timeframe
+        for date in rrule(MONTHLY, dtstart=(datetime.now() - relativedelta(months=11)), until=datetime.now())[::-1]:
+
+            params = dict(identifiant=account.iban, type_solde='C', type_releve='Previsionnel', type_date='O',
+                date_min=(date + relativedelta(days=1) - relativedelta(months=1)).strftime(dformat),
+                date_max=date.strftime(dformat)
             )
 
-            self.account_history.go(
-                identifiant=account.iban, type_solde='C', type_releve='Previsionnel',
-                type_date='O', date_min=(date + relativedelta(days=1)).strftime(dformat),
-                date_max=(date + relativedelta(months=1)).strftime(dformat)
-            )
+            self.account_history_view.go(**params)
+            self.account_history.go(**params)
 
-            for transaction in self.page.iter_history():
+            for transaction in sorted_transactions(self.page.iter_history()):
                 if transaction._coming:
                     self.logger.debug('skipping coming %r', transaction.to_dict())
                     continue
-                history.append(transaction)
-        return sorted_transactions(history)
+
+                if transaction.date > date:
+                    self.logger.debug('transaction not within expected timeframe, stop iterating history: %r',
+                                      transaction.to_dict())
+                    return
+
+                yield transaction
 
     @need_login
     def iter_coming_operations(self, account):

@@ -18,7 +18,6 @@
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 from __future__ import unicode_literals
 
-
 import hashlib
 import time
 import json
@@ -27,7 +26,7 @@ from decimal import Decimal
 from requests.exceptions import SSLError
 
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserUnavailable
+from weboob.exceptions import BrowserUnavailable, BrowserHTTPNotFound
 from weboob.browser.exceptions import ServerError
 from weboob.capabilities.bank import Account, AccountNotFound
 from weboob.capabilities.base import find_object, NotAvailable
@@ -57,7 +56,7 @@ def start_with_main_site(f):
                     break
             browser.where = 'start'
         elif browser.url and browser.url.startswith('https://ingdirectvie.ing.fr/'):
-            browser.lifeback.go()
+            browser.return_from_life_insurance()
             browser.where = 'start'
 
         elif browser.url and browser.url.startswith('https://subscribe.ing.fr/'):
@@ -100,7 +99,6 @@ class IngBrowser(LoginBrowser):
     asv_invest = URL(r'https://ingdirectvie.ing.fr/b2b2c/epargne/CoeDetCon', ASVInvest)
     detailfonds = URL(r'https://ingdirectvie.ing.fr/b2b2c/fonds/PerDesFac\?codeFonds=(.*)', DetailFondsPage)
 
-
     # CapDocument
     billpage = URL(r'/protected/pages/common/estatement/eStatement.jsf', BillsPage)
 
@@ -138,6 +136,15 @@ class IngBrowser(LoginBrowser):
         # get form to be redirected on transfer page
         self.api_redirection_url.go()
         self.page.go_new_website()
+
+    def return_from_life_insurance(self):
+        try:
+            self.lifeback.go()
+        except BrowserHTTPNotFound:
+            # we can't do login from this browser
+            # go on accounts page and redo login from api space
+            self.logger.warning('Cannot leave from life insurance space, re login on api space')
+        self.accountspage.stay_or_go()
 
     @need_login
     def set_multispace(self):
@@ -235,7 +242,6 @@ class IngBrowser(LoginBrowser):
             accounts_list.append(loan)
             yield loan
 
-
     @need_login
     @start_with_main_site
     def get_accounts_list(self, space=None, fill_account=True):
@@ -296,9 +302,10 @@ class IngBrowser(LoginBrowser):
             self.return_from_loan_site()
 
     def return_from_loan_site(self):
-        data = {'context': '{"originatingApplication":"SECUREUI"}',
-                    'targetSystem': 'INTERNET'}
-        self.location('https://subscribe.ing.fr/consumerloan/consumerloan-v1/sso/exit', data=data)
+        params = {'context': '{"originatingApplication":"SECUREUI"}',
+                  'targetSystem': 'INTERNET'}
+        data = {'targetSystemName': 'INTERNET'}
+        self.location('https://subscribe.ing.fr/consumerloan/consumerloan-v1/sso/exit', params=params, json=data)
         self.location('https://secure.ing.fr/', data={'token': self.response.text})
 
     def get_account(self, _id, space=None):
@@ -461,19 +468,14 @@ class IngBrowser(LoginBrowser):
                 yield inv
             self.return_from_titre_page.go()
         elif self.page.asv_has_detail or account._jid:
-            self.accountspage.stay_or_go()
-            shares = {}
-            for asv_investments in self.page.iter_asv_investments():
-                shares[asv_investments.label] = asv_investments.portfolio_share
             if self.go_on_asv_detail(account, '/b2b2c/epargne/CoeDetCon') is not False:
                 self.where = 'asv'
                 for inv in self.page.iter_investments():
-                    inv.portfolio_share = shares[inv.label]
                     yield inv
 
                 # return on old ing website
                 assert self.asv_invest.is_here(), "Should be on ING generali website"
-                self.lifeback.go()
+                self.return_from_life_insurance()
 
     def get_history_titre(self, account):
         self.go_investments(account)
@@ -515,7 +517,7 @@ class IngBrowser(LoginBrowser):
                                 inv.code = None
                         investment_list.append(inv)
                     tr.investments = investment_list
-            self.lifeback.go()
+            self.return_from_life_insurance()
         return iter(transactions)
 
     ############# CapDocument #############

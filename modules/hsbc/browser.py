@@ -25,7 +25,7 @@ from lxml.etree import XMLSyntaxError
 from collections import OrderedDict
 
 from weboob.tools.date import LinearDateGuesser
-from weboob.capabilities.bank import Account, AccountNotFound
+from weboob.capabilities.bank import Account, AccountNotFound, AccountOwnership
 from weboob.tools.capabilities.bank.transactions import sorted_transactions, keep_only_card_transactions
 from weboob.tools.compat import parse_qsl, urlparse
 from weboob.exceptions import BrowserIncorrectPassword
@@ -57,39 +57,50 @@ class HSBC(LoginBrowser):
     app_gone = False
 
     scpi_investment_page = URL(r'https://www.hsbc.fr/1/[0-9]/.*', ScpiInvestmentPage)
-    scpi_his_page =   URL(r'https://www.hsbc.fr/1/[0-9]/.*', ScpiHisPage)
-    connection =      URL(r'https://www.hsbc.fr/1/2/hsbc-france/particuliers/connexion', LoginPage)
-    login =           URL(r'https://www.hsbc.fr/1/*', LoginPage)
-    cptPage =         URL(r'/cgi-bin/emcgi.*\&Cpt=.*',
-                          r'/cgi-bin/emcgi.*\&Epa=.*',
-                          r'/cgi-bin/emcgi.*\&CPT_IdPrestation.*',
-                          r'/cgi-bin/emcgi.*\&Ass_IdPrestation.*',
-                          # FIXME are the previous patterns relevant in POST nav?
-                          r'/cgi-bin/emcgi',
-                          CPTOperationPage)
-    cbPage =          URL(r'/cgi-bin/emcgi.*[\&\?]Cb=.*',
-                          r'/cgi-bin/emcgi.*\&CB_IdPrestation.*',
-                          # FIXME are the previous patterns relevant in POST nav?
-                          r'/cgi-bin/emcgi',
-                          CBOperationPage)
-    appGone =     URL(r'/.*_absente.html',
-                      r'/pm_absent_inter.html',
-                      '/appli_absente_MBEL.html',
-                      '/pm_absent_inter_MBEL.html',
-                        AppGonePage)
-    rib =             URL(r'/cgi-bin/emcgi', RibPage)
-    accounts =        URL(r'/cgi-bin/emcgi', AccountsPage)
+    scpi_his_page = URL(r'https://www.hsbc.fr/1/[0-9]/.*', ScpiHisPage)
+
+    connection = URL(r'https://www.hsbc.fr/1/2/hsbc-france/particuliers/connexion', LoginPage)
+    connection2 = URL(r'https://www.hsbc.fr/1/2//hsbc-france/particuliers/connexion', LoginPage)
+    login = URL(r'https://www.hsbc.fr/1/*', LoginPage)
+    cptPage = URL(
+        r'/cgi-bin/emcgi.*\&Cpt=.*',
+        r'/cgi-bin/emcgi.*\&Epa=.*',
+        r'/cgi-bin/emcgi.*\&CPT_IdPrestation.*',
+        r'/cgi-bin/emcgi.*\&Ass_IdPrestation.*',
+        # FIXME are the previous patterns relevant in POST nav?
+        r'/cgi-bin/emcgi',
+        CPTOperationPage,
+    )
+    cbPage = URL(
+        r'/cgi-bin/emcgi.*[\&\?]Cb=.*',
+        r'/cgi-bin/emcgi.*\&CB_IdPrestation.*',
+        # FIXME are the previous patterns relevant in POST nav?
+        r'/cgi-bin/emcgi',
+        CBOperationPage,
+    )
+    appGone = URL(
+        r'/.*_absente.html',
+        r'/pm_absent_inter.html',
+        r'/appli_absente_MBEL.html',
+        r'/pm_absent_inter_MBEL.html',
+        AppGonePage,
+    )
+    rib = URL(r'/cgi-bin/emcgi', RibPage)
+    accounts = URL(r'/cgi-bin/emcgi', AccountsPage)
     owners_list = URL(r'/cgi-bin/emcgi', OwnersListPage)
     life_insurance_useless = URL(r'/cgi-bin/emcgi', LifeInsuranceUseless)
     profile = URL(r'/cgi-bin/emcgi', ProfilePage)
     unavailable = URL(r'/cgi-bin/emcgi', UnavailablePage)
-    frame_page = URL(r'/cgi-bin/emcgi',
-                     r'https://clients.hsbc.fr/cgi-bin/emcgi', FrameContainer)
+    frame_page = URL(
+        r'/cgi-bin/emcgi',
+        r'https://clients.hsbc.fr/cgi-bin/emcgi',
+        FrameContainer,
+    )
 
     # other site
     life_insurance_portal = URL(r'/cgi-bin/emcgi', LifeInsurancePortal)
-    life_insurance_main = URL('https://assurances.hsbc.fr/fr/accueil/b2c/accueil.html\?pointEntree=PARTIEGENERIQUEB2C', LifeInsuranceMain)
-    life_insurances = URL('https://assurances.hsbc.fr/navigation', LifeInsurancesPage)
+    life_insurance_main = URL(r'https://assurances.hsbc.fr/fr/accueil/b2c/accueil.html\?pointEntree=PARTIEGENERIQUEB2C', LifeInsuranceMain)
+    life_insurances = URL(r'https://assurances.hsbc.fr/navigation', LifeInsurancesPage)
     life_not_found = URL(r'https://assurances.hsbc.fr/fr/404.html', LifeNotFound)
 
     # investment pages
@@ -99,21 +110,25 @@ class HSBC(LoginBrowser):
         r'https://www.hsbc.fr/1/[0-9]/authentication/sso-cwd\?customerFullName=.*',
         InvestmentFormPage
     )
-    logon_investment_page = URL(r'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/LogonAuthentication', LogonInvestmentPage)
+    logon_investment_page = URL(
+        r'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/LogonAuthentication',
+        r'https://investissements.clients.hsbc.fr/cwd/group-wd-gateway-war/gateway/LogonAuthentication',
+        LogonInvestmentPage
+    )
     retrieve_accounts_view = URL(
-        r'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/wd/RetrieveProductView',
+        r'https://investissements.clients.hsbc.fr/cwd/group-wd-gateway-war/gateway/wd/RetrieveCustomerPortfolio',
         RetrieveAccountsPage
     )
     retrieve_investments_page = URL(
-        r'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/wd/RetrieveProductView',
+        r'https://investissements.clients.hsbc.fr/cwd/group-wd-gateway-war/gateway/wd/RetrieveCustomerPortfolio',
         RetrieveInvestmentsPage
     )
     retrieve_liquidity_page = URL(
-        r'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/wd/RetrieveProductView',
+        r'https://investissements.clients.hsbc.fr/cwd/group-wd-gateway-war/gateway/wd/RetrieveCustomerPortfolio',
         RetrieveLiquidityPage
     )
     retrieve_useless_page = URL(
-        r'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/wd/RetrieveProductView',
+        r'https://investissements.clients.hsbc.fr/cwd/group-wd-gateway-war/gateway/wd/RetrieveCustomerPortfolio',
         RetrieveUselessPage
     )
 
@@ -122,11 +137,13 @@ class HSBC(LoginBrowser):
 
     def __init__(self, username, password, secret, *args, **kwargs):
         super(HSBC, self).__init__(username, password, *args, **kwargs)
-        self.accounts_list = OrderedDict()
-        self.unique_accounts_list = dict()
+        self.accounts_dict = OrderedDict()
+        self.unique_accounts_dict = dict()
         self.secret = secret
         self.PEA_LISTING = {}
-        self.owners = []
+        self.owners_url_list = []
+        self.web_space = None
+        self.home_url = None
 
     def load_state(self, state):
         return
@@ -135,7 +152,14 @@ class HSBC(LoginBrowser):
         self.session.cookies.clear()
 
         self.app_gone = False
-        self.connection.go()
+        # The website seems to be using the connection2 URL now for login, it seems weird
+        # that there is randomly 2 `/` in the URL so i let the try on the first connection
+        # in case they revert the change.
+        try:
+            self.connection.go()
+        except HTTPNotFound:
+            self.connection2.go()
+
         self.page.login(self.username)
 
         no_secure_key_link = self.page.get_no_secure_key()
@@ -154,15 +178,14 @@ class HSBC(LoginBrowser):
         if new_base_url in self.url:
             self.BASEURL = new_base_url
 
-        home_url = None
         if self.frame_page.is_here():
-            home_url = self.page.get_frame()
+            self.home_url = self.page.get_frame()
             self.js_url = self.page.get_js_url()
 
-        if not home_url or not self.page.logged:
+        if not self.home_url or not self.page.logged:
             raise BrowserIncorrectPassword()
 
-        self.location(home_url)
+        self.location(self.home_url)
 
     def go_post(self, url, data=None):
         # most of HSBC accounts links are actually handled by js code
@@ -182,6 +205,7 @@ class HSBC(LoginBrowser):
         "Pas de TIERS", so we must always go to the owners list before
         going to the owner's account page.
         """
+
         if not self.owners_list.is_here():
             self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
 
@@ -192,8 +216,8 @@ class HSBC(LoginBrowser):
             self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
 
         # Refresh owners URLs in case they changed:
-        self.owners = self.page.get_owners_urls()
-        self.go_post(self.owners[owner])
+        self.owners_url_list = self.page.get_owners_urls()
+        self.go_post(self.owners_url_list[owner])
 
     @need_login
     def iter_account_owners(self):
@@ -202,71 +226,129 @@ class HSBC(LoginBrowser):
         people each having their own accounts. We must fetch the account
         for each person and store the owner of each account.
         """
-        if self.unique_accounts_list:
-            for account in self.unique_accounts_list.values():
+        if not self.web_space:
+            if not self.accounts.is_here():
+                self.location(self.home_url)
+            self.web_space = self.page.get_web_space()
+
+        if not self.unique_accounts_dict and self.web_space == 'new_space':
+            self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})  # Go to the owners list to find the list of other owners
+            self.owners_url_list = self.page.get_owners_urls()
+
+            for owner in range(len(self.owners_url_list)):
+                self.accounts_dict[owner] = {}
+                self.update_accounts_dict(owner)
+
+                # We must set an "_owner" attribute to each account.
+                for a in self.accounts_dict[owner].values():
+                    a._owner = owner
+
+                    # The first space is the PSU owner space
+                    if owner == 0:
+                        a.ownership = AccountOwnership.OWNER
+                    else:
+                        a.ownership = AccountOwnership.ATTORNEY
+
+                # go on cards page if there are cards accounts
+                for a in self.accounts_dict[owner].values():
+                    if a.type == Account.TYPE_CARD:
+                        self.location(a.url)
+                        break
+
+                # get all couples (card, parent) on card page
+                all_card_and_parent = []
+                if self.cbPage.is_here():
+                    all_card_and_parent = self.page.get_all_parent_id()
+                    self.go_post(self.js_url, data={'debr': 'COMPTES_PAN'})
+
+                # update cards parent and currency
+                for a in self.accounts_dict[owner].values():
+                    if a.type == Account.TYPE_CARD:
+                        for card in all_card_and_parent:  # card[0] and card[1] are labels containing the id for the card and its parents account, respectively
+                            if a.id in card[0].replace(' ', ''):  # cut spaces in labels such as 'CARTE PREMIER N° 1234 00XX XXXX 5678'
+                                parent_id = re.match(r'^(\d*)?(\d{11}EUR)$', card[1]).group(2)  # ids in the HTML have 5 numbers added at the beginning, catch only the end
+                                a.parent = find_object(self.accounts_dict[owner].values(), id=parent_id)
+                            if a.parent and not a.currency:
+                                a.currency = a.parent.currency
+
+                # We must get back to the owners list before moving to the next owner:
+                self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
+
+            # Fill a dictionary will all accounts without duplicating common accounts:
+            for owner in self.accounts_dict.values():
+                for account in owner.values():
+                    if account.id not in self.unique_accounts_dict.keys():
+                        self.unique_accounts_dict[account.id] = account
+                    else:
+                        # If an account is in multiple space, that's mean it is shared between this owners.
+                        self.unique_accounts_dict[account.id].ownership = AccountOwnership.CO_OWNER
+
+        if self.unique_accounts_dict:
+            for account in self.unique_accounts_dict.values():
                 yield account
         else:
+            # TODO ckeck GrayLog and get rid of old space code if clients are no longer using it
+            self.logger.warning('Passed through the old HSBC webspace')
             self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
-            if self.owners_list.is_here():
-                self.owners = self.page.get_owners_urls()
+            self.owners_url_list = self.page.get_owners_urls()
 
-                # self.accounts_list will be a dictionary of owners each
-                # containing a dictionary of the owner's accounts.
-                for owner in range(len(self.owners)):
-                    self.accounts_list[owner] = {}
-                    self.update_accounts_list(owner, True)
+            # self.accounts_dict will be a dictionary of owners each
+            # containing a dictionary of the owner's accounts.
+            for owner in range(len(self.owners_url_list)):
+                self.accounts_dict[owner] = {}
+                self.update_accounts_dict(owner)
 
-                    # We must set an "_owner" attribute to each account.
-                    for a in self.accounts_list[owner].values():
-                        a._owner = owner
+                # We must set an "_owner" attribute to each account.
+                for a in self.accounts_dict[owner].values():
+                    a._owner = owner
 
-                    # go on cards page if there are cards accounts
-                    for a in self.accounts_list[owner].values():
-                        if a.type == Account.TYPE_CARD:
-                            self.location(a.url)
-                            break
+                # go on cards page if there are cards accounts
+                for a in self.accounts_dict[owner].values():
+                    if a.type == Account.TYPE_CARD:
+                        self.location(a.url)
+                        break
 
-                    # get all couples (card, parent) on cards page
-                    all_card_and_parent = []
-                    if self.cbPage.is_here():
-                        all_card_and_parent = self.page.get_all_parent_id()
-                        self.go_post(self.js_url, data={'debr': 'COMPTES_PAN'})
+                # get all couples (card, parent) on cards page
+                all_card_and_parent = []
+                if self.cbPage.is_here():
+                    all_card_and_parent = self.page.get_all_parent_id()
+                    self.go_post(self.js_url, data={'debr': 'COMPTES_PAN'})
 
-                    # update cards parent and currency
-                    for a in self.accounts_list[owner].values():
-                        if a.type == Account.TYPE_CARD:
-                            for card in all_card_and_parent:
-                                if a.id in card[0].replace(' ', ''):
-                                    a.parent = find_object(self.accounts_list[owner].values(), id=card[1])
-                                if a.parent and not a.currency:
-                                    a.currency = a.parent.currency
+                # update cards parent and currency
+                for a in self.accounts_dict[owner].values():
+                    if a.type == Account.TYPE_CARD:
+                        for card in all_card_and_parent:
+                            if a.id in card[0].replace(' ', ''):
+                                a.parent = find_object(self.accounts_dict[owner].values(), id=card[1])
+                            if a.parent and not a.currency:
+                                a.currency = a.parent.currency
 
-                    # We must get back to the owners list before moving to the next owner:
-                    self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
+                # We must get back to the owners list before moving to the next owner:
+                self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
 
-                # Fill a dictionary will all accounts without duplicating common accounts:
-                for owner in self.accounts_list.values():
-                    for account in owner.values():
-                        if account.id not in self.unique_accounts_list.keys():
-                            self.unique_accounts_list[account.id] = account
-
-                for account in self.unique_accounts_list.values():
-                    yield account
+            # Fill a dictionary will all accounts without duplicating common accounts:
+            for owner in self.accounts_dict.values():
+                for account in owner.values():
+                    if account.id not in self.unique_accounts_dict.keys():
+                        self.unique_accounts_dict[account.id] = account
+            for account in self.unique_accounts_dict.values():
+                yield account
 
     @need_login
-    def update_accounts_list(self, owner, iban=True):
+    def update_accounts_dict(self, owner, iban=True):
         # Go to the owner's account page in case we are not there already:
         self.go_to_owner_accounts(owner)
-        for a in self.page.iter_spaces_account():
+
+        for a in self.page.iter_spaces_account(self.web_space):
             try:
-                self.accounts_list[owner][a.id].url = a.url
+                self.accounts_dict[owner][a.id].url = a.url
             except KeyError:
-                self.accounts_list[owner][a.id] = a
+                self.accounts_dict[owner][a.id] = a
 
         if iban:
             self.location(self.js_url, params={'debr': 'COMPTES_RIB'})
             if self.rib.is_here():
-                self.page.get_rib(self.accounts_list[owner])
+                self.page.get_rib(self.accounts_dict[owner])
 
     @need_login
     def _quit_li_space(self):
@@ -308,8 +390,10 @@ class HSBC(LoginBrowser):
     @need_login
     def get_history(self, account, coming=False, retry_li=True):
         self._quit_li_space()
-        self.update_accounts_list(account._owner, False)
-        account = self.accounts_list[account._owner][account.id]
+        #  Update accounts list only in case of several owners
+        if len(self.owners_url_list) > 1:
+            self.update_accounts_dict(account._owner, iban=False)
+        account = self.accounts_dict[account._owner][account.id]
 
         if account.url is None:
             return []
@@ -317,7 +401,7 @@ class HSBC(LoginBrowser):
         if account.url.startswith('javascript') or '&Crd=' in account.url or account.type == Account.TYPE_LOAN:
             raise NotImplementedError()
 
-        if account.type == Account.TYPE_MARKET and not 'BOURSE_INV' in account.url:
+        if account.type == Account.TYPE_MARKET and 'BOURSE_INV' not in account.url:
             # Clean account url
             m = re.search(r"'(.*)'", account.url)
             if m:
@@ -365,23 +449,22 @@ class HSBC(LoginBrowser):
             return history
 
         try:
-            self.go_post(self.accounts_list[account._owner][account.id].url)
+            self.go_post(account.url)
         # sometime go to hsbc life insurance space do logout
         except HTTPNotFound:
             self.app_gone = True
             self.do_logout()
             self.do_login()
-
         # If we relogin on hsbc, all links have changed
         if self.app_gone:
             self.app_gone = False
-            self.update_accounts_list(account._owner, False)
-            self.location(self.accounts_list[account._owner][account.id].url)
+            self.update_accounts_dict(account._owner, iban=False)
+            self.location(self.accounts_dict[account._owner][account.id].url)
 
         if self.page is None:
             return []
 
-        # for 'fusion' space
+        # for 'fusion' and 'new' space there is a form to submit on the page to go the account's history
         if hasattr(account, '_is_form') and account._is_form:
             # go on accounts page to get account form
             self.go_to_owner_accounts(account._owner)
@@ -389,12 +472,24 @@ class HSBC(LoginBrowser):
             self.page.go_history_page(account)
 
         if self.cbPage.is_here():
+            history_tabs_urls = self.page.history_tabs_urls()
             guesser = LinearDateGuesser(date_max_bump=timedelta(45))
-            history = list(self.page.get_history(date_guesser=guesser))
+            history = []
+            # gather coming anyway
+            # in case no new transaction has been recorded since last (past) payement
+            self.location(history_tabs_urls[0])  # fetch only first tab coming transactions
+            history.extend(list(self.page.get_history(date_guesser=guesser)))
+            if not coming:
+                # get further history
+                self.logger.debug("get history")
+                for tab in history_tabs_urls[1:]:
+                    self.location(tab)  # fetch all tab but first of past transactions
+                    history += list(self.page.get_history(date_guesser=guesser))
 
             for tr in history:
                 if tr.type == tr.TYPE_UNKNOWN:
                     tr.type = tr.TYPE_DEFERRED_CARD
+                    tr.bdate = tr.rdate
 
             if account.parent:
                 # Fetching the card summaries from the parent account using the card id in the transaction labels:
@@ -490,8 +585,8 @@ class HSBC(LoginBrowser):
 
     def get_life_investments(self, account, retry_li=True):
         self._quit_li_space()
-        self.update_accounts_list(account._owner, False)
-        account = self.accounts_list[account._owner][account.id]
+        self.update_accounts_dict(account._owner, False)
+        account = self.accounts_dict[account._owner][account.id]
         try:
             if not self._go_to_life_insurance(account):
                 self._quit_li_space()
@@ -521,7 +616,7 @@ class HSBC(LoginBrowser):
         if not hasattr(self.page, 'get_middle_frame_url'):
             # if we can catch the URL, we go directly, else we need to browse
             # the website
-            self.update_accounts_list(account._owner, False)
+            self.update_accounts_dict(account._owner, False)
 
         self.location(self.page.get_middle_frame_url())
 
@@ -532,7 +627,7 @@ class HSBC(LoginBrowser):
             if self.login.is_here():
                 self.logger.warning('Connection to the Logon page failed, we must try again.')
                 self.do_login()
-                self.update_accounts_list(account._owner, False)
+                self.update_accounts_dict(account._owner, False)
                 self.investment_form_page.go()
                 # If reloggin did not help accessing the wealth space,
                 # there is nothing more we can do to get there.
@@ -550,10 +645,10 @@ class HSBC(LoginBrowser):
 
     @need_login
     def get_profile(self):
-        if not self.owners:
+        if not self.owners_url_list:
             self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
             if self.owners_list.is_here():
-                self.owners = self.page.get_owners_urls()
+                self.owners_url_list = self.page.get_owners_urls()
 
         # The main owner of the connection is always the first of the list:
         self.go_to_owner_accounts(0)

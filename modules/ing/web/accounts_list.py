@@ -29,7 +29,7 @@ from weboob.capabilities.profile import Person
 from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
 from weboob.browser.elements import ListElement, TableElement, ItemElement, method, DataError
 from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Eval, Filter, Field, MultiFilter, Date,
+    CleanText, CleanDecimal, Filter, Field, MultiFilter, Date,
     Lower, Async, AsyncLoad, Format, Env,
     Regexp,
 )
@@ -230,16 +230,6 @@ class AccountsList(LoggedPage, HTMLPage):
                 return True
 
     @method
-    class iter_asv_investments(ListElement):
-        item_xpath = '//div[@id="index:accountdetail"]//div[has-class("asv_fond")]'
-
-        class item(ItemElement):
-            klass = Investment
-
-            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal('.//dl[@class="ligne-repartition"]/dd', replace_dots=True))
-            obj_label = CleanText('.//span[@class="asv_cat_lbl"]')
-
-    @method
     class get_coming(generic_transactions):
         item_xpath = '//div[@class="transactions cc future"]//table'
 
@@ -410,7 +400,7 @@ class ASVInvest(LoggedPage, HTMLPage):
                 else:
                     return NotAvailable
 
-            def obj_diff_percent(self):
+            def obj_diff_ratio(self):
                 diff = CleanDecimal(TableCell('diff_percent'), replace_dots=True, default=NotAvailable)(self)
                 if not diff:
                     return diff

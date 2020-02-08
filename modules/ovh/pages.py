@@ -17,8 +17,9 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
-from weboob.capabilities.bill import DocumentTypes, Bill, Subscription
+from weboob.capabilities.bill import Bill, Subscription
 from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
 from weboob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, Date
 from weboob.browser.filters.html import Attr
@@ -33,18 +34,23 @@ class LoginPage(HTMLPage):
             raise AuthMethodNotImplemented('Two-Factor authentication is not supported.')
 
     def is_logged(self):
-        return not self.doc.xpath('//div[has-class("error")]') and not self.doc.xpath('//form//input[contains(@placeholder, "Account ID")]')
+        return not self.doc.xpath('//input[@name="credentialToken"]')
 
     def login(self, login, password):
         form = self.get_form('//form[@class="pagination-centered"]')
-        user = Attr(None, 'name').filter(self.doc.xpath('//input[contains(@placeholder, "Account ID")]'))
-        pwd = Attr(None, 'name').filter(self.doc.xpath('//input[@placeholder="Password"]'))
+        # because name attribute for login and password change each time we call this page
+        user = Attr('//form[@class="pagination-centered"]//input[@type="text"]', 'name')(self.doc)
+        pwd = Attr('//form[@class="pagination-centered"]//input[@type="password"]', 'name')(self.doc)
+
         form[user] = login
         form[pwd] = password
         form.submit()
 
+    def get_error_message(self):
+        return CleanText('//form[@class="pagination-centered"]/div[@class="error"]')(self.doc)
+
     # There is 2 double auth method
-    # One activated by the user, that we don't handle,
+    # One activated by the user, that we don't handle,
     # The other, spawning sometimes at first login, that we can handle.
 
     def check_user_double_auth(self):
@@ -59,7 +65,7 @@ class LoginPage(HTMLPage):
         return bool(double_auth)
 
     def get_otp_message(self):
-        return self.doc.xpath('//div[@class="control-group" and contains(., "email")]')
+        return CleanText('//div[@class="control-group" and contains(., "email")]')(self.doc)
 
     def get_security_form(self):
         return self.get_form()
@@ -67,7 +73,7 @@ class LoginPage(HTMLPage):
 
 class ProfilePage(LoggedPage, JsonPage):
     @method
-    class get_list(ListElement):
+    class get_subscriptions(ListElement):
         class item(ItemElement):
             klass = Subscription
 
@@ -86,8 +92,7 @@ class BillsPage(LoggedPage, JsonPage):
 
             obj_id = Format('%s.%s', Env('subid'), Dict('orderId'))
             obj_date = Date(Dict('billingDate'))
-            obj_format = u"pdf"
-            obj_type = DocumentTypes.BILL
+            obj_format = 'pdf'
             obj_price = CleanDecimal(Dict('priceWithTax/value'))
             obj_url = Dict('pdfUrl')
             obj_label = Format('Facture %s', Dict('orderId'))

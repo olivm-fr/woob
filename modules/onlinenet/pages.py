@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
 import re
 
@@ -42,7 +43,11 @@ class ProfilPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Subscription
 
-            obj_subscriber = Format('%s %s', CleanText('//label[@for="form_firstname"]/../following-sibling::div'), CleanText('//label[@for="form_firstname"]/../following-sibling::div'))
+            obj_subscriber = Format(
+                    '%s %s',
+                    CleanText('//label[@for="form_firstname"]/../following-sibling::div'),
+                    CleanText('//label[@for="form_firstname"]/../following-sibling::div')
+            )
             obj_id = Env('username')
             obj_label = obj_id
 
@@ -56,9 +61,9 @@ class DocumentsPage(LoggedPage, HTMLPage):
         item_xpath = '//h3[contains(text(), "bills")]/following-sibling::table//tr[position() > 1]'
         head_xpath = '//h3[contains(text(), "bills")]/following-sibling::table//tr/th'
 
-        col_id = u'Id'
-        col_date = u'Date'
-        col_price = u'Total TTC'
+        col_id = 'Id'
+        col_date = 'Date'
+        col_price = 'Total TTC'
 
         class item(ItemElement):
             klass = Bill
@@ -66,18 +71,17 @@ class DocumentsPage(LoggedPage, HTMLPage):
             obj_id = Format('%s_%s', Env('username'), CleanDecimal(TableCell('id')))
             obj__url = Attr('.//a[contains(text(), "PDF")]', 'href', default=NotAvailable)
             obj_date = Date(CleanText(TableCell('date')))
-            obj_format = u"pdf"
+            obj_format = 'pdf'
             obj_label = Format('Facture %s', CleanDecimal(TableCell('id')))
             obj_type = DocumentTypes.BILL
             obj_price = CleanDecimal(TableCell('price'))
-            obj_currency = u'EUR'
+            obj_currency = 'EUR'
 
             def condition(self):
                 return CleanText(TableCell('id'))(self) != "No bills"
 
             def parse(self, el):
                 self.env['username'] = self.page.browser.username
-
 
     @method
     class get_documents(ListElement):
@@ -88,7 +92,7 @@ class DocumentsPage(LoggedPage, HTMLPage):
 
             obj_id = Format('%s_%s', Env('username'), Env('docid'))
             obj__url = Attr('.', 'href')
-            obj_format = u"pdf"
+            obj_format = 'pdf'
             obj_label = CleanText('.')
             obj_type = DocumentTypes.OTHER
 

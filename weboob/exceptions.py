@@ -17,6 +17,11 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
+
+from weboob.tools.misc import to_unicode
+from weboob.tools.compat import StrConv
+
+
 class BrowserIncorrectPassword(Exception):
     pass
 
@@ -37,17 +42,59 @@ class BrowserInteraction(Exception):
     pass
 
 
-class BrowserQuestion(BrowserInteraction):
+class BrowserQuestion(BrowserInteraction, StrConv):
     """
     When raised by a browser,
     """
     def __init__(self, *fields):
         self.fields = fields
 
+    def __str__(self):
+        return ", ".join("{}: {}".format(
+            field.id or field.label, field.description) for field in self.fields
+        )
+
+    def __unicode__(self):
+        return ", ".join(
+            u"{}: {}".format(
+                to_unicode(field.id) or to_unicode(field.label),
+                to_unicode(field.description)
+            ) for field in self.fields
+        )
+
+
+class DecoupledValidation(BrowserInteraction):
+    def __init__(self, message='', resource=None, *values):
+        super(DecoupledValidation, self).__init__(*values)
+        self.message = message
+        self.resource = resource
+
+    def __str__(self):
+        return self.message
+
+
+class AppValidation(DecoupledValidation):
+    pass
+
+
+class AppValidationError(Exception):
+    pass
+
+
+class AppValidationCancelled(AppValidationError):
+    pass
+
+
+class AppValidationExpired(AppValidationError):
+    pass
+
 
 class BrowserRedirect(BrowserInteraction):
-    def __init__(self, url):
+    def __init__(self, url, resource=None):
         self.url = url
+
+        # Needed for transfer redirection
+        self.resource = resource
 
     def __str__(self):
         return 'Redirecting to %s' % self.url
@@ -99,6 +146,18 @@ class RecaptchaQuestion(CaptchaQuestion):
         super(RecaptchaQuestion, self).__init__(self.type, website_key=website_key, website_url=website_url)
 
 
+class RecaptchaV3Question(CaptchaQuestion):
+    type = 'g_recaptcha'
+
+    website_key = None
+    website_url = None
+    action = None
+
+    def __init__(self, website_key, website_url, action=None):
+        super(RecaptchaV3Question, self).__init__(self.type, website_key=website_key, website_url=website_url)
+        self.action = action
+
+
 class FuncaptchaQuestion(CaptchaQuestion):
     type = 'funcaptcha'
 
@@ -111,7 +170,7 @@ class FuncaptchaQuestion(CaptchaQuestion):
             self.type, website_key=website_key, website_url=website_url, sub_domain=sub_domain)
 
 
-class BrowserHTTPNotFound(BrowserUnavailable):
+class BrowserHTTPNotFound(Exception):
     pass
 
 
@@ -119,7 +178,7 @@ class BrowserHTTPError(BrowserUnavailable):
     pass
 
 
-class BrowserHTTPSDowngrade(BrowserUnavailable):
+class BrowserHTTPSDowngrade(Exception):
     pass
 
 
@@ -160,4 +219,22 @@ class AuthMethodNotImplemented(ActionNeeded):
 
 
 class BrowserPasswordExpired(ActionNeeded):
+    pass
+
+
+class NeedInteractive(Exception):
+    pass
+
+
+class NeedInteractiveForRedirect(NeedInteractive):
+    """
+    An authentication is required to connect and credentials are not supplied
+    """
+    pass
+
+
+class NeedInteractiveFor2FA(NeedInteractive):
+    """
+    A 2FA is required to connect, credentials are supplied but not the second factor
+    """
     pass

@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# yapf-compatible
+
 from __future__ import unicode_literals
 
 from datetime import date
@@ -27,7 +29,7 @@ from weboob.capabilities.bank import (
     Account, Recipient, Transfer, TransferBankError,
 )
 from weboob.browser.filters.standard import (
-    CleanDecimal, Date, CleanText, Coalesce,
+    CleanDecimal, Date, CleanText, Coalesce, Format,
 )
 from weboob.browser.filters.json import Dict
 
@@ -40,6 +42,11 @@ class RecipientsPage(LoggedPage, JsonPage):
 
     @method
     class iter_debit_accounts(DictElement):
+        def store(self, obj):
+            # can have accounts with same ID
+            # filter it on `browser.py` to have 'index' (needed to do transfer)
+            return obj
+
         class item(ItemElement):
             def condition(self):
                 return Dict('accountNumber', default=None)(self)
@@ -49,7 +56,7 @@ class RecipientsPage(LoggedPage, JsonPage):
             obj_id = obj_number = Dict('accountNumber')
             obj_label = Coalesce(
                 Dict('accountNatureLongLabel', default=''),
-                Dict('accountNatureShortLabel', default='')
+                Dict('accountNatureShortLabel', default=''),
             )
             obj_iban = Dict('ibanCode')
             obj_currency = Dict('currencyCode')
@@ -72,11 +79,18 @@ class RecipientsPage(LoggedPage, JsonPage):
             klass = Recipient
 
             obj_id = Dict('accountNumber')
-            obj_label = Dict('accountNatureLongLabel', default='')
+            obj_label = CleanText(
+                Format(
+                    '%s %s',
+                    Dict('accountHolderLongDesignation'),
+                    Dict('accountNatureShortLabel', default=''),
+                )
+            )
             obj_iban = Dict('ibanCode')
             obj_category = 'Interne'
             obj_enabled_at = date.today()
             obj__is_recipient = Dict('recipientOfTransfert', default=False)
+            obj__owner_name = CleanText(Dict('accountHolderLongDesignation'))
 
     @method
     class iter_external_recipient(DictElement):
@@ -90,7 +104,7 @@ class RecipientsPage(LoggedPage, JsonPage):
             klass = Recipient
 
             obj_id = obj_iban = Dict('ibanCode')
-            obj_label = Dict('recipientName')
+            obj_label = CleanText(Dict('recipientName'))
             obj_category = 'Externe'
             obj_enabled_at = date.today()
 
@@ -121,10 +135,14 @@ class TransferPage(LoggedPage, JsonPage):
 
         t.account_id = Dict('currentDebitAccountNumber')(self.doc)
         t.account_iban = Dict('currentDebitIbanCode')(self.doc)
-        t.account_label = Dict('typeCompte')(self.doc)
+        t.account_label = Dict('currentDebitTypeCompte')(self.doc)
 
+        t.recipient_label = CleanText(Dict('currentCreditAccountName'))(self.doc)
         t.recipient_id = t.recipient_iban = Dict('currentCreditIbanCode')(self.doc)
-        t.recipient_label = Dict('currentCreditAccountName')(self.doc)
+
+        # Internal transfer
+        if not Dict('isExternalTransfer')(self.doc):
+            t.recipient_id = Dict('currentCreditAccountNumber')(self.doc)
 
         return t
 

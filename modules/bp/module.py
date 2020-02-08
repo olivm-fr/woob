@@ -19,6 +19,7 @@
 
 
 from decimal import Decimal
+from datetime import timedelta
 from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.base import find_object, strict_find_object, NotAvailable
@@ -47,17 +48,27 @@ class BPModule(
     VERSION = '1.6'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'La Banque Postale'
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
-                           ValueBackendPassword('password', label='Mot de passe', regexp='^(\d{6})$'),
-                           Value('website', label='Type de compte', default='par',
-                                 choices={'par': 'Particuliers', 'pro': 'Professionnels'}))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Identifiant', masked=False),
+        Value('resume', noprompt=True, default=''),
+        Value('request_information', default=None, noprompt=True, required=False),
+        Value('code', label='Code SMS', required=False, default=''),
+        ValueBackendPassword('password', label='Mot de passe', regexp='^(\d{6})$'),
+        Value('website', label='Type de compte', default='par',
+              choices={'par': 'Particuliers', 'pro': 'Professionnels'})
+    )
 
     def create_default_browser(self):
         b = {'par': BPBrowser, 'pro': BProBrowser}
 
         self.BROWSER = b[self.config['website'].get()]
 
-        return self.create_browser(self.config['login'].get(), self.config['password'].get(), weboob=self.weboob)
+        return self.create_browser(
+            self.config,
+            self.config['login'].get(),
+            self.config['password'].get(),
+            weboob=self.weboob
+        )
 
     def iter_accounts(self):
         return self.browser.get_accounts_list()
@@ -104,6 +115,9 @@ class BPModule(
     def transfer_check_label(self, old, new):
         old = old.encode('latin-1', errors="xmlcharrefreplace").decode('latin-1')
         return super(BPModule, self).transfer_check_label(old, new)
+
+    def transfer_check_date(self, old_exec_date, new_exec_date):
+        return old_exec_date <= new_exec_date <= old_exec_date + timedelta(days=2)
 
     def execute_transfer(self, transfer, **params):
         return self.browser.execute_transfer(transfer)

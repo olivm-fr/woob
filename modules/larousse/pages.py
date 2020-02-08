@@ -27,13 +27,13 @@ from weboob.browser.filters.standard import Env, CleanText
 from weboob.browser.pages import HTMLPage
 
 CODES = {
-    'allemand': 'German',
-    'anglais': 'English',
-    'arabe': 'Arabic',
-    'chinois': 'Chinese',
-    'espagnol': 'Spanish',
-    'francais': 'French',
-    'italien': 'Italian',
+    'allemand': 'de',
+    'anglais': 'en',
+    'arabe': 'ar',
+    'chinois': 'zh',
+    'espagnol': 'es',
+    'francais': 'fr',
+    'italien': 'it',
 }
 
 RCODES = {v: k for k, v in CODES.items()}
@@ -41,14 +41,12 @@ RCODES = {v: k for k, v in CODES.items()}
 class LangList(HTMLPage):
     def get_langs(self):
         res = {}
-        for a in self.doc.xpath('//ul[@class="menu-items"]/li//a'):
+        for a in self.doc.xpath('//a[@class="item-dico-bil"]'):
             url = a.attrib['href']
             mtc = re.search(r'/dictionnaires/(\w+)-(\w+)', url)
             if not mtc:
                 continue
             src, dst = mtc.groups()
-            if dst == 'monolingue':
-                continue
             res[CODES[src], CODES[dst]] = (src, dst)
         return res
 

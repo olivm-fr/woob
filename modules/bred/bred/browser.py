@@ -43,24 +43,24 @@ __all__ = ['BredBrowser']
 class BredBrowser(LoginBrowser):
     BASEURL = 'https://www.bred.fr'
 
-    home =              URL('/$', HomePage)
-    login =             URL('/transactionnel/Authentication', LoginPage)
-    error =             URL('.*gestion-des-erreurs/erreur-pwd',
-                            '.*gestion-des-erreurs/opposition',
-                            '/pages-gestion-des-erreurs/erreur-technique',
-                            '/pages-gestion-des-erreurs/message-tiers-oppose', ErrorPage)
-    universe =          URL('/transactionnel/services/applications/menu/getMenuUnivers', UniversePage)
-    token =             URL(r'/transactionnel/services/rest/User/nonce\?random=(?P<timestamp>.*)', TokenPage)
-    move_universe =     URL('/transactionnel/services/applications/listes/(?P<key>.*)/default', MoveUniversePage)
-    switch =            URL('/transactionnel/services/rest/User/switch', SwitchPage)
-    loans =             URL('/transactionnel/services/applications/prets/liste', LoansPage)
-    accounts =          URL('/transactionnel/services/rest/Account/accounts', AccountsPage)
-    iban =              URL('/transactionnel/services/rest/Account/account/(?P<number>.*)/iban', IbanPage)
-    life_insurances =   URL('/transactionnel/services/applications/avoirsPrepar/getAvoirs', LifeInsurancesPage)
-    search =            URL('/transactionnel/services/applications/operations/getSearch/', SearchPage)
-    profile =           URL('/transactionnel/services/rest/User/user', ProfilePage)
-    emails =            URL('/transactionnel/services/applications/gestionEmail/getAdressesMails', EmailsPage)
-    error_code =        URL('/.*\?errorCode=.*', ErrorCodePage)
+    home = URL(r'/$', HomePage)
+    login = URL(r'/transactionnel/Authentication', LoginPage)
+    error = URL(r'.*gestion-des-erreurs/erreur-pwd',
+                r'.*gestion-des-erreurs/opposition',
+                r'/pages-gestion-des-erreurs/erreur-technique',
+                r'/pages-gestion-des-erreurs/message-tiers-oppose', ErrorPage)
+    universe = URL(r'/transactionnel/services/applications/menu/getMenuUnivers', UniversePage)
+    token = URL(r'/transactionnel/services/rest/User/nonce\?random=(?P<timestamp>.*)', TokenPage)
+    move_universe = URL(r'/transactionnel/services/applications/listes/(?P<key>.*)/default', MoveUniversePage)
+    switch = URL(r'/transactionnel/services/rest/User/switch', SwitchPage)
+    loans = URL(r'/transactionnel/services/applications/prets/liste', LoansPage)
+    accounts = URL(r'/transactionnel/services/rest/Account/accounts', AccountsPage)
+    iban = URL(r'/transactionnel/services/rest/Account/account/(?P<number>.*)/iban', IbanPage)
+    life_insurances = URL(r'/transactionnel/services/applications/avoirsPrepar/getAvoirs', LifeInsurancesPage)
+    search = URL(r'/transactionnel/services/applications/operations/getSearch/', SearchPage)
+    profile = URL(r'/transactionnel/services/rest/User/user', ProfilePage)
+    emails = URL(r'/transactionnel/services/applications/gestionEmail/getAdressesMails', EmailsPage)
+    error_code = URL(r'/.*\?errorCode=.*', ErrorCodePage)
 
     def __init__(self, accnum, login, password, *args, **kwargs):
         kwargs['username'] = login
@@ -135,9 +135,6 @@ class BredBrowser(LoginBrowser):
     def get_list(self):
         self.accounts.go()
         for acc in self.page.iter_accounts(accnum=self.accnum, current_univers=self.current_univers):
-            if acc.type == Account.TYPE_CHECKING:
-                self.iban.go(number=acc._number)
-                self.page.set_iban(account=acc)
             yield acc
 
     @need_login
@@ -183,17 +180,25 @@ class BredBrowser(LoginBrowser):
         seen = set()
         offset = 0
         next_page = True
+        end_date = date.today()
+        last_date = None
         while next_page:
+            if offset == 10000:
+                offset = 0
+                end_date = last_date
             operation_list = self._make_api_call(
                 account=account,
-                start_date=date(day=1, month=1, year=2000), end_date=date.today(),
+                start_date=date(day=1, month=1, year=2000), end_date=end_date,
                 offset=offset, max_length=50,
             )
 
             transactions = self.page.iter_history(account=account, operation_list=operation_list, seen=seen, today=today, coming=coming)
 
+            transactions = sorted_transactions(transactions)
+            if transactions:
+                last_date = transactions[-1].date
             # Transactions are unsorted
-            for t in sorted_transactions(transactions):
+            for t in transactions:
                 if coming == t._coming:
                     yield t
                 elif coming and not t._coming:
@@ -201,7 +206,7 @@ class BredBrowser(LoginBrowser):
                     self.logger.debug('stopping coming after %s', t)
                     return
 
-            next_page = len(transactions) == 50
+            next_page = len(transactions) > 0
             offset += 50
 
             # This assert supposedly prevents infinite loops,
@@ -227,3 +232,9 @@ class BredBrowser(LoginBrowser):
         self.page.set_email(profile=profile)
 
         return profile
+
+    @need_login
+    def fill_account(self, account, fields):
+        if account.type == Account.TYPE_CHECKING and 'iban' in fields:
+            self.iban.go(number=account._number)
+            self.page.set_iban(account=account)

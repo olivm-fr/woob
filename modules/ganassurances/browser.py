@@ -17,18 +17,16 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
-
-import re
+from __future__ import unicode_literals
 
 from weboob.browser import AbstractBrowser
 
 
-class GanAssurances(AbstractBrowser):
-    PARENT = 'groupama'
-    PARENT_ATTR = 'package.browser.GroupamaBrowser'
+class GanAssurancesBrowser(AbstractBrowser):
+    PARENT = 'ganpatrimoine'
+    PARENT_ATTR = 'package.browser.GanPatrimoineBrowser'
 
     def __init__(self, website, *args, **kwargs):
-        super(GanAssurances, self).__init__(*args, **kwargs)
-        self.BASEURL = 'https://%s' % website
-        self.website = re.findall('espaceclient.(.*?).fr', self.BASEURL)[0]
-
+        super(GanAssurancesBrowser, self).__init__(website, *args, **kwargs)
+        self.website = website
+        self.BASEURL = 'https://espaceclient.%s.fr' % website

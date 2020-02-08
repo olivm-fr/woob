@@ -19,11 +19,11 @@
 
 from ast import literal_eval
 from decimal import Decimal, ROUND_DOWN
-import json
 import re
 
+from weboob.tools.compat import unicode, unquote
 from weboob.capabilities.bank import Account
-from weboob.capabilities.base import NotAvailable, Currency
+from weboob.capabilities.base import NotAvailable
 from weboob.exceptions import BrowserUnavailable, ActionNeeded
 from weboob.browser.exceptions import ServerError
 from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
@@ -53,75 +53,59 @@ class PromoPage(LoggedPage, HTMLPage):
 
 class LoginPage(HTMLPage):
     def get_token_and_csrf(self, code):
-        mtc = re.search(r'var (_0x\w{4})=function.*?\};', code)
-        decoder_name = mtc.group(1)
-
-        decoder_code = re.search(r'var _0x\w{4}=\[.*var (_0x\w{4})=function.*?\};', code).group(0)
-        decoder_code += """
-        ;function mapDecoder(array) {
-            var map = {};
-            for (var key in array) {
-                map[key] = %s(key);
-            }
-            return map;
-        }
-        """ % decoder_name
-        decoder_js = Javascript(decoder_code)
-
-        # clean string obfuscation like: '\x70\x61\x79\x70\x61\x6c\x20\x73\x75\x63\x6b\x73'
-        def basic_decoder(mtc):
-            return repr(literal_eval(mtc.group(0)).encode('utf-8'))
-        cleaner_code = re.sub(r"'.*?(?<!\\)'", basic_decoder, code)
-
-        # clean other obfuscation like: _0x1234('0x42')
-        # Do only one call to JS by putting all the elements to decode in an
-        # array that will be mapped in JS to a structure of the form {encoded:
-        # decoded}.
-        to_decode = set()
-        for m in re.finditer(r"%s\('([^']+)'\)" % re.escape(decoder_name), cleaner_code):
-            to_decode.add(literal_eval(m.group(1)))
-
-        decoded_map = decoder_js.call('mapDecoder', [k for k in to_decode])
-
-        def exec_decoder(mtc):
-            key = repr(literal_eval(mtc.group(1)))
-            # Use json.dumps to force utf8 encoding.
-            ret = json.dumps(str(decoded_map[key]))
-            # Force simple quoting around the string.
-            return "'" + ret[1:-1] + "'"
-        cleaner_code = re.sub(r"%s\('([^']+)'\)" % re.escape(decoder_name), exec_decoder, cleaner_code)
-
-        cookie = re.search(r'xppcts = (\w+);', cleaner_code).group(1)
-        sessionID = re.search(r"%s'([^']+)'" % re.escape("'&_sessionID='+encodeURIComponent("), cleaner_code).group(1)
-        csrf = re.search(r"%s'([^']+)'" % re.escape("'&_csrf='+encodeURIComponent("), cleaner_code).group(1)
-        key, value = re.findall(r"'(\w+)','(\w+)'", cleaner_code)[-1]
+        # Paypal will try to create an infinite loop to make the parse fail, based on different
+        # weird things like a check of 'ind\\u0435xOf' vs 'indexOf'.
+        cleaner_code = code.replace(r"'ind\\u0435xOf'", "'indexOf'")
+        # It also calls "data" which is undefined instead of a return (next call is an infinite
+        # recursive function). This should theorically not happen if window.domain is correctly set
+        # to "paypal.com" though.
+        cleaner_code = cleaner_code.replace("data;", "return;")
 
         # Remove setCookie function content
         cleaner_code = re.sub(r"'setCookie'.*(?=,'removeCookie')", "'setCookie':function(){}", cleaner_code)
 
-        # Detect the name of the function that computes the token, detect the
-        # variable that stores the result and store it as a global.
-        get_token_func_name = re.search(r"ads_token_js='\+encodeURIComponent\((\w+)\)", cleaner_code).group(1)
-        get_token_func_declaration = "var " + get_token_func_name + "="
-        cleaner_code = cleaner_code.replace(get_token_func_declaration, get_token_func_declaration + "window.ADS_JS_TOKEN=")
-
-        # Remove the call to an infinite loop
-        loop_func_name = re.search(r"\(function\(\w+,\s?\w+,\s?\w+,\s?\w+\)\{var\s(\w+)=", cleaner_code).group(1)
-        cleaner_code = cleaner_code.replace(loop_func_name + "();", "")
-        cleaner_code = cleaner_code.replace("data;", "return;")
-
-        # Add a function that returns the token
-        cleaner_code += """
-        function GET_ADS_JS_TOKEN()
+        # Paypal will try to send a XHR, let's use a fake method to catch the values sent
+        cleaner_code = """
+        XMLHttpRequest.prototype.send = function(body)
         {
-            return window.ADS_JS_TOKEN || "INVALID_TOKEN";
+            window.PAYPAL_TOKENS = body;
+        };
+        function GET_JS_TOKENS()
+        {
+            return window.PAYPAL_TOKENS || "INVALID_TOKENS";
         }
-        """
+
+        """ + cleaner_code
 
         try:
-            token = str(Javascript(cleaner_code, None, "paypal.com").call("GET_ADS_JS_TOKEN"))
+            raw = str(Javascript(cleaner_code, None, "paypal.com").call("GET_JS_TOKENS"))
+            raw = raw.split("&")
+            tokens = {}
+            for r in raw:
+                r = r.split("=")
+                k = r[0]
+                v = unquote(r[1])
+
+                if k not in ["ads_token_js", "_sessionID", "_csrf"]:
+                    tokens["key"] = k
+                    tokens["value"] = v
+                else:
+                    tokens[k] = v
+
+            token = tokens["ads_token_js"]
+            sessionID = tokens["_sessionID"]
+            csrf = tokens["_csrf"]
+            key = tokens["key"]
+            value = tokens["value"]
         except:
-            raise BrowserUnavailable()
+            raise BrowserUnavailable("Could not grab tokens")
+
+        # Clean string obfuscation like: '\x70\x61\x79\x70\x61\x6c\x20\x73\x75\x63\x6b\x73'
+        def basic_decoder(mtc):
+            return repr(literal_eval(mtc.group(0)).encode('utf-8'))
+        cleaner_code = re.sub(r"'.*?(?<!\\)'", basic_decoder, code)
+
+        cookie = re.search(r'xppcts = (\w+);', cleaner_code).group(1)
 
         return token, csrf, key, value, sessionID, cookie
 
@@ -165,22 +149,18 @@ class AccountPage(HomePage):
 
     def get_accounts(self):
         accounts = {}
-        content = self.doc.xpath('//div[@id="moneyPage" or @id="MoneyPage"]')[0]
+        content = self.doc.xpath('//section[@id="contents"]')[0]
 
         # Multiple accounts
-        lines = content.xpath('(//div[@class="col-md-8 multi-currency"])[1]/ul/li')
+        lines = content.xpath('.//ul[@class="multiCurrency-container"][1]/li')
         for li in lines:
             account = Account()
             account.iban = NotAvailable
             account.type = Account.TYPE_CHECKING
-            currency_code = CleanText().filter((li.xpath('./span[@class="currencyUnit"]/span') or li.xpath('./span[1]'))[0])
-            currency = Currency.get_currency(currency_code)
-            if not currency:
-                self.logger.warning('Unable to find currency %r', currency_code)
-                continue
+            currency = CleanText().filter(li.xpath('.//span[contains(@class, "multiCurrency-label_alignMiddle")]')[0])
             account.id = currency
             account.currency = currency
-            account.balance = CleanDecimal(replace_dots=True).filter(li.xpath('./span[@class="amount"]/text()'))
+            account.balance = CleanDecimal(replace_dots=True).filter(li.xpath('.//span[contains(@class, "multiCurrency-label_right")]/text()')[0])
             account.label = u'%s %s*' % (self.browser.username, account.currency)
             accounts[account.id] = account
             self.browser.account_currencies.append(account.currency)
@@ -288,7 +268,7 @@ class ProHistoryPage(HistoryPage, JsonPage):
                 return []
             cc = [tr['grossAmount']['amountUnformatted'] for tr in transaction['secondaryTransactions'] \
                  if account.currency == tr['grossAmount']['currency'] \
-                  and (tr['grossAmount']['amountUnformatted'] < 0) == (transaction['grossAmount']['amountUnformatted'] < 0) \
+                  and (int(tr['grossAmount']['amountUnformatted']) < 0) == (int(transaction['grossAmount']['amountUnformatted']) < 0) \
                   and tr['transactionDescription']['description'].startswith('Conversion de devise')]
             if not cc:
                 return []

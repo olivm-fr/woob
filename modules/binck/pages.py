@@ -28,7 +28,7 @@ from weboob.browser.filters.html import Attr, Link, TableCell
 from weboob.browser.filters.json import Dict
 from weboob.exceptions import BrowserPasswordExpired, ActionNeeded
 from weboob.capabilities.bank import Account, Investment
-from weboob.capabilities.base import NotAvailable
+from weboob.capabilities.base import NotAvailable, empty
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.investments import is_isin_valid
 
@@ -43,8 +43,15 @@ class QuestionPage(HTMLPage):
         if self.doc.xpath(u'//h1[contains(text(), "Questionnaires connaissance et expérience")]'):
             form = self.get_form('//form[@action="/FsmaMandatoryQuestionnairesOverview/PostponeQuestionnaires"]')
         else:
-            form = self.get_form('//form[@action="/FDL_Complex_FR_Compte/Introduction/SkipQuestionnaire"]')
+            form = self.get_form('//form[contains(@action, "Complex_FR_Compte/Introduction/SkipQuestionnaire")]')
         form.submit()
+
+
+class BinckPage(LoggedPage, HTMLPage):
+    # Used to factorize the get_token() method
+    def get_token(self):
+        return [{Attr('.', 'name')(input): Attr('.', 'value')(input)}
+            for input in self.doc.xpath('//input[contains(@name, "Token")]')][0]
 
 
 class ViewPage(LoggedPage, HTMLPage):
@@ -58,11 +65,15 @@ class ViewPage(LoggedPage, HTMLPage):
 class HomePage(LoggedPage, HTMLPage):
     # We directly go from the home page to the accounts page
     def on_load(self):
-        ''' Remove the old_website_connection part when old website is obsolete '''
         if self.browser.old_website_connection:
-            self.browser.location('https://web.binck.fr/AccountsOverview/Index')
-        else:
-            self.browser.location('https://web.binck.fr/PersonAccountOverview/Index')
+            accounts_url = 'https://web.binck.fr/AccountsOverview/Index'
+        elif self.doc.xpath('//a[text()="Mes comptes Binck"]'):
+            accounts_url = 'https://web.binck.fr/PersonAccountOverview/Index'
+        elif self.doc.xpath('//a[span[text()="Portefeuille"]][@role="button"]'):
+            self.browser.unique_account = True
+            accounts_url = 'https://web.binck.fr/PortfolioOverview/Index'
+        assert accounts_url, 'The accounts URL of this connection is not handled yet!'
+        self.browser.location(accounts_url)
 
 
 class ChangePassPage(LoggedPage, HTMLPage):
@@ -70,6 +81,16 @@ class ChangePassPage(LoggedPage, HTMLPage):
         message = CleanText('//h3')(self.doc) or CleanText('//h1')(self.doc)
         raise BrowserPasswordExpired(message)
 
+
+class HandlePasswordsPage(BinckPage):
+    def on_load(self):
+        token = self.get_token()
+        self.browser.postpone_passwords.go(headers=token, method='POST')
+        self.browser.home_page.go()
+
+
+class PostponePasswords(LoggedPage, HTMLPage):
+    pass
 
 class LogonFlowPage(HTMLPage):
     def on_load(self):
@@ -87,7 +108,7 @@ class LoginPage(HTMLPage):
         return CleanText('//div[contains(@class, "errors")]')(self.doc)
 
 
-class AccountsPage(LoggedPage, HTMLPage):
+class AccountsPage(BinckPage):
     TYPES = {'L': Account.TYPE_SAVINGS,
              'CT': Account.TYPE_MARKET,
              'PEA': Account.TYPE_PEA,
@@ -98,10 +119,6 @@ class AccountsPage(LoggedPage, HTMLPage):
     ''' Delete this method when the old website is obsolete '''
     def has_accounts_table(self):
         return self.doc.xpath('//table[contains(@class, "accountoverview-table")]')
-
-    def get_token(self):
-        return [{Attr('.', 'name')(input): Attr('.', 'value')(input)} \
-            for input in self.doc.xpath('//input[contains(@name, "Token")]')][0]
 
     @method
     class iter_accounts(ListElement):
@@ -131,7 +148,7 @@ class AccountsPage(LoggedPage, HTMLPage):
                 return Account.get_currency(CleanText('.//div[contains(text(), "Total des avoirs")]/following::strong[1]')(self))
 
 
-class OldAccountsPage(LoggedPage, HTMLPage):
+class OldAccountsPage(BinckPage):
     '''
     Old website accounts page. We can get rid of this
     class when all users have access to the new website.
@@ -149,10 +166,6 @@ class OldAccountsPage(LoggedPage, HTMLPage):
 
     def get_iban(self):
         return CleanText('//div[@class="iban"]/text()', replace=[(' ', '')], default=NotAvailable)(self.doc)
-
-    def get_token(self):
-        return [{Attr('.', 'name')(input): Attr('.', 'value')(input)} \
-            for input in self.doc.xpath('//input[contains(@name, "Token")]')][0]
 
     def is_investment(self):
         # warning: the link can be present even in case of non-investement account
@@ -199,12 +212,11 @@ class InvestmentPage(LoggedPage, JsonPage):
 
             obj_label = Dict('SecurityName')
             obj_quantity = MyDecimal(Dict('Quantity'))
-            obj_vdate = Env('vdate')
             obj_unitvalue = Env('unitvalue', default=NotAvailable)
             obj_unitprice = Env('unitprice', default=NotAvailable)
             obj_valuation = MyDecimal(Dict('ValueInEuro'))
             obj_diff = MyDecimal(Dict('ResultValueInEuro'))
-            obj_diff_percent = Eval(lambda x: x / 100, MyDecimal(Dict('ResultPercentageInEuro')))
+            obj_diff_ratio = Eval(lambda x: x / 100, MyDecimal(Dict('ResultPercentageInEuro')))
             obj_original_currency = Env('o_currency', default=NotAvailable)
             obj_original_unitvalue = Env('o_unitvalue', default=NotAvailable)
             obj_original_unitprice = Env('o_unitprice', default=NotAvailable)
@@ -220,9 +232,9 @@ class InvestmentPage(LoggedPage, JsonPage):
                 return NotAvailable
 
             def obj_code_type(self):
-                if is_isin_valid(Field('code')(self)):
-                    return Investment.CODE_TYPE_ISIN
-                return NotAvailable
+                if empty(Field('code')(self)):
+                    return NotAvailable
+                return Investment.CODE_TYPE_ISIN
 
             def parse(self, el):
                 if self.env['currency'] != CleanText(Dict('CurrencyCode'))(self):
@@ -234,7 +246,6 @@ class InvestmentPage(LoggedPage, JsonPage):
                 else:
                     self.env['unitvalue'] = MyDecimal(Dict('Quote'))(self)
                     self.env['unitprice'] = MyDecimal(Dict('HistoricQuote'))(self)
-                self.env['vdate'] = Date(dayfirst=True).filter(Dict('PortfolioSummary/UpdatedAt')(self.page.doc))
 
 
 class InvestmentListPage(LoggedPage, HTMLPage):

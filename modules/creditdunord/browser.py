@@ -20,7 +20,7 @@
 from __future__ import unicode_literals
 
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired, ActionNeeded
+from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired, ActionNeeded, BrowserUnavailable
 from weboob.capabilities.bank import Account
 from weboob.capabilities.base import find_object
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
@@ -30,19 +30,25 @@ from .pages import (
     ProTransactionsPage, LabelsPage, RgpdPage,
 )
 
+
 class CreditDuNordBrowser(LoginBrowser):
     ENCODING = 'UTF-8'
     BASEURL = "https://www.credit-du-nord.fr/"
 
     login = URL('$',
                 '/.*\?.*_pageLabel=page_erreur_connexion',
+                '/.*\?.*_pageLabel=reinitialisation_mot_de_passe',
                 LoginPage)
     redirect = URL('/swm/redirectCDN.html', RedirectPage)
     entrypage = URL('/icd/zco/#zco', EntryPage)
     multitype_av = URL('/vos-comptes/IPT/appmanager/transac/professionnels\?_nfpb=true&_eventName=onRestart&_pageLabel=synthese_contrats_assurance_vie', AVPage)
-    loans = URL('/vos-comptes/IPT/appmanager/transac/(?P<account_type>.*)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<loans_page_label>(creditPersoImmobilier|credit__en_cours|credit_en_cours))', ProAccountsPage)
-    proaccounts = URL('/vos-comptes/IPT/appmanager/transac/(professionnels|entreprises)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<accounts_page_label>(transac_tableau_de_bord|page__synthese_v1|page_synthese_v1))', ProAccountsPage)
-    accounts = URL('/vos-comptes/IPT/appmanager/transac/(?P<account_type>.*)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<accounts_page_label>(transac_tableau_de_bord|page__synthese_v1|page_synthese_v1))', AccountsPage)
+    loans = URL(r'/vos-comptes/IPT/appmanager/transac/(?P<account_type>.*)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<loans_page_label>(creditPersoImmobilier|credit_?_en_cours))', ProAccountsPage)
+    proaccounts = URL(r'/vos-comptes/IPT/appmanager/transac/(professionnels|entreprises)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<accounts_page_label>(transac_tableau_de_bord|page_?_synthese_v1))',
+                      r'/vos-comptes/(professionnels|entreprises)/page_?_synthese',
+                      ProAccountsPage)
+    accounts = URL(r'/vos-comptes/IPT/appmanager/transac/(?P<account_type>.*)\?_nfpb=true&_eventName=onRestart&_pageLabel=(?P<accounts_page_label>(transac_tableau_de_bord|page_?_synthese_v1))',
+                   r'/vos-comptes/particuliers',
+                   AccountsPage)
     multitype_iban = URL('/vos-comptes/IPT/appmanager/transac/professionnels\?_nfpb=true&_eventName=onRestart&_pageLabel=impression_rib', ProIbanPage)
     transactions = URL('/vos-comptes/IPT/appmanager/transac/particuliers\?_nfpb=true(.*)', TransactionsPage)
     protransactions = URL('/vos-comptes/(.*)/transac/(professionnels|entreprises)', ProTransactionsPage)
@@ -63,28 +69,29 @@ class CreditDuNordBrowser(LoginBrowser):
             not self.page.doc.xpath(u'//b[contains(text(), "vous devez modifier votre code confidentiel")]')
 
     def do_login(self):
-        self.login.go().login(self.username, self.password)
+        self.login.go()
+        self.page.login(self.username, self.password)
         if self.accounts.is_here():
             expired_error = self.page.get_password_expired()
             if expired_error:
                 raise BrowserPasswordExpired(expired_error)
 
-        if self.login.is_here():
+        # Force redirection to entry page if the redirect page does not contain an url
+        if self.redirect.is_here():
+            self.entrypage.go()
+
+        if self.entrypage.is_here() or self.login.is_here():
             error = self.page.get_error()
             if error:
+                if 'code confidentiel à la première connexion' in error:
+                    raise BrowserPasswordExpired(error)
                 raise BrowserIncorrectPassword(error)
-            else:
-                # in case we are still on login without error message
-                # we'll check what's happening.
-                assert False, "Still on login page."
 
         if not self.logged:
             raise BrowserIncorrectPassword()
 
-        if self.page.doc.xpath('//head[title="Authentification"]/script[contains(text(), "_pageLabel=reinitialisation_mot_de_passe")]'):
-            raise BrowserPasswordExpired()
-
     def _iter_accounts(self):
+        owner_name = self.get_profile().name.upper()
         #self.loans.go(account_type=self.account_type, loans_page_label=self.loans_page_label)
         #for a in self.page.get_list():
         #    yield a
@@ -94,11 +101,17 @@ class CreditDuNordBrowser(LoginBrowser):
             for a in self.page.get_av_accounts():
                 self.location(a._link, data=a._args)
                 self.location(a._link.replace("_attente", "_detail_contrat_rep"), data=a._args)
+                if self.page.get_error():
+                    raise BrowserUnavailable(self.page.get_error())
                 self.page.fill_diff_currency(a)
                 yield a
         self.accounts.go(account_type=self.account_type, accounts_page_label=self.accounts_page_label)
-        for a in self.page.get_list():
-            yield a
+        if self.accounts.is_here():
+            for a in self.page.get_list(name=owner_name):
+                yield a
+        else:
+            for a in self.page.get_list():
+                yield a
 
     @need_login
     def get_pages_labels(self):
@@ -122,10 +135,15 @@ class CreditDuNordBrowser(LoginBrowser):
         self.multitype_iban.go()
         link = self.page.iban_go()
 
-        for a in [a for a in accounts if a._acc_nb]:
-            if a.type != Account.TYPE_CARD:
-                self.location(link + a._acc_nb)
-                a.iban = self.page.get_iban()
+        if link:
+            # For some accounts, the IBAN is displayed somewhere else behind
+            # an OTP validation (icd/zco/public-index.html#zco/transac/impression_rib),
+            # the link is None if this is the case.
+            # TODO when we will be able to test this OTP
+            for a in accounts:
+                if a._acc_nb and a.type != Account.TYPE_CARD:
+                    self.location(link + a._acc_nb)
+                    a.iban = self.page.get_iban()
 
         return accounts
 

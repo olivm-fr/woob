@@ -24,20 +24,20 @@ import re
 from datetime import datetime
 from io import BytesIO
 
+import dateutil.parser
 from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.html import TableCell, Attr
 from weboob.browser.elements import DictElement, ItemElement, method, TableElement
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Date, Regexp, Format, Eval, BrowserURL, Field,
-    Async, Currency,
+    Currency,
 )
 from weboob.capabilities.bank import Transaction, Account, Investment
 from weboob.capabilities.profile import Person
 from weboob.tools.captcha.virtkeyboard import MappedVirtKeyboard, VirtKeyboardError
-from weboob.tools.date import parse_french_date
 from weboob.capabilities import NotAvailable
-from weboob.exceptions import ActionNeeded, BrowserForbidden
+from weboob.exceptions import BrowserPasswordExpired, BrowserForbidden
 
 def fromtimestamp(milliseconds):
     return datetime.fromtimestamp(milliseconds/1000)
@@ -99,9 +99,9 @@ class AuthPage(HTMLPage):
             raise BrowserForbidden(content)
 
 
-class ActionNeededPage(HTMLPage):
+class PasswordExpiredPage(HTMLPage):
     def on_load(self):
-        raise ActionNeeded(CleanText('//p[@class="message"]')(self.doc))
+        raise BrowserPasswordExpired(CleanText('//p[@class="message"]')(self.doc))
 
 
 class AccountsPage(LoggedPage, JsonPage):
@@ -178,7 +178,7 @@ class BnpHistoryItem(ItemElement):
         mtc = re.search(r'\bDU (\d{2})\.?(\d{2})\.?(\d{2})\b', raw)
         if mtc:
             date = '%s/%s/%s' % (mtc.group(1), mtc.group(2), mtc.group(3))
-            return parse_french_date(date)
+            return dateutil.parser.parse(date, dayfirst=True)
 
         # The date can be truncated, so it is not retrieved
         if 'dateCreation' in self.el:
@@ -200,36 +200,33 @@ class CardItemElement(ItemElement):
             'numero_mvt': Field('_trid')(self),
         })
 
-    def obj__redacted_card(self):
-        raw = Field('raw')(self)
-
-        if not raw.startswith('FACTURE CARTE') or ' SUIVANT RELEVE DU ' in raw:
-            return
-
-        page = Async('details').loaded_page(self)
-        return page.get_redacted_card()
-
 
 class AccountHistoryPage(LoggedPage, JsonPage):
     TYPES = {
-        u'CARTE': Transaction.TYPE_DEFERRED_CARD,  # Cartes
-        u'CHEQU': Transaction.TYPE_CHECK,  # Chèques
-        u'REMCB': Transaction.TYPE_DEFERRED_CARD,  # Remises cartes
-        u'VIREM': Transaction.TYPE_TRANSFER,  # Virements
-        u'VIRIT': Transaction.TYPE_TRANSFER,  # Virements internationaux
-        u'VIRSP': Transaction.TYPE_TRANSFER,  # Virements européens
-        u'VIRTR': Transaction.TYPE_TRANSFER,  # Virements de trésorerie
-        u'VIRXX': Transaction.TYPE_TRANSFER,  # Autres virements
-        u'PRLVT': Transaction.TYPE_LOAN_PAYMENT,  # Prélèvements, TIP et télérèglements
-        u'AUTOP': Transaction.TYPE_UNKNOWN,  # Autres opérations
+        'CARTE': Transaction.TYPE_DEFERRED_CARD,  # Cartes
+        'CHEQU': Transaction.TYPE_CHECK,  # Chèques
+        'REMCB': Transaction.TYPE_DEFERRED_CARD,  # Remises cartes
+        'VIREM': Transaction.TYPE_TRANSFER,  # Virements
+        'VIRIT': Transaction.TYPE_TRANSFER,  # Virements internationaux
+        'VIRSP': Transaction.TYPE_TRANSFER,  # Virements européens
+        'VIRTR': Transaction.TYPE_TRANSFER,  # Virements de trésorerie
+        'VIRXX': Transaction.TYPE_TRANSFER,  # Autres virements
+        'PRLVT': Transaction.TYPE_ORDER,  # Prélèvements, TIP et télérèglements
+        'AUTOP': Transaction.TYPE_UNKNOWN,  # Autres opérations
 
         'FACCB': Transaction.TYPE_CARD,   # Cartes
     }
 
     COMING_TYPES = {
-        u'0083': Transaction.TYPE_DEFERRED_CARD,
-        u'0813': Transaction.TYPE_LOAN_PAYMENT,
-        u'0568': Transaction.TYPE_TRANSFER,
+        '0001': Transaction.TYPE_CHECK,  # CHEQUE
+        '0029': Transaction.TYPE_BANK,  # Interets et Commissions
+        '0083': Transaction.TYPE_DEFERRED_CARD,
+        '0099': Transaction.TYPE_PAYBACK,  # REM. CARTE OU EROCHQ.*
+        '0512': Transaction.TYPE_TRANSFER,  # VIREMENT FAVEUR TIERS
+        '0558': Transaction.TYPE_TRANSFER,  # VIREMENT RECU TIERS.*
+        '0568': Transaction.TYPE_TRANSFER,  # VIREMENT SEPA
+        '0813': Transaction.TYPE_ORDER,  # PRLV SEPA .*
+        '1194': Transaction.TYPE_DEFERRED_CARD,  # PAYBACK typed as DEFERRED_CARD
     }
 
     @method
@@ -260,7 +257,10 @@ class AccountHistoryPage(LoggedPage, JsonPage):
 
             def obj_type(self):
                 type = self.page.TYPES.get(Dict('nature/codefamille')(self), Transaction.TYPE_UNKNOWN)
-                if type == Transaction.TYPE_CARD and re.search(r' RELEVE DU \d+\.', Field('raw')(self)):
+                if (
+                    (type == Transaction.TYPE_CARD and re.search(r' RELEVE DU \d+\.', Field('raw')(self))) or
+                    (type == Transaction.TYPE_UNKNOWN and re.search(r'FACTURE CARTE AFFAIRES \w{16} SUIVANT RELEVE DU \d{2}.\d{2}.\d{4}', Field('raw')(self)))
+                ):
                     return Transaction.TYPE_CARD_SUMMARY
                 return type
 
@@ -270,10 +270,18 @@ class AccountHistoryPage(LoggedPage, JsonPage):
             def obj_rdate(self):
                 raw = self.obj_raw()
                 mtc = re.search(r'\bDU (\d{6}|\d{8})\b', raw)
+
                 if mtc:
-                    date = mtc.group(1)
-                    date = '%s/%s/%s' % (date[0:2], date[2:4], date[4:])
-                    return parse_french_date(date)
+                    numbers = mtc.group(1)
+                    # we need to create this string because dateutil crashes
+                    # with dates in the ddmmyyyy format
+                    # dd/mm/yy and dd/mm/yyyy
+                    date = '%s/%s/%s' % (numbers[0:2], numbers[2:4], numbers[4:])
+                    try:
+                        return dateutil.parser.parse(date, dayfirst=True)
+                    except ValueError:
+                        # parsing failed assuming yyyymmdd format
+                        return dateutil.parser.parse(numbers)
 
                 return fromtimestamp(Dict('dateCreation')(self))
 
@@ -330,9 +338,7 @@ class AccountHistoryPage(LoggedPage, JsonPage):
 
 
 class TransactionPage(LoggedPage, JsonPage):
-    def get_redacted_card(self):
-        # warning: the account on which the transaction is returned depends on this data!
-        return self.doc['carteNum']
+    pass
 
 
 class MarketPage(LoggedPage, HTMLPage):

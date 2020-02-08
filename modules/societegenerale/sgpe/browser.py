@@ -22,36 +22,39 @@ from __future__ import unicode_literals
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-from weboob.browser.browsers import LoginBrowser, need_login, StatesMixin
+from weboob.browser.browsers import LoginBrowser, need_login
 from weboob.browser.url import URL
 from weboob.browser.exceptions import ClientError
 from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, NoAccountsException
 from weboob.capabilities.base import find_object
 from weboob.capabilities.bank import (
     AccountNotFound, RecipientNotFound, AddRecipientStep, AddRecipientBankError,
-    Recipient, TransferBankError,
+    Recipient, TransferBankError, AccountOwnerType,
 )
 from weboob.tools.value import Value
 
 from .pages import (
-    LoginPage, CardsPage, CardHistoryPage, IncorrectLoginPage,
-    ProfileProPage, ProfileEntPage, ChangePassPage, SubscriptionPage, InscriptionPage,
-    ErrorPage, UselessPage,
+    LoginEntPage, CardsPage, CardHistoryPage, ProfileProPage,
+    ProfileEntPage, ChangePassPage, SubscriptionPage, InscriptionPage,
+    ErrorPage, UselessPage, MainPage, MainProPage, LoginProPage,
 )
 from .json_pages import (
     AccountsJsonPage, BalancesJsonPage, HistoryJsonPage, BankStatementPage,
+    MarketAccountPage, MarketInvestmentPage,
 )
 from .transfer_pages import (
     EasyTransferPage, RecipientsJsonPage, TransferPage, SignTransferPage, TransferDatesPage,
     AddRecipientPage, AddRecipientStepPage, ConfirmRecipientPage,
 )
 
+from ..browser import SocieteGenerale as SocieteGeneraleParBrowser
+
 
 __all__ = ['SGProfessionalBrowser', 'SGEnterpriseBrowser']
 
 
 class SGPEBrowser(LoginBrowser):
-    login = URL('$', LoginPage)
+    login = URL('$')
     cards = URL('/Pgn/.+PageID=Cartes&.+', CardsPage)
     cards_history = URL('/Pgn/.+PageID=ReleveCarte&.+', CardHistoryPage)
     change_pass = URL('/gao/changer-code-secret-expire-saisie.html',
@@ -107,6 +110,10 @@ class SGPEBrowser(LoginBrowser):
 
     @need_login
     def get_cb_operations(self, account):
+        if account.type in (account.TYPE_MARKET, ):
+            # market account transactions are in checking account
+            return
+
         self.location('/Pgn/NavigationServlet?PageID=Cartes&MenuID=%sOPF&Classeur=1&NumeroPage=1&Rib=%s&Devise=%s' % (self.MENUID, account.id, account.currency))
 
         if self.inscription_page.is_here():
@@ -132,6 +139,9 @@ class SGEnterpriseBrowser(SGPEBrowser):
     MENUID = 'BANREL'
     CERTHASH = '2231d5ddb97d2950d5e6fc4d986c23be4cd231c31ad530942343a8fdcc44bb99'
 
+    login = URL('$', LoginEntPage)
+    main_page = URL('/icd-web/syd-front/index-comptes.html', MainPage)
+
     accounts = URL('/icd/syd-front/data/syd-comptes-accederDepuisMenu.json', AccountsJsonPage)
     intraday_accounts = URL('/icd/syd-front/data/syd-intraday-accederDepuisMenu.json', AccountsJsonPage)
 
@@ -141,6 +151,13 @@ class SGEnterpriseBrowser(SGPEBrowser):
     history = URL('/icd/syd-front/data/syd-comptes-chargerReleve.json',
                   '/icd/syd-front/data/syd-intraday-chargerDetail.json', HistoryJsonPage)
     history_next = URL('/icd/syd-front/data/syd-comptes-chargerProchainLotEcriture.json', HistoryJsonPage)
+
+    market_investment = URL(r'/Pgn/NavigationServlet\?.*PageID=CompteTitreDetailFrame',
+                            r'/Pgn/NavigationServlet\?.*PageID=CompteTitreDetail',
+                            MarketInvestmentPage)
+    market_accounts = URL(r'/Pgn/NavigationServlet\?.*PageID=CompteTitreFrame',
+                          r'/Pgn/NavigationServlet\?.*PageID=CompteTitre',
+                          MarketAccountPage)
 
     profile = URL('/gae/afficherModificationMesDonnees.html', ProfileEntPage)
 
@@ -174,15 +191,39 @@ class SGEnterpriseBrowser(SGPEBrowser):
             self.intraday_balances.go()
 
         for acc in self.page.populate_balances(accounts):
+            acc.owner_type = AccountOwnerType.ORGANIZATION
             yield acc
+
+        # retrieve market accounts if exist
+        for market_account in self.iter_market_accounts():
+            yield market_account
 
     @need_login
     def iter_history(self, account):
+        if account.type in (account.TYPE_MARKET, ):
+            # market account transactions are in checking account
+            return
+
         value = self.history.go(data={'cl500_compte': account._id, 'cl200_typeReleve': 'valeur'}).get_value()
         for tr in self.history.go(data={'cl500_compte': account._id, 'cl200_typeReleve': value}).iter_history(value=value):
             yield tr
         for tr in self.location('/icd/syd-front/data/syd-intraday-chargerDetail.json', data={'cl500_compte': account._id}).page.iter_history():
             yield tr
+
+    @need_login
+    def iter_market_accounts(self):
+        self.main_page.go()
+        # retrieve market accounts if exist
+        market_accounts_link = self.page.get_market_accounts_link()
+
+        # there are no examples of entreprise space with market accounts yet
+        assert not market_accounts_link, 'There are market accounts, retrieve them.'
+        return []
+
+    @need_login
+    def iter_investment(self, account):
+        # there are no examples of entreprise space with market accounts yet
+        return []
 
     @need_login
     def iter_subscription(self):
@@ -208,53 +249,74 @@ class SGEnterpriseBrowser(SGPEBrowser):
         self.subscription_form.go(data=data)
         return self.page.iter_documents(sub_id=subscription.id)
 
-class SGProfessionalBrowser(SGEnterpriseBrowser, StatesMixin):
+
+class SGProfessionalBrowser(SGEnterpriseBrowser, SocieteGeneraleParBrowser):
     BASEURL = 'https://professionnels.secure.societegenerale.fr'
     MENUID = 'SBOREL'
     CERTHASH = '9f5232c9b2283814976608bfd5bba9d8030247f44c8493d8d205e574ea75148e'
-    STATE_DURATION = 5
 
-    incorrect_login = URL('/authent.html', IncorrectLoginPage)
-    profile = URL('/gao/modifier-donnees-perso-saisie.html', ProfileProPage)
+    login = URL(r'/sec/vk/authent.json',
+                r'/sec/oob_sendooba.json',
+                r'/sec/oob_pollingooba.json',
+                r'/sec/oob_auth.json',
+                r'/sec/csa/send.json',
+                r'/sec/csa/check.json', LoginProPage)
 
-    transfer_dates = URL('/ord-web/ord//get-dates-execution.json', TransferDatesPage)
-    easy_transfer = URL('/ord-web/ord//ord-virement-simplifie-emetteur.html', EasyTransferPage)
-    internal_recipients = URL('/ord-web/ord//ord-virement-simplifie-beneficiaire.html', EasyTransferPage)
-    external_recipients = URL('/ord-web/ord//ord-liste-compte-beneficiaire-externes.json', RecipientsJsonPage)
+    profile = URL(r'/gao/modifier-donnees-perso-saisie.html', ProfileProPage)
 
-    init_transfer_page = URL('/ord-web/ord//ord-enregistrer-ordre-simplifie.json', TransferPage)
-    sign_transfer_page = URL('/ord-web/ord//ord-verifier-habilitation-signature-ordre.json', SignTransferPage)
-    confirm_transfer = URL('/ord-web/ord//ord-valider-signature-ordre.json', TransferPage)
+    transfer_dates = URL(r'/ord-web/ord//get-dates-execution.json', TransferDatesPage)
+    easy_transfer = URL(r'/ord-web/ord//ord-virement-simplifie-emetteur.html', EasyTransferPage)
+    internal_recipients = URL(r'/ord-web/ord//ord-virement-simplifie-beneficiaire.html', EasyTransferPage)
+    external_recipients = URL(r'/ord-web/ord//ord-liste-compte-beneficiaire-externes.json', RecipientsJsonPage)
 
-    recipients = URL('/ord-web/ord//ord-gestion-tiers-liste.json', RecipientsJsonPage)
-    add_recipient = URL('/ord-web/ord//ord-fragment-form-tiers.html\?cl_action=ajout&cl_idTiers=',
+    init_transfer_page = URL(r'/ord-web/ord//ord-enregistrer-ordre-simplifie.json', TransferPage)
+    sign_transfer_page = URL(r'/ord-web/ord//ord-verifier-habilitation-signature-ordre.json', SignTransferPage)
+    confirm_transfer = URL(r'/ord-web/ord//ord-valider-signature-ordre.json', TransferPage)
+
+    recipients = URL(r'/ord-web/ord//ord-gestion-tiers-liste.json', RecipientsJsonPage)
+    add_recipient = URL(r'/ord-web/ord//ord-fragment-form-tiers.html\?cl_action=ajout&cl_idTiers=',
                         AddRecipientPage)
-    add_recipient_step = URL('/ord-web/ord//ord-tiers-calcul-bic.json',
-                             '/ord-web/ord//ord-preparer-signature-destinataire.json',
+    add_recipient_step = URL(r'/ord-web/ord//ord-tiers-calcul-bic.json',
+                             r'/ord-web/ord//ord-preparer-signature-destinataire.json',
                              AddRecipientStepPage)
-    confirm_new_recipient = URL('/ord-web/ord//ord-creer-destinataire.json', ConfirmRecipientPage)
+    confirm_new_recipient = URL(r'/ord-web/ord//ord-creer-destinataire.json', ConfirmRecipientPage)
 
-    bank_statement_menu = URL('/icd/syd-front/data/syd-rce-accederDepuisMenu.json', BankStatementPage)
-    bank_statement_search = URL('/icd/syd-front/data/syd-rce-lancerRecherche.json', BankStatementPage)
+    bank_statement_menu = URL(r'/icd/syd-front/data/syd-rce-accederDepuisMenu.json', BankStatementPage)
+    bank_statement_search = URL(r'/icd/syd-front/data/syd-rce-lancerRecherche.json', BankStatementPage)
 
-    useless_page = URL('/icd-web/syd-front/index-comptes.html', UselessPage)
-    error_page = URL('https://static.societegenerale.fr/pro/erreur.html', ErrorPage)
+    useless_page = URL(r'/icd-web/syd-front/index-comptes.html', UselessPage)
+    error_page = URL(r'https://static.societegenerale.fr/pro/erreur.html',
+                     r'https://.*/pro/erreur.html', ErrorPage)
+
+    markets_page = URL(r'/icd/npe/data/comptes-titres/findComptesTitresClasseurs-authsec.json', MarketAccountPage)
+    investments_page = URL(r'/icd/npe/data/comptes-titres/findLignesCompteTitre-authsec.json', MarketInvestmentPage)
+
+    main_page = URL(r'https://professionnels.secure.societegenerale.fr',
+                    r'/sec/vk/gen_', MainProPage)
 
     date_max = None
     date_min = None
 
     new_rcpt_token = None
     new_rcpt_validate_form = None
-    need_reload_state = None
 
-    __states__ = ['need_reload_state', 'new_rcpt_token', 'new_rcpt_validate_form']
+    __states__ = ('new_rcpt_token', 'new_rcpt_validate_form', 'polling_transaction',)
 
-    def load_state(self, state):
-        # reload state only for new recipient feature
-        if state.get('need_reload_state'):
-            state.pop('url', None)
-            self.need_reload_state = None
-            super(SGProfessionalBrowser, self).load_state(state)
+    def do_login(self):
+        return super(SocieteGeneraleParBrowser, self).do_login()
+
+    @need_login
+    def iter_market_accounts(self):
+        self.markets_page.go()
+        return self.page.iter_market_accounts()
+
+    @need_login
+    def iter_investment(self, account):
+        if account.type not in (account.TYPE_MARKET, ):
+            return []
+
+        self.investments_page.go(data={'cl2000_numeroPrestation': account._prestation_number})
+        return self.page.iter_investment()
 
     def copy_recipient_obj(self, recipient):
         rcpt = Recipient()
@@ -361,7 +423,6 @@ class SGProfessionalBrowser(SGEnterpriseBrowser, StatesMixin):
         self.new_rcpt_validate_form.update(data)
 
         rcpt = self.copy_recipient_obj(recipient)
-        self.need_reload_state = True
         raise AddRecipientStep(rcpt, Value('code', label='Veuillez entrer le code reçu par SMS.'))
 
     @need_login
@@ -418,7 +479,7 @@ class SGProfessionalBrowser(SGEnterpriseBrowser, StatesMixin):
             raise TransferBankError(message="La date d'exécution du virement est invalide. Elle doit correspondre aux horaires et aux dates d'ouvertures d'agence.")
 
         # update account and recipient info
-        recipient = find_object(self.iter_recipients(account), iban=recipient.iban, error=RecipientNotFound)
+        recipient = find_object(self.iter_recipients(account), iban=recipient.iban, id=recipient.id, error=RecipientNotFound)
 
         data = [
             ('an_codeAction', 'C'),
@@ -500,6 +561,9 @@ class SGProfessionalBrowser(SGEnterpriseBrowser, StatesMixin):
             if search_date_min < self.date_min:
                 search_date_min = self.date_min
                 is_end = True
+
+            if search_date_max <= self.date_min:
+                break
 
             data = {
                 'dt10_dateDebut' : search_date_min.strftime('%d/%m/%Y'),

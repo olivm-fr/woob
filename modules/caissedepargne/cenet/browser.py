@@ -19,6 +19,7 @@
 
 from __future__ import unicode_literals
 
+
 import json
 
 from weboob.browser import LoginBrowser, need_login, StatesMixin
@@ -47,26 +48,35 @@ class CenetBrowser(LoginBrowser, StatesMixin):
 
     STATE_DURATION = 5
 
-    login = URL(r'https://(?P<domain>[^/]+)/authentification/manage\?step=identification&identifiant=(?P<login>.*)',
-                r'https://.*/authentification/manage\?step=identification&identifiant=.*',
-                r'https://.*/login.aspx', LoginPage)
-    account_login = URL('https://(?P<domain>[^/]+)/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)', LoginPage)
-    cenet_vk = URL('https://www.cenet.caisse-epargne.fr/Web/Api/ApiAuthentification.asmx/ChargerClavierVirtuel')
-    cenet_home = URL('/Default.aspx$', CenetHomePage)
-    cenet_accounts = URL('/Web/Api/ApiComptes.asmx/ChargerSyntheseComptes', CenetAccountsPage)
-    cenet_loans = URL('/Web/Api/ApiFinancements.asmx/ChargerListeFinancementsMLT', CenetLoanPage)
-    cenet_account_history = URL('/Web/Api/ApiComptes.asmx/ChargerHistoriqueCompte', CenetAccountHistoryPage)
-    cenet_account_coming = URL('/Web/Api/ApiCartesBanquaires.asmx/ChargerEnCoursCarte', CenetAccountHistoryPage)
-    cenet_tr_detail = URL('/Web/Api/ApiComptes.asmx/ChargerDetailOperation', CenetCardSummaryPage)
-    cenet_cards = URL('/Web/Api/ApiCartesBanquaires.asmx/ChargerCartes', CenetCardsPage)
-    error = URL(r'https://.*/login.aspx',
-                r'https://.*/Pages/logout.aspx.*',
-                r'https://.*/particuliers/Page_erreur_technique.aspx.*', ErrorPage)
-    cenet_login = URL(r'https://.*/$',
-                      r'https://.*/default.aspx', CenetLoginPage)
+    login = URL(
+        r'https://(?P<domain>[^/]+)/authentification/manage\?step=identification&identifiant=(?P<login>.*)',
+        r'https://.*/authentification/manage\?step=identification&identifiant=.*',
+        r'https://.*/login.aspx',
+        LoginPage,
+    )
+    account_login = URL(r'https://(?P<domain>[^/]+)/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)', LoginPage)
+    cenet_vk = URL(r'https://www.cenet.caisse-epargne.fr/Web/Api/ApiAuthentification.asmx/ChargerClavierVirtuel')
+    cenet_home = URL(r'/Default.aspx$', CenetHomePage)
+    cenet_accounts = URL(r'/Web/Api/ApiComptes.asmx/ChargerSyntheseComptes', CenetAccountsPage)
+    cenet_loans = URL(r'/Web/Api/ApiFinancements.asmx/ChargerListeFinancementsMLT', CenetLoanPage)
+    cenet_account_history = URL(r'/Web/Api/ApiComptes.asmx/ChargerHistoriqueCompte', CenetAccountHistoryPage)
+    cenet_account_coming = URL(r'/Web/Api/ApiCartesBanquaires.asmx/ChargerEnCoursCarte', CenetAccountHistoryPage)
+    cenet_tr_detail = URL(r'/Web/Api/ApiComptes.asmx/ChargerDetailOperation', CenetCardSummaryPage)
+    cenet_cards = URL(r'/Web/Api/ApiCartesBanquaires.asmx/ChargerCartes', CenetCardsPage)
+    error = URL(
+        r'https://.*/login.aspx',
+        r'https://.*/Pages/logout.aspx.*',
+        r'https://.*/particuliers/Page_erreur_technique.aspx.*',
+        ErrorPage,
+    )
+    cenet_login = URL(
+        r'https://.*/$',
+        r'https://.*/default.aspx',
+        CenetLoginPage,
+    )
 
-    subscription = URL('/Web/Api/ApiReleves.asmx/ChargerListeEtablissements', SubscriptionPage)
-    documents = URL('/Web/Api/ApiReleves.asmx/ChargerListeReleves', SubscriptionPage)
+    subscription = URL(r'/Web/Api/ApiReleves.asmx/ChargerListeEtablissements', SubscriptionPage)
+    documents = URL(r'/Web/Api/ApiReleves.asmx/ChargerListeReleves', SubscriptionPage)
     download = URL(r'/Default.aspx\?dashboard=ComptesReleves&lien=SuiviReleves', DownloadDocumentPage)
 
     __states__ = ('BASEURL',)
@@ -98,7 +108,8 @@ class CenetBrowser(LoginBrowser, StatesMixin):
         elif not self.nuser:
             raise BrowserIncorrectPassword("Erreur: Numéro d'utilisateur requis.")
 
-        assert "authMode" in data and data['authMode'] == 'redirect', 'should not be on the cenet website'
+        if "authMode" in data and data['authMode'] != 'redirect':
+            raise BrowserIncorrectPassword()
 
         payload = {'contexte': '', 'dataEntree': None, 'donneesEntree': "{}", 'filtreEntree': "\"false\""}
         res = self.cenet_vk.open(data=json.dumps(payload), headers={'Content-Type': "application/json"})
@@ -185,11 +196,13 @@ class CenetBrowser(LoginBrowser, StatesMixin):
 
                 if tr.type is FrenchTransaction.TYPE_CARD_SUMMARY:
                     if find_object(card_tr_list, label=tr.label, amount=tr.amount, raw=tr.raw, date=tr.date, rdate=tr.rdate):
-                        self.logger.warning('Duplicate transaction: %s' % tr)
+                        self.logger.warning('Duplicated transaction: %s', tr)
+                        items.pop()
                         continue
+
                     card_tr_list.append(tr)
                     tr.deleted = True
-                    tr_dict = [tr_dict for tr_dict in data_out if tr_dict['Libelle'] == tr.label]
+                    tr_dict = [tr_dict2 for tr_dict2 in data_out if tr_dict2['Libelle'] == tr.label]
                     donneesEntree = {}
                     donneesEntree['Compte'] = account._formated
                     donneesEntree['ListeOperations'] = [tr_dict[0]]
@@ -277,15 +290,15 @@ class CenetBrowser(LoginBrowser, StatesMixin):
     def iter_documents(self, subscription):
         sub_id = subscription.id
         input_filter = {
-            'Page':0,
-            'NombreParPage':0,
-            'Tris':[],
-            'Criteres':[
-                {'Champ': 'Etablissement','TypeCritere': 'Equals','Value': sub_id},
-                {'Champ': 'DateDebut','TypeCritere': 'Equals','Value': None},
-                {'Champ': 'DateFin','TypeCritere': 'Equals','Value': None},
-                {'Champ': 'MaxRelevesAffichesParNumero','TypeCritere': 'Equals','Value': '100'}
-            ]
+            'Page': 0,
+            'NombreParPage': 0,
+            'Tris': [],
+            'Criteres': [
+                {'Champ': 'Etablissement', 'TypeCritere': 'Equals', 'Value': sub_id},
+                {'Champ': 'DateDebut', 'TypeCritere': 'Equals', 'Value': None},
+                {'Champ': 'DateFin', 'TypeCritere': 'Equals', 'Value': None},
+                {'Champ': 'MaxRelevesAffichesParNumero', 'TypeCritere': 'Equals', 'Value': '100'},
+            ],
         }
         json_data = {
             'contexte': '',

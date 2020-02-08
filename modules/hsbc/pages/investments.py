@@ -45,7 +45,7 @@ class LogonInvestmentPage(LoggedPage, HTMLPage):
 
 
 class ProductViewHelper():
-    URL = 'https://investissements.clients.hsbc.fr/group-wd-gateway-war/gateway/wd/RetrieveProductView'
+    URL = 'https://investissements.clients.hsbc.fr/cwd/group-wd-gateway-war/gateway/wd/RetrieveCustomerPortfolio'
 
     def __init__(self, browser):
         self.browser = browser
@@ -299,14 +299,14 @@ class RetrieveAccountsPage(LoggedPage, JsonPage):
         is_holding_order_information = bool(self.response.json()['holdingOrderInformation'])
         is_account_filter_information = bool(self.response.json()['accountFilterInformation'])
         return (
-            (is_holding_order_information != is_account_filter_information) and
-            self.response.json()['accountFilterInformation']
+            (is_holding_order_information != is_account_filter_information)
+            and self.response.json()['accountFilterInformation']
         )
 
     @method
     class iter_accounts(DictElement):
         TYPE_ACCOUNTS = {
-            'SEC': Account.TYPE_MARKET, # also PEA type
+            'SEC': Account.TYPE_MARKET,  # also PEA type
             'CHK': Account.TYPE_CHECKING,
             'INV': Account.TYPE_LIFE_INSURANCE,
             'SAV': Account.TYPE_SAVINGS,
@@ -347,9 +347,9 @@ class RetrieveInvestmentsPage(LoggedPage, JsonPage):
         is_holding_order_information = bool(self.response.json()['holdingOrderInformation'])
         is_account_filter_information = bool(self.response.json()['accountFilterInformation'])
         return (
-            (is_holding_order_information != is_account_filter_information) and
-            bool(self.response.json()['holdingOrderInformation']) and
-            self.response.json()['holdingOrderInformation'][0]['accountTypeCode'] != 'OTH'
+            (is_holding_order_information != is_account_filter_information)
+            and bool(self.response.json()['holdingOrderInformation'])
+            and self.response.json()['holdingOrderInformation'][0]['accountTypeCode'] != 'OTH'
         )
 
     @method
@@ -372,7 +372,7 @@ class RetrieveInvestmentsPage(LoggedPage, JsonPage):
                 vdate = Dict('holdingDetailInformation/0/productPriceUpdateDate')(self)
                 # vdate can be 'None'
                 if vdate:
-                    return datetime.datetime.fromtimestamp(int(vdate)/1000).date()
+                    return datetime.datetime.fromtimestamp(int(vdate) / 1000).date()
                 return NotAvailable
 
             obj_diff = CleanDecimal(Dict(
@@ -385,10 +385,15 @@ class RetrieveInvestmentsPage(LoggedPage, JsonPage):
             obj_valuation = CleanDecimal(Dict(
                 'holdingDetailInformation/0/holdingDetailMultipleCurrencyInformation/0/productHoldingMarketValueAmount'
             ), default=NotAvailable)
-            obj_diff_percent = CleanDecimal(Dict(
-                'holdingDetailInformation/0/holdingDetailMultipleCurrencyInformation/0'
-                '/profitLossUnrealizedPercent'
-            ), default=NotAvailable)
+
+            def obj_diff_ratio(self):
+                ratio = CleanDecimal(Dict(
+                    'holdingDetailInformation/0/holdingDetailMultipleCurrencyInformation/0/profitLossUnrealizedPercent'
+                ), default=NotAvailable)(self)
+                if ratio is not NotAvailable:
+                    ratio /= 100
+                return ratio
+
             obj_portfolio_share = NotAvailable  # must be computed from the sum of iter_investments
 
             def obj_original_currency(self):
@@ -422,7 +427,7 @@ class RetrieveInvestmentsPage(LoggedPage, JsonPage):
     @method
     class iter_under_investments(DictElement):
         def parse(self, el):
-            self.item_xpath = 'holdingOrderInformation/'+ str(Env('index')(self)) +'/holdingSummaryInformation'
+            self.item_xpath = 'holdingOrderInformation/' + str(Env('index')(self)) + '/holdingSummaryInformation'
 
         class item(ItemElement):
             klass = Investment
@@ -442,10 +447,16 @@ class RetrieveInvestmentsPage(LoggedPage, JsonPage):
             ), default=NotAvailable)
             obj_unitprice = CleanDecimal(Dict(
                 'holdingSummaryMultipleCurrencyInformation/0/productHoldingUnitCostAverageAmount'
-            ),default=NotAvailable)
-            obj_diff_percent = CleanDecimal(Dict(
-                'holdingSummaryMultipleCurrencyInformation/0/profitLossUnrealizedPercent'
             ), default=NotAvailable)
+
+            def obj_diff_ratio(self):
+                ratio = CleanDecimal(Dict(
+                    'holdingSummaryMultipleCurrencyInformation/0/profitLossUnrealizedPercent'
+                ), default=NotAvailable)(self)
+                if ratio is not NotAvailable:
+                    ratio /= 100
+                return ratio
+
             obj_diff = CleanDecimal(Dict(
                 'holdingSummaryMultipleCurrencyInformation/0/profitLossUnrealizedAmount'
             ), default=NotAvailable)
@@ -457,9 +468,9 @@ class RetrieveLiquidityPage(LoggedPage, JsonPage):
         is_holding_order_information = bool(self.response.json()['holdingOrderInformation'])
         is_account_filter_information = bool(self.response.json()['accountFilterInformation'])
         return (
-            (is_holding_order_information != is_account_filter_information) and
-            bool(self.response.json()['holdingOrderInformation']) and
-            self.response.json()['holdingOrderInformation'][0]['accountTypeCode'] == 'OTH'
+            (is_holding_order_information != is_account_filter_information)
+            and bool(self.response.json()['holdingOrderInformation'])
+            and self.response.json()['holdingOrderInformation'][0]['accountTypeCode'] == 'OTH'
         )
 
     @method
@@ -532,11 +543,11 @@ class ScpiInvestmentPage(LoggedPage, HTMLPage):
         item_xpath = '//table[@class="csTable"]//tbody//tr'
         head_xpath = '//table[@class="csTable"]//thead//th/a'
 
-        col_label = u'Nature'
-        col_quantity = u'Quantité'
-        col_unitprice = u'Prix de revient (en €)'
-        col_unitvalue = [u"Prix de retrait (en €)", u"Valeur d'expertise (en €) *"]
-        col_diff_percent = u'(+/-) value en %'
+        col_label = 'Nature'
+        col_quantity = 'Quantité'
+        col_unitprice = 'Prix de revient (en €)'
+        col_unitvalue = ["Prix de retrait (en €)", "Valeur d'expertise (en €) *"]
+        col_diff_percent = '(+/-) value en %'
 
         class item(ItemElement):
             klass = Investment
@@ -546,7 +557,7 @@ class ScpiInvestmentPage(LoggedPage, HTMLPage):
             obj_unitprice = CleanDecimal(TableCell('unitprice'), replace_dots=True)
             obj_unitvalue = CleanDecimal(TableCell('unitvalue'), replace_dots=True)
 
-            def obj_diff_percent(self):
+            def obj_diff_ratio(self):
                 diff_percent = CleanDecimal(
                     Regexp(CleanText(TableCell('diff_percent')), r'\d+,\d+'),
                     replace_dots=True

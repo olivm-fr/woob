@@ -19,6 +19,7 @@
 
 from __future__ import unicode_literals
 
+
 import re
 
 from weboob.browser.pages import HTMLPage, LoggedPage, PartialHTMLPage
@@ -31,7 +32,10 @@ from weboob.exceptions import BrowserIncorrectPassword
 
 
 class LoginPage(PartialHTMLPage):
-    def login(self, login, password):
+    def get_recaptcha_sitekey(self):
+        return Attr('//div[@class="g-recaptcha"]', 'data-sitekey', default=NotAvailable)(self.doc)
+
+    def login(self, login, password, captcha_response=None):
         maxlength = Attr('//input[@id="Email"]', 'data-val-maxlength-max')(self.doc)
         regex = Attr('//input[@id="Email"]', 'data-val-regex-pattern')(self.doc)
         # their regex is: ^([\w\-+\.]+)@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.)|(([\w-]+\.)+))([a-zA-Z]{2,15}|[0-9]{1,3})(\]?)$
@@ -47,6 +51,10 @@ class LoginPage(PartialHTMLPage):
         form = self.get_form(xpath='//form[contains(@action, "/Login/Login")]')
         form['Email'] = login
         form['Password'] = password
+
+        if captcha_response:
+            form['g-recaptcha-response'] = captcha_response
+
         form.submit()
 
     def get_error(self):
@@ -58,18 +66,22 @@ class CaptchaPage(HTMLPage):
         return CleanText('//div[@class="captcha-block"]/p[1]/text()')(self.doc)
 
 
-class ProfilPage(LoggedPage, HTMLPage):
+class ProfilePage(LoggedPage, HTMLPage):
     @method
-    class get_list(ListElement):
+    class get_subscriptions(ListElement):
         class item(ItemElement):
             klass = Subscription
 
             obj_subscriber = Format('%s %s', Attr('//input[@id="FirstName"]', 'value'), Attr('//input[@id="LastName"]', 'value'))
-            obj_id = Env('subid')
-            obj_label = obj_id
 
-            def parse(self, el):
-                self.env['subid'] = self.page.browser.username
+            def obj_id(self):
+                if 'Materielnet' in self.page.browser.__class__.__name__:
+                    filter_id = CleanText('//p[@class="NumCustomer"]/span')
+                else:  # ldlc
+                    filter_id = Regexp(CleanText('//span[@class="nclient"]'), r'Nº client : (.*)')
+
+                return filter_id(self)
+            obj_label = obj_id
 
 
 class MyAsyncLoad(Filter):
@@ -87,7 +99,7 @@ class DocumentsPage(LoggedPage, PartialHTMLPage):
         class item(ItemElement):
             klass = Bill
 
-            load_details = Link('.//a') & MyAsyncLoad
+            load_details = Link('.//div[has-class("historic-cell--details")]/a') & MyAsyncLoad
 
             obj_id = Format('%s_%s', Env('email'), Field('label'))
             obj_url = Async('details') & Link('//a', default=NotAvailable)

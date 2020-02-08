@@ -92,7 +92,7 @@ class BankStandardTest(object):
         self.assertFalse(empty(account.balance) and empty(account.coming), 'account %r should have balance or coming' % account)
         self.assertTrue(account.type, 'account %r is untyped' % account)
         self.assertTrue(account.currency, 'account %r has no currency' % account)
-        self.assertIsNot(account.number, NotLoaded)
+        self.assertIsNot(account.number, NotLoaded, 'account %r number is not loaded' % account)
         if account.iban:
             self.assertTrue(is_iban_valid(account.iban), 'account %r IBAN is invalid: %r' % (account, account.iban))
 
@@ -153,7 +153,7 @@ class BankStandardTest(object):
 
     def check_investment(self, account, inv):
         self.assertTrue(inv.label, 'investment %r has no label' % inv)
-        self.assertTrue(inv.valuation, 'investment %r has no valuation' % inv)
+        self.assertFalse(empty(inv.valuation), 'investment %r has no valuation' % inv)
         if inv.code and inv.code != 'XX-liquidity':
             self.assertTrue(inv.code_type, 'investment %r has code but no code type' % inv)
         if inv.code_type == inv.CODE_TYPE_ISIN and inv.code and not inv.code.startswith('XX'):
@@ -180,3 +180,5 @@ class BankStandardTest(object):
     def check_recipient(self, account, rcpt):
         self.assertTrue(rcpt.id, 'recipient %r has no id' % rcpt)
         self.assertTrue(rcpt.label, 'recipient %r has no label' % rcpt)
+        self.assertTrue(rcpt.category, 'recipient %r has no category' % rcpt)
+        self.assertTrue(rcpt.enabled_at, 'recipient %r has no enabled_at' % rcpt)

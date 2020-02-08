@@ -637,6 +637,7 @@ class Currency(object):
         (u'EGP', (u'E£',)),
         (u'ISK', (u'Íkr', u'kr')),
         (u'XPF', (u'XPF',)),
+        (u'SAR', (u'SAR',)),
     ])
 
     EXTRACTOR = re.compile(r'[()\d\s,\.\-]', re.UNICODE)
@@ -674,3 +675,7 @@ class Currency(object):
     def currency2txt(klass, currency):
         _currency = klass.CURRENCIES.get(currency, (u'',))
         return _currency[0]
+
+
+def capability_to_string(capability_klass):
+    return re.match(r'^Cap(\w+)', capability_klass.__name__).group(1).lower()

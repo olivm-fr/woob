@@ -58,8 +58,8 @@ def pagination(func):
     >>> from .browsers import PagesBrowser
     >>> from .url import URL
     >>> class Browser(PagesBrowser):
-    ...     BASEURL = 'https://people.symlink.me'
-    ...     list = URL('/~rom1/projects/weboob/list-(?P<pagenum>\d+).html', Page)
+    ...     BASEURL = 'https://romain.bignon.me'
+    ...     list = URL('/projects/weboob/list-(?P<pagenum>\d+).html', Page)
     ...
     >>> b = Browser()
     >>> b.list.go(pagenum=1) # doctest: +ELLIPSIS
@@ -133,6 +133,16 @@ class Page(object):
     :class:`LoginBrowser` and the :func:`need_login` decorator.
     """
 
+    def __new__(cls, *args, **kwargs):
+        """ Accept any arguments, necessary for AbstractPage __new__ override.
+
+        AbstractPage, in its overridden __new__, removes itself from class hierarchy
+        so its __new__ is called only once. In python 3, default (object) __new__ is
+        then used for next instantiations but it's a slot/"fixed" version supporting
+        only one argument (type to instanciate).
+        """
+        return object.__new__(cls)
+
     def __init__(self, browser, response, params=None, encoding=None):
         self.browser = browser
         self.logger = getLogger(self.__class__.__name__.lower(), browser.logger)
@@ -141,7 +151,7 @@ class Page(object):
         self.params = params
 
         # Setup encoding and build document
-        self.forced_encoding = encoding or self.ENCODING
+        self.forced_encoding = self.normalize_encoding(encoding or self.ENCODING)
         if self.forced_encoding:
             self.response.encoding = self.forced_encoding
         self.doc = self.build_doc(self.data)
@@ -159,7 +169,7 @@ class Page(object):
 
     @property
     def encoding(self):
-        return self.response.encoding
+        return self.normalize_encoding(self.response.encoding)
 
     @encoding.setter
     def encoding(self, value):
@@ -213,6 +223,14 @@ class Page(object):
         """
         return None
 
+    def normalize_encoding(self, encoding):
+        """
+        Make sure we can easily compare encodings by formatting them the same way.
+        """
+        if isinstance(encoding, bytes):
+            encoding = encoding.decode('utf-8')
+        return encoding.lower() if encoding else encoding
+
     def absurl(self, url):
         """
         Get an absolute URL from an a partial URL, relative to the Page URL
@@ -260,6 +278,7 @@ class Form(OrderedDict):
         self.url = el.attrib.get('action', page.url)
         self.name = el.attrib.get('name', '')
         self.req = None
+        self.headers = None
         submits = 0
 
         # Find all elements of the form that will be useful to create the request
@@ -323,6 +342,8 @@ class Form(OrderedDict):
             else:
                 self.req = requests.Request(self.method, self.url, data=self)
             self.req.headers.setdefault('Referer', self.page.url)
+            if self.headers:
+                self.req.headers.update(self.headers)
         return self.req
 
     def submit(self, **kwargs):
@@ -333,6 +354,7 @@ class Form(OrderedDict):
         :type data_encoding: :class:`basestring`
         """
         kwargs.setdefault('data_encoding', self.page.encoding)
+        self.headers = kwargs.pop('headers', None)
         return self.page.browser.location(self.request, **kwargs)
 
 
@@ -508,7 +530,7 @@ class XMLPage(Page):
         import re
         m = re.search(b'<\?xml version="1.0" encoding="(.*)"\?>', self.data)
         if m:
-            return m.group(1)
+            return self.normalize_encoding(m.group(1))
 
     def build_doc(self, content):
         import lxml.etree as etree
@@ -654,10 +676,10 @@ class HTMLPage(Page):
         Method to build the lxml document from response and given encoding.
         """
         encoding = self.encoding
-        if encoding == 'latin-1':
-            encoding = 'latin1'
+        if encoding == u'latin-1':
+            encoding = u'latin1'
         if encoding:
-            encoding = encoding.replace('ISO8859_', 'ISO8859-')
+            encoding = encoding.replace(u'iso8859_', u'iso8859-')
         import lxml.html as html
         parser = html.HTMLParser(encoding=encoding)
         return html.parse(BytesIO(content), parser)
@@ -671,18 +693,18 @@ class HTMLPage(Page):
             # meta http-equiv=content-type content=...
             _, params = parse_header(content)
             if 'charset' in params:
-                encoding = params['charset'].strip("'\"")
+                encoding = self.normalize_encoding(params['charset'].strip("'\""))
 
         for charset in self.doc.xpath('//head/meta[@charset]/@charset'):
             # meta charset=...
-            encoding = charset.lower()
+            encoding = self.normalize_encoding(charset)
 
-        if encoding == 'iso-8859-1' or not encoding:
-            encoding = 'windows-1252'
+        if encoding == u'iso-8859-1' or not encoding:
+            encoding = u'windows-1252'
         try:
             codecs.lookup(encoding)
         except LookupError:
-            encoding = 'windows-1252'
+            encoding = u'windows-1252'
 
         return encoding
 

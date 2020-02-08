@@ -18,7 +18,6 @@
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
 
-import logging
 import os
 import tempfile
 import sys
@@ -27,7 +26,7 @@ import weboob.tools.date
 import yaml
 
 from .iconfig import ConfigError, IConfig
-from .util import replace
+from .util import LOGGER, replace
 
 try:
     from yaml import CLoader as Loader
@@ -67,14 +66,14 @@ class YamlConfig(IConfig):
     def load(self, default={}):
         self.values = default.copy()
 
-        logging.debug(u'Loading application configuration file: %s.' % self.path)
+        LOGGER.debug(u'Loading configuration file: %s.' % self.path)
         try:
             with open(self.path, 'r') as f:
                 self.values = yaml.load(f, Loader=self.LOADER)
-            logging.debug(u'Application configuration file loaded: %s.' % self.path)
+            LOGGER.debug(u'Configuration file loaded: %s.' % self.path)
         except IOError:
             self.save()
-            logging.debug(u'Application configuration file created with default values: %s. Please customize it.' % self.path)
+            LOGGER.debug(u'Configuration file created with default values: %s.' % self.path)
 
         if self.values is None:
             self.values = {}
@@ -88,6 +87,7 @@ class YamlConfig(IConfig):
         with f:
             yaml.dump(self.values, f, Dumper=self.DUMPER, default_flow_style=False)
         replace(f.name, self.path)
+        LOGGER.debug(u'Configuration file saved: %s.' % self.path)
 
     def get(self, *args, **kwargs):
         v = self.values

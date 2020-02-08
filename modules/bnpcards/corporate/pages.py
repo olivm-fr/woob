@@ -17,13 +17,15 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
 import re
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
 from weboob.browser.pages import HTMLPage, LoggedPage, pagination, NextPage
 from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Field, Format
+from weboob.browser.filters.standard import CleanText, CleanDecimal, Field, Format, Env
 from weboob.browser.filters.html import Link, Attr
 from weboob.capabilities.bank import Account
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
@@ -60,8 +62,9 @@ class AccountsPage(LoggedPage, HTMLPage):
             obj_label = CleanText('./td[1]')
             obj_type = Account.TYPE_CARD
             obj__status = CleanText('./td[5]')
-            obj_currency = u'EUR'
+            obj_currency = 'EUR'
             obj_url = Link('./td[2]/a')
+            obj__company = Env('company', default=None)  # this field is something used to make the module work, not something meant to be displayed to end users
 
     @pagination
     def get_link(self, account_id, owner):
@@ -93,7 +96,7 @@ class AccountsPage(LoggedPage, HTMLPage):
             form['periodeFin'] = (date.today() + relativedelta(months=4)).strftime("%d/%m/%Y")
             form['periodeSelectionMode'] = "input"
         onclick = self.doc.xpath(submit)[0].get("onclick")
-        url_parts = re.findall("'([^']*)'", onclick)
+        url_parts = re.findall(r"'([^']*)'", onclick)
         form.url = 'operation%s%sCorporate.event.do' % (url_parts[1], url_parts[0].title())
         form.submit()
 
@@ -144,7 +147,7 @@ class TransactionsPage(LoggedPage, HTMLPage):
             url = Attr('//table[@id="tgDecorationFoot"]//a[contains(text(), "1")]', 'href', default=None)(self.doc)
             if url is None:
                 # at page=4, there is "<Première page> ... <2> <3> 4"
-                url = Attr(u'//table[@id="tgDecorationFoot"]//a[contains(text(), "Première page")]', 'href')(self.doc)
+                url = Attr('//table[@id="tgDecorationFoot"]//a[contains(text(), "Première page")]', 'href')(self.doc)
             self.browser.location(url)
 
 

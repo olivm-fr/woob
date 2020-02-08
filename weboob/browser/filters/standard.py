@@ -22,6 +22,7 @@ from __future__ import absolute_import
 import datetime
 import re
 import unicodedata
+import unidecode
 from collections import Iterator
 from decimal import Decimal, InvalidOperation
 from itertools import islice
@@ -35,13 +36,15 @@ from weboob.tools.compat import basestring, long, parse_qs, unicode, urlparse
 
 from .base import _NO_DEFAULT, Filter, FilterError, ItemNotFound, _Filter, debug
 
-__all__ = ['FilterError', 'ColumnNotFound', 'RegexpError', 'FormatError',
-           'Filter', 'Base', 'Env', 'TableCell', 'RawText',
-           'CleanText', 'Lower', 'Upper', 'Capitalize', 'CleanDecimal',
-           'Field', 'Regexp', 'Map', 'DateTime', 'Date', 'Time', 'DateGuesser',
-           'Duration', 'MultiFilter', 'CombineDate', 'Format', 'Join', 'Type',
-           'Eval', 'BrowserURL', 'Async', 'AsyncLoad',
-           'QueryValue', 'Coalesce']
+__all__ = [
+    'Filter', 'FilterError', 'ColumnNotFound', 'RegexpError', 'FormatError',
+    'AsyncLoad', 'Async', 'Base', 'Decode', 'Env', 'TableCell', 'RawText',
+    'CleanText', 'Lower', 'Upper', 'Title', 'Currency', 'NumberFormatError',
+    'CleanDecimal', 'Slugify', 'Type', 'Field', 'Regexp', 'Map', 'MapIn',
+    'DateTime', 'FromTimestamp', 'Date', 'DateGuesser', 'Time', 'Duration',
+    'MultiFilter', 'CombineDate', 'Format', 'BrowserURL', 'Join', 'MultiJoin',
+    'Eval', 'QueryValue', 'Coalesce',
+]
 
 
 class ColumnNotFound(FilterError):
@@ -191,7 +194,7 @@ class TableCell(_Filter):
     ...         obj_label = CleanText(TableCell('label'))
     ...
 
-    The 'colspan' variable enables the handling of table tags that have
+    TableCell handles table tags that have
     a "colspan" attribute that modify the width of the column:
     for example <td colspan="2"> will occupy two columns instead of one,
     creating a column shift for all the next columns that must be taken
@@ -200,7 +203,7 @@ class TableCell(_Filter):
 
     def __init__(self, *names, **kwargs):
         support_th = kwargs.pop('support_th', False)
-        self.colspan = kwargs.pop('colspan', False)
+        kwargs.pop('colspan', True)
         super(TableCell, self).__init__(**kwargs)
         self.names = names
 
@@ -209,25 +212,7 @@ class TableCell(_Filter):
         else:
             self.td = './td[%s]'
 
-    """
-    The two methods below are used to verify that modifying TableCell
-    to handle colspans does not modify the class behavior in weboob modules.
-    The "assert" should crash if a module does not return the same results
-    with and without handling colspans.
-    """
-
-    def call_without_colspan(self, item):
-        # Former behavior without handling colspans > 1
-        for name in self.names:
-            idx = item.parent.get_colnum(name)
-            if idx is not None:
-                ret = item.xpath(self.td % (idx + 1))
-                for el in ret:
-                    self.highlight_el(el, item)
-                return ret
-        return self.default_or_raise(ColumnNotFound('Unable to find column %s' % ' or '.join(self.names)))
-
-    def call_with_colspan(self, item):
+    def __call__(self, item):
         # New behavior, handling colspans > 1
         for name in self.names:
             col_idx = item.parent.get_colnum(name)
@@ -249,15 +234,6 @@ class TableCell(_Filter):
                     current_col += int(ret[0].attrib.get('colspan', 1))
 
         return self.default_or_raise(ColumnNotFound('Unable to find column %s' % ' or '.join(self.names)))
-
-    def __call__(self, item):
-        if self.colspan:
-            return self.call_with_colspan(item)
-
-        ret_without_colspan = self.call_without_colspan(item)
-        ret_with_colspan = self.call_with_colspan(item)
-        assert ret_without_colspan == ret_with_colspan, 'Different behavior with and without colspan in TableCell'
-        return ret_with_colspan
 
 
 class RawText(Filter):
@@ -316,7 +292,7 @@ class CleanText(Filter):
     True
     """
 
-    def __init__(self, selector=None, symbols='', replace=[], children=True, newlines=True, normalize='NFC', **kwargs):
+    def __init__(self, selector=None, symbols='', replace=[], children=True, newlines=True, transliterate=False, normalize='NFC', **kwargs):
         """
         :param symbols: list of strings to remove from text
         :type symbols: list
@@ -328,6 +304,8 @@ class CleanText(Filter):
         :type newlines: bool
         :param normalize: Unicode normalization to perform
         :type normalize: str or None
+        :param transliterate: Transliterates unicode characters into ASCII characters
+        :type transliterate: bool
         """
 
         super(CleanText, self).__init__(selector, **kwargs)
@@ -336,20 +314,21 @@ class CleanText(Filter):
         self.children = children
         self.newlines = newlines
         self.normalize = normalize
+        self.transliterate = transliterate
 
     @debug()
     def filter(self, txt):
         if isinstance(txt, (tuple, list)):
             txt = u' '.join([self.clean(item, children=self.children) for item in txt])
 
-        txt = self.clean(txt, self.children, self.newlines, self.normalize)
+        txt = self.clean(txt, self.children, self.newlines, self.normalize, self.transliterate)
         txt = self.remove(txt, self.symbols)
         txt = self.replace(txt, self.toreplace)
         # ensure it didn't become str by mistake
         return unicode(txt)
 
     @classmethod
-    def clean(cls, txt, children=True, newlines=True, normalize='NFC'):
+    def clean(cls, txt, children=True, newlines=True, normalize='NFC', transliterate=False):
         if not isinstance(txt, basestring):
             if children:
                 txt = [t.strip() for t in txt.itertext()]
@@ -367,6 +346,8 @@ class CleanText(Filter):
         # normalize to a standard Unicode form
         if normalize:
             txt = unicodedata.normalize(normalize, txt)
+        if transliterate:
+            txt = unidecode.unidecode(txt)
         return txt
 
     @classmethod
@@ -400,12 +381,12 @@ class Upper(CleanText):
         return txt.upper()
 
 
-class Capitalize(CleanText):
-    """Extract text with :class:`CleanText` and capitalize it."""
+class Title(CleanText):
+    """Extract text with :class:`CleanText` and apply title() to it."""
 
     @debug()
     def filter(self, txt):
-        txt = super(Capitalize, self).filter(txt)
+        txt = super(Title, self).filter(txt)
         return txt.title()
 
 
@@ -626,9 +607,17 @@ class Regexp(Filter):
 
     def __init__(self, selector=None, pattern=None, template=None, nth=0, flags=0, default=_NO_DEFAULT):
         super(Regexp, self).__init__(selector, default=default)
-        assert pattern is not None
+        if pattern is None:
+            raise FilterError('Missing pattern parameter')
         self.pattern = pattern
-        self._regex = re.compile(pattern, flags)
+
+        # 8192 = regex.VERSION0 / 256 = regex.VERSION1
+        if '(?V0)' in pattern or '(?V1)' in pattern or flags & 8192 or flags & 256:
+            import regex
+            self._regex = regex.compile(pattern, flags)
+        else:
+            self._regex = re.compile(pattern, flags)
+        self._regex = self._regex
         self.template = template
         self.nth = nth
 
@@ -694,13 +683,37 @@ class Map(Filter):
             return self.default_or_raise(ItemNotFound('Unable to handle %r on %r' % (txt, self.map_dict)))
 
 
+class MapIn(Filter):
+    """
+    Map the pattern of a selected value to another value using a dict.
+    """
+
+    def __init__(self, selector, map_dict, default=_NO_DEFAULT):
+        """
+        :param selector: key from `map_dict` to use
+        """
+        super(MapIn, self).__init__(selector, default=default)
+        self.map_dict = map_dict
+
+    @debug()
+    def filter(self, txt):
+        """
+        :raises: :class:`ItemNotFound` if key pattern does not exist in dict
+        """
+        for key in self.map_dict:
+            if key in txt:
+                return self.map_dict[key]
+
+        return self.default_or_raise(ItemNotFound('Unable to handle %r on %r' % (txt, self.map_dict)))
+
+
 class DateTime(Filter):
     """Parse date and time."""
 
-    def __init__(self, selector=None, default=_NO_DEFAULT, dayfirst=False, translations=None,
-                 parse_func=parse_date, fuzzy=False):
+    def __init__(self, selector=None, default=_NO_DEFAULT, translations=None,
+                 parse_func=parse_date, strict=True, **kwargs):
         """
-        :param dayfirst: if True, the day is be the first element in the string to parse
+        :param dayfirst: if True, the day is the first element in the string to parse
         :type dayfirst: bool
         :param parse_func: the function to use for parsing the datetime
         :param translations: string replacements from site locale to English
@@ -708,10 +721,13 @@ class DateTime(Filter):
         """
 
         super(DateTime, self).__init__(selector, default=default)
-        self.dayfirst = dayfirst
+        self.kwargs = kwargs
         self.translations = translations
         self.parse_func = parse_func
-        self.fuzzy = fuzzy
+        self.strict = strict
+
+    _default_date_1 = datetime.datetime(2100, 10, 10, 1, 1, 1)
+    _default_date_2 = datetime.datetime(2120, 12, 12, 2, 2, 2)
 
     @debug()
     def filter(self, txt):
@@ -721,18 +737,50 @@ class DateTime(Filter):
             if self.translations:
                 for search, repl in self.translations:
                     txt = search.sub(repl, txt)
-            return self.parse_func(txt, dayfirst=self.dayfirst, fuzzy=self.fuzzy)
+            if self.strict:
+                parse1 = self.parse_func(txt, default=self._default_date_1, **self.kwargs)
+                parse2 = self.parse_func(txt, default=self._default_date_2, **self.kwargs)
+                if parse1 != parse2:
+                    raise FilterError('Date is not complete')
+                return parse1
+            else:
+                return self.parse_func(txt, **self.kwargs)
         except (ValueError, TypeError) as e:
             return self.default_or_raise(FormatError('Unable to parse %r: %s' % (txt, e)))
+
+
+class FromTimestamp(Filter):
+    """Parse a timestamp into a datetime."""
+
+    def __init__(self, selector, millis=False, tz=None, default=_NO_DEFAULT):
+        super(FromTimestamp, self).__init__(selector, default=default)
+        self.millis = millis
+        self.tz = tz
+
+    @debug()
+    def filter(self, txt):
+        try:
+            ts = float(txt)
+        except (TypeError, ValueError) as exc:
+            return self.default_or_raise(FormatError('Unable to parse %r: %s' % (txt, exc)))
+
+        if self.millis:
+            ts /= 1000
+
+        try:
+            return datetime.datetime.fromtimestamp(ts, tz=self.tz)
+        except TypeError as exc:
+            return self.default_or_raise(FormatError('Unable to parse %r: %s' % (txt, exc)))
 
 
 class Date(DateTime):
     """Parse date."""
 
-    def __init__(self, selector=None, default=_NO_DEFAULT, dayfirst=False, translations=None,
-                 parse_func=parse_date, fuzzy=False):
-        super(Date, self).__init__(selector, default=default, dayfirst=dayfirst, translations=translations,
-                                   parse_func=parse_func, fuzzy=fuzzy)
+    def __init__(self, selector=None, default=_NO_DEFAULT, translations=None, parse_func=parse_date, strict=True, **kwargs):
+        super(Date, self).__init__(selector, default=default, translations=translations, parse_func=parse_func, strict=strict, **kwargs)
+
+    _default_date_1 = datetime.datetime(2100, 10, 10, 1, 1, 1)
+    _default_date_2 = datetime.datetime(2120, 12, 12, 1, 1, 1)
 
     @debug()
     def filter(self, txt):
@@ -867,8 +915,21 @@ class BrowserURL(MultiFilter):
 
 
 class Join(Filter):
-    def __init__(self, pattern, selector=None, textCleaner=CleanText, newline=False, addBefore='', addAfter=''):
-        super(Join, self).__init__(selector)
+    """
+    Join multiple results from a selector.
+    >>> Join(' - ', '//div/p')  # doctest: +SKIP
+
+    >>> Join(pattern=', ').filter([u"Oui", u"bonjour", ""]) == u"Oui, bonjour"
+    True
+    >>> Join(pattern='-').filter([u"Au", u"revoir", ""]) == u"Au-revoir"
+    True
+    >>> Join(pattern='-').filter([]) == u""
+    True
+    >>> Join(pattern='-', default=u'empty').filter([]) == u'empty'
+    True
+    """
+    def __init__(self, pattern, selector=None, textCleaner=CleanText, newline=False, addBefore='', addAfter='', default=_NO_DEFAULT):
+        super(Join, self).__init__(selector, default=default)
         self.pattern = pattern
         self.textCleaner = textCleaner
         self.newline = newline
@@ -891,7 +952,37 @@ class Join(Filter):
         if self.addAfter:
             result = '%s%s' % (result, self.addAfter)
 
+        if not result and self.default is not _NO_DEFAULT:
+            return self.default
         return result
+
+
+class MultiJoin(MultiFilter):
+    """
+    Join multiple filters.
+    >>> MultiJoin(Field('field1'), Field('field2'))  # doctest: +SKIP
+
+    >>> MultiJoin(pattern=u', ').filter([u"Oui", u"bonjour", ""]) == u"Oui, bonjour"
+    True
+    >>> MultiJoin(pattern=u'-').filter([u"Au", u"revoir", ""]) == u"Au-revoir"
+    True
+    >>> MultiJoin(pattern=u'-').filter([]) == u""
+    True
+    >>> MultiJoin(pattern=u'-', default=u'empty').filter([]) == u'empty'
+    True
+    >>> MultiJoin(pattern=u'-').filter([1, 2, 3]) == u'1-2-3'
+    True
+    """
+    def __init__(self, *args, **kwargs):
+        self.pattern = kwargs.pop('pattern', ', ')
+        super(MultiJoin, self).__init__(*args, **kwargs)
+
+    @debug()
+    def filter(self, values):
+        values = [unicode(v) for v in values if v]
+        if not values and self.default is not _NO_DEFAULT:
+            return self.default
+        return self.pattern.join(values)
 
 
 class Eval(MultiFilter):
@@ -1026,3 +1117,34 @@ def test_CleanDecimal_strict():
     assert_raises(NumberFormatError, CleanDecimal.SI().filter, 'foo 123,456,789')
     assert_raises(NumberFormatError, CleanDecimal.SI().filter, 'foo 12 3456 bar')
     assert_raises(NumberFormatError, CleanDecimal.SI().filter, 'foo 123-456 bar')
+
+
+def test_DateTime():
+    today = datetime.datetime.now()
+    assert_raises(FilterError, Date(strict=True).filter, '2019')
+    assert_raises(FilterError, Date(strict=True).filter, '1788-7')
+    assert_raises(FilterError, Date(strict=True).filter, 'June 1st')
+
+    assert Date(strict=True).filter('1788-7-15') == datetime.date(1788, 7, 15)
+
+    assert Date(strict=False).filter('1788-7-15') == datetime.date(1788, 7, 15)
+    assert Date(strict=False).filter('1945-7') == datetime.date(1945, 7, today.day)
+    assert Date(strict=False).filter('June 1st') == datetime.date(today.year, 6, 1)
+
+    assert DateTime(strict=False).filter('1788-7') == datetime.datetime(1788, 7, today.day)
+    assert DateTime(strict=False).filter('1788') == datetime.datetime(1788, today.month, today.day)
+    assert DateTime(strict=False).filter('5-1') == datetime.datetime(today.year, 5, 1)
+
+    assert Date(yearfirst=True).filter('88-7-15') == datetime.date(1988, 7, 15)
+    assert Date(yearfirst=False).filter('20-7-15') == datetime.date(2015, 7, 20)
+    assert Date(yearfirst=True).filter('1789-7-15') == datetime.date(1789, 7, 15)
+    assert Date(yearfirst=True, strict=False).filter('7-15') == datetime.date(today.year, 7, 15)
+
+
+def test_regex():
+    try:
+        assert Regexp(pattern=r'([[a-z]--[aeiou]]+)(?V1)').filter(u'abcde') == u'bcd'
+        assert not Regexp(pattern=r'([[a-z]--[aeiou]]+)(?V0)', default=False).filter(u'abcde')
+    except ImportError:
+        pass
+    assert not Regexp(pattern=r'([[a-z]--[aeiou]]+)', default=False).filter(u'abcde')

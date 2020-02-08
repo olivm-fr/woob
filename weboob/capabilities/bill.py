@@ -52,6 +52,8 @@ class DocumentTypes(object):
     REPORT = u'report'
     BILL = u'bill'
     OTHER = u'other'
+    INCOME_TAX = u'income_tax'
+    KIID = u'kiid'
 
 
 class Detail(BaseObject, Currency):
@@ -77,6 +79,7 @@ class Document(BaseObject):
     label =         StringField('label of document')
     type =          StringField('type of document')
     transactions =  Field('List of transaction ID related to the document', list, default=[])
+    has_file =      BoolField('Boolean to set if file is available', default=True)
 
 
 class Bill(Document, Currency):
@@ -107,7 +110,7 @@ class Subscription(BaseObject):
 
 
 class CapDocument(CapCollection):
-    accepted_doc_types = ()
+    accepted_document_types = ()
     """
     Tuple of document types handled by the module (:class:`DocumentTypes`)
     """

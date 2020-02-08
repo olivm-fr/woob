@@ -24,7 +24,7 @@ from datetime import date
 from decimal import Decimal
 
 from weboob.tools.date import parse_french_date
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded, ParseError
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded
 from weboob.capabilities.base import find_object
 from weboob.browser.pages import JsonPage, LoggedPage, HTMLPage
 from weboob.capabilities import NotAvailable
@@ -38,21 +38,22 @@ from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 
 
 class Transaction(FrenchTransaction):
-    PATTERNS = [(re.compile(r'^.*Virement (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
-                (re.compile(r'PRELEV SEPA (?P<text>.*)'),        FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'.*Prélèvement.*'),        FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'^(REGL|Rgt)(?P<text>.*)'),        FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'^(?P<text>.*) Carte \d+\s+ LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})'),
-                                                          FrenchTransaction.TYPE_CARD),
-                (re.compile(r'^Débit mensuel.*'), FrenchTransaction.TYPE_CARD_SUMMARY),
-                (re.compile(r"^Retrait d'espèces à un DAB (?P<text>.*) CARTE [X\d]+ LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})"),
-                                                          FrenchTransaction.TYPE_WITHDRAWAL),
-                (re.compile(r'^Paiement de chèque (?P<text>.*)'),  FrenchTransaction.TYPE_CHECK),
-                (re.compile(r'^(Cotisation|Intérêts) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-                (re.compile(r'^(Remise Chèque|Remise de chèque)\s*(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
-                (re.compile(r'^Versement (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
-                (re.compile(r'^(?P<text>.*)LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})\s*(?P<text2>.*)'),
-                                                          FrenchTransaction.TYPE_UNKNOWN),
+    PATTERNS = [
+        (re.compile(r'^.*Virement (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'PRELEV SEPA (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'.*Prélèvement.*'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^(REGL|Rgt)(?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^(?P<text>.*) Carte \d+\s+ LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})'),
+                                                FrenchTransaction.TYPE_CARD),
+        (re.compile(r'^Débit mensuel.*'), FrenchTransaction.TYPE_CARD_SUMMARY),
+        (re.compile(r"^Retrait d'espèces à un DAB (?P<text>.*) CARTE [X\d]+ LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})"),
+                                                FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^Paiement de chèque (?P<text>.*)'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^(Cotisation|Intérêts) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(Remise Chèque|Remise de chèque)\s*(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^Versement (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^(?P<text>.*)LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})\s*(?P<text2>.*)'),
+                                                  FrenchTransaction.TYPE_UNKNOWN),
     ]
 
 
@@ -109,7 +110,9 @@ class AccountsPage(MyJsonPage):
     ACCOUNT_TYPES = {
         '000': Account.TYPE_CHECKING,   # Compte à vue
         '001': Account.TYPE_SAVINGS,    # Livret Ile de France
+        '004': Account.TYPE_SAVINGS,    # Livret Guadeloupe
         '011': Account.TYPE_CARD,       # Carte bancaire
+        '013': Account.TYPE_LOAN,       # LCR (Lettre de Change Relevé)
         '020': Account.TYPE_SAVINGS,    # Compte sur livret
         '021': Account.TYPE_SAVINGS,
         '022': Account.TYPE_SAVINGS,    # Livret d'épargne populaire
@@ -117,10 +120,12 @@ class AccountsPage(MyJsonPage):
         '025': Account.TYPE_SAVINGS,    # Livret Fidélis
         '027': Account.TYPE_SAVINGS,    # Livret A
         '037': Account.TYPE_SAVINGS,
+        '070': Account.TYPE_SAVINGS,    # Compte Epargne Logement
         '077': Account.TYPE_SAVINGS,    # Livret Bambino
         '078': Account.TYPE_SAVINGS,    # Livret jeunes
         '080': Account.TYPE_SAVINGS,    # Plan épargne logement
         '081': Account.TYPE_SAVINGS,
+        '086': Account.TYPE_SAVINGS,    # Compte épargne Moisson
         '097': Account.TYPE_CHECKING,   # Solde en devises
         '730': Account.TYPE_DEPOSIT,    # Compte à terme Optiplus
         '999': Account.TYPE_MARKET,     # no label, we use 'Portefeuille Titres' if needed
@@ -131,7 +136,7 @@ class AccountsPage(MyJsonPage):
 
         accounts_list = []
 
-        for content in  self.get_content():
+        for content in self.get_content():
             if accnum != '00000000000' and content['numero'] != accnum:
                 continue
             for poste in content['postes']:
@@ -142,14 +147,6 @@ class AccountsPage(MyJsonPage):
                 a._consultable = poste['consultable']
                 a._univers = current_univers
                 a.id = '%s.%s' % (a._number, a._nature)
-
-                if a.id in seen:
-                    # some accounts like "compte à terme fidélis" have the same _number and _nature
-                    # but in fact are kind of closed, so worthless...
-                    self.logger.warning('ignored account id %r (%r) because it is already used', a.id, poste.get('numeroDossier'))
-                    continue
-
-                seen.add(a.id)
 
                 a.type = self.ACCOUNT_TYPES.get(poste['codeNature'], Account.TYPE_UNKNOWN)
                 if a.type == Account.TYPE_UNKNOWN:
@@ -163,7 +160,7 @@ class AccountsPage(MyJsonPage):
                     a.id += '.%s' % a._file_number
 
                 if poste['postePortefeuille']:
-                    a.label = u'Portefeuille Titres'
+                    a.label = '{} Portefeuille Titres'.format(content['intitule'].strip())
                     a.balance = Decimal(str(poste['montantTitres']['valeur']))
                     a.currency = poste['montantTitres']['monnaie']['code'].strip()
                     if not a.balance and not a.currency and 'dateTitres' not in poste:
@@ -174,11 +171,22 @@ class AccountsPage(MyJsonPage):
                     continue
 
                 a.label = ' '.join([content['intitule'].strip(), poste['libelle'].strip()])
+                if poste['numeroDossier']:
+                    a.label = '{} n°{}'.format(a.label, poste['numeroDossier'])
+
                 a.balance = Decimal(str(poste['solde']['valeur']))
                 a.currency = poste['solde']['monnaie']['code'].strip()
                 # Some accounts may have balance currency
                 if 'Solde en devises' in a.label and a.currency != u'EUR':
                     a.id += str(poste['monnaie']['codeSwift'])
+
+                if a.id in seen:
+                    # some accounts like "compte à terme fidélis" have the same _number and _nature
+                    # but in fact are kind of closed, so worthless...
+                    self.logger.warning('ignored account id %r (%r) because it is already used', a.id, poste.get('numeroDossier'))
+                    continue
+
+                seen.add(a.id)
                 accounts_list.append(a)
 
         return accounts_list
@@ -256,15 +264,16 @@ class SearchPage(LoggedPage, JsonPage):
             t = Transaction()
             t.id = str(op['id'])
             if op['id'] in seen:
-                raise ParseError('There are several transactions with the same ID, probably an infinite loop')
+                self.logger.debug('Skipped transaction : "%s %s"' % (op['id'], op['libelle']))
+                continue
 
             seen.add(t.id)
-            d = date.fromtimestamp(op.get('dateDebit', op.get('dateOperation'))/1000)
+            d = date.fromtimestamp(op.get('dateDebit', op.get('dateOperation')) / 1000)
             op['details'] = [re.sub(r'\s+', ' ', i).replace('\x00', '') for i in op['details'] if i]  # sometimes they put "null" elements...
             label = re.sub(r'\s+', ' ', op['libelle']).replace('\x00', '')
             raw = ' '.join([label] + op['details'])
-            t.rdate = date.fromtimestamp(op.get('dateOperation', op.get('dateDebit'))/1000)
-            vdate = date.fromtimestamp(op.get('dateValeur', op.get('dateDebit', op.get('dateOperation')))/1000)
+            t.rdate = date.fromtimestamp(op.get('dateOperation', op.get('dateDebit')) / 1000)
+            vdate = date.fromtimestamp(op.get('dateValeur', op.get('dateDebit', op.get('dateOperation'))) / 1000)
             t.parse(d, raw, vdate=vdate)
             t.amount = Decimal(str(op['montant']))
             if 'categorie' in op:
@@ -331,9 +340,13 @@ class ErrorCodePage(HTMLPage):
     def on_load(self):
         code = re.search(r'\/\?errorCode=(\d+)', self.url).group(1)
         page = self.browser.open('/particuliers/compte-bancaire/comptes-en-ligne/bredconnect-compte-ligne?errorCode=%s' % code).page
-        # invalid login/password
-        if code == '20100':
-            msg = CleanText('//label[contains(@class, "error")]')(page.doc)
+        msg = CleanText('//label[contains(@class, "error")]', default=None)(page.doc)
+        # 20100: invalid login/password
+        # 139: dispobank user trying to connect to Bred
+        if code in ('20100', '139'):
             raise BrowserIncorrectPassword(msg)
+        # 20104 & 1000: unknown error during login
+        elif code in ('20104', '1000'):
+            raise BrowserUnavailable(msg)
 
-        assert False, 'The % error is not handled.' % code
+        assert False, 'Error %s is not handled yet.' % code

@@ -22,33 +22,16 @@ from __future__ import unicode_literals
 import re
 from dateutil.relativedelta import relativedelta
 
-from weboob.capabilities.bill import Document, Subscription
+from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.browser.elements import TableElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, Regexp, Env, Date, Format, Field
+from weboob.browser.filters.standard import CleanText, Regexp, Date, Format, Field
 from weboob.browser.filters.html import Link, TableCell, Attr
-from weboob.browser.pages import LoggedPage
+from weboob.browser.pages import LoggedPage, RawPage
 
 from .base import BasePage
 
+
 class BankStatementPage(LoggedPage, BasePage):
-    @method
-    class iter_subscription(TableElement):
-        item_xpath = '//table[.//th]//tr[td and @class="LGNTableRow"]'
-        head_xpath = '//table//th'
-
-        col_id = 'Numéro de Compte'
-        col_label = 'Type de Compte'
-        col__last_document_label = 'Derniers relevés'
-
-        class item(ItemElement):
-            def condition(self):
-                return 'Récapitulatif annuel' not in CleanText(TableCell('_last_document_label'))(self)
-
-            klass = Subscription
-
-            obj_id = CleanText(TableCell('id'), replace=[(' ', '')])
-            obj_label = CleanText(TableCell('label'))
-
     @method
     class iter_searchable_subscription(TableElement):
         item_xpath = '//table//tr[@class="fond_ligne"]'
@@ -63,7 +46,6 @@ class BankStatementPage(LoggedPage, BasePage):
             klass = Subscription
 
             obj_id = CleanText(TableCell('id'), replace=[(' ', '')])
-            obj_subscriber = Env('subscriber')
 
             def obj_label(self):
                 label = CleanText(TableCell('label'))(self)
@@ -111,7 +93,7 @@ class BankStatementPage(LoggedPage, BasePage):
 
             d.url = Regexp(Link('.'), r"= '(.*)';")(a)
             d.id = '%s_%s' % (subscription.id, date_filter(a).replace('/', ''))
-            d.type = 'document'
+            d.type = DocumentTypes.STATEMENT
 
             yield d
 
@@ -119,3 +101,7 @@ class BankStatementPage(LoggedPage, BasePage):
         return any((CleanText('//div[@class="MessageErreur"]')(self.doc),
                    CleanText('//span[@class="error_msg"]')(self.doc),
                    self.doc.xpath('//div[contains(@class, "error_page")]'), ))
+
+
+class RibPdfPage(LoggedPage, RawPage):
+    pass

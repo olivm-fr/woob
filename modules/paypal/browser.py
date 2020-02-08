@@ -21,6 +21,7 @@
 import datetime
 from dateutil.relativedelta import relativedelta
 
+from weboob.tools.compat import basestring
 from weboob.exceptions import BrowserHTTPError, BrowserIncorrectPassword, BrowserUnavailable
 from weboob.browser.browsers import LoginBrowser, need_login
 from weboob.browser.url import URL
@@ -63,7 +64,8 @@ class Paypal(LoginBrowser):
                           HistoryDetailsPage)
     promo = URL('https://www.paypal.com/fr/webapps/mpp/clickthru/paypal-app-promo-2.*',
                 '/fr/webapps/mpp/clickthru.*', PromoPage)
-    account = URL('https://www.paypal.com/businessexp/money',
+    account = URL('https://www.paypal.com/myaccount/money',
+                  'https://www.paypal.com/businessexp/money',
                   'https://www.paypal.com/webapps/business/money', AccountPage)
     pro_history = URL('https://\w+.paypal.com/businessexp/transactions/activity\?.*',
                       ProHistoryPage)
@@ -95,15 +97,15 @@ class Paypal(LoginBrowser):
         data['_sessionID'] = sessionID
         data[key] = value
         res = self.open('/auth/verifychallenge', data=data)
-        if not 'OK' in res.content:
+        if not 'OK' in res.text:
             raise BrowserUnavailable('Challenge failed')
 
         res = self.page.login(self.username, self.password)
 
-        if 'LoginFailed' in res.content or 'Sorry, we can\'t log you in' in res.content or self.error.is_here():
+        if 'LoginFailed' in res.text or 'Sorry, we can\'t log you in' in res.text or self.error.is_here():
             raise BrowserIncorrectPassword()
 
-        if '/auth/validatecaptcha' in res.content:
+        if '/auth/validatecaptcha' in res.text:
             raise BrowserUnavailable('captcha')
 
         self.location('/')
@@ -142,7 +144,8 @@ class Paypal(LoginBrowser):
                 'endDate':          e,
                }
         # The response is sometimes not the one we expect.
-        for i in xrange(3):
+        exc = None
+        for i in range(3):
             try:
                 self.location(
                     'https://www.paypal.com/myaccount/activity/filter?%s',
@@ -154,7 +157,8 @@ class Paypal(LoginBrowser):
                 return iter([])
             except KeyError as e:
                 self.logger.warning("retrying to get activity ...")
-        raise e
+                exc = e
+        raise exc
 
     @need_login
     def get_download_history(self, account, step_min=None, step_max=None):

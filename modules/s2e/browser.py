@@ -18,35 +18,48 @@
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from __future__ import unicode_literals
+
+import re
+
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
+from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, NoAccountsException
+from weboob.capabilities.bank import Investment
+from weboob.tools.capabilities.bank.investments import is_isin_valid
 
 from .pages import (
-    LoginPage, AccountsPage, AMFHSBCPage, AMFAmundiPage, AMFSGPage, HistoryPage,
-    ErrorPage, LyxorfcpePage, EcofiPage, EcofiDummyPage, LandingPage, SwissLifePage, LoginErrorPage,
-    EtoileGestionPage, EtoileGestionCharacteristicsPage,
+    LoginPage, AccountsPage, AMFHSBCPage, AMFAmundiPage, AMFSGPage, HistoryPage, ErrorPage,
+    LyxorfcpePage, EcofiPage, EcofiDummyPage, LandingPage, SwissLifePage, LoginErrorPage,
+    EtoileGestionPage, EtoileGestionCharacteristicsPage, EtoileGestionDetailsPage,
+    APIInvestmentDetailsPage, LyxorFundsPage, EsaliaDetailsPage, ProfilePage,
 )
 
 
 class S2eBrowser(LoginBrowser, StatesMixin):
-    login = URL('/portal/salarie-(?P<slug>\w+)/authentification',
-                '(.*)portal/salarie-(?P<slug>\w+)/authentification',
-                '/portal/j_security_check', LoginPage)
-    login_error = URL('/portal/login', LoginErrorPage)
-    landing = URL('(.*)portal/salarie-bnp/accueil', LandingPage)
-    accounts = URL('/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs\?language=(?P<lang>)',
-                   '/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs', AccountsPage)
-    amfcode_hsbc = URL('https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
-    amfcode_amundi = URL('https://www.amundi-ee.com/entr/product', AMFAmundiPage)
-    amfcode_sg = URL('http://sggestion-ede.com/product', AMFSGPage)
+    login = URL(r'/portal/salarie-(?P<slug>\w+)/authentification',
+                r'(.*)portal/salarie-(?P<slug>\w+)/authentification',
+                r'/portal/j_security_check', LoginPage)
+    login_error = URL(r'/portal/login', LoginErrorPage)
+    landing = URL(r'(.*)portal/salarie-bnp/accueil', LandingPage)
+    accounts = URL(r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs\?language=(?P<lang>)',
+                   r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs', AccountsPage)
+    amfcode_hsbc = URL(r'https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
+    amfcode_amundi = URL(r'https://www.amundi-ee.com/entr/product', AMFAmundiPage)
+    amfcode_sg = URL(r'http://sggestion-ede.com/product', AMFSGPage)
     isincode_ecofi = URL(r'http://www.ecofi.fr/fr/fonds/.*#yes\?bypass=clientprive', EcofiPage)
     pdf_file_ecofi = URL(r'http://www.ecofi.fr/sites/.*', EcofiDummyPage)
-    lyxorfcpe = URL('http://www.lyxorfcpe.com/part', LyxorfcpePage)
-    history = URL('/portal/salarie-(?P<slug>\w+)/operations/consulteroperations', HistoryPage)
-    error = URL('/maintenance/.+/', ErrorPage)
-    swisslife = URL('http://fr.swisslife-am.com/fr/produits/.*', SwissLifePage)
-    etoile_gestion = URL('http://www.etoile-gestion.com/index.php/etg_fr_fr/productsheet/view/.*', EtoileGestionPage)
-    etoile_gestion_characteristics = URL('http://www.etoile-gestion.com/etg_fr_fr/ezjscore/.*', EtoileGestionCharacteristicsPage)
+    lyxorfcpe = URL(r'http://www.lyxorfcpe.com/part', LyxorfcpePage)
+    lyxorfunds = URL(r'https://www.lyxorfunds.com', LyxorFundsPage)
+    history = URL(r'/portal/salarie-(?P<slug>\w+)/operations/consulteroperations', HistoryPage)
+    error = URL(r'/maintenance/.+/', ErrorPage)
+    swisslife = URL(r'http://fr.swisslife-am.com/fr/produits/.*', SwissLifePage)
+    etoile_gestion = URL(r'http://www.etoile-gestion.com/index.php/etg_fr_fr/productsheet/view/.*', EtoileGestionPage)
+    etoile_gestion_characteristics = URL(r'http://www.etoile-gestion.com/etg_fr_fr/ezjscore/.*', EtoileGestionCharacteristicsPage)
+    etoile_gestion_details = URL(r'http://www.etoile-gestion.com/productsheet/.*', EtoileGestionDetailsPage)
+    profile = URL(r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP', ProfilePage)
+    bnp_investments = URL(r'https://optimisermon.epargne-retraite-entreprises.bnpparibas.com')
+    api_investment_details = URL(r'https://funds-api.bnpparibas.com/api/performances/FromIsinCode/', APIInvestmentDetailsPage)
+    esalia_details = URL(r'https://www.societegeneralegestion.fr/psSGGestionEntr/productsheet/view', EsaliaDetailsPage)
 
     STATE_DURATION = 10
 
@@ -82,21 +95,38 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     @need_login
     def iter_accounts(self):
         if 'accs' not in self.cache.keys():
+            no_accounts_message = None
             self.accounts.stay_or_go(slug=self.SLUG, lang=self.LANG)
             # weird wrongpass
             if not self.accounts.is_here():
                 raise BrowserIncorrectPassword()
-            multi = self.page.get_multi()
-            if len(multi):
+            multi_space = self.page.get_multi()
+            if len(multi_space):
                 # Handle multi entreprise accounts
                 accs = []
-                for id in multi:
-                    self.page.go_multi(id)
-                    for a in self.accounts.go(slug=self.SLUG).iter_accounts():
-                        a._multi = id
-                        accs.append(a)
+                for space in multi_space:
+                    space_accs = []
+                    self.page.go_multi(space)
+                    self.accounts.go(slug=self.SLUG)
+                    if not no_accounts_message:
+                        no_accounts_message = self.page.get_no_accounts_message()
+                    for acc in self.page.iter_accounts():
+                        acc._space = space
+                        space_accs.append(acc)
+                    company_name = self.profile.go(slug=self.SLUG).get_company_name()
+                    for acc in space_accs:
+                        acc.company_name = company_name
+                    accs.extend(space_accs)
             else:
+                no_accounts_message = self.page.get_no_accounts_message()
                 accs = [a for a in self.page.iter_accounts()]
+                company_name = self.profile.go(slug=self.SLUG).get_company_name()
+                for acc in accs:
+                    acc.company_name = company_name
+            if not len(accs) and no_accounts_message:
+                # Accounts list is empty and we found the
+                # message on at least one of the spaces:
+                raise NoAccountsException(no_accounts_message)
             self.cache['accs'] = accs
         return self.cache['accs']
 
@@ -105,16 +135,65 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         if account.id not in self.cache['invs']:
             self.accounts.stay_or_go(slug=self.SLUG)
             # Handle multi entreprise accounts
-            if hasattr(account, '_multi'):
-                self.page.go_multi(account._multi)
+            if hasattr(account, '_space'):
+                self.page.go_multi(account._space)
                 self.accounts.go(slug=self.SLUG)
             # Select account
             self.page.get_investment_pages(account.id)
-            invs = [i for i in self.page.iter_investment()]
+            investments_without_quantity = [i for i in self.page.iter_investment()]
             # Get page with quantity
             self.page.get_investment_pages(account.id, valuation=False)
-            self.cache['invs'][account.id] = self.page.update_invs_quantity(invs)
+            investments_without_performances = self.page.update_invs_quantity(investments_without_quantity)
+            investments = self.update_investments(investments_without_performances)
+            self.cache['invs'][account.id] = investments
         return self.cache['invs'][account.id]
+
+    @need_login
+    def update_investments(self, investments):
+        for inv in investments:
+            if inv._link:
+                if self.bnp_investments.match(inv._link):
+                    # From the current URL, which has the format:
+                    # https://optimisermon.epargne-retraite-entreprises.bnpparibas.com/Mes-Supports/11111/QS0002222T5
+                    # We can extract the investment ISIN code and use it to call routes of the BNP Wealth API
+                    self.location(inv._link)
+                    m = re.search(r'Mes-Supports/(.*)/(.*)', self.url)
+                    if m:
+                        if is_isin_valid(m.group(2)):
+                            inv.code = m.group(2)
+                            inv.code_type = Investment.CODE_TYPE_ISIN
+                        self.location('https://funds-api.bnpparibas.com/api/performances/FromIsinCode/' + inv.code)
+                        self.page.fill_investment(obj=inv)
+
+                elif self.amfcode_sg.match(inv._link) or self.lyxorfunds.match(inv._link):
+                    # SGgestion-ede or Lyxor investments: not all of them have available attributes.
+                    # For those requests to work in every case we need the headers from AccountsPage
+                    self.location(inv._link, headers={'Referer': self.accounts.build(slug=self.SLUG)})
+                    self.page.fill_investment(obj=inv)
+
+                elif self.esalia_details.match(inv._link):
+                    # Esalia (Société Générale Épargne Salariale) details page:
+                    # Fetch code, code_type & asset_category here
+                    m = re.search(r'idvm\/(.*)\/lg', inv._link)
+                    if m:
+                        if is_isin_valid(m.group(1)):
+                            inv.code = m.group(1)
+                            inv.code_type = Investment.CODE_TYPE_ISIN
+                    self.location(inv._link)
+                    inv.asset_category = self.page.get_asset_category()
+
+                elif self.etoile_gestion_details.match(inv._link):
+                    # Etoile Gestion investments details page:
+                    # Fetch asset_category & performance_history
+                    self.location(inv._link)
+                    inv.asset_category = self.page.get_asset_category()
+                    performance_url = self.page.get_performance_url()
+                    if performance_url:
+                        self.location(performance_url)
+                        if self.etoile_gestion_characteristics.is_here():
+                            inv.performance_history = self.page.get_performance_history()
+
+        return investments
 
     @need_login
     def iter_pocket(self, account):
@@ -133,13 +212,13 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     def iter_history(self, account):
         self.history.stay_or_go(slug=self.SLUG)
         # Handle multi entreprise accounts
-        if hasattr(account, '_multi'):
-            self.page.go_multi(account._multi)
+        if hasattr(account, '_space'):
+            self.page.go_multi(account._space)
             self.history.go(slug=self.SLUG)
         # Get more transactions on each page
-        self.page.show_more("50")
-        for tr in self.page.iter_history(accid=account.id):
-            yield tr
+        if self.page.show_more("50"):
+            for tr in self.page.iter_history(accid=account.id):
+                yield tr
         # Go back to first page
         self.page.go_start()
 

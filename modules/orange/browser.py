@@ -22,10 +22,13 @@ from __future__ import unicode_literals
 from requests.exceptions import ConnectTimeout
 
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded, BrowserPasswordExpired
 from .pages import LoginPage, BillsPage
-from .pages.login import ManageCGI, HomePage
-from .pages.bills import SubscriptionsPage, BillsApiPage, ContractsPage
+from .pages.login import ManageCGI, HomePage, PasswordPage
+from .pages.bills import (
+    SubscriptionsPage, SubscriptionsApiPage, BillsApiProPage, BillsApiParPage,
+    ContractsPage,
+)
 from .pages.profile import ProfilePage
 from weboob.browser.exceptions import ClientError, ServerError
 from weboob.tools.compat import basestring
@@ -36,30 +39,46 @@ __all__ = ['OrangeBillBrowser']
 
 
 class OrangeBillBrowser(LoginBrowser):
+    TIMEOUT = 60
+
     BASEURL = 'https://espaceclientv3.orange.fr'
 
-    home_page = URL('https://businesslounge.orange.fr/$', HomePage)
-    loginpage = URL('https://login.orange.fr/\?service=sosh&return_url=https://www.sosh.fr/',
-                    'https://login.orange.fr/front/login', LoginPage)
+    home_page = URL(r'https://businesslounge.orange.fr/$', HomePage)
+    loginpage = URL(
+        r'https://login.orange.fr/\?service=sosh&return_url=https://www.sosh.fr/',
+        r'https://login.orange.fr/front/login',
+        LoginPage,
+    )
+    password_page = URL(r'https://login.orange.fr/front/password', PasswordPage)
 
-    contracts = URL('https://espaceclientpro.orange.fr/api/contracts\?page=1&nbcontractsbypage=15', ContractsPage)
+    contracts = URL(r'https://espaceclientpro.orange.fr/api/contracts\?page=1&nbcontractsbypage=15', ContractsPage)
 
     subscriptions = URL(r'https://espaceclientv3.orange.fr/js/necfe.php\?zonetype=bandeau&idPage=gt-home-page', SubscriptionsPage)
-    manage_cgi = URL('https://eui.orange.fr/manage_eui/bin/manage.cgi', ManageCGI)
+    subscriptions_api = URL(r'https://sso-f.orange.fr/omoi_erb/portfoliomanager/v2.0/contractSelector/users/current', SubscriptionsApiPage)
 
-    billspage = URL('https://m.espaceclientv3.orange.fr/\?page=factures-archives',
-                    'https://.*.espaceclientv3.orange.fr/\?page=factures-archives',
-                    'https://espaceclientv3.orange.fr/\?page=factures-archives',
-                    'https://espaceclientv3.orange.fr/\?page=facture-telecharger',
-                    'https://espaceclientv3.orange.fr/maf.php',
-                    'https://espaceclientv3.orange.fr/\?idContrat=(?P<subid>.*)&page=factures-historique',
-                    'https://espaceclientv3.orange.fr/\?page=factures-historique&idContrat=(?P<subid>.*)',
-                     BillsPage)
+    manage_cgi = URL(r'https://eui.orange.fr/manage_eui/bin/manage.cgi', ManageCGI)
 
-    bills_api = URL('https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bills\?count=(?P<count>)',
-                    BillsApiPage)
+    # is billspage deprecated ?
+    billspage = URL(
+        r'https://m.espaceclientv3.orange.fr/\?page=factures-archives',
+        r'https://.*.espaceclientv3.orange.fr/\?page=factures-archives',
+        r'https://espaceclientv3.orange.fr/\?page=factures-archives',
+        r'https://espaceclientv3.orange.fr/\?page=facture-telecharger',
+        r'https://espaceclientv3.orange.fr/maf.php',
+        r'https://espaceclientv3.orange.fr/\?idContrat=(?P<subid>.*)&page=factures-historique',
+        r'https://espaceclientv3.orange.fr/\?page=factures-historique&idContrat=(?P<subid>.*)',
+        BillsPage,
+    )
 
-    doc_api = URL('https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bill/(?P<dir>.*)/(?P<fact_type>.*)/\?(?P<billparams>)')
+    bills_api_pro = URL(
+        r'https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bills\?count=(?P<count>)',
+        BillsApiProPage,
+    )
+
+    bills_api_par = URL(r'https://sso-f.orange.fr/omoi_erb/facture/v2.0/billsAndPaymentInfos/users/current/contracts/(?P<subid>\d+)', BillsApiParPage)
+    doc_api_par = URL(r'https://sso-f.orange.fr/omoi_erb/facture/v1.0/pdf')
+
+    doc_api_pro = URL('https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bill/(?P<dir>.*)/(?P<fact_type>.*)/\?(?P<billparams>)')
     profile = URL('/\?page=profil-infosPerso', ProfilePage)
 
     def do_login(self):
@@ -71,7 +90,15 @@ class OrangeBillBrowser(LoginBrowser):
         except ClientError as error:
             if error.response.status_code == 401:
                 raise BrowserIncorrectPassword()
+            if error.response.status_code == 403:
+                # occur when user try several times with a bad password, orange block his account for a short time
+                raise BrowserIncorrectPassword(error.response.json())
             raise
+
+        if self.password_page.is_here():
+            error_message = self.page.get_change_password_message()
+            if error_message:
+                raise BrowserPasswordExpired(error_message)
 
     def get_nb_remaining_free_sms(self):
         raise NotImplementedError()
@@ -124,20 +151,33 @@ class OrangeBillBrowser(LoginBrowser):
         # if nb_sub is 0, we continue, because we can get them in next url
 
         for sub in self._iter_subscriptions_by_type(profile.name, 'sosh'):
+            nb_sub += 1
             yield sub
         for sub in self._iter_subscriptions_by_type(profile.name, 'orange'):
+            nb_sub += 1
             yield sub
+
+        if nb_sub == 0:
+            # No subscriptions found, trying with the API.
+            headers = {
+                'X-Orange-Caller-Id': 'ECQ',
+            }
+            self.subscriptions_api.go(headers=headers)
+            for sub in self.page.iter_subscription():
+                sub.subscriber = profile.name
+                yield sub
 
     @need_login
     def iter_documents(self, subscription):
         documents = []
         if subscription._is_pro:
-            for d in self.bills_api.go(subid=subscription.id, count=72).get_bills(subid=subscription.id):
+            for d in self.bills_api_pro.go(subid=subscription.id, count=72).get_bills(subid=subscription.id):
                 documents.append(d)
             # check pagination for this subscription
             assert len(documents) != 72
         else:
-            self.billspage.go(subid=subscription.id)
+            headers = {'x-orange-caller-id': 'ECQ'}
+            self.bills_api_par.go(subid=subscription.id, headers=headers)
             for b in self.page.get_bills(subid=subscription.id):
                 documents.append(b)
         return iter(documents)

@@ -25,29 +25,30 @@ from decimal import Decimal
 import re
 from io import BytesIO
 from datetime import date
+from PIL import Image
 
 from weboob.browser.pages import HTMLPage, LoggedPage, pagination, NextPage, FormNotFound, PartialHTMLPage, LoginPage, CsvPage, RawPage, JsonPage
 from weboob.browser.elements import ListElement, ItemElement, method, TableElement, SkipItem, DictElement
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Field, Format,
     Regexp, Date, AsyncLoad, Async, Eval, Env,
-    Currency as CleanCurrency, Map,
+    Currency as CleanCurrency, Map, Coalesce,
+    MapIn, Lower,
 )
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.html import Attr, Link, TableCell
 from weboob.capabilities.bank import (
     Account, Investment, Recipient, Transfer, AccountNotFound,
-    AddRecipientBankError, TransferInvalidAmount, Loan,
+    AddRecipientBankError, TransferInvalidAmount, Loan, AccountOwnership,
 )
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.capabilities.base import NotAvailable, Currency
+from weboob.capabilities.base import NotAvailable, Currency, find_object, empty
 from weboob.capabilities.profile import Person
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.tools.value import Value
 from weboob.tools.date import parse_french_date
-from weboob.tools.captcha.virtkeyboard import VirtKeyboard, VirtKeyboardError
-from weboob.tools.compat import urljoin
+from weboob.tools.compat import urljoin, urlencode, urlparse, range
 from weboob.exceptions import BrowserQuestion, BrowserIncorrectPassword, BrowserHTTPNotFound, BrowserUnavailable, ActionNeeded
 
 
@@ -64,7 +65,7 @@ class IbanPage(LoggedPage, HTMLPage):
         if self.doc.xpath('//div[has-class("alert")]/p[contains(text(), "Une erreur est survenue")]') or \
            self.doc.xpath('//div[has-class("alert")]/p[contains(text(), "Le compte est introuvable")]'):
             return NotAvailable
-        return CleanText('//table[thead[tr[th[contains(text(), "Code I.B.A.N")]]]]/tbody/tr/td[2]', replace=[(' ', '')])(self.doc)
+        return CleanText('//div[strong[contains(text(),"IBAN")]]/div[contains(@class, "definition")]', replace=[(' ', '')])(self.doc)
 
 
 class AuthenticationPage(HTMLPage):
@@ -80,6 +81,9 @@ class AuthenticationPage(HTMLPage):
         form.submit()
 
         self.browser.auth_token = None
+
+    def get_confirmation_link(self):
+        return Link('//a[contains(@href, "validation")]')(self.doc)
 
     def sms_first_step(self):
         """
@@ -98,9 +102,11 @@ class AuthenticationPage(HTMLPage):
             raise BrowserIncorrectPassword(error)
 
         form = self.get_form()
-        self.browser.auth_token = form['flow_secureForm_instance']
-        form['otp_prepare[receiveCode]'] = ''
-        form.submit()
+        # regular login way detection
+        if 'flow_secureForm_instance' in form:
+            self.browser.auth_token = form['flow_secureForm_instance']
+            form['otp_prepare[receiveCode]'] = ''
+            form.submit()
 
         raise BrowserQuestion(Value('pin_code', label='Enter the PIN Code'))
 
@@ -110,13 +116,19 @@ class Transaction(FrenchTransaction):
                 (re.compile(u'^CHQ\. (?P<text>.*)'),        FrenchTransaction.TYPE_CHECK),
                 (re.compile('^(ACHAT|PAIEMENT) CARTE (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD),
+                (re.compile('^(ACHAT |PAIEMENT )?CARTE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2}) (?P<text>.*)'),
+                                                            FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^(?P<text>.+)?(ACHAT|PAIEMENT) CARTE (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{4}) (?P<text2>.*)'),
+                                                            FrenchTransaction.TYPE_CARD),
+                (re.compile(r'^(?P<text>.+)?(ACHAT|PAIEMENT) CARTE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<text2>.*)'),
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^(?P<text>.+)?((ACHAT|PAIEMENT)\s)?CARTE (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{4}) (?P<text2>.*)'),
                                                             FrenchTransaction.TYPE_CARD),
+                (re.compile(r'^(?P<text>.+)?((ACHAT|PAIEMENT)\s)?CARTE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<text2>.*)'),
+                                                            FrenchTransaction.TYPE_CARD),
                 (re.compile('^(PRLV SEPA |PRLV |TIP )(?P<text>.*)'),
                                                             FrenchTransaction.TYPE_ORDER),
-                (re.compile('^RETRAIT DAB (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*)'),
+                (re.compile('^RETRAIT DAB (?P<dd>\d{2})/?(?P<mm>\d{2})/?(?P<yy>\d{2}) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_WITHDRAWAL),
                 (re.compile(r'^([A-Z][\sa-z]* )?RETRAIT DAB (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{4}) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_WITHDRAWAL),
@@ -135,45 +147,72 @@ class VirtKeyboardPage(HTMLPage):
     pass
 
 
-class BoursoramaVirtKeyboard(VirtKeyboard):
-    symbols = {'0': (17, 7, 24, 17),
-               '1': (18, 6, 21, 18),
-               '2': (9, 7, 32, 34),
-               '3': (10, 7, 31, 34),
-               '4': (11, 6, 29, 34),
-               '5': (14, 6, 28, 34),
-               '6': (7, 7, 34, 34),
-               '7': (5, 6, 36, 34),
-               '8': (8, 7, 32, 34),
-               '9': (4, 7, 38, 34)}
+class BoursoramaVirtKeyboard(object):
+    symbols = {
+        '0': '0000110000001111110001110011100110000110111000011011100001101100000110111000011011100001100110000110011100111000111111000000110000',
+        '1': '0000110000000111000000111100000111110000011011000000001100000000110000000011000000001100000000110000000011000000001100000000110000',
+        '2': '0001111000011111110001100011100000000110000000011000000001100000001110000001110000001110000001110000001110000001111111110111111111',
+        '3': '0001111000011111111001100011100000000110000000011000000011100001111000000111110000000001100000000110111000111001111111100001110000',
+        '4': '0000011100000011110000001111000001101100000100110000110011000110001100011000110011111111101111111110000000111000000011000000001100',
+        '5': '1111111100111111110011100000001100000000110000000011111111001111111110010000011000000001100000000110111000111011111111000001110000',
+        '6': '0000111000001111111001110001000110000000011000000011101111001111111110111000011011100001100110000110011100111000111111000000111000',
+        '7': '0111111111011111111100000001100000000110000000111000000011000000011100000001100000000110000000110000000011000000011100000001100000',
+        '8': '0001111000011111111011100011101110000110011000011001111111000011111000011100111011100001101110000110111000111001111111100001111000',
+        '9': '0001110000011111110001100011101110000110110000011011100001100111111110001111011000000001100000000110001000110001111111000001110000',
+    }
 
-    color = (255,255,255)
+    def __init__(self, browser, page):
+        self.browser = browser
+        self.fingerprints = {}
+        col = 0
 
-    def __init__(self, page):
-        self.md5 = {}
+        keys = page.doc.xpath('//ul[@class="password-input"]//button/@data-matrix-key')
+
         for button in page.doc.xpath('//ul[@class="password-input"]//button'):
-            c = button.attrib['data-matrix-key']
             txt = button.attrib['style'].replace('background-image:url(data:image/png;base64,', '').rstrip(');')
-            img = BytesIO(b64decode(txt.encode('ascii')))
-            self.load_image(img, self.color, convert='RGB')
-            self.load_symbols((0, 0, 42, 42), c)
 
-    def load_symbols(self, coords, c):
-        coord = self.get_symbol_coords(coords)
-        if coord == (-1, -1, -1, -1):
-            return
-        self.md5[coord] = c
+            img = Image.open(BytesIO(b64decode(txt.encode('ascii'))))
+            width, height = img.size
 
-    def get_code(self, password):
-        code = ''
-        for i, d in enumerate(password):
-            if i > 0:
-                code += '|'
-            try:
-                code += self.md5[self.symbols[d]]
-            except KeyError:
-                raise VirtKeyboardError()
-        return code
+            img = img.crop((16, 6, width - 16, height - 23))
+            width, height = img.size
+
+            matrix = img.load()
+            s = ""
+            for y in range(height):
+                for x in range(width):
+                    (r, g, b, a) = matrix[x, y]
+                    # If the pixel is white and opaque enough
+                    if a > 200 and r + g + b > 740:
+                        s += "1"
+                    else:
+                        s += "0"
+            self.fingerprints[keys[col]] = s
+            col += 1
+
+    def get_symbol_code(self, char):
+        fingerprint = self.symbols[char]
+        for code, string in self.fingerprints.items():
+            if fingerprint == string:
+                return code
+        # Image contains some noise, and the match is not always perfect
+        # (this is why we can't use md5 hashs)
+        # But if we can't find the perfect one, we can take the best one
+        best = 0
+        result = None
+        for code, string in self.fingerprints.items():
+            match = 0
+            for j, bit in enumerate(string):
+                if bit == fingerprint[j]:
+                    match += 1
+            if match > best:
+                best = match
+                result = code
+        self.browser.logger.info(self.fingerprints[result] + "(" + result + ") match " + char)
+        return result
+
+    def get_string_code(self, string):
+        return '|'.join(self.get_symbol_code(c) for c in string)
 
 
 class LoginPage(LoginPage, HTMLPage):
@@ -192,8 +231,8 @@ class LoginPage(LoginPage, HTMLPage):
             password = ''.join([c if c.isdigit() else [k for k, v in self.TO_DIGIT.items() if c in v][0] for c in password.lower()])
         form = self.get_form()
         keyboard_page = self.browser.keyboard.open()
-        vk = BoursoramaVirtKeyboard(keyboard_page)
-        code = vk.get_code(password)
+        vk = BoursoramaVirtKeyboard(self.browser, keyboard_page)
+        code = vk.get_string_code(password)
         form['form[login]'] = login
         form['form[fakePassword]'] = len(password) * '•'
         form['form[password]'] = code
@@ -214,26 +253,36 @@ class AccountsPage(LoggedPage, HTMLPage):
         # This id appears when there are no accounts (pro and pp)
         return not self.doc.xpath('//div[contains(@id, "alert-random")]')
 
-    ACCOUNT_TYPES = {u'comptes courants':      Account.TYPE_CHECKING,
-                     u'cav':                   Account.TYPE_CHECKING,
-                     'livret':                 Account.TYPE_SAVINGS,
-                     'pel':                    Account.TYPE_SAVINGS,
-                     'cel':                    Account.TYPE_SAVINGS,
-                     u'comptes épargne':       Account.TYPE_SAVINGS,
-                     u'mon épargne':           Account.TYPE_SAVINGS,
-                     'csljeune':               Account.TYPE_SAVINGS, # in url
-                     u'ord':                   Account.TYPE_MARKET,
-                     u'comptes bourse':        Account.TYPE_MARKET,
-                     u'mes placements financiers': Account.TYPE_MARKET,
-                     u'av':                    Account.TYPE_LIFE_INSURANCE,
-                     u'assurances vie':        Account.TYPE_LIFE_INSURANCE,
-                     u'assurance-vie':         Account.TYPE_LIFE_INSURANCE,
-                     u'mes crédits':           Account.TYPE_LOAN,
-                     u'crédit':                Account.TYPE_LOAN,
-                     u'prêt':                  Account.TYPE_LOAN,
-                     u'pea':                   Account.TYPE_PEA,
-                     'carte':                  Account.TYPE_CARD,
-                    }
+    ACCOUNT_TYPES = {
+        'comptes courants': Account.TYPE_CHECKING,
+        'cav': Account.TYPE_CHECKING,
+        'livret': Account.TYPE_SAVINGS,
+        'livret-a': Account.TYPE_SAVINGS,
+        'pel': Account.TYPE_SAVINGS,
+        'cel': Account.TYPE_SAVINGS,
+        'ldd': Account.TYPE_SAVINGS,
+        'csl': Account.TYPE_SAVINGS,
+        'comptes épargne': Account.TYPE_SAVINGS,
+        'mon épargne': Account.TYPE_SAVINGS,
+        'csljeune': Account.TYPE_SAVINGS,  # in url
+        'ord': Account.TYPE_MARKET,
+        'comptes bourse': Account.TYPE_MARKET,
+        'mes placements financiers': Account.TYPE_MARKET,
+        'av': Account.TYPE_LIFE_INSURANCE,
+        'assurances vie': Account.TYPE_LIFE_INSURANCE,
+        'assurance-vie': Account.TYPE_LIFE_INSURANCE,
+        'mes crédits': Account.TYPE_LOAN,
+        'crédit': Account.TYPE_LOAN,
+        'prêt': Account.TYPE_LOAN,
+        'pea': Account.TYPE_PEA,
+        'carte': Account.TYPE_CARD,
+    }
+
+    ACCOUNTS_OWNERSHIP = {
+        'Comptes de mes enfants': AccountOwnership.ATTORNEY,
+        'joint': AccountOwnership.CO_OWNER,
+        'commun': AccountOwnership.CO_OWNER,
+    }
 
     @method
     class iter_accounts(ListElement):
@@ -249,7 +298,6 @@ class AccountsPage(LoggedPage, HTMLPage):
                 return not self.is_external() and not any(x in Field('url')(self) for x in ('automobile', 'assurance/protection', 'assurance/comptes', 'assurance/famille'))
 
             obj_label = CleanText('.//a[has-class("account--name")] | .//div[has-class("account--name")]')
-
             obj_currency = FrenchTransaction.Currency('.//a[has-class("account--balance")]')
             obj_valuation_diff = Async('details') & CleanDecimal('//li[h4[text()="Total des +/- values"]]/h3 |\
                         //li[span[text()="Total des +/- values latentes"]]/span[has-class("overview__value")]', replace_dots=True, default=NotAvailable)
@@ -289,6 +337,8 @@ class AccountsPage(LoggedPage, HTMLPage):
                     raise SkipItem()
                 return id
 
+            obj_number = obj_id
+
             def obj_type(self):
                 # card url is /compte/cav/xxx/carte/yyy so reverse to match "carte" before "cav"
                 for word in Field('url')(self).lower().split('/')[::-1]:
@@ -311,6 +361,23 @@ class AccountsPage(LoggedPage, HTMLPage):
                     return Account.TYPE_LOAN
 
                 return Account.TYPE_UNKNOWN
+
+            def obj_ownership(self):
+                ownership = Coalesce(
+                    MapIn(
+                        CleanText('../tr[contains(@class, "list--accounts--master")]//h4/text()'),
+                        self.page.ACCOUNTS_OWNERSHIP,
+                        default=NotAvailable
+                    ),
+                    MapIn(
+                        Lower(Field('label')),
+                        self.page.ACCOUNTS_OWNERSHIP,
+                        default=NotAvailable
+                    ),
+                    default=NotAvailable
+                )(self)
+
+                return ownership
 
             def obj_url(self):
                 link = Attr('.//a[has-class("account--name")] | .//a[2] | .//div/a', 'href', default=NotAvailable)(self)
@@ -337,6 +404,7 @@ class LoanPage(LoggedPage, HTMLPage):
 
     LOAN_TYPES = {
         "PRÊT PERSONNEL": Account.TYPE_CONSUMER_CREDIT,
+        "CLIC": Account.TYPE_CONSUMER_CREDIT,
     }
 
     @method
@@ -345,19 +413,32 @@ class LoanPage(LoggedPage, HTMLPage):
         klass = Loan
 
         obj_id = CleanText('//h3[contains(@class, "account-number")]/strong')
-        obj_label =  CleanText('//h2[contains(@class, "page-title__account")]//div[@class="account-edit-label"]/span')
-        obj_total_amount = CleanDecimal('//p[contains(text(), "Montant emprunt")]/span', replace_dots=True)
-        obj_currency = CleanCurrency('//p[contains(text(), "Montant emprunt")]/span')
-        obj_duration = CleanDecimal('//p[contains(text(), "Nombre prévisionnel d\'échéances restantes")]/span', default=NotAvailable)
-        obj_rate = CleanDecimal('//p[contains(text(), "Taux nominal en vigueur du prêt")]/span')
-        obj_nb_payments_left = CleanDecimal('//p[contains(text(), "Nombre prévisionnel d\'échéances restantes")]/span', default=NotAvailable)
-        obj_next_payment_amount = CleanDecimal('//p[contains(text(), "Montant de la prochaine échéance")]/span', replace_dots=True, default=NotAvailable)
-        obj_nb_payments_total = CleanDecimal('//p[contains(text(), "Nombre d\'écheances totales") or contains(text(), "Nombre total d\'échéances")]/span')
+        obj_label =  CleanText('//h2[contains(@class, "page-title__account")]//*[@class="account-edit-label"]/span[1]')
+        obj_currency = CleanCurrency('//p[contains(text(), "Solde impayé")]/span')
+        obj_duration = CleanDecimal.French('//p[contains(text(), "échéances restantes")]/span', default=NotAvailable)
+        obj_rate = CleanDecimal.French('//p[contains(text(), "Taux nominal en vigueur du prêt")]/span', default=NotAvailable)
+        obj_nb_payments_left = CleanDecimal.French('//p[contains(text(), "échéances restantes")]/span', default=NotAvailable)
+        obj_next_payment_amount = CleanDecimal.French('//p[contains(text(), "Montant de la prochaine échéance")]/span', default=NotAvailable)
+        obj_nb_payments_total = CleanDecimal.French('//p[contains(text(), "écheances totales") or contains(text(), "Nombre total")]/span')
         obj_subscription_date = Date(CleanText('//p[contains(text(), "Date de départ du prêt")]/span'), parse_func=parse_french_date)
-        obj_maturity_date = Date(CleanText('//p[contains(text(), "Date prévisionnelle d\'échéance finale")]/span'), parse_func=parse_french_date, default=NotAvailable)
+
+        def obj_total_amount(self):
+            total_amount = CleanText('//p[contains(text(), "Montant emprunt")]/span')(self)
+            if total_amount:
+                return CleanDecimal.French('//p[contains(text(), "Montant emprunt")]/span')(self)
+            return CleanDecimal.French('//div[contains(text(), "Montant emprunt")]/following-sibling::div')(self)
+
+        def obj_maturity_date(self):
+            maturity_date = CleanText('//p[contains(text(), "échéance finale")]/span')(self)
+            if maturity_date:
+                # Sometimes there is no maturity date, so instead there is just a dash
+                if maturity_date == '-':
+                    return NotAvailable
+                return Date(CleanText('//p[contains(text(), "échéance finale")]/span'), parse_func=parse_french_date)(self)
+            return Date(Regexp(CleanText('//p[contains(text(), "date de votre dernière échéance")]'), r'(\d.*)'), parse_func=parse_french_date, default=NotAvailable)(self)
 
         def obj_balance(self):
-            balance = CleanDecimal('//p[contains(text(), "Capital restant dû")]/span', replace_dots=True)(self)
+            balance = CleanDecimal.French('//div[contains(text(), "Capital restant dû")]/following-sibling::div')(self)
             if balance > 0:
                 balance *= -1
             return balance
@@ -370,7 +451,7 @@ class LoanPage(LoggedPage, HTMLPage):
             tmp = CleanText('//p[contains(text(), "Date de la prochaine échéance")]/span')(self)
             if tmp == "-":
                 return NotAvailable
-            return Date(CleanText('//p[contains(text(), "Date de la prochaine échéance")]/span'), parse_func=parse_french_date)(self)
+            return Date(CleanText('//div[contains(text(), "Prochaine échéance")]/following-sibling::div'))(self)
 
 
 class NoAccountPage(LoggedPage, HTMLPage):
@@ -409,6 +490,7 @@ class CalendarPage(LoggedPage, HTMLPage):
 
 
 class HistoryPage(LoggedPage, HTMLPage):
+    @pagination
     @method
     class iter_history(ListElement):
         item_xpath = '//ul[has-class("list__movement")]/li[div and not(contains(@class, "summary")) \
@@ -416,14 +498,32 @@ class HistoryPage(LoggedPage, HTMLPage):
                                                                and not(contains(@class, "separator")) \
                                                                and not(contains(@class, "list__movement__line--deffered"))]'
 
+        def next_page(self):
+            next_page = self.el.xpath('//li[a[contains(text(), "Mouvements")]]')
+            if next_page:
+                next_page_token = Attr('.', 'data-operations-next-pagination')(next_page[0])
+                params = {
+                    'rumroute': 'accounts.bank.movements',
+                    'continuationToken': next_page_token
+                }
+                parsed = urlparse(self.page.url)
+                return '%s://%s%s?%s' %(parsed.scheme, parsed.netloc, parsed.path, urlencode(params))
+
+
         class item(ItemElement):
             klass = Transaction
 
-            obj_raw = Transaction.Raw(CleanText('.//div[has-class("list__movement__line--label__name")]'))
-            obj_date = Date(Attr('.//time', 'datetime'))
             obj_amount = CleanDecimal('.//div[has-class("list__movement__line--amount")]', replace_dots=True)
             obj_category = CleanText('.//span[has-class("category")]')
             obj__account_name = CleanText('.//span[contains(@class, "account__name-xs")]', default=None)
+
+            # div "label__name" contain two span: one with the short label (hidden in the website) and one with
+            # the long label. We try to get the long one. If it's empty, we take the content of "label__name" to
+            # be sure to have a value.
+            obj_raw = Coalesce(
+                Transaction.Raw(CleanText('.//span[has-class("list__movement--label-long")]')),
+                Transaction.Raw(CleanText('.//div[has-class("list__movement__line--label__name")]')),
+            )
 
             def obj_id(self):
                 return Attr('.', 'data-id', default=NotAvailable)(self) or Attr('.', 'data-custom-id', default=NotAvailable)(self)
@@ -483,6 +583,16 @@ class HistoryPage(LoggedPage, HTMLPage):
                         return False
                 return True
 
+            def condition(self):
+                # Users can split their transactions if they want. We don't want this kind
+                # of custom transaction because:
+                #  - The sum of this transactions can be different than the original transaction
+                #     ex: The real transaction as an amount of 100€, the user is free to split it on 50€ and 60€
+                #  - The original transaction is scraped anyway and we don't want duplicates
+                if self.xpath('./div[has-class("list__movement__line--block__split")]'):
+                    return False
+                return True
+
     def get_cards_number_link(self):
         return Link('//a[small[span[contains(text(), "carte bancaire")]]]', default=NotAvailable)(self.doc)
 
@@ -504,15 +614,19 @@ class CardHistoryPage(LoggedPage, CsvPage):
             klass = Transaction
 
             obj_raw = Transaction.Raw(Dict('label'))
-            obj_date = Date(Dict('dateVal'), dayfirst=True)
+            obj_bdate = Date(Dict('dateOp'))
+
+            def obj_date(self):
+                return self.page.browser.get_debit_date(Field('bdate')(self))
+
             obj__account_label = Dict('accountLabel')
             obj__is_coming = False
 
             def obj_amount(self):
                 if Field('type')(self) == Transaction.TYPE_CARD_SUMMARY:
                     # '-' so the reimbursements appear positively in the card transactions:
-                    return -CleanDecimal(Dict('amount'), replace_dots=True)(self)
-                return CleanDecimal(Dict('amount'), replace_dots=True)(self)
+                    return -CleanDecimal.French(Dict('amount'))(self)
+                return CleanDecimal.French(Dict('amount'))(self)
 
             def obj_rdate(self):
                 if self.obj.rdate:
@@ -533,16 +647,6 @@ class CardHistoryPage(LoggedPage, CsvPage):
 
             def obj_category(self):
                 return Dict('category')(self)
-
-            # The csv page shows every transactions of the card account AND the associated
-            # check account. Here we want only the card transactions.
-            # Also, if there is more than one card account, the csv page will show
-            # transactions of every card account (smart) ... So we need to check for
-            # account number.
-            def validate(self, obj):
-                if "Relevé" in obj.raw:
-                    return Env('account_number')(self) in obj.raw
-                return ("CARTE" in obj.raw or "CARTE" in obj._account_label) and Env('account_number')(self) in Dict('accountNum')(self)
 
 
 class Myiter_investment(TableElement):
@@ -644,7 +748,7 @@ class MarketPage(LoggedPage, HTMLPage):
         # Xpath can be h3/h4 or div/span; in both cases
         # the first node contains "Solde Espèces":
         valuation = CleanDecimal('//li/*[contains(text(), "Solde Espèces")]/following-sibling::*', replace_dots=True, default=None)(self.doc)
-        if valuation:
+        if not empty(valuation):
             yield create_french_liquidity(valuation)
 
         for inv in self.get_investment():
@@ -768,11 +872,24 @@ def MySelect(*args, **kwargs):
 
 
 class ProfilePage(LoggedPage, HTMLPage):
+
+    def get_children_firstnames(self):
+        names = []
+
+        for child in self.doc.xpath('//span[@class="transfer__account-name"]'):
+            name = child.text.split('\n')
+            assert len(name) > 1, "There is a child without firstname or the html code has changed !"
+            names.append(child.text.split('\n')[0])
+
+        return names
+
     @method
     class get_profile(ItemElement):
         klass = Person
 
         obj_name = Format('%s %s %s', MySelect('genderTitle'), MyInput('firstName'), MyInput('lastName'))
+        obj_firstname = MyInput('firstName')
+        obj_lastname = MyInput('lastName')
         obj_nationality = CleanText(u'//span[contains(text(), "Nationalité")]/span')
         obj_spouse_name = MyInput('spouseFirstName')
         obj_children = CleanDecimal(MyInput('dependentChildren'), default=NotAvailable)
@@ -787,19 +904,30 @@ class ProfilePage(LoggedPage, HTMLPage):
 
 class CardsNumberPage(LoggedPage, HTMLPage):
     def populate_cards_number(self, cards):
-        for card in cards:
-            # The second hash of the card's url is used to get
-            # the card's hash on the HTML page:
-            card_url_hash = re.search('carte\/(.*)', card.url).group(1)
-            card_hash = CleanText('//nav[ul[li[a[contains(@href, "%s")]]]]/@data-card-key' % card_url_hash)(self.doc)
-            # With the card hash we can get the card number.
-            # Non activated cards have no card_hash and therefore no
-            # card number so we can easily eliminate them afterwards.
-            card_details = CleanText('//div[@data-card-key="%s"]' % card_hash)(self.doc).replace(' ', '')
-            # We are looking for "4978********1234" in card_details:
-            number_search = re.search(r'\d{4}\*{8}\d{4}', card_details)
-            if number_search:
-                card.number = number_search.group(0)
+        """
+        Cards seems to be related to 2 hashs. The first one is already set in the account`id` (card.id)
+        the second one is only findable in this page (which gives us the card number).
+        We need to find the link between both hash to set the card number to the good account.
+        """
+
+        # We get all related card hashs in the page associate each one with the correct card account
+        for _hash in self.doc.xpath('//div[contains(@class, "credit-card-carousel")]/@data-card-key'):
+            # We get the card number associate to the cards_hash
+            card_number = CleanText(
+                '//div[@data-card-key="%s" and contains(@class, "credit-card-carousel")]'
+                '//*[local-name()="svg"]//*[local-name()="tspan"]' % _hash,
+                replace=[(' ', '')]
+            )(self.doc)
+
+            # There is only one place in the code where we can associate both hash to each other. The second hash
+            # that we found with the first one match with a card account id.
+            url = Link('//nav[@data-card-key="%s"]//a[contains(@href, "calendrier")]' % _hash, NotAvailable)(self.doc)
+
+            # If there is no coming, that's not a deferred card
+            if not empty(url):
+                card_id = re.search(r'\/carte\/(.*)\/calendrier', url).group(1)
+                card = find_object(cards, id=card_id, error=AccountNotFound)
+                card.number = card_number
 
 
 class HomePage(LoggedPage, HTMLPage):
@@ -840,7 +968,7 @@ class TransferAccounts(LoggedPage, HTMLPage):
 class TransferRecipients(LoggedPage, HTMLPage):
     @method
     class iter_recipients(ListElement):
-        item_xpath = '//div[contains(@class, "deploy__wrapper")]//label[@class="account-choice__label"]'
+        item_xpath = '//div[contains(@class, "deploy__wrapper")]//label'
 
         class item(ItemElement):
             klass = Recipient
@@ -853,10 +981,10 @@ class TransferRecipients(LoggedPage, HTMLPage):
                 return label.rstrip('-').rstrip()
 
             def obj_category(self):
-                text = CleanText('./ancestor::div[has-class("deploy--item")]//a[has-class("deploy__title")]')(self)
-                if 'Mes comptes Boursorama Banque' in text:
+                text = CleanText('./ancestor::div[has-class("deploy--item")]//span')(self).lower()
+                if 'mes comptes boursorama banque' in text:
                     return 'Interne'
-                elif any(exp in text for exp in ('Comptes externes', 'Comptes de tiers', 'Mes bénéficiaires')):
+                elif any(exp in text for exp in ('comptes externes', 'comptes de tiers', 'mes bénéficiaires')):
                     return 'Externe'
 
             def obj_iban(self):
@@ -903,10 +1031,7 @@ class TransferCharac(LoggedPage, HTMLPage):
         else:
             assert self.get_option(form.el.xpath('//select[@id="Characteristics_schedulingType"]')[0], 'Différé') == '2'
             form['Characteristics[schedulingType]'] = '2'
-            # If we let the 0 in the front of the month or the day like 02, the website will not interpret the good date
-            form['Characteristics[scheduledDate][day]'] = exec_date.strftime('%d').lstrip("0")
-            form['Characteristics[scheduledDate][month]'] = exec_date.strftime('%m').lstrip("0")
-            form['Characteristics[scheduledDate][year]'] = exec_date.strftime('%Y')
+            form['Characteristics[scheduledDate]'] = exec_date.strftime('%d/%m/%Y')
 
         form['Characteristics[notice]'] = 'none'
         form.submit()
@@ -919,25 +1044,25 @@ class TransferConfirm(LoggedPage, HTMLPage):
             raise TransferInvalidAmount(message=errors)
 
     def need_refresh(self):
-        return not self.doc.xpath('//form[@name="Confirm"]//button[contains(text(), "Je valide")]')
+        return not self.doc.xpath('//form[@name="Confirm"]//button[contains(text(), "Valider")]')
 
     @method
     class get_transfer(ItemElement):
         klass = Transfer
 
-        obj_label = CleanText('//div[@id="transfer-label"]/span[@class="transfer__account-value"]')
-        obj_amount = CleanDecimal('//div[@id="transfer-amount"]/span[@class="transfer__account-value"]', replace_dots=True)
-        obj_currency = CleanCurrency('//div[@id="transfer-amount"]/span[@class="transfer__account-value"]')
+        obj_label = CleanText('//span[@id="transfer-label"]/span[@class="transfer__account-value"]')
+        obj_amount = CleanDecimal.French('//span[@id="transfer-amount"]/span[@class="transfer__account-value"]')
+        obj_currency = CleanCurrency('//span[@id="transfer-amount"]/span[@class="transfer__account-value"]')
 
         obj_account_label = CleanText('//span[@id="transfer-origin-account"]')
         obj_recipient_label = CleanText('//span[@id="transfer-destination-account"]')
 
         def obj_exec_date(self):
-            type_ = CleanText('//div[@id="transfer-type"]/span[@class="transfer__account-value"]')(self)
+            type_ = CleanText('//span[@id="transfer-type"]/span[@class="transfer__account-value"]')(self)
             if type_ == 'Ponctuel':
                 return datetime.date.today()
             elif type_ == 'Différé':
-                return Date(CleanText('//div[@id="transfer-date"]/span[@class="transfer__account-value"]'), dayfirst=True)(self)
+                return Date(CleanText('//span[@id="transfer-date"]/span[@class="transfer__account-value"]'), dayfirst=True)(self)
 
     def submit(self):
         form = self.get_form(name='Confirm')
@@ -976,42 +1101,31 @@ class AddRecipientPage(LoggedPage, HTMLPage):
         form['externalAccountsPrepareType[beneficiaryFirstname]'] = recipient.label
         form['externalAccountsPrepareType[bank]'] = recipient.bank_name or 'Autre'
         form['externalAccountsPrepareType[iban]'] = recipient.iban
+        form['submit'] = ''
         form.submit()
 
     def is_send_sms(self):
-        return self._is_form(name='otp_prepare')
+        return self._is_form(name='strong_authentication_prepare')
 
     def send_sms(self):
-        form = self.get_form(name='otp_prepare')
-        form['otp_prepare[receiveCode]'] = ''
+        form = self.get_form(name='strong_authentication_prepare')
         form.submit()
 
     def is_confirm_sms(self):
-        return self._is_form(name='otp_confirm')
+        return self._is_form(name='strong_authentication_confirm')
 
-    def confirm_sms(self, code):
-        form = self.get_form(name='otp_confirm')
-        form['otp_confirm[otpCode]'] = code
-        form.submit()
+    def get_confirm_sms_form(self):
+        form = self.get_form(name='strong_authentication_confirm')
+        recipient_form = {k: v for k, v in form.items()}
+        recipient_form['url'] = form.url
+        return recipient_form
 
-    def is_confirm(self):
+    def is_confirm_send_sms(self):
         return self._is_form(name='externalAccountsConfirmType')
 
-    def confirm(self):
-        self.get_form(name='externalAccountsConfirmType').submit()
-
-    def get_recipient(self):
-        div = self.doc.xpath('//div[@class="confirmation__text"]')[0]
-
-        ret = Recipient()
-        ret.label = CleanText('//p[b[contains(text(),"Libellé du compte :")]]/text()')(div)
-        ret.iban = ret.id = CleanText('//p[b[contains(text(),"Iban :")]]/text()')(div)
-        ret.bank_name = CleanText(u'//p[b[contains(text(),"Établissement bancaire :")]]/text()')(div)
-        ret.currency = u'EUR'
-        ret.category = u'Externe'
-        ret.enabled_at = datetime.date.today()
-        assert ret.label
-        return ret
+    def confirm_send_sms(self):
+        form = self.get_form(name='externalAccountsConfirmType')
+        form.submit()
 
     def is_created(self):
         return CleanText('//p[contains(text(), "Le bénéficiaire a bien été ajouté.")]')(self.doc) != ""

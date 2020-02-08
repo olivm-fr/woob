@@ -24,22 +24,24 @@ from weboob.browser.pages import LoggedPage, JsonPage, pagination
 from weboob.browser.elements import ItemElement, method, DictElement
 from weboob.browser.filters.standard import (
     CleanDecimal, CleanText, Date, Format, BrowserURL, Env,
-    Field,
+    Field, Regexp, Currency as CurrencyFilter,
 )
 from weboob.browser.filters.json import Dict
-from weboob.capabilities.base import Currency
+from weboob.capabilities.base import Currency, empty
 from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account
-from weboob.capabilities.bill import Document, Subscription
+from weboob.capabilities.bank import Account, Investment
+from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.exceptions import (
-    BrowserUnavailable, NoAccountsException, BrowserIncorrectPassword, BrowserPasswordExpired,
+    BrowserUnavailable, NoAccountsException, BrowserPasswordExpired,
     AuthMethodNotImplemented,
 )
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
+from weboob.tools.capabilities.bank.investments import is_isin_valid
 from weboob.tools.compat import quote_plus
 
 from .pages import Transaction
+
 
 class AccountsJsonPage(LoggedPage, JsonPage):
     ENCODING = 'utf-8'
@@ -58,18 +60,25 @@ class AccountsJsonPage(LoggedPage, JsonPage):
              u'Prêt':                Account.TYPE_LOAN,
             }
 
+    @property
+    def logged(self):
+        return Dict('commun/raison', default=None)(self.doc) != "niv_auth_insuff"
+
     def on_load(self):
         if self.doc['commun']['statut'].lower() == 'nok':
             reason = self.doc['commun']['raison']
             if reason == 'SYD-COMPTES-UNAUTHORIZED-ACCESS':
                 raise NoAccountsException("Vous n'avez pas l'autorisation de consulter : {}".format(reason))
             elif reason == 'niv_auth_insuff':
-                raise BrowserIncorrectPassword('Vos identifiants sont incorrects')
-            elif reason == 'chgt_mdp_oblig':
-                raise BrowserPasswordExpired('Veuillez renouveler votre mot de passe')
+                return
+            elif reason in ('chgt_mdp_oblig', 'chgt_mdp_init'):
+                raise BrowserPasswordExpired('Veuillez vous rendre sur le site de la banque pour renouveler votre mot de passe')
             elif reason == 'oob_insc_oblig':
                 raise AuthMethodNotImplemented("L'authentification par Secure Access n'est pas prise en charge")
-            raise BrowserUnavailable(reason)
+            else:
+                # the BrowserUnavailable was raised for every unknown error, and was masking the real error.
+                # So users and developers didn't know what kind of error it was.
+                assert False, 'Error %s is not handled yet.' % reason
 
     @method
     class iter_class_accounts(DictElement):
@@ -203,6 +212,18 @@ class HistoryJsonPage(LoggedPage, JsonPage):
                 Dict('l3'),
             ))
 
+            def obj_commission(self):
+                if Regexp(Field('label'), r' ([\d{1,3}\s?]*\d{1,3},\d{2}E COM [\d{1,3}\s?]*\d{1,3},\d{2}E)', default='')(self):
+                    # commission can be scraped from labels like 'REMISE CB /14/08 XXXXXX YYYYYYYYYYY ZZ 105,00E COM 0,84E'
+                    return CleanDecimal.French(Regexp(Field('label'), r'COM ([\d{1,3}\s?]*\d{1,3},\d{2})E', default=''), sign=lambda x: -1, default=NotAvailable)(self)
+                return NotAvailable
+
+            def obj_gross_amount(self):
+                if not empty(Field('commission')(self)):
+                    # gross_amount can be scraped from labels like 'REMISE CB /14/08 XXXXXX YYYYYYYYYYY ZZ 105,00E COM 0,84E'
+                    return CleanDecimal.French(Regexp(Field('label'), r' ([\d{1,3}\s?]*\d{1,3},\d{2})E COM', default=''), default=NotAvailable)(self)
+                return NotAvailable
+
             def obj_amount(self):
                 return CleanDecimal(Dict('c', default=None), replace_dots=True, default=None)(self) or \
                     CleanDecimal(Dict('d'), replace_dots=True)(self)
@@ -237,9 +258,60 @@ class BankStatementPage(LoggedPage, JsonPage):
             d = Document()
             d.date = datetime.strptime(document['dateEdition'], '%d/%m/%Y')
             d.label = '%s %s' % (account['libelle'], document['dateEdition'])
-            d.type = 'document'
+            d.type = DocumentTypes.STATEMENT
             d.format = 'pdf'
             d.id = '%s_%s' % (account['id'], document['dateEdition'].replace('/', ''))
             d.url = '/icd/syd-front/data/syd-rce-telechargerReleve.html?b64e4000_sceau=%s' % quote_plus(document['sceau'])
 
             yield d
+
+
+class MarketAccountPage(LoggedPage, JsonPage):
+    @method
+    class iter_market_accounts(DictElement):
+        item_xpath = 'donnees/comptesTitresByClasseur'
+
+        def condition(self):
+            # Some 'comptesTitresByClasseur' do not have a 'list' key
+            # and therefore have no account list, we skip them
+            return Dict('list', default=None)(self)
+
+        class iter_accounts(DictElement):
+            item_xpath = 'list'
+
+            class item(ItemElement):
+                klass = Account
+
+                obj__prestation_number = Dict('numeroPrestation')
+
+                obj_id = Format('%s_TITRE', CleanText(Field('_prestation_number'), replace=[(' ', '')]))
+                obj_number = CleanText(Field('_prestation_number'), replace=[(' ', '')])
+                obj_label = Dict('intitule')
+                obj_balance = CleanDecimal.French(Dict('evaluation'))
+                obj_currency = CurrencyFilter(Dict('evaluation'))
+                obj_type = Account.TYPE_MARKET
+
+
+class MarketInvestmentPage(LoggedPage, JsonPage):
+    @method
+    class iter_investment(DictElement):
+        item_xpath = 'donnees'
+
+        class item(ItemElement):
+            klass = Investment
+
+            obj_label = Dict('libelle')
+            obj_valuation = CleanDecimal.French(Dict('valorisation'))
+            obj_quantity = CleanDecimal.French(Dict('quantite'))
+            obj_unitvalue = CleanDecimal.French(Dict('cours'))
+
+            def obj_code(self):
+                code = Dict('codeISIN')(self)
+                if is_isin_valid(code):
+                    return code
+                return NotAvailable
+
+            def obj_code_type(self):
+                if empty(Field('code')(self)):
+                    return NotAvailable
+                return Investment.CODE_TYPE_ISIN

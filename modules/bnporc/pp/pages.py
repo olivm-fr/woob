@@ -29,19 +29,23 @@ import lxml.html as html
 
 from weboob.browser.elements import DictElement, ListElement, TableElement, ItemElement, method
 from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import Format, Eval, Regexp, CleanText, Date, CleanDecimal, Field
+from weboob.browser.filters.standard import (
+    Format, Eval, Regexp, CleanText, Date, CleanDecimal, Field, Coalesce, Map, Env,
+    Currency,
+)
 from weboob.browser.filters.html import TableCell
 from weboob.browser.pages import JsonPage, LoggedPage, HTMLPage
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import (
     Account, Investment, Recipient, Transfer, TransferBankError,
-    AddRecipientBankError, AddRecipientTimeout,
+    AddRecipientBankError, AddRecipientTimeout, AccountOwnership,
 )
+from weboob.capabilities.base import empty
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
 from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserPasswordExpired, ActionNeeded
 from weboob.tools.capabilities.bank.iban import rib2iban, rebuild_rib, is_iban_valid
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
+from weboob.tools.capabilities.bank.transactions import FrenchTransaction, parse_with_patterns
 from weboob.tools.captcha.virtkeyboard import GridVirtKeyboard
 from weboob.tools.date import parse_french_date
 from weboob.tools.capabilities.bank.investments import is_isin_valid
@@ -104,7 +108,10 @@ class ConnectionThresholdPage(HTMLPage):
         return True
 
     def on_load(self):
-        msg = CleanText('//div[@class="confirmation"]//span[span]')(self.doc)
+        msg = (
+            CleanText('//div[@class="confirmation"]//span[span]')(self.doc) or
+            CleanText('//p[contains(text(), "Vous avez atteint la date de fin de vie de votre code secret")]')(self.doc)
+        )
 
         self.logger.warning('Password expired.')
         if not self.browser.rotating_password:
@@ -212,7 +219,7 @@ class LoginPage(JsonPage):
 
             wrongpass_codes = [201, 21510, 203, 202, 7]
             actionNeeded_codes = [21501, 3, 4, 50]
-            websiteUnavailable_codes = [207, 1001]
+            websiteUnavailable_codes = [207, 1000, 1001]
             if error in wrongpass_codes:
                 raise BrowserIncorrectPassword(msg)
             elif error == 21: # "Ce service est momentanément indisponible. Veuillez renouveler votre demande ultérieurement." -> In reality, account is blocked because of too much wrongpass
@@ -303,46 +310,116 @@ class ProfilePage(LoggedPage, JsonPage):
 
 
 class AccountsPage(BNPPage):
-    FAMILY_TO_TYPE = {
-        1: Account.TYPE_CHECKING,
-        2: Account.TYPE_SAVINGS,
-        3: Account.TYPE_DEPOSIT,
-        4: Account.TYPE_MARKET,
-        5: Account.TYPE_LIFE_INSURANCE,
-        6: Account.TYPE_LIFE_INSURANCE,
-        8: Account.TYPE_LOAN,
-        9: Account.TYPE_LOAN,
-    }
+    def get_user_ikpi(self):
+        return self.doc['data']['infoUdc']['titulaireConnecte']['ikpi']
 
-    LABEL_TO_TYPE = {
-        u'PEA Espèces':                       Account.TYPE_PEA,
-        u'PEA Titres':                        Account.TYPE_PEA,
-        u'PEL':                               Account.TYPE_SAVINGS,
-        u'Plan Epargne Retraite Particulier': Account.TYPE_PERP,
-    }
+    @method
+    class iter_accounts(DictElement):
+        item_xpath = 'data/infoUdc/familleCompte'
 
-    def iter_accounts(self, ibans):
-        for f in self.path('data.infoUdc.familleCompte.*'):
-            for a in f.get('compte'):
-                iban = ibans.get(a.get('key'))
-                if iban is not None and not is_iban_valid(iban):
-                    iban = rib2iban(rebuild_rib(iban))
+        class iter_accounts_details(DictElement):
+            item_xpath = 'compte'
 
-                acc = Account.from_dict({
-                    'id': a.get('key'),
-                    'label': a.get('libellePersoProduit') or a.get('libelleProduit'),
-                    'currency': a.get('devise'),
-                    'type': self.LABEL_TO_TYPE.get(' '.join(a.get('libelleProduit').split())) or \
-                            self.FAMILY_TO_TYPE.get(f.get('idFamilleCompte')) or Account.TYPE_UNKNOWN,
-                    'balance': a.get('soldeDispo'),
-                    'coming': a.get('soldeAVenir'),
-                    'iban': iban,
-                    'number': a.get('value')
-                })
+            class item(ItemElement):
+                def validate(self, obj):
+                    # We skip loans with a balance of 0 because the JSON returned gives
+                    # us no info (only `null` values on all fields), so there is nothing
+                    # useful to display
+                    return obj.type != Account.TYPE_LOAN or obj.balance != 0
+
+                FAMILY_TO_TYPE = {
+                    1: Account.TYPE_CHECKING,
+                    2: Account.TYPE_SAVINGS,
+                    3: Account.TYPE_DEPOSIT,
+                    4: Account.TYPE_MARKET,
+                    5: Account.TYPE_LIFE_INSURANCE,
+                    6: Account.TYPE_LIFE_INSURANCE,
+                    8: Account.TYPE_LOAN,
+                    9: Account.TYPE_LOAN,
+                }
+
+                LABEL_TO_TYPE = {
+                    'PEA Espèces': Account.TYPE_PEA,
+                    'PEA Titres': Account.TYPE_PEA,
+                    'PEL': Account.TYPE_SAVINGS,
+                    'Plan Epargne Retraite Particulier': Account.TYPE_PERP,
+                    'Crédit immobilier': Account.TYPE_MORTGAGE,
+                    'Réserve Provisio': Account.TYPE_REVOLVING_CREDIT,
+                    'Prêt personnel': Account.TYPE_CONSUMER_CREDIT,
+                    'Crédit Silo': Account.TYPE_REVOLVING_CREDIT,
+                }
+
+                klass = Account
+
+                obj_id = Dict('key')
+                obj_label = Coalesce(
+                    Dict('libellePersoProduit', default=NotAvailable),
+                    Dict('libelleProduit', default=NotAvailable),
+                    default=NotAvailable
+                )
+                obj_currency = Currency(Dict('devise'))
+                obj_type = Coalesce(
+                    Map(Dict('libelleProduit'), LABEL_TO_TYPE, default=NotAvailable),
+                    Map(Env('account_type'), FAMILY_TO_TYPE, default=NotAvailable),
+                    default=Account.TYPE_UNKNOWN
+                )
+                obj_balance = Dict('soldeDispo')
+                obj_coming = Dict('soldeAVenir')
+                obj_number = Dict('value')
+                obj__subscriber = Format('%s %s', Dict('titulaire/nom'), Dict('titulaire/prenom'))
+                obj__iduser = Dict('titulaire/ikpi')
+
+                def obj_iban(self):
+                    iban = Map(Dict('key'), Env('ibans')(self), default=NotAvailable)(self)
+
+                    if not empty(iban):
+                        if not is_iban_valid(iban):
+                            iban = rib2iban(rebuild_rib(iban))
+                        return iban
+                    return None
+
+                def obj_ownership(self):
+                    indic = Dict('titulaire/indicTitulaireCollectif', default=None)(self)
+                    # The boolean is in the form of a string ('true' or 'false')
+                    if indic == 'true':
+                        return AccountOwnership.CO_OWNER
+                    elif indic == 'false':
+                        if self.page.get_user_ikpi() == Dict('titulaire/ikpi')(self):
+                            return AccountOwnership.OWNER
+                        return AccountOwnership.ATTORNEY
+                    return NotAvailable
+
                 # softcap not used TODO don't pass this key when backend is ready
                 # deferred cb can disappear the day after the appear, so 0 as day_for_softcap
-                acc._bisoftcap = {'deferred_cb': {'softcap_day': 1000, 'day_for_softcap': 0, 'date_field': 'rdate'}}
-                yield acc
+                obj__bisoftcap = {'deferred_cb': {'softcap_day': 1000, 'day_for_softcap': 1}}
+
+            def parse(self, el):
+                self.env['account_type'] = Dict('idFamilleCompte')(el)
+
+
+class LoanDetailsPage(BNPPage):
+    @method
+    class fill_loan_details(ItemElement):
+        def condition(self):
+            # If the loan doesn't have any info (that means the loan is already refund),
+            # the data/message is null whereas it is set to "OK" when everything is fine.
+            return Dict('data/message')(self) == 'OK'
+
+        obj_total_amount = Dict('data/montantPret')
+        obj_maturity_date = Date(Dict('data/dateEcheanceRemboursement'), dayfirst=True)
+        obj_duration = Dict('data/dureeRemboursement')
+        obj_rate = Dict('data/tauxRemboursement')
+        obj_nb_payments_left = Dict('data/nbRemboursementRestant')
+        obj_next_payment_date = Date(Dict('data/dateProchainAmortissement'), dayfirst=True)
+        obj__subscriber = Format('%s %s', Dict('data/titulaire/nom'), Dict('data/titulaire/prenom'))
+        obj__iduser = None
+
+    @method
+    class fill_revolving_details(ItemElement):
+        obj_total_amount = Dict('data/montantDisponible')
+        obj_rate = Dict('data/tauxInterets')
+        obj__subscriber = Format('%s %s', Dict('data/titulaire/nom'), Dict('data/titulaire/prenom'))
+        obj__iduser = None
 
 
 class AccountsIBANPage(BNPPage):
@@ -398,6 +475,8 @@ class RecipientsPage(BNPPage):
     @method
     class iter_recipients(DictElement):
         item_xpath = 'data/infoBeneficiaire/listeBeneficiaire'
+        # We ignore duplicate because BNP allows differents recipients with the same iban
+        ignore_duplicate = True
 
         class item(MyRecipient):
             # For the moment, only yield ready to transfer on recipients.
@@ -552,7 +631,7 @@ class HistoryPage(BNPPage):
                 'category': op.get('categorie'),
                 'amount': self.one('montant.montant', op),
             })
-            tr.parse(raw=op.get('libelleOperation'),
+            tr.parse(raw=CleanText().filter(op.get('libelleOperation')),
                      date=parse_french_date(op.get('dateOperation')),
                      vdate=parse_french_date(self.one('montant.valueDate', op)))
 
@@ -571,9 +650,13 @@ class HistoryPage(BNPPage):
                 'amount': op.get('montant'),
                 'card': op.get('numeroPorteurCarte'),
             })
-            tr.parse(date=parse_french_date(op.get('dateOperation')),
-                     vdate=parse_french_date(op.get('valueDate')),
-                     raw=op.get('libelle'))
+
+            tr.date = parse_french_date(op.get('dateOperation'))
+            tr.vdate = parse_french_date(op.get('valueDate'))
+            tr.rdate = NotAvailable
+            tr.raw = CleanText().filter(op.get('libelle'))
+            parse_with_patterns(tr.raw, tr, Transaction.PATTERNS)
+
             if tr.type == Transaction.TYPE_CARD:
                 tr.type = self.browser.card_to_transaction_type.get(op.get('keyCarte'),
                                                                     Transaction.TYPE_DEFERRED_CARD)
@@ -610,10 +693,15 @@ class LifeInsurancesPage(BNPPage):
 
 
 class LifeInsurancesHistoryPage(BNPPage):
+    IGNORED_STATUSES = (
+        'En cours',
+        'Sans suite',
+    )
+
     def iter_history(self, coming):
         for op in self.get('data.listerMouvements.listeMouvements') or []:
             #We have not date for this statut so we just skit it
-            if op.get('statut') == u'En cours':
+            if op.get('statut') in self.IGNORED_STATUSES:
                 continue
 
             tr = Transaction.from_dict({
@@ -622,13 +710,15 @@ class LifeInsurancesHistoryPage(BNPPage):
                 'amount': op.get('montantNet'),
                 })
 
-            if op.get('statut') == 'Sans suite':
-                continue
-
             tr.parse(date=parse_french_date(op.get('dateSaisie')),
                      vdate = parse_french_date(op.get('dateEffet')) if op.get('dateEffet') else None,
                      raw='%s %s' % (op.get('libelleMouvement'), op.get('canalSaisie') or ''))
             tr._op = op
+
+            if not tr.amount:
+                if op.get('rib', {}).get('codeBanque') == 'null':
+                    self.logger.info('ignoring non-transaction with label %r', tr.raw)
+                    continue
 
             if (op.get('statut') == u'Traité') ^ coming:
                 yield tr
@@ -665,6 +755,9 @@ class CapitalisationPage(LoggedPage, HTMLPage):
     # To be completed with other account labels and types seen on the "Assurance Vie" space:
     ACCOUNT_TYPES = {
         'BNP Paribas Multiplacements':                  Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Multihorizons':                    Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Libertéa Privilège':               Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Avenir Retraite':                  Account.TYPE_LIFE_INSURANCE,
         'BNP Paribas Multiciel Privilège':              Account.TYPE_CAPITALISATION,
         'Plan Epargne Retraite Particulier':            Account.TYPE_PERP,
         "Plan d'Épargne Retraite des Particuliers":     Account.TYPE_PERP,
@@ -692,6 +785,8 @@ class CapitalisationPage(LoggedPage, HTMLPage):
             obj_balance = CleanDecimal(TableCell('balance'), replace_dots=True)
             obj_coming = None
             obj_iban = None
+            obj__subscriber = None
+            obj__iduser = None
 
             def obj_type(self):
                 for k, v in self.page.ACCOUNT_TYPES.items():
@@ -831,6 +926,7 @@ class AddRecipPage(BNPPage):
             raise AddRecipientBankError(message=self.get('message'))
 
     def get_recipient(self, recipient):
+        # handle polling response
         r = Recipient()
         r.iban = recipient.iban
         r.id = self.get('data.gestionBeneficiaire.identifiantBeneficiaire')
@@ -840,6 +936,7 @@ class AddRecipPage(BNPPage):
         r.currency = u'EUR'
         r.bank_name = NotAvailable
         r._id_transaction = self.get('data.gestionBeneficiaire.idTransactionAF') or NotAvailable
+        r._transfer_id = self.get('data.gestionBeneficiaire.identifiantBeneficiaire') or NotAvailable
         return r
 
 

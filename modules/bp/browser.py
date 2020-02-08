@@ -17,27 +17,40 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
 import os
+import time
 from datetime import datetime, timedelta
+
+from requests.exceptions import HTTPError
 
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.browser.browsers import StatesMixin
 from weboob.browser.exceptions import ServerError
 from weboob.capabilities.base import NotAvailable
-from weboob.exceptions import BrowserIncorrectPassword, BrowserBanned, NoAccountsException, BrowserUnavailable
+from weboob.exceptions import (
+    BrowserIncorrectPassword, BrowserBanned, NoAccountsException,
+    BrowserUnavailable, ActionNeeded, NeedInteractiveFor2FA,
+    BrowserQuestion, AppValidation, AppValidationCancelled, AppValidationExpired,
+)
 from weboob.tools.compat import urlsplit, urlunsplit, parse_qsl
+from weboob.tools.decorators import retry
 
 from .pages import (
     LoginPage, Initident, CheckPassword, repositionnerCheminCourant, BadLoginPage, AccountDesactivate,
     AccountList, AccountHistory, CardsList, UnavailablePage, AccountRIB, Advisor,
     TransferChooseAccounts, CompleteTransfer, TransferConfirm, TransferSummary, CreateRecipient, ValidateRecipient,
-    ValidateCountry, ConfirmPage, RcptSummary, SubscriptionPage, DownloadPage, ProSubscriptionPage,
+    ValidateCountry, ConfirmPage, RcptSummary, SubscriptionPage, DownloadPage, ProSubscriptionPage, RevolvingAttributesPage,
+    TwoFAPage, Validated2FAPage, SmsPage, DecoupledPage
 )
 from .pages.accounthistory import (
     LifeInsuranceInvest, LifeInsuranceHistory, LifeInsuranceHistoryInv, RetirementHistory,
     SavingAccountSummary, CachemireCatalogPage,
 )
-from .pages.accountlist import MarketLoginPage, UselessPage, ProfilePage
+from .pages.accountlist import (
+    MarketLoginPage, UselessPage, ProfilePage, MarketCheckPage, MarketHomePage,
+)
 from .pages.pro import RedirectPage, ProAccountsList, ProAccountHistory, DownloadRib, RibPage
 from .pages.mandate import MandateAccountsList, PreMandate, PreMandateBis, MandateLife, MandateMarket
 from .linebourse_browser import LinebourseBrowser
@@ -50,10 +63,11 @@ __all__ = ['BPBrowser', 'BProBrowser']
 
 class BPBrowser(LoginBrowser, StatesMixin):
     BASEURL = 'https://voscomptesenligne.labanquepostale.fr'
-    STATE_DURATION = 5
+    STATE_DURATION = 10
 
     # FIXME beware that '.*' in start of URL() won't match all domains but only under BASEURL
 
+    login_image = URL(r'.*wsost/OstBrokerWeb/loginform\?imgid=', UselessPage)
     login_page = URL(r'.*wsost/OstBrokerWeb/loginform.*', LoginPage)
     repositionner_chemin_courant = URL(r'.*authentification/repositionnerCheminCourant-identif.ea', repositionnerCheminCourant)
     init_ident = URL(r'.*authentification/initialiser-identif.ea', Initident)
@@ -66,6 +80,14 @@ class BPBrowser(LoginBrowser, StatesMixin):
                         r'.*voscomptes/synthese/3-synthese.ea',
                         RedirectPage)
 
+    auth_page = URL(r'voscomptes/canalXHTML/securite/gestionAuthentificationForte/init-gestionAuthentificationForte.ea', TwoFAPage)
+    validated_2fa_page = URL(r'voscomptes/canalXHTML/securite/gestionAuthentificationForte/../../securite/authentification/retourDSP2-identif.ea',
+                             r'voscomptes/canalXHTML/securite/authentification/retourDSP2-identif.ea',
+                             Validated2FAPage)
+    decoupled_page = URL(r'/voscomptes/canalXHTML/securite/gestionAuthentificationForte/validationTerminal-gestionAuthentificationForte.ea', DecoupledPage)
+    sms_page = URL(r'/voscomptes/canalXHTML/securite/gestionAuthentificationForte/authenticateCerticode-gestionAuthentificationForte.ea', SmsPage)
+    sms_validation = URL(r'/voscomptes/canalXHTML/securite/gestionAuthentificationForte/validation-gestionAuthentificationForte.ea', SmsPage)
+
     par_accounts_checking = URL('/voscomptes/canalXHTML/comptesCommun/synthese_ccp/afficheSyntheseCCP-synthese_ccp.ea', AccountList)
     par_accounts_savings_and_invests = URL('/voscomptes/canalXHTML/comptesCommun/synthese_ep/afficheSyntheseEP-synthese_ep.ea', AccountList)
     par_accounts_loan = URL('/voscomptes/canalXHTML/pret/encours/consulterPrets-encoursPrets.ea',
@@ -74,10 +96,12 @@ class BPBrowser(LoginBrowser, StatesMixin):
                             '/voscomptes/canalXHTML/pret/encours/detaillerOffrePretConsoListe-encoursPrets.ea',
                             '/voscomptes/canalXHTML/pret/creditRenouvelable/init-consulterCreditRenouvelable.ea',
                             '/voscomptes/canalXHTML/pret/encours/rechercherPret-encoursPrets.ea',
-                            '/voscomptes/canalXHTML/sso/commun/init-integration.ea\?partenaire',
-                            '/voscomptes/canalXHTML/sso/lbpf/souscriptionCristalFormAutoPost.jsp',
+                            '/voscomptes/canalXHTML/sso/commun/init-integration.ea\?partenaire=cristalCEC',
                             AccountList)
-    par_accounts_revolving = URL('https://espaceclientcreditconso.labanquepostale.fr/sav/accueil.do', AccountList)
+
+    revolving_start = URL(r'/voscomptes/canalXHTML/sso/lbpf/souscriptionCristalFormAutoPost.jsp', AccountList)
+    par_accounts_revolving = URL(r'https://espaceclientcreditconso.labanquepostale.fr/sav/loginlbpcrypt.do', RevolvingAttributesPage)
+
 
     accounts_rib = URL(r'.*voscomptes/canalXHTML/comptesCommun/imprimerRIB/init-imprimer_rib.ea.*',
                        '/voscomptes/canalXHTML/comptesCommun/imprimerRIB/init-selection_rib.ea', AccountRIB)
@@ -96,7 +120,9 @@ class BPBrowser(LoginBrowser, StatesMixin):
                                  r'/voscomptes/canalXHTML/assurance/vie/detailMouvementHermesBompard-assuranceVie.ea\?idMouvement=(\w+)', LifeInsuranceHistoryInv)
     lifeinsurance_cachemire_catalog = URL(r'https://www.labanquepostale.fr/particuliers/bel_particuliers/assurance/accueil_cachemire.html', CachemireCatalogPage)
 
+    market_home = URL(r'https://labanquepostale.offrebourse.com/fr/\d+/?', MarketHomePage)
     market_login = URL(r'/voscomptes/canalXHTML/bourse/aiguillage/oicFormAutoPost.jsp', MarketLoginPage)
+    market_check = URL(r'/voscomptes/canalXHTML/bourse/aiguillage/lancerBourseEnLigne-connexionBourseEnLigne.ea', MarketCheckPage)
     useless = URL(r'https://labanquepostale.offrebourse.com/ReroutageSJR', UselessPage)
 
     retirement_hist = URL(r'/voscomptes/canalXHTML/assurance/retraitePoints/historiqueRetraitePoint-assuranceRetraitePoints.ea(\?numContrat=(?P<id>\w+))?',
@@ -106,16 +132,19 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
     par_account_checking_history = URL('/voscomptes/canalXHTML/CCP/releves_ccp/init-releve_ccp.ea\?typeRecherche=10&compte.numero=(?P<accountId>.*)',
                                        '/voscomptes/canalXHTML/CCP/releves_ccp/afficher-releve_ccp.ea', AccountHistory)
-    deferred_card_history = URL(r'/voscomptes/canalXHTML/CB/releveCB/init-mouvementsCarteDD.ea\?compte.numero=(?P<accountId>\w+)&indexCompte=(?P<cardIndex>\d+)&typeListe=(?P<type>\d+)', AccountHistory)
-    deferred_card_history_multi = URL(r'/voscomptes/canalXHTML/CB/releveCB/preparerRecherche-mouvementsCarteDD.ea\?indexCompte=(?P<accountId>\w+)&indexCarte=(?P<cardIndex>\d+)&typeListe=(?P<type>\d+)',
-                                      r'/voscomptes/canalXHTML/CB/releveCB/preparerRecherche-mouvementsCarteDD.ea\?compte.numero=(?P<accountId>\w+)&indexCarte=(?P<cardIndex>\d+)&typeListe=(?P<type>\d+)', AccountHistory)
+    single_card_history = URL(r'/voscomptes/canalXHTML/CB/releveCB/preparerRecherche-mouvementsCarteDD.ea\?typeListe=(?P<monthIndex>\d+)', AccountHistory)
+    deferred_card_history = URL(r'/voscomptes/canalXHTML/CB/releveCB/init-mouvementsCarteDD.ea\?compte.numero=(?P<accountId>\w+)&indexCompte=(?P<cardIndex>\d+)&typeListe=(?P<monthIndex>\d+)', AccountHistory)
+    deferred_card_history_multi = URL(r'/voscomptes/canalXHTML/CB/releveCB/preparerRecherche-mouvementsCarteDD.ea\?indexCompte=(?P<accountId>\w+)&indexCarte=(?P<cardIndex>\d+)&typeListe=(?P<monthIndex>\d+)',
+                                      r'/voscomptes/canalXHTML/CB/releveCB/preparerRecherche-mouvementsCarteDD.ea\?compte.numero=(?P<accountId>\w+)&indexCarte=(?P<cardIndex>\d+)&typeListe=(?P<monthIndex>\d+)', AccountHistory)
     par_account_checking_coming = URL('/voscomptes/canalXHTML/CCP/releves_ccp_encours/preparerRecherche-releve_ccp_encours.ea\?compte.numero=(?P<accountId>.*)&typeRecherche=1',
                                       '/voscomptes/canalXHTML/CB/releveCB/init-mouvementsCarteDD.ea\?compte.numero=(?P<accountId>.*)&typeListe=1&typeRecherche=10',
                                       '/voscomptes/canalXHTML/CCP/releves_ccp_encours/preparerRecherche-releve_ccp_encours.ea\?indexCompte',
                                       '/voscomptes/canalXHTML/CNE/releveCNE_encours/init-releve_cne_en_cours.ea\?compte.numero',
                                       '/voscomptes/canalXHTML/CNE/releveCNE_encours/init-releve_cne_en_cours.ea\?indexCompte=(?P<accountId>.*)&typeRecherche=1&typeMouvements=CNE', AccountHistory)
     par_account_savings_and_invests_history = URL('/voscomptes/canalXHTML/CNE/releveCNE/init-releve_cne.ea\?typeRecherche=10&compte.numero=(?P<accountId>.*)',
-                                                  '/voscomptes/canalXHTML/CNE/releveCNE/releveCNE-releve_cne.ea', AccountHistory)
+                                                  '/voscomptes/canalXHTML/CNE/releveCNE/releveCNE-releve_cne.ea',
+                                                  '/voscomptes/canalXHTML/CNE/releveCNE/frame-releve_cne.ea\?compte.numero=.*&typeRecherche=.*',
+                                                  AccountHistory)
 
     cards_list = URL('/voscomptes/canalXHTML/CB/releveCB/init-mouvementsCarteDD.ea\?compte.numero=(?P<account_id>\w+)$',
                      r'.*CB/releveCB/init-mouvementsCarteDD.ea.*',
@@ -124,6 +153,11 @@ class BPBrowser(LoginBrowser, StatesMixin):
     transfer_choose = URL(r'/voscomptes/canalXHTML/virement/mpiaiguillage/init-saisieComptes.ea', TransferChooseAccounts)
     transfer_complete = URL(r'/voscomptes/canalXHTML/virement/mpiaiguillage/soumissionChoixComptes-saisieComptes.ea',
                             r'/voscomptes/canalXHTML/virement/virementSafran_national/init-creerVirementNational.ea',
+                            # The two following urls are obtained after a redirection made after a form
+                            # No parameters or data seem to change that the website go back to the evious folder, using ".."
+                            # We can't do much since it is finaly handled by the module requests
+                            r'/voscomptes/canalXHTML/virement/mpiaiguillage/\.\./virementSafran_national/init-creerVirementNational.ea',
+                            r'/voscomptes/canalXHTML/virement/mpiaiguillage/\.\./virementSafran_sepa/init-creerVirementSepa.ea',
                             r'/voscomptes/canalXHTML/virement/virementSafran_sepa/init-creerVirementSepa.ea',
                             CompleteTransfer)
     transfer_confirm = URL(r'/voscomptes/canalXHTML/virement/virementSafran_pea/validerVirementPea-virementPea.ea',
@@ -131,7 +165,11 @@ class BPBrowser(LoginBrowser, StatesMixin):
                            r'/voscomptes/canalXHTML/virement/virementSafran_sepa/valider-virementSepa.ea',
                            r'/voscomptes/canalXHTML/virement/virementSafran_sepa/confirmerInformations-virementSepa.ea',
                            r'/voscomptes/canalXHTML/virement/virementSafran_national/valider-creerVirementNational.ea',
-                           r'/voscomptes/canalXHTML/virement/virementSafran_national/validerVirementNational-virementNational.ea', TransferConfirm)
+                           r'/voscomptes/canalXHTML/virement/virementSafran_national/validerVirementNational-virementNational.ea',
+                           # the following url is already used in transfer_summary
+                           # but we need it to detect the case where the website displaies the list of devices
+                           # when a transfer is made with an otp or decoupled
+                           r'/voscomptes/canalXHTML/virement/virementSafran_sepa/confirmer-creerVirementSepa.ea', TransferConfirm)
     transfer_summary = URL(r'/voscomptes/canalXHTML/virement/virementSafran_national/confirmerVirementNational-virementNational.ea',
                            r'/voscomptes/canalXHTML/virement/virementSafran_pea/confirmerInformations-virementPea.ea',
                            r'/voscomptes/canalXHTML/virement/virementSafran_sepa/confirmer-creerVirementSepa.ea',
@@ -181,9 +219,14 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
     accounts = None
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, config, *args, **kwargs):
         self.weboob = kwargs.pop('weboob')
+        self.config = config
         super(BPBrowser, self).__init__(*args, **kwargs)
+        self.resume = config['resume'].get()
+        self.request_information = config['request_information'].get()
+        self.__states__ += ('sms_form', )
+
         dirname = self.responses_dirname
         if dirname:
             dirname += '/bourse'
@@ -191,17 +234,21 @@ class BPBrowser(LoginBrowser, StatesMixin):
         self.recipient_form = None
 
     def load_state(self, state):
+        if state.get('url'):
+            # We don't want to come back to last URL during SCA
+            state.pop('url')
+        super(BPBrowser, self).load_state(state)
+
         if 'recipient_form' in state and state['recipient_form'] is not None:
-            super(BPBrowser, self).load_state(state)
             self.logged = True
 
     def deinit(self):
         super(BPBrowser, self).deinit()
         self.linebourse.deinit()
 
-    def location(self, url, **kwargs):
+    def open(self, *args, **kwargs):
         try:
-            return super(BPBrowser, self).location(url, **kwargs)
+            return super(BPBrowser, self).open(*args, **kwargs)
         except ServerError as err:
             if "/../" not in err.response.url:
                 raise
@@ -210,18 +257,85 @@ class BPBrowser(LoginBrowser, StatesMixin):
             self.logger.debug('site has "/../" in their url, fixing url manually')
             parts = list(urlsplit(err.response.url))
             parts[2] = os.path.abspath(parts[2])
-            return self.location(urlunsplit(parts))
+            return self.open(urlunsplit(parts))
 
-    def do_login(self):
+    def login_without_2fa(self):
         self.location(self.login_url)
         self.page.login(self.username, self.password)
 
-        if self.redirect_page.is_here() and self.page.check_for_perso():
-            raise BrowserIncorrectPassword(u"L'identifiant utilisé est celui d'un compte de Particuliers.")
+        if self.redirect_page.is_here():
+            if self.page.check_for_perso():
+                raise BrowserIncorrectPassword("L'identifiant utilisé est celui d'un compte de Particuliers.")
+            error = self.page.get_error()
+            raise BrowserUnavailable(error or '')
+
         if self.badlogin.is_here():
             raise BrowserIncorrectPassword()
         if self.disabled_account.is_here():
             raise BrowserBanned()
+
+    def do_login(self):
+        self.code = self.config['code'].get()
+        if self.resume:
+            return self.handle_polling()
+        elif self.code:
+            return self.handle_sms()
+
+        self.login_without_2fa()
+
+        self.auth_page.go()
+        if self.auth_page.is_here():
+            # Handle 2FA
+            # 2FA seem to be handled by LBP. Indeed logins after 2FA will redirect to the LBP main page
+            # Consequently no state for future connexion needs to be kept
+            if self.request_information is None:
+                raise NeedInteractiveFor2FA()
+            auth_method = self.page.get_auth_method()
+
+            if auth_method == 'cer+':
+                # We force here the first device present
+                self.decoupled_page.go(params={'deviceSelected': '0'})
+                raise AppValidation(self.page.get_decoupled_message())
+
+            elif auth_method == 'cer':
+                self.location('/voscomptes/canalXHTML/securite/gestionAuthentificationForte/authenticateCerticode-gestionAuthentificationForte.ea')
+                self.page.check_if_is_blocked()
+                self.sms_form = self.page.get_sms_form()
+                raise BrowserQuestion(Value('code', label='Entrez le code reçu par SMS'))
+
+            elif auth_method == 'no2fa':
+                self.location(self.page.get_skip_url())
+
+        # If we are here, we don't need 2FA, we are logged
+
+    def handle_polling(self):
+        timeout = time.time() + 300.00
+        while time.time() < timeout:
+            polling = self.location('/voscomptes/canalXHTML/securite/gestionAuthentificationForte/validationOperation-gestionAuthentificationForte.ea').json()
+            result = polling['statutOperation']
+            if result == '1':
+                # Waiting for PSU validation
+                time.sleep(10)
+                continue
+            elif result == '2':
+                # Validated
+                break
+            elif result == '3':
+                raise AppValidationCancelled()
+            elif result == '6':
+                raise AppValidationExpired()
+            else:
+                assert False, 'statutOperation: %s is not handled' % result
+
+            raise AppValidationExpired()
+
+        self.location('/voscomptes/canalXHTML/securite/gestionAuthentificationForte/finalisation-gestionAuthentificationForte.ea')
+
+    def handle_sms(self):
+        self.sms_form['codeOTPSaisi'] = self.code
+        self.sms_validation.go(data=self.sms_form)
+        if not self.validated_2fa_page.is_here() and self.page.is_sms_wrong():
+            raise BrowserIncorrectPassword('Le code de sécurité que vous avez saisi est erroné.')
 
     @need_login
     def get_accounts_list(self):
@@ -233,6 +347,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
             accounts = []
             to_check = []
 
+            owner_name = self.get_profile().name
             self.par_accounts_checking.go()
 
             pages = [self.par_accounts_checking, self.par_accounts_savings_and_invests, self.par_accounts_loan]
@@ -245,7 +360,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
                     no_accounts += 1
                     continue
 
-                for account in self.page.iter_accounts():
+                for account in self.page.iter_accounts(name=owner_name):
                     if account.type == Account.TYPE_LOAN:
                         self.location(account.url)
                         if 'initSSO' not in account.url:
@@ -260,8 +375,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
                                 accounts.append(student_loan)
                         else:
                             # The main revolving page is not accessible, we can reach it by this new way
-                            self.location(self.absurl('/voscomptes/canalXHTML/sso/lbpf/souscriptionCristalFormAutoPost.jsp'))
-                            self.page.go_revolving()
+                            self.go_revolving()
                             revolving_loan = self.page.get_revolving_attributes(account)
                             accounts.append(revolving_loan)
                         page.go()
@@ -297,14 +411,23 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         return self.accounts
 
+    @retry(BrowserUnavailable, delay=5)
+    def go_revolving(self):
+        self.revolving_start.go()
+        self.page.go_revolving()
+
     def iter_cards(self, account):
-        self.deferred_card_history.go(accountId=account.id, type=0, cardIndex=0)
+        self.deferred_card_history.go(accountId=account.id, monthIndex=0, cardIndex=0)
         if self.cards_list.is_here():
             self.logger.debug('multiple cards for account %r', account)
             for card in self.page.get_cards(parent_id=account.id):
                 card.parent = account
                 yield card
         else:
+            # The website does not shows the transactions if we do not
+            # redirect to a precedent month with weboob then come back
+            self.single_card_history.go(monthIndex=1)
+            self.single_card_history.go(monthIndex=0)
             self.logger.debug('single card for account %r', account)
             self.logger.debug('parsing %r', self.url)
             card = self.page.get_single_card(parent_id=account.id)
@@ -345,7 +468,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
             if hasattr(self.page, 'iter_transactions') and self.page.has_transactions():
                 return self.page.iter_transactions()
 
-            elif account.type == Account.TYPE_PERP and self.retirement_hist.is_here():
+            elif account.type in (Account.TYPE_PERP, Account.TYPE_LIFE_INSURANCE) and self.retirement_hist.is_here():
                 return self.page.get_history()
 
             return []
@@ -353,8 +476,19 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def go_linebourse(self, account):
-        self.location(account.url)
-        self.market_login.go()
+        # Sometimes the redirection done from MarketLoginPage
+        # (to https://labanquepostale.offrebourse.com/ReroutageSJR)
+        # throws an error 404 or 403
+        location = retry(HTTPError, delay=5)(self.location)
+        location(account.url)
+
+        # TODO Might be deprecated, check the logs after some time to
+        # check if this is still used.
+        if not self.market_home.is_here():
+            self.logger.debug('Landed in unexpected market page, doing self.market_login.go()')
+            go = retry(HTTPError, delay=5)(self.market_login.go)
+            go()
+
         self.linebourse.session.cookies.update(self.session.cookies)
         self.par_accounts_checking.go()
 
@@ -391,12 +525,13 @@ class BPBrowser(LoginBrowser, StatesMixin):
             self.cards_list.go(account_id=account.parent.id)
             self.location(link)
             assert urlobj.is_here()
-            ncard = self.page.params['cardIndex']
+            ncard = self.page.params.get('cardIndex', 0)
             self.logger.debug('handling card %s for account %r', ncard, account)
+            urlobj.go(accountId=account.parent.id, monthIndex=1, cardIndex=ncard)
 
             for t in range(6):
                 try:
-                    urlobj.go(accountId=account.parent.id, type=t, cardIndex=ncard)
+                    urlobj.go(accountId=account.parent.id, monthIndex=t, cardIndex=ncard)
                 except BrowserUnavailable:
                     self.logger.debug("deferred card history stop at %s", t)
                     break
@@ -417,7 +552,10 @@ class BPBrowser(LoginBrowser, StatesMixin):
         if account.type in (account.TYPE_PEA, account.TYPE_MARKET):
             self.go_linebourse(account)
             investments = list(self.linebourse.iter_investment(account.id))
-            investments.append(self.linebourse.get_liquidity(account.id))
+            liquidity = self.linebourse.get_liquidity(account.id)
+            if liquidity:
+                # avoid to append None
+                investments.append(liquidity)
             return investments
 
         if account.type != Account.TYPE_LIFE_INSURANCE:
@@ -450,9 +588,11 @@ class BPBrowser(LoginBrowser, StatesMixin):
     @need_login
     def init_transfer(self, account, recipient, amount, transfer):
         self.transfer_choose.stay_or_go()
-        self.page.init_transfer(account.id, recipient._value)
-        assert self.transfer_complete.is_here()
-        self.page.complete_transfer(amount, transfer)
+        self.page.init_transfer(account.id, recipient._value, amount)
+
+        assert self.transfer_complete.is_here(), 'An error occured while validating the first part of the transfer.'
+        self.page.complete_transfer(transfer)
+
         return self.page.handle_response(account, recipient, amount, transfer.label)
 
     @need_login
@@ -461,6 +601,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
         self.page.confirm()
         # Should only happen if double auth.
         if self.transfer_confirm.is_here():
+            self.page.choose_device()
             self.page.double_auth(transfer)
         return self.page.handle_response(transfer)
 
@@ -520,12 +661,12 @@ class BPBrowser(LoginBrowser, StatesMixin):
     @need_login
     def iter_documents(self, subscription):
         self.subscription.go()
-        params = self.page.get_params(sub_label=subscription.label)
+        params = self.page.get_params(subscription._full_id)
 
         for year in self.page.get_years():
             params['formulaire.anneeRecherche'] = year
 
-            if 'PEA' in subscription.label:
+            if any(l in subscription.label for l in ('PEA', 'TIT')):
                 for statement_type in self.page.STATEMENT_TYPES:
                     params['formulaire.typeReleve'] = statement_type
                     self.subscription_search.go(params=params)
@@ -555,7 +696,7 @@ class BProBrowser(BPBrowser):
 
     pro_accounts_list = URL(r'.*voscomptes/synthese/synthese.ea', ProAccountsList)
 
-    pro_history = URL(r'.*voscomptes/historique(ccp|cne)/(\d+-)?historique(ccp|cne).*', ProAccountHistory)
+    pro_history = URL(r'.*voscomptes/historique(ccp|cne)/(\d+-)?historique(operationnel)?(ccp|cne).*', ProAccountHistory)
 
     useless2 = URL(r'.*/voscomptes/bourseenligne/lancementBourseEnLigne-bourseenligne.ea\?numCompte=(?P<account>\d+)', UselessPage)
     market_login = URL(r'.*/voscomptes/bourseenligne/oicformautopost.jsp', MarketLoginPage)
@@ -602,6 +743,13 @@ class BProBrowser(BPBrowser):
     def _get_coming_transactions(self, account):
         return []
 
+    def check_accounts_list_error(self):
+        error = self.page.get_errors()
+        if error:
+            if 'veuillez-vous rapprocher du mandataire principal de votre contrat' in error.lower():
+                raise ActionNeeded(error)
+            raise BrowserUnavailable(error)
+
     @need_login
     def get_accounts_list(self):
         if self.accounts is None:
@@ -613,7 +761,8 @@ class BProBrowser(BPBrowser):
             self.location(self.accounts_url)
             assert self.pro_accounts_list.is_here()
 
-            for account in self.page.get_accounts_list():
+            self.check_accounts_list_error()
+            for account in self.page.iter_accounts():
                 ids.add(account.id)
                 accounts.append(account)
 
@@ -621,7 +770,8 @@ class BProBrowser(BPBrowser):
                 self.location(self.accounts_and_loans_url)
                 assert self.pro_accounts_list.is_here()
 
-            for account in self.page.get_accounts_list():
+            self.check_accounts_list_error()
+            for account in self.page.iter_accounts():
                 if account.id not in ids:
                     ids.add(account.id)
                     accounts.append(account)

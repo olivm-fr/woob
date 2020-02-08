@@ -17,9 +17,10 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
 from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound
-from weboob.capabilities.base import find_object, NotAvailable, empty
+from weboob.capabilities.base import find_object, empty
 from weboob.capabilities.bank import Account, TransferInvalidLabel
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.bill import CapDocument, Subscription, Document, DocumentNotFound, SubscriptionNotFound
@@ -34,23 +35,25 @@ __all__ = ['AXABanqueModule']
 
 class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument, CapProfile):
     NAME = 'axabanque'
-    MAINTAINER = u'Romain Bignon'
+    MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
     VERSION = '1.6'
-    DESCRIPTION = u'AXA Banque'
+    DESCRIPTION = 'AXA Banque'
     LICENSE = 'LGPLv3+'
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
-                           ValueBackendPassword('password', label='Code', regexp='\d+'))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Identifiant', masked=False),
+        ValueBackendPassword('password', label='Code', regexp='\d+'),
+    )
     BROWSER = AXABanque
 
     def create_default_browser(self):
         login = self.config['login'].get()
         self.BROWSER = AXABanque if login.isdigit() else AXAAssurance
-        return self.create_browser(login, self.config['password'].get(),
-                                   weboob=self.weboob)
-
-    def get_account(self, _id):
-        return find_object(self.browser.iter_accounts(), id=_id, error=AccountNotFound)
+        return self.create_browser(
+            login,
+            self.config['password'].get(),
+            weboob=self.weboob
+        )
 
     def iter_accounts(self):
         return self.browser.iter_accounts()
@@ -140,9 +143,7 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
     def download_document(self, document):
         if not isinstance(document, Document):
             document = self.get_document(document)
-        if document.url is NotAvailable:
-            return
-        return self.browser.download_document(document.url)
+        return self.browser.download_document(document._download_id)
 
     def iter_resources(self, objs, split_path):
         if Account in objs:

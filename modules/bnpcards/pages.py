@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
 import re
 from datetime import date
 from decimal import Decimal
@@ -24,7 +26,10 @@ from decimal import Decimal
 from weboob.exceptions import BrowserPasswordExpired
 from weboob.browser.pages import HTMLPage, LoggedPage, pagination
 from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Field, Env, Format
+from weboob.browser.filters.standard import (
+    CleanText, CleanDecimal, Field, Env, Format, RawText,
+    Eval,
+)
 from weboob.browser.filters.html import Link, Attr, AbsoluteLink
 from weboob.capabilities.bank import Account
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
@@ -49,12 +54,18 @@ class LoginPage(HTMLPage):
 
 
 class ExpandablePage(LoggedPage, HTMLPage):
-    def expand(self, account=None, rib=None):
+    def expand(self, account=None, rib=None, company=None):
         form = self.get_form()
         if rib is not None:
             form['ribSaisi'] = rib
         if account is not None:
-            form['numCarteSaisi'] = account._nav_num
+            form['nomCarteSaisi'] = account.label  # some forms use 'nomCarteSaisi' some use 'titulaireSaisie'
+            form['titulaireSaisie'] = account.label
+        if company is not None:
+            if 'entrepriseSaisie' in form.keys():  # some forms use 'entrepriseSaisie' some use 'entrepriseSaisi'
+                form['entrepriseSaisie'] = company
+            else:
+                form['entrepriseSaisi'] = company
         # needed if coporate titulaire
         form.url = form.url.replace('Appliquer', 'Afficher')
         form.submit()
@@ -80,13 +91,16 @@ class PeriodsPage(LoggedPage, HTMLPage):
             periods.append(period)
         return periods
 
-    def expand(self, period, account=None, rib=None):
+    def expand(self, period, account=None, rib=None, company=None):
         form = self.get_form(submit='//input[@value="Display"]')
         if account is not None:
-            form['numCarteSaisi'] = account._nav_num
+            form['nomCarteSaisi'] = account.label
+            form['titulaireSaisi'] = account.label
         form['periodeSaisie'] = period
         if rib is not None:
             form['ribSaisi'] = rib
+        if company is not None:
+            form['entrepriseSaisi'] = company
         # needed if coporate titulaire
         form.url = form.url.replace('Appliquer', 'Afficher')
         form.submit()
@@ -106,10 +120,15 @@ class AccountsPage(ExpandablePage, GetableLinksPage):
             klass = Account
 
             obj_id = CleanText('./td[2]')
-            obj_label = CleanText('./td[1]')
+
+            # Some account names have spaces in the middle which cause
+            # the history search to fail if we remove them.
+            # eg: `NAME  SURNAME` = `NAME++SURNAME` in the history search.
+            obj_label = Eval(lambda x: x.strip(), RawText('./td[1]'))
             obj_type = Account.TYPE_CARD
             obj__rib = Env('rib')
-            obj_currency = u'EUR'
+            obj__company = Env('company', default=None)  # this field is something used to make the module work, not something meant to be displayed to end users
+            obj_currency = 'EUR'
             obj_number = CleanText('./td[2]', replace=[(' ', '')])
             obj_url = AbsoluteLink('./td[2]/a')
 
@@ -117,6 +136,9 @@ class AccountsPage(ExpandablePage, GetableLinksPage):
 
         def store(self, obj):
             return obj
+
+    def get_companies(self):
+        return self.doc.xpath('//select[@name="entrepriseSaisie"]/option/@value')
 
 
 class ComingPage(ExpandablePage):
@@ -190,7 +212,8 @@ class TiCardPage(ExpandablePage, TransactionsPage):
             obj_label = Format('%s %s', CleanText('//table[@class="params"]/tr/td[1]/b[2]'), Field('id'))
             obj_type = Account.TYPE_CARD
             obj__nav_num = Attr('.', 'value')
-            obj_currency = u'EUR'
+            obj_currency = 'EUR'
+            obj__company = Env('company', default=None)  # this field is something used to make the module work, not something meant to be displayed to end users
 
     def get_balance(self):
         if self.doc.xpath('//div[@class="messageaucunedonnee"]'):

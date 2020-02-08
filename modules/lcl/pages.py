@@ -27,28 +27,27 @@ from decimal import Decimal
 from io import BytesIO
 from datetime import datetime, timedelta
 
-from weboob.capabilities import NotAvailable
-from weboob.capabilities.base import find_object, Currency
+from weboob.capabilities.base import empty, find_object, NotAvailable
 from weboob.capabilities.bank import (
     Account, Investment, Recipient, TransferError, TransferBankError, Transfer,
+    AccountOwnership,
 )
 from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.capabilities.profile import Person, ProfileMissing
 from weboob.capabilities.contact import Advisor
-from weboob.browser.elements import method, ListElement, TableElement, ItemElement, SkipItem, DictElement
-from weboob.exceptions import ParseError
+from weboob.browser.elements import method, ListElement, TableElement, ItemElement, DictElement
 from weboob.browser.exceptions import ServerError
 from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage, FormNotFound, pagination
-from weboob.browser.filters.html import Attr, Link, TableCell, AttributeNotFound
+from weboob.browser.filters.html import Attr, Link, TableCell, AttributeNotFound, AbsoluteLink
 from weboob.browser.filters.standard import (
-    CleanText, Field, Regexp, Format, Date, CleanDecimal, Map, AsyncLoad, Async, Env, Slugify, BrowserURL, Eval,
+    CleanText, Field, Regexp, Format, Date, CleanDecimal, Map, AsyncLoad, Async, Env, Slugify,
+    BrowserURL, Eval, Currency,
 )
 from weboob.browser.filters.json import Dict
-from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword
+from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword, ActionNeeded, ParseError
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.captcha.virtkeyboard import MappedVirtKeyboard, VirtKeyboardError
-from weboob.tools.compat import unicode
-from weboob.tools.compat import urlparse, parse_qs
+from weboob.tools.compat import unicode, urlparse, parse_qs, urljoin
 from weboob.tools.html import html2text
 from weboob.tools.date import parse_french_date
 from weboob.tools.capabilities.bank.investments import is_isin_valid
@@ -62,7 +61,7 @@ def MyDecimal(*args, **kwargs):
 def myXOR(value, seed):
     s = ''
     for i in range(len(value)):
-        s += chr(seed^ord(value[i]))
+        s += chr(seed ^ ord(value[i]))
     return s
 
 
@@ -86,12 +85,12 @@ class LCLBasePage(HTMLPage):
                     value = ''
                 else:
                     value += ','
-                value += txt[start+len(pattern):start+txt[start+len(pattern):].find(end)+len(pattern)]
+                value += txt[start + len(pattern):start + txt[start + len(pattern):].find(end) + len(pattern)]
 
                 if not is_list:
                     break
 
-                txt = txt[start+len(pattern)+txt[start+len(pattern):].find(end):]
+                txt = txt[start + len(pattern) + txt[start + len(pattern):].find(end):]
 
                 start = txt.find(pattern)
                 if start < 0:
@@ -100,35 +99,38 @@ class LCLBasePage(HTMLPage):
 
 
 class LCLVirtKeyboard(MappedVirtKeyboard):
-    symbols={'0': '9da2724133f2221482013151735f033c',
-             '1': '873ab0087447610841ae1332221be37b',
-             '2': '93ce6c330393ff5980949d7b6c800f77',
-             '3': 'b2d70c69693784e1bf1f0973d81223c0',
-             '4': '498c8f5d885611938f94f1c746c32978',
-             '5': '359bcd60a9b8565917a7bf34522052c3',
-             '6': 'aba912172f21f78cd6da437cfc4cdbd0',
-             '7': 'f710190d6b947869879ec02d8e851dfa',
-             '8': 'b42cc25e1539a15f767aa7a641f3bfec',
-             '9': 'cc60e5894a9d8e12ee0c2c104c1d5490'
-            }
+    symbols = {
+        '0': '9da2724133f2221482013151735f033c',
+        '1': '873ab0087447610841ae1332221be37b',
+        '2': '93ce6c330393ff5980949d7b6c800f77',
+        '3': 'b2d70c69693784e1bf1f0973d81223c0',
+        '4': '498c8f5d885611938f94f1c746c32978',
+        '5': '359bcd60a9b8565917a7bf34522052c3',
+        '6': 'aba912172f21f78cd6da437cfc4cdbd0',
+        '7': 'f710190d6b947869879ec02d8e851dfa',
+        '8': 'b42cc25e1539a15f767aa7a641f3bfec',
+        '9': 'cc60e5894a9d8e12ee0c2c104c1d5490'
+    }
 
-    url="/outil/UAUT/Clavier/creationClavier?random="
+    url = "/outil/UAUT/Clavier/creationClavier?random="
 
-    color=(255,255,255,255)
+    color = (255, 255, 255, 255)
 
     def __init__(self, basepage):
-        img=basepage.doc.find("//img[@id='idImageClavier']")
+        img = basepage.doc.find("//img[@id='idImageClavier']")
         random.seed()
-        self.url += "%s"%str(int(math.floor(int(random.random()*1000000000000000000000))))
-        super(LCLVirtKeyboard, self).__init__(BytesIO(basepage.browser.open(self.url).content), basepage.doc,img,self.color, "id")
-        self.check_symbols(self.symbols,basepage.browser.responses_dirname)
+        self.url += "%s" % str(int(math.floor(int(random.random() * 1000000000000000000000))))
+        super(LCLVirtKeyboard, self).__init__(
+            BytesIO(basepage.browser.open(self.url).content),
+            basepage.doc, img, self.color, "id")
+        self.check_symbols(self.symbols, basepage.browser.responses_dirname)
 
     def get_symbol_code(self, md5sum):
-        code=MappedVirtKeyboard.get_symbol_code(self, md5sum)
+        code = MappedVirtKeyboard.get_symbol_code(self, md5sum)
         return code[-2:]
 
     def get_string_code(self, string):
-        code=''
+        code = ''
         for c in string:
             code += self.get_symbol_code(self.symbols[c])
         return code
@@ -159,9 +161,9 @@ class LoginPage(HTMLPage):
                 continue
             offset = script.text.find(s)
             if offset != -1:
-                seed = int(script.text[offset+len(s)+1:offset+len(s)+2])
+                seed = int(script.text[offset + len(s) + 1:offset + len(s) + 2])
                 break
-        if seed==-1:
+        if seed == -1:
             raise ParseError("Variable 'aleatoire' not found")
 
         form = self.get_form('//form[@id="formAuthenticate"]')
@@ -181,16 +183,34 @@ class LoginPage(HTMLPage):
             return False
         return True
 
-    def is_error(self):
+    def check_error(self):
         errors = self.doc.xpath(u'//*[@class="erreur" or @class="messError"]')
-        return len(errors) > 0 and not self.doc.xpath('//a[@href="/outil/UWHO/Accueil/"]')
+        if not errors or self.doc.xpath('//a[@href="/outil/UWHO/Accueil/"]'):
+            return
+
+        for error in errors:
+            error_text = CleanText(error.xpath('./div/text()'))(self.doc)
+            if 'Suite à la saisie de plusieurs identifiant / code erronés' in error_text:
+                raise ActionNeeded(error_text)
+            if 'Votre identifiant ou votre code personnel est incorrect' in error_text:
+                raise BrowserIncorrectPassword(error_text)
+        raise BrowserIncorrectPassword()
 
 
 class ContractsPage(LoginPage):
     def on_load(self):
-        if self.is_error():
-            raise BrowserIncorrectPassword()
-        self.select_contract()
+        # after login we are redirect in ContractsPage even if there is an error at login
+        # I let the error check code here to simplify
+        # a better solution will be to put error check on browser.py and error parsing in pages.py
+        self.check_error()
+
+        # To avoid skipping contract page the first time we see it,
+        # and to be able to get the contracts list from it
+        if self.browser.parsed_contracts:
+            self.select_contract()
+
+    def get_contracts_list(self):
+        return self.doc.xpath('//input[@name="contratId"]/@value')
 
     def select_contract(self, id_contract=None):
         link = self.doc.xpath('//a[contains(text(), "Votre situation globale")]')
@@ -207,11 +227,18 @@ class ContractsPage(LoginPage):
 
 class ContractsChoicePage(ContractsPage):
     def on_load(self):
-        if self.is_error():
-            raise BrowserIncorrectPassword()
-        self.browser.contracts = [unicode(x) for x in self.doc.xpath('//input[@name="contratId"]/@value')]
+        self.check_error()
         if not self.logged and not self.browser.current_contract:
             self.select_contract()
+
+
+class OwnedItemElement(ItemElement):
+    def get_ownership(self, owner):
+        if re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)', owner, re.IGNORECASE):
+            return AccountOwnership.CO_OWNER
+        elif all(n in owner for n in self.env['name'].split()):
+            return AccountOwnership.OWNER
+        return AccountOwnership.ATTORNEY
 
 
 class AccountsPage(LoggedPage, HTMLPage):
@@ -224,7 +251,7 @@ class AccountsPage(LoggedPage, HTMLPage):
         return CleanText('//li[@id="nomClient"]/p')(self.doc)
 
     @method
-    class get_list(ListElement):
+    class get_accounts_list(ListElement):
 
         # XXX Ugly Hack to replace account by second occurrence.
         # LCL pro website sometimes display the same account twice and only second link is valid to fetch transactions.
@@ -238,34 +265,41 @@ class AccountsPage(LoggedPage, HTMLPage):
         item_xpath = '//tr[contains(@onclick, "redirect")]'
         flush_at_end = True
 
-        class account(ItemElement):
+        class account(OwnedItemElement):
             klass = Account
 
             def condition(self):
                 return '/outil/UWLM/ListeMouvement' in self.el.attrib['onclick']
 
-            NATURE2TYPE = {'001': Account.TYPE_SAVINGS,
-                           '004': Account.TYPE_CHECKING,
-                           '005': Account.TYPE_CHECKING,
-                           '006': Account.TYPE_CHECKING,
-                           '007': Account.TYPE_SAVINGS,
-                           '012': Account.TYPE_SAVINGS,
-                           '023': Account.TYPE_CHECKING,
-                           '036': Account.TYPE_SAVINGS,
-                           '046': Account.TYPE_SAVINGS,
-                           '047': Account.TYPE_SAVINGS,
-                           '049': Account.TYPE_SAVINGS,
-                           '058': Account.TYPE_CHECKING,
-                           '068': Account.TYPE_PEA,
-                           '069': Account.TYPE_SAVINGS,
-                          }
+            def load_details(self):
+                link_id = Field('_link_id')(self)
+                if link_id:
+                    account_url = urljoin(self.page.browser.BASEURL, link_id)
+                    return self.page.browser.async_open(url=account_url)
+                return NotAvailable
+
+            NATURE2TYPE = {
+                '001': Account.TYPE_SAVINGS,
+                '004': Account.TYPE_CHECKING,
+                '005': Account.TYPE_CHECKING,
+                '006': Account.TYPE_CHECKING,
+                '007': Account.TYPE_SAVINGS,
+                '012': Account.TYPE_SAVINGS,
+                '023': Account.TYPE_CHECKING,
+                '036': Account.TYPE_SAVINGS,
+                '046': Account.TYPE_SAVINGS,
+                '047': Account.TYPE_SAVINGS,
+                '049': Account.TYPE_SAVINGS,
+                '058': Account.TYPE_CHECKING,
+                '068': Account.TYPE_PEA,
+                '069': Account.TYPE_SAVINGS,
+            }
 
             obj__link_id = Format('%s&mode=190', Regexp(CleanText('./@onclick'), "'(.*)'"))
             obj__agence = Regexp(Field('_link_id'), r'.*agence=(\w+)')
             obj__compte = Regexp(Field('_link_id'), r'compte=(\w+)')
             obj_id = Format('%s%s', Field('_agence'), Field('_compte'))
             obj__transfer_id = Format('%s0000%s', Field('_agence'), Field('_compte'))
-            obj__coming_links = []
             obj_label = CleanText('.//div[@class="libelleCompte"]')
             obj_balance = MyDecimal('.//td[has-class("right")]', replace_dots=True)
             obj_currency = FrenchTransaction.Currency('.//td[has-class("right")]')
@@ -273,21 +307,21 @@ class AccountsPage(LoggedPage, HTMLPage):
             obj__market_link = None
             obj_number = Field('id')
 
-        class card(ItemElement):
-            def condition(self):
-                return '/outil/UWCB/UWCBEncours' in self.el.attrib['onclick']
+            def obj_ownership(self):
+                async_page = Async('details').loaded_page(self)
+                owner = CleanText('//h5[contains(text(), "Titulaire")]')(async_page.doc)
+                return self.get_ownership(owner)
 
-            def parse(self, el):
-                link = Regexp(CleanText('./@onclick'), "'(.*)'")(el)
-                id = Regexp(CleanText('./@onclick'), r'.*AGENCE=(\w+).*COMPTE=(\w+).*CLE=(\w+)', r'\1\2\3')(el)
+    def get_deferred_cards(self):
+        trs = self.doc.xpath('//tr[contains(@onclick, "EncoursCB")]')
+        links = []
 
-                account = self.parent.objects[id]
-                if not account.coming:
-                    account.coming = Decimal('0')
+        for tr in trs:
+            parent_id = Regexp(CleanText('./@onclick'), r'.*AGENCE=(\w+).*COMPTE=(\w+).*CLE=(\w+)', r'\1\2\3')(tr)
+            link = Regexp(CleanText('./@onclick'), "'(.*)'")(tr)
+            links.append((parent_id, link))
 
-                account.coming += CleanDecimal('.//td[has-class("right")]', replace_dots=True)(el)
-                account._coming_links.append(link)
-                raise SkipItem()
+        return links
 
     @method
     class get_advisor(ItemElement):
@@ -322,11 +356,16 @@ class LoansPage(LoggedPage, HTMLPage):
             obj_type = Account.TYPE_LOAN
             obj_id = Env('id')
             obj__transfer_id = None
-            obj_number = Regexp(CleanText(TableCell('id'), replace=[(' ', ''),('-', '')]), r'(\d{11}[A-Z])')
+            obj_number = Regexp(CleanText(TableCell('id'), replace=[(' ', ''), ('-', '')]), r'(\d{11}[A-Z])')
 
             def obj_label(self):
                 has_type = CleanText('./ancestor::table[.//th[contains(text(), "Type")]]', default=None)(self)
                 return CleanText('./td[2]')(self) if has_type else CleanText('./ancestor::table/preceding-sibling::div[1]')(self).split(' - ')[0]
+
+            def obj_ownership(self):
+                if re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\b(ou)? (m|mr|me|mme|mlle|mle|ml)\b(.*)', CleanText(TableCell('id'))(self), re.IGNORECASE):
+                    return AccountOwnership.CO_OWNER
+                return AccountOwnership.OWNER
 
             def parse(self, el):
                 label = Field('label')(self)
@@ -355,7 +394,7 @@ class LoansProPage(LoggedPage, HTMLPage):
             obj_type = Account.TYPE_LOAN
             obj_id = Env('id')
             obj__transfer_id = None
-            obj_number = Regexp(CleanText(TableCell('id'), replace=[(' ', ''),('-', '')]), r'(\d{11}[A-Z])')
+            obj_number = Regexp(CleanText(TableCell('id'), replace=[(' ', ''), ('-', '')]), r'(\d{11}[A-Z])')
 
             def obj_label(self):
                 has_type = CleanText('./ancestor::table[.//th[contains(text(), "Nature libell")]]', default=None)(self)
@@ -371,36 +410,32 @@ class LoansProPage(LoggedPage, HTMLPage):
 
 
 class Transaction(FrenchTransaction):
-    PATTERNS = [(re.compile('^(?P<category>CB) (?P<text>RETRAIT) DU (?P<dd>\d+)/(?P<mm>\d+)'),
-                                                        FrenchTransaction.TYPE_WITHDRAWAL),
-            (re.compile('^(?P<category>(PRLV|PE)( SEPA)?) (?P<text>.*)'),
-                                                        FrenchTransaction.TYPE_ORDER),
-            (re.compile('^(?P<category>CHQ\.) (?P<text>.*)'),
-                                                        FrenchTransaction.TYPE_CHECK),
-            (re.compile('^(?P<category>RELEVE CB) AU (\d+)/(\d+)/(\d+)'),
-                                                        FrenchTransaction.TYPE_CARD),
-            (re.compile('^(?P<category>CB) (?P<text>.*) (?P<dd>\d+)/(?P<mm>\d+)/(?P<yy>\d+)'),
-                                                        FrenchTransaction.TYPE_CARD),
-            (re.compile('^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP)) (?P<text>.*)'),
-                                                        FrenchTransaction.TYPE_ORDER),
-            (re.compile('^(?P<category>(ECHEANCE\s*)?PRET)(?P<text>.*)'),   FrenchTransaction.TYPE_LOAN_PAYMENT),
-            (re.compile('^(?P<category>(EVI|VIR(EM(EN)?)?T?)(.PERMANENT)? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>.*)'),
-                                                        FrenchTransaction.TYPE_TRANSFER),
-            (re.compile('^(?P<category>REMBOURST)(?P<text>.*)'),     FrenchTransaction.TYPE_PAYBACK),
-            (re.compile('^(?P<category>COM(MISSIONS?)?)(?P<text>.*)'),   FrenchTransaction.TYPE_BANK),
-            (re.compile('^(?P<text>(?P<category>REMUNERATION).*)'),   FrenchTransaction.TYPE_BANK),
-            (re.compile('^(?P<text>(?P<category>ABON.*?)\s*.*)'),   FrenchTransaction.TYPE_BANK),
-            (re.compile('^(?P<text>(?P<category>RESULTAT .*?)\s*.*)'),   FrenchTransaction.TYPE_BANK),
-            (re.compile('^(?P<text>(?P<category>TRAIT\..*?)\s*.*)'),   FrenchTransaction.TYPE_BANK),
-            (re.compile('^(?P<category>REM CHQ) (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
-            (re.compile('^VIREMENT.*'),FrenchTransaction.TYPE_TRANSFER),
-            (re.compile('.*(PRELEVEMENTS|PRELVT|TIP).*'),FrenchTransaction.TYPE_ORDER),
-            (re.compile('.*CHEQUE.*'), FrenchTransaction.TYPE_CHECK),
-            (re.compile('.*ESPECES.*'), FrenchTransaction.TYPE_DEPOSIT),
-            (re.compile('.*(CARTE|CB).*'), FrenchTransaction.TYPE_CARD),
-            (re.compile('.*(AGIOS|ANNULATIONS|IMPAYES|CREDIT).*'), FrenchTransaction.TYPE_BANK),
-            (re.compile('.*(FRAIS DE TENUE DE COMPTE).*'), FrenchTransaction.TYPE_BANK),
-            (re.compile(r'.*\b(RETRAIT)\b.*'), FrenchTransaction.TYPE_WITHDRAWAL),
+    PATTERNS = [
+        (re.compile('^(?P<category>CB) (?P<text>RETRAIT) DU (?P<dd>\d+)/(?P<mm>\d+)'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile('^(?P<category>(PRLV|PE)( SEPA)?) (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile('^(?P<category>CHQ\.) (?P<text>.*)'), FrenchTransaction.TYPE_CHECK),
+        (re.compile('^(?P<category>RELEVE CB) AU (\d+)/(\d+)/(\d+)'), FrenchTransaction.TYPE_CARD),
+        (re.compile('^(?P<category>CB) (?P<text>.*) (?P<dd>\d+)/(?P<mm>\d+)/(?P<yy>\d+)'), FrenchTransaction.TYPE_CARD),
+        (re.compile('^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP)) (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile('^(?P<category>(ECHEANCE\s*)?PRET)(?P<text>.*)'), FrenchTransaction.TYPE_LOAN_PAYMENT),
+        (re.compile('^(TP-\d+-)?(?P<category>(EVI|VIR(EM(EN)?)?T?)(.PERMANENT)? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile('^(?P<category>REMBOURST)(?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK),
+        (re.compile('^(?P<category>COM(MISSIONS?)?)(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<text>(?P<category>REMUNERATION).*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<text>(?P<category>ABON.*?)\s*.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<text>(?P<category>RESULTAT .*?)\s*.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<text>(?P<category>TRAIT\..*?)\s*.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'(?P<text>(?P<category>COTISATION).*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'(?P<text>(?P<category>INTERETS).*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<category>REM CHQ) (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile('^VIREMENT.*'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile('.*(PRELEVEMENTS|PRELVT|TIP).*'), FrenchTransaction.TYPE_ORDER),
+        (re.compile('.*CHEQUE.*'), FrenchTransaction.TYPE_CHECK),
+        (re.compile('.*ESPECES.*'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile('.*(CARTE|CB).*'), FrenchTransaction.TYPE_CARD),
+        (re.compile('.*(AGIOS|ANNULATIONS|IMPAYES|CREDIT).*'), FrenchTransaction.TYPE_BANK),
+        (re.compile('.*(FRAIS DE TENUE DE COMPTE).*'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'.*\b(RETRAIT)\b.*'), FrenchTransaction.TYPE_WITHDRAWAL),
     ]
 
 
@@ -423,7 +458,25 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
         col_raw = [u'Vos opérations', u'Libellé']
 
         class item(Transaction.TransactionElement):
-            load_details = Attr('.', 'href', default=None) & AsyncLoad
+            def load_details(self):
+                # Those are summary for deferred card transactions,
+                # they do not have details.
+                if CleanText('./td[contains(text(), "RELEVE CB")]')(self):
+                    return None
+
+                row = Attr('.', 'id', default=None)(self)
+                assert row, 'HTML format of transactions details changed'
+
+                if not re.match(r'\d+', row):
+                    return self.page.browser.async_open(
+                        Attr('.', 'href')(self),
+                        method='POST',
+                    )
+
+                return self.page.browser.async_open(
+                    '/outil/UWLM/ListeMouvementsParticulier/accesDetailsMouvement?element=%s' % row,
+                    method='POST',
+                )
 
             def obj_type(self):
                 type = Async('details', CleanText(u'//td[contains(text(), "Nature de l\'opération")]/following-sibling::*[1]'))(self)
@@ -436,15 +489,14 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
                 return Transaction.TYPE_UNKNOWN
 
             def condition(self):
-                return self.parent.get_colnum('date') is not None and \
-                       len(self.el.findall('td')) >= 3 and \
-                       self.el.get('class') and \
-                       'tableTr' not in self.el.get('class')
+                return (self.parent.get_colnum('date') is not None
+                        and len(self.el.findall('td')) >= 3
+                        and self.el.get('class')
+                        and 'tableTr' not in self.el.get('class'))
 
             def validate(self, obj):
                 if obj.category == 'RELEVE CB':
                     obj.type = Transaction.TYPE_CARD_SUMMARY
-                    obj.deleted = True
 
                 raw = Async('details', CleanText(u'//td[contains(text(), "Libellé")]/following-sibling::*[1]|//td[contains(text(), "Nom du donneur")]/following-sibling::*[1]', default=obj.raw))(self)
                 if raw:
@@ -461,9 +513,9 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
                     # Empty transaction label
                     obj.raw = obj.label = Async('details', CleanText(u'//td[contains(text(), "Nature de l\'opération")]/following-sibling::*[1]'))(self)
                 if not obj.date:
-                    obj.date = Async('details', Date(CleanText(u'//td[contains(text(), "Date de l\'opération")]/following-sibling::*[1]', default=u''), default=NotAvailable))(self)
+                    obj.date = Async('details', Date(CleanText(u'//td[contains(text(), "Date de l\'opération")]/following-sibling::*[1]', default=u''), dayfirst=True, default=NotAvailable))(self)
                     obj.rdate = obj.date
-                    obj.vdate = Async('details', Date(CleanText(u'//td[contains(text(), "Date de valeur")]/following-sibling::*[1]', default=u''), default=NotAvailable))(self)
+                    obj.vdate = Async('details', Date(CleanText(u'//td[contains(text(), "Date de valeur")]/following-sibling::*[1]', default=u''), dayfirst=True, default=NotAvailable))(self)
                     obj.amount = Async('details', CleanDecimal(u'//td[contains(text(), "Montant")]/following-sibling::*[1]', replace_dots=True, default=NotAvailable))(self)
                 # ugly hack to fix broken html
                 # sometimes transactions have really an amount of 0...
@@ -476,32 +528,135 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
         return self._get_operations(self)()
 
 
-class CBHistoryPage(AccountHistoryPage):
-    def get_operations(self):
-        for tr in self._get_operations(self)():
-            tr.type = tr.TYPE_DEFERRED_CARD
-            deferred_date = Regexp(CleanText('//div[@class="date"][contains(text(), "Carte")]'), r'le ([^:]+)', default=None)(self.doc)
-            if deferred_date:
-                tr.date = parse_french_date(deferred_date).date()
-            # rdate > date doesn't make any sense but it seems that lcl website can do shitty things sometimes
-            if tr.date >= tr.rdate:
-                yield tr
-            else:
-                self.logger.error('skipping transaction with rdate > date')
+class CardsPage(LoggedPage, HTMLPage):
 
+    def deferred_date(self):
+        deferred_date = Regexp(CleanText('//div[@class="date"][contains(text(), "Carte")]'), r'le ([^:]+)', default=None)(self.doc)
+        assert deferred_date, 'Cannot find deferred_date'
+        return parse_french_date(deferred_date).date()
 
-class CBListPage(CBHistoryPage):
-    def get_cards(self):
-        cards = []
-        for tr in self.doc.getiterator('tr'):
-            link = Regexp(CleanText('./@onclick'), "'(.*)'", default=None)(tr)
-            if link is not None and link.startswith('/outil/UWCB/UWCBEncours') and 'listeOperations' in link:
-                cards.append(link)
-        return cards
+    def get_card_summary(self):
+        amount = CleanDecimal.French('//div[@class="montantEncours"]')(self.doc)
+
+        if amount:
+            t = Transaction()
+            t.date = t.rdate = self.deferred_date()
+            t.type = Transaction.TYPE_CARD_SUMMARY
+            t.label = t.raw = CleanText('//div[@class="date"][contains(text(), "Carte")]')(self.doc)
+            t.amount = abs(amount)
+            return t
+
+    def format_url(self, url):
+        cb_type = re.match(r'.*(UWCBEncours.*)/.*', url).group(1)
+        return '/outil/UWCB/%s/listeOperations' % cb_type
+
+    @method
+    class iter_multi_cards(TableElement):
+        head_xpath = '//table[@class="tagTab"]/tr/th'
+        item_xpath = '//table[@class="tagTab"]//tr[position()>1]'
+
+        col_label = re.compile('Type')
+        col_number = re.compile('Numéro')
+        col_owner = re.compile('Titulaire')
+        col_coming = re.compile('Montant')
+
+        class Item(ItemElement):
+            klass = Account
+
+            obj_type = Account.TYPE_CARD
+            obj_balance = Decimal(0)
+            obj_parent = Env('parent_account')
+            obj_coming = CleanDecimal.French(TableCell('coming'))
+            obj_currency = Currency(TableCell('coming'))
+            obj__transfer_id = None
+
+            obj__cards_list = CleanText(Env('cards_list'))
+
+            def obj__transactions_link(self):
+                link = Attr('.', 'onclick')(self)
+                url = re.match('.*\'(.*)\'\\.*', link).group(1)
+                return self.page.format_url(url)
+
+            def obj_number(self):
+                card_number = re.match('((XXXX ){3}X ([0-9]{3}))', CleanText(TableCell('number'))(self))
+                return card_number.group(1)[0:16] + card_number.group(1)[-3:]
+
+            def obj_label(self):
+                return '%s %s %s' % (
+                    CleanText(TableCell('label'))(self),
+                    CleanText(TableCell('owner'))(self),
+                    Field('number')(self),
+                )
+
+            def obj_id(self):
+                card_number = re.match('((XXXX ){3}X([0-9]{3}))', CleanText(Field('number'))(self))
+                return '%s-%s' % (Env('parent_account')(self).id, card_number.group(3))
+
+    def get_single_card(self, parent_account):
+        account = Account()
+
+        card_info = CleanText('//select[@id="selectCard"]/option/text()')(self.doc)
+        # ex: VISA INFINITE DD M FIRSTNAME LASTNAME N°XXXX XXXX XXXX X103
+        regex = '(.*)N°((XXXX ){3}X([0-9]{3})).*'
+        card_infos = re.match(regex, card_info)
+
+        coming = CleanDecimal.French('//div[@class="montantEncours"]/text()')(self.doc)
+
+        account.id = '%s-%s' % (parent_account.id, card_infos.group(4))
+        account.type = Account.TYPE_CARD
+        account.parent = parent_account
+        account.balance = Decimal('0')
+        account.coming = coming
+        account.number = card_infos.group(2)
+        account.label = card_info
+        account.currency = parent_account.currency
+        account._transactions_link = self.format_url(self.url)
+        account._transfer_id = None
+        # We need to store this url. It will be useful later to get the transactions.
+        account._cards_list = self.url
+        return account
+
+    def get_child_cards(self, parent_account):
+        # There is a selector with only one entry when there is only one card
+        # But not when there are multiple card.
+        if self.doc.xpath('//select[@id="selectCard"]'):
+            return [self.get_single_card(parent_account)]
+        return list(self.iter_multi_cards(parent_account=parent_account, cards_list=self.url))
+
+    @method
+    class iter_transactions(TableElement):
+
+        item_xpath = '//tr[contains(@class, "ligne")]'
+        head_xpath = '//th'
+
+        col_date = re.compile('Date')
+        col_label = re.compile('Libellé')
+        col_amount = re.compile('Montant')
+
+        class item(ItemElement):
+
+            klass = Transaction
+
+            obj_rdate = obj_bdate = Date(CleanText(TableCell('date')), dayfirst=True)
+            obj_type = Transaction.TYPE_DEFERRED_CARD
+            obj_raw = obj_label = CleanText(TableCell('label'))
+            obj_amount = CleanDecimal.French(TableCell('amount'))
+
+            def obj_date(self):
+                return self.page.deferred_date()
+
+            def condition(self):
+                if Field('date')(self) < Field('rdate')(self):
+                    self.logger.error(
+                        'skipping transaction with rdate(%s) > date(%s) for label(%s)',
+                        Field('rdate')(self), Field('date')(self), Field('label')(self)
+                    )
+                    return False
+                return True
 
 
 class BoursePage(LoggedPage, HTMLPage):
-    ENCODING='latin-1'
+    ENCODING = 'latin-1'
     REFRESH_MAX = 0
 
     TYPES = {
@@ -511,7 +666,7 @@ class BoursePage(LoggedPage, HTMLPage):
         "plan d'épargne en actions bourse": Account.TYPE_PEA,
         'pea pme bourse': Account.TYPE_PEA,
         'pea pme': Account.TYPE_PEA,
-            }
+    }
 
     def on_load(self):
         """
@@ -552,26 +707,28 @@ class BoursePage(LoggedPage, HTMLPage):
         item_xpath = '//table[has-class("tableau_comptes_details")]//tr[td and not(parent::tfoot)]'
         head_xpath = '//table[has-class("tableau_comptes_details")]/thead/tr/th'
 
-        col_label = u'Comptes'
+        col_label = 'Comptes'
+        col_owner = re.compile('Titulaire')
         col_titres = re.compile('Valorisation')
-        col_especes = u'Solde espèces'
+        col_especes = re.compile('Solde espèces')
 
-        class item(ItemElement):
+        class item(OwnedItemElement):
             klass = Account
 
             load_details = Field('_market_link') & AsyncLoad
 
             obj__especes = CleanDecimal(TableCell('especes'), replace_dots=True, default=0)
             obj__titres = CleanDecimal(TableCell('titres'), replace_dots=True, default=0)
-            obj_valuation_diff = Async('details') &  CleanDecimal('//td[contains(text(), "value latente")]/ \
-                                                                  following-sibling::td[1]', replace_dots=True)
-            obj__market_link = Regexp(Attr(TableCell('label'), 'onclick'), "'(.*?)'")
+            obj_valuation_diff = Async('details') & CleanDecimal(
+                '//td[contains(text(), "value latente")]/following-sibling::td[1]',
+                replace_dots=True,
+            )
+            obj__market_id = Regexp(Attr(TableCell('label'), 'onclick'), r'nump=(\d+:\d+)')
+            obj__market_link = Regexp(Attr(TableCell('label'), 'onclick'), r"goTo\('(.*?)'")
             obj__link_id = Async('details') & Link(u'//a[text()="Historique"]')
             obj__transfer_id = None
             obj_balance = Field('_titres')
-
-            def obj_currency(self):
-                return Currency.get_currency(CleanText(TableCell('titres'))(self))
+            obj_currency = Currency(CleanText(TableCell('titres')))
 
             def obj_number(self):
                 number = CleanText((TableCell('label')(self)[0]).xpath('./div[not(b)]'))(self).replace(' - ', '')
@@ -593,12 +750,17 @@ class BoursePage(LoggedPage, HTMLPage):
                         return self.page.TYPES.get(key)
                 return Account.TYPE_MARKET
 
+            def obj_ownership(self):
+                owner = CleanText(TableCell('owner'))(self)
+                return self.get_ownership(owner)
+
     def get_logout_link(self):
-        return Link('//a[@class="link-underline" and contains(text(), "espace client")]')(self.doc)
+        return Link('//a[contains(text(), "Retour aux comptes")]')(self.doc)
 
     @method
     class iter_investment(ListElement):
         item_xpath = '//table[@id="tableValeurs"]/tbody/tr[@id and count(descendant::td) > 1]'
+
         class item(ItemElement):
             klass = Investment
 
@@ -640,7 +802,7 @@ class BoursePage(LoggedPage, HTMLPage):
             form = self.page.get_form(id="historyFilter")
             form['PAGE'] = int(form['PAGE']) + 1
             return requests.Request("POST", form.url, data=dict(form)) \
-                   if self.page.doc.xpath('//*[@data-page = $page]', page=form['PAGE']) else None
+                if self.page.doc.xpath('//*[@data-page = $page]', page=form['PAGE']) else None
 
         class item(ItemElement):
             klass = Transaction
@@ -672,7 +834,8 @@ class DiscPage(LoggedPage, HTMLPage):
             # and sometimes there's just no form
             form = self.get_form(xpath='//form[not(@id="formLogout")]')
             form.submit()
-        except FormNotFound: # Sometime no form is present, just a redirection
+        except FormNotFound:
+            # Sometime no form is present, just a redirection
             self.logger.debug('no form on this page')
 
         super(DiscPage, self).on_load()
@@ -687,18 +850,39 @@ class NoPermissionPage(LoggedPage, HTMLPage):
 
 
 class AVPage(LoggedPage, HTMLPage):
+    def get_routage_url(self):
+        for account in self.doc.xpath('//table[@class]/tbody/tr'):
+            if account.xpath('.//td[has-class("nomContrat")]//a[has-class("routageCAR")]'):
+                return Link('.//td[has-class("nomContrat")]//a[has-class("routageCAR")]')(account)
+
+    def is_website_life_insurance(self):
+        # no need specific account to go on life insurance external website
+        # because we just need to go on life insurance external website
+        return bool(self.get_routage_url())
+
+    def get_calie_life_insurances_first_index(self):
+        # indices are associated to calie life insurances to make requests to them
+        # if only one life insurance, this request directly leads to details on CaliePage
+        # otherwise, any index will lead to CalieContractsPage,
+        # so we stop at the first index
+        for account in self.doc.xpath('//table[@class]/tbody/tr'):
+            if account.xpath('.//td[has-class("nomContrat")]//a[contains(@class, "redirect")][@href="#"]'):
+                index = Attr(account.xpath('.//td[has-class("nomContrat")]//a[contains(@class, "redirect")][@href="#"]'), 'id')(self)
+                return index
+
     @method
-    class get_list(ListElement):
+    class get_popup_life_insurance(ListElement):
         item_xpath = '//table[@class]/tbody/tr'
 
-        class item(ItemElement):
+        class item(OwnedItemElement):
             klass = Account
 
             def condition(self):
-                if self.obj_balance(self) == 0 and not self.el.xpath('.//td/a'):
+                if self.obj_balance(self) == 0 and not self.el.xpath('.//td[has-class("nomContrat")]//a'):
                     self.logger.warning("ignoring an AV account because there's no link for it")
                     return False
-                return True
+                # there is life insurance detail page link but check if it's a popup
+                return self.el.xpath('.//td[has-class("nomContrat")]//a[has-class("clickPopupDetail")]')
 
             obj__owner = CleanText('.//td[2]')
             obj_label = Format(u'%s %s', CleanText('.//td/text()[following-sibling::br]'), obj__owner)
@@ -710,19 +894,22 @@ class AVPage(LoggedPage, HTMLPage):
             obj__coming_links = []
             obj__transfer_id = None
             obj_number = Field('id')
+            obj__external_website = False
+            obj__is_calie_account = False
+
+            def obj_ownership(self):
+                owner = CleanText(Field('_owner'))(self)
+                return self.get_ownership(owner)
 
             def obj_id(self):
+                _id = CleanText('.//td/@id')(self)
+                # in old code, we use _id, it seems that is not used anymore
+                # but check if it's the case for all users
+                assert not _id, '_id is still used to retrieve life insurance'
+
                 try:
-                    _id = CleanText('.//td/a/@id')(self)
-                    if not _id:
-                        self.page.browser.assurancevie.go()
-                        ac_details_page = self.page.browser.open(Link('.//td/a')(self)).page
-                    else:
-                        if '-' in _id:
-                            split = _id.split('-')
-                            ac_details_page = self.page.browser.open('/outil/UWVI/AssuranceVie/accesDetail?ID_CONTRAT=%s&PRODUCTEUR=%s' % (split[0], split[1])).page
-                        else:
-                            ac_details_page = self.page.browser.open('/outil/UWVI/AssuranceVie/accesDetail?ID_CONTRAT=%s' % (_id)).page
+                    self.page.browser.assurancevie.go()
+                    ac_details_page = self.page.browser.open(Link('.//td[has-class("nomContrat")]//a')(self)).page
                     return CleanText('(//tr[3])/td[2]')(ac_details_page.doc)
                 except ServerError:
                     self.logger.debug("link didn't work, trying with the form instead")
@@ -737,8 +924,8 @@ class AVPage(LoggedPage, HTMLPage):
                     return account_id
 
             def obj__form(self):
-                form_id = Attr('.//td/a', 'id', default=None)(self)
-                form_class = Attr('.//td/a', 'class', default=None)(self)
+                # maybe deprecated
+                form_id = Attr('.//td[has-class("nomContrat")]//a', 'id', default=None)(self)
                 if form_id:
                     if '-' in form_id:
                         id_contrat = re.search(r'^(.*?)-', form_id).group(1)
@@ -747,7 +934,7 @@ class AVPage(LoggedPage, HTMLPage):
                         id_contrat = form_id
                         producteur = None
                 else:
-                    if len(self.xpath('.//td/a[has-class("clickPopupDetail")]')):
+                    if len(self.xpath('.//td[has-class("nomContrat")]/a[has-class("clickPopupDetail")]')):
                         # making a form of this link sometimes makes the site return an empty response...
                         # the link is a link to some info, not full AV website
                         # it's probably an indication the account is restricted anyway, so avoid it
@@ -755,20 +942,38 @@ class AVPage(LoggedPage, HTMLPage):
                         return None
 
                     # sometimes information are not in id but in href
-                    url = Attr('.//td/a', 'href', default=None)(self)
+                    url = Attr('.//td[has-class("nomContrat")]//a', 'href', default=None)(self)
                     parsed_url = urlparse(url)
                     params = parse_qs(parsed_url.query)
 
                     id_contrat = params['ID_CONTRAT'][0]
                     producteur = params['PRODUCTEUR'][0]
 
-                if 'redirect' in form_class:
+                if self.xpath('//form[@id="formRedirectPart"]'):
                     form = self.page.get_form('//form[@id="formRedirectPart"]')
                 else:
                     form = self.page.get_form('//form[@id="formRoutage"]')
                     form['PRODUCTEUR'] = producteur
                 form['ID_CONTRAT'] = id_contrat
                 return form
+
+
+class CalieContractsPage(LoggedPage, HTMLPage):
+    @method
+    class iter_calie_life_insurance(TableElement):
+        head_xpath = '//table[contains(@id, "MainTable")]//tr[contains(@id, "HeadersRow")]//td[text()]'
+        item_xpath = '//table[contains(@id, "MainTable")]//tr[contains(@id, "DataRow")]'
+
+        col_number = 'Numéro contrat'  # internal contrat number
+
+        class item(ItemElement):
+            klass = Account
+
+            # internal contrat number, to be replaced by external number in CaliePage.fill_account()
+            # obj_id is needed here though, to avoid dupicate account errors
+            obj_id = CleanText(TableCell('number'))
+
+            obj_url = AbsoluteLink('.//a')  # need AbsoluteLink since we moved out of basurl domain
 
 
 class SendTokenPage(LoggedPage, LCLBasePage):
@@ -800,17 +1005,17 @@ class CalieTableElement(TableElement):
 
 
 class CaliePage(LoggedPage, HTMLPage):
-    def on_load(self):
-        # TODO raise the ActionNeeded when backend handles it.
-        if self.doc.xpath('//button[@id="acceptDisclaimerButton"]'):
-            self.logger.warning('Action Needed on website: %s', CleanText('//div[@class="data-header"]')(self.doc))
+    def check_error(self):
+        message = CleanText('//div[contains(@class, "disclaimer-div")]//text()[contains(., "utilisation vaut acceptation")]')(self.doc)
+        if self.doc.xpath('//button[@id="acceptDisclaimerButton"]') and message:
+            raise ActionNeeded(message)
 
     @method
     class iter_investment(CalieTableElement):
         # Careful, <table> contains many nested <table/tbody/tr/td>
         # Two first lines are titles, two last are investment sum-ups
-        item_xpath = '//table[@class="dxgvTable dxgvRBB"]//tr[position() > 2 and position() < last()-1]'
-        head_xpath = '//table[@class="dxgvTable dxgvRBB"]//tr[1]/td//tr/td[1]'
+        item_xpath = '//table[@class="dxgvTable dxgvRBB"]//tr[contains(@class, "DataRow")]'
+        head_xpath = '//table[contains(@id, "MainTable")]//tr[contains(@id, "HeadersRow")]//td[text()]'
 
         col_label = 'Support'
         col_vdate = 'Date de valeur'
@@ -818,7 +1023,7 @@ class CaliePage(LoggedPage, HTMLPage):
         col_valuation = 'Valeur dans la devise du support (EUR)'
         col_unitvalue = 'Valeur unitaire'
         col_quantity = 'Parts'
-        col_diff = 'Performance'
+        col_diff_ratio = 'Performance'
         col_portfolio_share = 'Répartition (%)'
 
         class item(ItemElement):
@@ -827,16 +1032,40 @@ class CaliePage(LoggedPage, HTMLPage):
             obj_label = CleanText(TableCell('label'))
             obj_original_valuation = CleanDecimal(TableCell('original_valuation'), replace_dots=True)
             obj_valuation = CleanDecimal(TableCell('valuation'), replace_dots=True)
-            obj_vdate = Date(CleanText(TableCell('vdate')))
-            obj_unitvalue = CleanDecimal(TableCell('unitvalue'), replace_dots=True)
-            obj_quantity = CleanDecimal(TableCell('quantity'), replace_dots=True)
+            obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True)
+            obj_unitvalue = CleanDecimal(TableCell('unitvalue'), replace_dots=True, default=NotAvailable)  # displayed with format '123.456,78 EUR'
+            obj_quantity = CleanDecimal(TableCell('quantity'), replace_dots=True, default=NotAvailable)  # displayed with format '1.234,5678 u.'
             obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal(TableCell('portfolio_share')))
-            obj_diff = CleanDecimal(TableCell('diff'))
+
+            def obj_diff_ratio(self):
+                _diff_ratio = CleanDecimal(TableCell('diff_ratio'), default=NotAvailable)(self)
+                if not empty(_diff_ratio):
+                    return Eval(lambda x: x / 100, _diff_ratio)(self)
+                return NotAvailable
 
             # Unfortunately on the Calie space the links to the
             # invest details return Forbidden even on the website
             obj_code = NotAvailable
             obj_code_type = NotAvailable
+
+    @method
+    class fill_account(ItemElement):
+        obj_number = obj_id = Regexp(CleanText('.'), r'Numéro externe (.{10})')
+        obj_label = Format(
+            '%s %s',
+            Regexp(CleanText('.'), r'Produit (.*) Statut'),
+            Field('id')
+        )
+        obj_balance = CleanDecimal('//tr[contains(@id, "FooterRow")]', replace_dots=True)
+        obj_type = Account.TYPE_LIFE_INSURANCE
+        obj_currency = 'EUR'
+        obj__external_website = True
+        obj__is_calie_account = True
+        obj__transfer_id = None
+
+        def obj__history_url(self):
+            relative_url = Regexp(Attr('//a[contains(text(), "Opérations")]', 'onclick'), r'href=\'(.*)\'')(self)
+            return urljoin(self.page.url, relative_url)
 
 
 class AVDetailPage(LoggedPage, LCLBasePage):
@@ -850,6 +1079,40 @@ class AVDetailPage(LoggedPage, LCLBasePage):
         params['site'] = 'LCLI'
         params['stbzn'] = 'bnc'
         return self.browser.location('https://assurance-vie-et-prevoyance.secure.lcl.fr/filiale/entreeBam', params=params)
+
+
+class AVListPage(LoggedPage, JsonPage):
+    @method
+    class iter_life_insurance(DictElement):
+        item_xpath = 'syntheseContrats'
+
+        class item(ItemElement):
+            def condition(self):
+                activity = Dict('lcstacntgen')(self)
+                account_type = Dict('lcgampdt')(self)
+                # We ignore accounts without activities or when the activity is 'Closed',
+                # they are inactive and closed and they don't appear on the website.
+                return bool(
+                    activity and account_type
+                    and activity.lower() == 'actif'
+                    and account_type.lower() == 'epargne'
+                )
+
+            klass = Account
+
+            obj_id = obj_number = Dict('idcntcar')
+            obj_balance = CleanDecimal(Dict('mtvalcnt'))
+            obj_label = Dict('lnpdt')
+            obj_type = Account.TYPE_LIFE_INSURANCE
+            obj_currency = 'EUR'
+
+            obj__external_website = True
+            obj__form = None
+            obj__link_id = None
+            obj__market_link = None
+            obj__coming_links = []
+            obj__transfer_id = None
+            obj__is_calie_account = False
 
 
 class AVHistoryPage(LoggedPage, JsonPage):
@@ -886,6 +1149,16 @@ class AVHistoryPage(LoggedPage, JsonPage):
 
 
 class AVInvestmentsPage(LoggedPage, JsonPage):
+    def update_life_insurance_account(self, life_insurance):
+        life_insurance._owner = Format(
+            '%s %s',
+            Dict('situationAdministrativeEpargne/lppeoscp'),
+            Dict('situationAdministrativeEpargne/lnpeoscp'),
+        )(self.doc)
+        life_insurance.label = '%s %s' % (Dict('situationAdministrativeEpargne/lcofc')(self.doc), life_insurance._owner)
+        life_insurance.valuation_diff = CleanDecimal(Dict('situationFinanciereEpargne/mtpmvcnt'), default=NotAvailable)(self.doc)
+        return life_insurance
+
     @method
     class iter_investment(DictElement):
         item_xpath = 'listeSupports/support'
@@ -899,17 +1172,12 @@ class AVInvestmentsPage(LoggedPage, JsonPage):
             obj_unitvalue = CleanDecimal(Dict('mtliqpaaspt'), default=NotAvailable)
             obj_quantity = CleanDecimal(Dict('qtpaaspt'), default=NotAvailable)
             obj_diff = CleanDecimal(Dict('mtpmvspt'), default=NotAvailable)
+            obj_vdate = Date(Dict('dvspt'), default=NotAvailable)
 
             def obj_portfolio_share(self):
                 ptf = CleanDecimal(Dict('txrpaspt'), default=NotAvailable)(self)
                 ptf /= 100
                 return ptf
-
-            def obj_vdate(self):
-                time = Dict('dvspt')(self)
-                if not time:
-                    return NotAvailable
-                return datetime.fromtimestamp(time//1000)
 
             def obj_code_type(self):
                 if is_isin_valid(Field('code')(self)):
@@ -920,7 +1188,7 @@ class AVInvestmentsPage(LoggedPage, JsonPage):
 class RibPage(LoggedPage, LCLBasePage):
     def get_iban(self):
         if (self.doc.xpath('//div[contains(@class, "rib_cadre")]//div[contains(@class, "rib_internat")]')):
-            return CleanText().filter(self.doc.xpath('//div[contains(@class, "rib_cadre")]//div[contains(@class, "rib_internat")]//p//strong')[0].text).replace(' ','')
+            return CleanText('//div[contains(@class, "rib_cadre") and not(contains(@class, "hidden"))]//div[contains(@class, "rib_internat")]//p//strong/text()[1]', replace=[(' ', '')])(self.doc)
 
     def check_iban_by_account(self, account_id):
         iban_account_id = CleanText().filter(self.doc.xpath('(//td[@class[contains(., "guichet-")]]/following-sibling::*)[1]/strong'))
@@ -928,12 +1196,12 @@ class RibPage(LoggedPage, LCLBasePage):
         iban_account = "%s%s" % (iban_guichet_id, iban_account_id[4:])
 
         if account_id == iban_account:
-            return CleanText().filter(self.doc.xpath('//div[contains(@class, "rib_cadre")]//div[contains(@class, "rib_internat")]//p//strong')[0].text).replace(' ', '')
-        else:
-            return None
+            return CleanText('//div[contains(@class, "rib_cadre") and not(contains(@class, "hidden"))]//div[contains(@class, "rib_internat")]//p//strong/text()[1]', replace=[(' ', '')])(self.doc)
+        return None
 
     def has_iban_choice(self):
         return False if self.doc.xpath('(//strong[contains(., "RELEVE D\'IDENTITE BANCAIRE")])[1]') else True
+
 
 class HomePage(LoggedPage, HTMLPage):
     pass
@@ -944,7 +1212,7 @@ class TransferPage(LoggedPage, HTMLPage):
         # This aims to track input errors.
         script_error = CleanText(u"//script[contains(text(), 'if (\"true\"===\"true\")')]")(self.doc)
         if script_error:
-            raise TransferBankError(CleanText().filter(html2text(re.search(u'\.html\("(.*?)"\)', script_error).group(1))))
+            raise TransferBankError(message=CleanText().filter(html2text(re.search(u'\.html\("(.*?)"\)', script_error).group(1))))
 
     def can_transfer(self, account_transfer_id):
         for div in self.doc.xpath('//div[input[@id="indexCompteEmetteur"]]//div[@class="infoCompte" and not(@title)]'):
@@ -1027,7 +1295,7 @@ class TransferPage(LoggedPage, HTMLPage):
         )(self.doc)
         # skip html comment with filtering on text() content
         transfer.label = CleanText('//div[@class="motif"]/text()[contains(., "Motif : ")]',
-                                   replace=[('Motif : ','')])(self.doc)
+                                   replace=[('Motif : ', '')])(self.doc)
 
         return transfer
 
@@ -1052,7 +1320,9 @@ class TransferPage(LoggedPage, HTMLPage):
 
         class Item(ItemElement):
             klass = Recipient
-            validate = lambda self, obj: self.obj_id(self) != self.env['account_transfer_id']
+
+            def condition(self):
+                return len(self.el.xpath('./div')) > 1
 
             obj_id = CleanText('./div[@class="infoCompte" and not(@title)]', replace=[(' 0000', '')])
             obj__transfer_id = CleanText('./div[@class="infoCompte" and not(@title)]', replace=[(' ', '')])
@@ -1064,8 +1334,8 @@ class TransferPage(LoggedPage, HTMLPage):
             def obj_enabled_at(self):
                 return datetime.now().replace(microsecond=0)
 
-            def condition(self):
-                return len(self.el.xpath('./div')) > 1
+            def validate(self, obj):
+                return Field('id')(self) != self.env['account_transfer_id']
 
             def parse(self, el):
                 if bool(CleanText('./div[@id="soldeEurosCompte"]')(self)):
@@ -1078,9 +1348,9 @@ class TransferPage(LoggedPage, HTMLPage):
                     self.env['iban'] = self.obj_id(self)
                     self.env['bank_name'] = NotAvailable
 
-    def fill_transfer_id(self, transfer):
-        transfer.id = Regexp(CleanText(u'//div[@class="alertConfirmationVirement"]//p[contains(text(), "référence")]'), u'référence (\d+)')(self.doc)
-        return transfer
+    def check_error(self):
+        transfer_confirmation_msg = CleanText('//div[@class="alertConfirmationVirement"]')(self.doc)
+        assert transfer_confirmation_msg, 'Transfer confirmation message is not found.'
 
 
 class AddRecipientPage(LoggedPage, HTMLPage):
@@ -1198,7 +1468,7 @@ class DepositPage(LoggedPage, HTMLPage):
         col_name = 'Nom du contrat'
         col_balance = 'Capital investi'
 
-        class item(ItemElement):
+        class item(OwnedItemElement):
             klass = Account
 
             obj_type = Account.TYPE_DEPOSIT
@@ -1210,6 +1480,10 @@ class DepositPage(LoggedPage, HTMLPage):
             # So it can be modified later
             obj_id = None
             obj__transfer_id = None
+
+            def obj_ownership(self):
+                owner = CleanText(TableCell('owner'))(self)
+                return self.get_ownership(owner)
 
     def set_deposit_account_id(self, account):
         account.id = CleanText('//td[contains(text(), "N° contrat")]/following::td[1]//b')(self.doc)

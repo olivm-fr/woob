@@ -1,166 +1,206 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2010-2013 Xavier Guerrin
+# Copyright(C) 2012-2019  Budget Insight
 #
 # This file is part of a weboob module.
 #
 # This weboob module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
+# it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
 # This weboob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
+# GNU Lesser General Public License for more details.
 #
-# You should have received a copy of the GNU Affero General Public License
+# You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+
+# yapf-compatible
+
+from __future__ import unicode_literals
 
 from datetime import date
 from collections import OrderedDict
-import re
 
+from weboob.tools.value import Value, ValueBackendPassword
+from weboob.tools.backend import BackendConfig, Module
 from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import Account, AccountNotFound, CapBankWealth, CapBankTransferAddRecipient
-from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, Value
+from weboob.capabilities.bank import (
+    CapBankWealth, CapBankTransferAddRecipient, Account, AccountNotFound,
+)
 
 from .proxy_browser import ProxyBrowser
 
+__all__ = ['CreditAgricoleModule']
 
-__all__ = ['CragrModule']
 
-
-class CragrModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, CapProfile):
+class CreditAgricoleModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapProfile):
     NAME = 'cragr'
-    MAINTAINER = u'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
+    MAINTAINER = 'Quentin Defenouillère'
+    EMAIL = 'quentin.defenouillere@budget-insight.com'
     VERSION = '1.6'
-    DESCRIPTION = u'Crédit Agricole'
-    LICENSE = 'AGPLv3+'
-    website_choices = OrderedDict([(k, u'%s (%s)' % (v, k)) for k, v in sorted({
-        'm.ca-alpesprovence.fr': u'Alpes Provence',
-        'm.ca-alsace-vosges.fr': u'Alsace-Vosges',
-        'm.ca-anjou-maine.fr': u'Anjou Maine',
-        'm.ca-aquitaine.fr': u'Aquitaine',
-        'm.ca-atlantique-vendee.fr': u'Atlantique Vendée',
-        'm.ca-briepicardie.fr': u'Brie Picardie',
-        'm.ca-cb.fr': u'Champagne Bourgogne',
-        'm.ca-centrefrance.fr': u'Centre France',
-        'm.ca-centreloire.fr': u'Centre Loire',
-        'm.ca-centreouest.fr': u'Centre Ouest',
-        'm.ca-centrest.fr': u'Centre Est',
-        'm.ca-charente-perigord.fr': u'Charente Périgord',
-        'm.ca-cmds.fr': u'Charente-Maritime Deux-Sèvres',
-        'm.ca-corse.fr': u'Corse',
-        'm.ca-cotesdarmor.fr': u'Côtes d\'Armor',
-        'm.ca-des-savoie.fr': u'Des Savoie',
-        'm.ca-finistere.fr': u'Finistere',
-        'm.ca-franchecomte.fr': u'Franche-Comté',
-        'm.ca-guadeloupe.fr': u'Guadeloupe',
-        'm.ca-illeetvilaine.fr': u'Ille-et-Vilaine',
-        'm.ca-languedoc.fr': u'Languedoc',
-        'm.ca-loirehauteloire.fr': u'Loire Haute Loire',
-        'm.ca-lorraine.fr': u'Lorraine',
-        'm.ca-martinique.fr': u'Martinique Guyane',
-        'm.ca-morbihan.fr': u'Morbihan',
-        'm.ca-nmp.fr': u'Nord Midi-Pyrénées',
-        'm.ca-nord-est.fr': u'Nord Est',
-        'm.ca-norddefrance.fr': u'Nord de France',
-        'm.ca-normandie-seine.fr': u'Normandie Seine',
-        'm.ca-normandie.fr': u'Normandie',
-        'm.ca-paris.fr': u'Ile-de-France',
-        'm.ca-pca.fr': u'Provence Côte d\'Azur',
-        'm.ca-reunion.fr': u'Réunion',
-        'm.ca-sudmed.fr': u'Sud Méditerranée',
-        'm.ca-sudrhonealpes.fr': u'Sud Rhône Alpes',
-        'm.ca-toulouse31.fr': u'Toulouse 31', # m.ca-toulousain.fr redirects here
-        'm.ca-tourainepoitou.fr': u'Tourraine Poitou',
-        'm.ca-valdefrance.fr': u'Val de France',
-        'm.lefil.com': u'Pyrénées Gascogne',
-        }.items())])
+    DESCRIPTION = 'Crédit Agricole'
+    LICENSE = 'LGPLv3+'
 
-    CONFIG = BackendConfig(Value('website',  label=u'Région', choices=website_choices),
-                           ValueBackendPassword('login', label=u'N° de compte', masked=False, regexp=r'\d+'),
-                           ValueBackendPassword('password', label=u'Code personnel', regexp=r'\d{6}'))
+    region_choices = {
+        'www.ca-alpesprovence.fr': 'Alpes Provence',
+        'www.ca-alsace-vosges.fr': 'Alsace-Vosges',
+        'www.ca-anjou-maine.fr': 'Anjou Maine',
+        'www.ca-aquitaine.fr': 'Aquitaine',
+        'www.ca-atlantique-vendee.fr': 'Atlantique Vendée',
+        'www.ca-briepicardie.fr': 'Brie Picardie',
+        'www.ca-cb.fr': 'Champagne Bourgogne',
+        'www.ca-centrefrance.fr': 'Centre France',
+        'www.ca-centreloire.fr': 'Centre Loire',
+        'www.ca-centreouest.fr': 'Centre Ouest',
+        'www.ca-centrest.fr': 'Centre Est',
+        'www.ca-charente-perigord.fr': 'Charente Périgord',
+        'www.ca-cmds.fr': 'Charente-Maritime Deux-Sèvres',
+        'www.ca-corse.fr': 'Corse',
+        'www.ca-cotesdarmor.fr': 'Côtes d\'Armor',
+        'www.ca-des-savoie.fr': 'Des Savoie',
+        'www.ca-finistere.fr': 'Finistere',
+        'www.ca-franchecomte.fr': 'Franche-Comté',
+        'www.ca-guadeloupe.fr': 'Guadeloupe',
+        'www.ca-illeetvilaine.fr': 'Ille-et-Vilaine',
+        'www.ca-languedoc.fr': 'Languedoc',
+        'www.ca-loirehauteloire.fr': u'Loire Haute Loire',
+        'www.ca-lorraine.fr': 'Lorraine',
+        'www.ca-martinique.fr': 'Martinique Guyane',
+        'www.ca-morbihan.fr': 'Morbihan',
+        'www.ca-nmp.fr': 'Nord Midi-Pyrénées',
+        'www.ca-nord-est.fr': 'Nord Est',
+        'www.ca-norddefrance.fr': 'Nord de France',
+        'www.ca-normandie-seine.fr': 'Normandie Seine',
+        'www.ca-normandie.fr': 'Normandie',
+        'www.ca-paris.fr': 'Ile-de-France',
+        'www.ca-pca.fr': 'Provence Côte d\'Azur',
+        'www.ca-reunion.fr': 'Réunion',
+        'www.ca-sudmed.fr': 'Sud Méditerranée',
+        'www.ca-sudrhonealpes.fr': 'Sud Rhône Alpes',
+        'www.ca-toulouse31.fr': 'Toulouse 31',
+        'www.ca-tourainepoitou.fr': 'Tourraine Poitou',
+        'www.ca-valdefrance.fr': 'Val de France',
+        'www.ca-pyrenees-gascogne.fr': 'Pyrénées Gascogne',
+    }
+    region_choices = OrderedDict([
+        (website, u'%s (%s)' % (region, website)) for website, region in sorted(region_choices.items())
+    ])
+
+    region_aliases = {
+        'm.ca-alpesprovence.fr': 'www.ca-alpesprovence.fr',
+        'm.ca-alsace-vosges.fr': 'www.ca-alsace-vosges.fr',
+        'm.ca-anjou-maine.fr': 'www.ca-anjou-maine.fr',
+        'm.ca-aquitaine.fr': 'www.ca-aquitaine.fr',
+        'm.ca-atlantique-vendee.fr': 'www.ca-atlantique-vendee.fr',
+        'm.ca-briepicardie.fr': 'www.ca-briepicardie.fr',
+        'm.ca-cb.fr': 'www.ca-cb.fr',
+        'm.ca-centrefrance.fr': 'www.ca-centrefrance.fr',
+        'm.ca-centreloire.fr': 'www.ca-centreloire.fr',
+        'm.ca-centreouest.fr': 'www.ca-centreouest.fr',
+        'm.ca-centrest.fr': 'www.ca-centrest.fr',
+        'm.ca-charente-perigord.fr': 'www.ca-charente-perigord.fr',
+        'm.ca-cmds.fr': 'www.ca-cmds.fr',
+        'm.ca-corse.fr': 'www.ca-corse.fr',
+        'm.ca-cotesdarmor.fr': 'www.ca-cotesdarmor.fr',
+        'm.ca-des-savoie.fr': 'www.ca-des-savoie.fr',
+        'm.ca-finistere.fr': 'www.ca-finistere.fr',
+        'm.ca-franchecomte.fr': 'www.ca-franchecomte.fr',
+        'm.ca-guadeloupe.fr': 'www.ca-guadeloupe.fr',
+        'm.ca-illeetvilaine.fr': 'www.ca-illeetvilaine.fr',
+        'm.ca-languedoc.fr': 'www.ca-languedoc.fr',
+        'm.ca-loirehauteloire.fr': 'www.ca-loirehauteloire.fr',
+        'm.ca-lorraine.fr': 'www.ca-lorraine.fr',
+        'm.ca-martinique.fr': 'www.ca-martinique.fr',
+        'm.ca-morbihan.fr': 'www.ca-morbihan.fr',
+        'm.ca-nmp.fr': 'www.ca-nmp.fr',
+        'm.ca-nord-est.fr': 'www.ca-nord-est.fr',
+        'm.ca-norddefrance.fr': 'www.ca-norddefrance.fr',
+        'm.ca-normandie-seine.fr': 'www.ca-normandie-seine.fr',
+        'm.ca-normandie.fr': 'www.ca-normandie.fr',
+        'm.ca-paris.fr': 'www.ca-paris.fr',
+        'm.ca-pca.fr': 'www.ca-pca.fr',
+        'm.ca-reunion.fr': 'www.ca-reunion.fr',
+        'm.ca-sudmed.fr': 'www.ca-sudmed.fr',
+        'm.ca-sudrhonealpes.fr': 'www.ca-sudrhonealpes.fr',
+        'm.ca-toulouse31.fr': 'www.ca-toulouse31.fr',
+        'm.ca-tourainepoitou.fr': 'www.ca-tourainepoitou.fr',
+        'm.ca-valdefrance.fr': 'www.ca-valdefrance.fr',
+        'm.lefil.com': 'www.ca-pyrenees-gascogne.fr',
+    }
 
     BROWSER = ProxyBrowser
 
-    COMPAT_DOMAINS = {
-        'm.lefil.com': 'm.ca-pyrenees-gascogne.fr',
-    }
+    CONFIG = BackendConfig(
+        Value('website', label='Caisse Régionale', choices=region_choices, aliases=region_aliases),
+        ValueBackendPassword('login', label='Identifiant à 11 chiffres', masked=False, regexp=r'\d{11}'),
+        ValueBackendPassword('password', label='Code personnel à 6 chiffres', regexp=r'\d{6}')
+    )
 
     def create_default_browser(self):
-        site_conf = self.config['website'].get()
-        site_conf = self.COMPAT_DOMAINS.get(site_conf, site_conf)
-        return self.create_browser(site_conf,
-                                   self.config['login'].get(),
-                                   self.config['password'].get(),
-                                   weboob=self.weboob)
+        region_website = self.config['website'].get()
 
-    def iter_accounts(self):
-        return self.browser.get_accounts_list()
+        return self.create_browser(
+            region_website, self.config['login'].get(), self.config['password'].get(), weboob=self.weboob
+        )
 
+    # Accounts methods
     def get_account(self, _id):
         return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
 
-    def _history_filter(self, account, coming):
+    def iter_accounts(self):
+        return self.browser.iter_accounts()
+
+    # Transactions methods
+    def iter_history(self, account):
+        if account.type == Account.TYPE_CARD:
+            return self.filter_transactions(account, coming=False)
+        return self.browser.iter_history(account, coming=False)
+
+    def iter_coming(self, account):
+        if account.type == Account.TYPE_CARD:
+            return self.filter_transactions(account, coming=True)
+        return []
+
+    def filter_transactions(self, account, coming):
         today = date.today()
 
-        def to_date(obj):
+        def switch_to_date(obj):
             if hasattr(obj, 'date'):
                 return obj.date()
             return obj
 
-        for tr in self.browser.get_history(account, coming):
-            tr_coming = to_date(tr.date) > today
-            if coming == tr_coming:
+        for tr in self.browser.iter_history(account, coming):
+            is_coming = switch_to_date(tr.date) > today
+            if is_coming == coming:
                 yield tr
             elif coming:
                 break
 
-    def iter_history(self, account):
-        if account.type == Account.TYPE_CARD:
-            return self._history_filter(account, False)
-        return self.browser.get_history(account, False)
-
-    def iter_coming(self, account):
-        if account.type == Account.TYPE_CARD:
-            return self._history_filter(account, True)
-        return []
-
+    # Wealth method
     def iter_investment(self, account):
-        for inv in self.browser.iter_investment(account):
-            yield inv
+        return self.browser.iter_investment(account)
 
-    def iter_contacts(self):
-        return self.browser.iter_advisor()
-
-    def get_profile(self):
-        if not hasattr(self.browser, 'get_profile'):
-            raise NotImplementedError()
-        return self.browser.get_profile()
-
+    # Recipient & Transfer methods
     def iter_transfer_recipients(self, account):
         if not isinstance(account, Account):
             account = self.get_account(account)
-
         return self.browser.iter_transfer_recipients(account)
 
+    def new_recipient(self, recipient, **params):
+        return self.browser.new_recipient(recipient, **params)
+
     def init_transfer(self, transfer, **params):
-        def to_ascii(s):
-            return s.encode('ascii', errors='ignore').decode('ascii')
-
-        if transfer.label:
-            transfer.label = re.sub(r'[+!]', '', to_ascii(transfer.label[:33]))
-
         return self.browser.init_transfer(transfer, **params)
 
     def execute_transfer(self, transfer, **params):
         return self.browser.execute_transfer(transfer, **params)
 
-    def new_recipient(self, recipient, **params):
-        return self.browser.new_recipient(recipient, **params)
+    # Profile method
+    def get_profile(self):
+        if not hasattr(self.browser, 'get_profile'):
+            raise NotImplementedError()
+        return self.browser.get_profile()

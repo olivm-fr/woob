@@ -17,43 +17,115 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
-from weboob.browser import LoginBrowser, URL, need_login
+from datetime import date
 
-from .pages import LoginPage, AccountsPage, TransactionsPage, PassModificationPage
+from weboob.browser import URL, need_login
+from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
+from weboob.browser.selenium import (
+    SeleniumBrowser, webdriver, AnyCondition, IsHereCondition,
+    VisibleXPath,
+)
+
+from .ent_pages import AccueilPage
+from .pages import LoginPage, PreLoginPage, AccountsPage, HistoryPage
 
 
-class SogecartesBrowser(LoginBrowser):
-    BASEURL = 'https://www.sogecartenet.fr/'
+class SogecarteTitulaireBrowser(SeleniumBrowser):
+    BASEURL = 'https://www.sogecartenet.fr'
 
-    login = URL('/internationalisation/identification', LoginPage)
-    pass_modification = URL('/internationalisation/./modificationMotPasse.*', PassModificationPage)
-    accounts = URL('/internationalisation/gestionParcCartes', AccountsPage)
-    transactions = URL('/internationalisation/csv/operationsParCarte.*', TransactionsPage)
+    # False for debug / True for production
+    HEADLESS = True
 
-    def load_state(self, state):
-        pass
+    DRIVER = webdriver.Chrome
+
+    pre_login = URL(r'/ih3m-ihm/SOCGEN/FRA', PreLoginPage)
+    login = URL(r'/ih3m-ihm/SOCGEN/FRA', LoginPage)
+    accueil = URL(r'/ih3m-ihm/SOCGEN/FRA#!ACCUEIL', AccueilPage)
+    accounts = URL(r'/ih3m-ihm/SOCGEN/FRA#!INFORMATION', AccountsPage)
+    history = URL(r'/ih3m-ihm/SOCGEN/FRA#!COMPTE', HistoryPage)
+
+    def __init__(self, config, *args, **kwargs):
+        self.config = config
+        self.username = self.config['login'].get()
+        self.password = self.config['password'].get()
+        super(SogecarteTitulaireBrowser, self).__init__(*args, **kwargs)
 
     def do_login(self):
-        assert isinstance(self.username, basestring)
-        assert isinstance(self.password, basestring)
-        data = {"USER": self.username,
-                "PWD": self.password[:10],
-                "ACCES": "PE",
-                "LANGUE": "en",
-                "QUEFAIRE": "LOGIN",
-                }
-        self.login.go(data=data)
+        self.pre_login.go()
+        self.wait_until_is_here(self.pre_login)
+
+        self.page.go_login()
+        self.wait_until_is_here(self.login)
+        self.page.login(self.username, self.password)
+
+        self.wait_until(AnyCondition(
+            IsHereCondition(self.accueil),
+            VisibleXPath('//div[@id="labelQuestion"]'),
+            VisibleXPath('//div[contains(@class, "Notification-error-message")]'),
+        ))
+
+        if not self.accueil.is_here():
+            assert self.login.is_here(), 'We landed on an unknown page'
+            error = self.page.get_error()
+            if any((
+                'Votre compte a été désactivé' in error,
+                'Votre compte est bloqué' in error,
+            )):
+                raise ActionNeeded(error)
+            raise BrowserIncorrectPassword(error)
 
     @need_login
     def iter_accounts(self):
         self.accounts.go()
-        return self.page.iter_accounts()
+        self.wait_until_is_here(self.accounts)
+
+        # TODO implement pagination when we have a connection
+        # with multiple accounts.
+        accounts = list(self.page.iter_accounts())
+
+        self.history.go()
+        self.wait_until_is_here(self.history)
+
+        self.page.go_history_tab()
+        currency = self.page.get_currency()
+        self.page.go_coming_tab()
+
+        for acc in accounts:
+            acc.currency = currency
+            self.page.fill_account_details(obj=acc)
+            yield acc
 
     @need_login
-    def get_history(self, account):
-        if not account._url:
-            return ([])
-        self.location(account._url)
-        assert self.transactions.is_here()
-        return self.page.get_history()
+    def iter_transactions(self, account, coming=False):
+        self.history.stay_or_go()
+        self.wait_until_is_here(self.history)
+
+        self.page.select_first_date_history()
+
+        today = date.today()
+        # 1 page = 1 month
+        page_count = 0
+        has_next_page = True
+        # Limit number of pages to avoid infinite loops
+        while has_next_page and page_count < 36:
+            for tr in self.page.iter_history():
+                if tr.date <= today and not coming:
+                    yield tr
+                elif tr.date > today and coming:
+                    yield tr
+                elif tr.date <= today and coming:
+                    # Transactions are always ordered by most recent, so if
+                    # we passed today's date we can stop checking for more
+                    return
+            page_count += 1
+            has_next_page = self.page.go_next_page()
+
+    @need_login
+    def iter_history(self, account):
+        return self.iter_transactions(account)
+
+    @need_login
+    def iter_coming(self, account):
+        return self.iter_transactions(account, coming=True)

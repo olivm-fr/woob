@@ -21,6 +21,8 @@
 from .base import Capability, BaseObject, Field, IntField, DecimalField, \
                   StringField, BytesField, Enum, EnumField, UserError
 from .date import DateField
+from .address import compat_field, PostalAddress
+from .image import BaseImage
 
 __all__ = [
     'CapHousing', 'Housing', 'Query', 'City', 'UTILITIES', 'ENERGY_CLASS',
@@ -39,7 +41,7 @@ class TypeNotSupported(UserError):
         super(TypeNotSupported, self).__init__(msg)
 
 
-class HousingPhoto(BaseObject):
+class HousingPhoto(BaseImage):
     """
     Photo of a housing.
     """
@@ -47,9 +49,6 @@ class HousingPhoto(BaseObject):
 
     def __init__(self, url):
         super(HousingPhoto, self).__init__(url.split('/')[-1], url)
-
-    def __iscomplete__(self):
-        return self.data
 
     def __unicode__(self):
         return self.url
@@ -75,7 +74,7 @@ class ENERGY_CLASS(Enum):
 
 
 class POSTS_TYPES(Enum):
-    RENT=u'RENT'
+    RENT = u'RENT'
     SALE = u'SALE'
     SHARING = u'SHARING'
     FURNISHED_RENT = u'FURNISHED_RENT'
@@ -113,7 +112,7 @@ class Housing(BaseObject):
     currency = StringField('Currency of cost')
     utilities = EnumField('Utilities included or not', UTILITIES)
     date = DateField('Date when the housing has been published')
-    location = StringField('Location of housing')
+    address = Field('Location of housing', PostalAddress)
     station = StringField('What metro/bus station next to housing')
     text = StringField('Text of the housing')
     phone = StringField('Phone number to contact')
@@ -123,6 +122,8 @@ class Housing(BaseObject):
     details = Field('Key/values of details', dict)
     DPE = EnumField('DPE (Energy Performance Certificate)', ENERGY_CLASS)
     GES = EnumField('GES (Greenhouse Gas Emissions)', ENERGY_CLASS)
+
+    location = compat_field('address', 'full_address')
 
 
 class Query(BaseObject):

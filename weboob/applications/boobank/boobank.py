@@ -90,8 +90,8 @@ class OfxFormatter(IFormatter):
         self.output(u'DATA:OFXSGML')
         self.output(u'VERSION:102')
         self.output(u'SECURITY:NONE')
-        self.output(u'ENCODING:USASCII')
-        self.output(u'CHARSET:1252')
+        self.output(u'ENCODING:UTF-8')
+        self.output(u'CHARSET:UTF-8')
         self.output(u'COMPRESSION:NONE')
         self.output(u'OLDFILEUID:NONE')
         self.output(u'NEWFILEUID:%s\n' % uuid.uuid1())
@@ -467,8 +467,7 @@ class Boobank(CaptchaMixin, ReplApplication):
             params = {}
             for field in error.fields:
                 v = self.ask(field)
-                if v:
-                    params[field.id] = v
+                params[field.id] = v
             #backend.config['accept_transfer'].set(v)
             params['backends'] = backend
             self.start_format()
@@ -479,8 +478,7 @@ class Boobank(CaptchaMixin, ReplApplication):
             params['backends'] = backend
             for field in error.fields:
                 v = self.ask(field)
-                if v:
-                    params[field.id] = v
+                params[field.id] = v
             try:
                 next(iter(self.do('add_recipient', error.recipient, **params)))
             except CallErrors as e:

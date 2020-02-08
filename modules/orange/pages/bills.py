@@ -28,7 +28,9 @@ except ImportError:
 from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
 from weboob.capabilities.bill import Subscription
 from weboob.browser.elements import DictElement, ListElement, ItemElement, method, TableElement
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Env, Field, Regexp, Date, Currency, BrowserURL, Format
+from weboob.browser.filters.standard import (
+    CleanDecimal, CleanText, Env, Field, Regexp, Date, Currency, BrowserURL, Format, Eval
+)
 from weboob.browser.filters.html import Link, TableCell
 from weboob.browser.filters.javascript import JSValue
 from weboob.browser.filters.json import Dict
@@ -38,7 +40,7 @@ from weboob.tools.date import parse_french_date
 from weboob.tools.compat import urlencode
 
 
-class BillsApiPage(LoggedPage, JsonPage):
+class BillsApiProPage(LoggedPage, JsonPage):
     @method
     class get_bills(DictElement):
         item_xpath = 'bills'
@@ -50,7 +52,7 @@ class BillsApiPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Bill
 
-            obj_date = Date(Dict('dueDate'), parse_func=parse_french_date,  default=NotAvailable)
+            obj_date = Date(Dict('dueDate'), parse_func=parse_french_date, default=NotAvailable)
             obj_price = CleanDecimal(Dict('amountIncludingTax'))
             obj_format = 'pdf'
 
@@ -64,9 +66,33 @@ class BillsApiPage(LoggedPage, JsonPage):
                 params = {'billid': Dict('id')(self), 'billDate': Dict('dueDate')(self)}
                 return urlencode(params)
 
-            obj_url = BrowserURL('doc_api', subid=Env('subid'), dir=Dict('documents/0/mainDir'), fact_type=Dict('documents/0/subDir'), billparams=get_params)
+            obj_url = BrowserURL('doc_api_pro', subid=Env('subid'), dir=Dict('documents/0/mainDir'), fact_type=Dict('documents/0/subDir'), billparams=get_params)
+            obj__is_v2 = False
 
 
+class BillsApiParPage(LoggedPage, JsonPage):
+    @method
+    class get_bills(DictElement):
+        item_xpath = 'billsHistory/billList'
+
+        class item(ItemElement):
+            klass = Bill
+
+            obj_date = Date(Dict('date'), default=NotAvailable)
+            obj_price = Eval(lambda x: x / 100, CleanDecimal(Dict('amount')))
+            obj_format = 'pdf'
+
+            def obj_label(self):
+                return 'Facture du %s' % Field('date')(self)
+
+            def obj_id(self):
+                return '%s_%s' % (Env('subid')(self), Field('date')(self).strftime('%d%m%Y'))
+
+            obj_url = Format('%s%s', BrowserURL('doc_api_par'), Dict('hrefPdf'))
+            obj__is_v2 = True
+
+
+# is BillsPage deprecated ?
 class BillsPage(LoggedPage, HTMLPage):
     @method
     class get_bills(TableElement):
@@ -83,7 +109,7 @@ class BillsPage(LoggedPage, HTMLPage):
             klass = Bill
 
             obj_type = DocumentTypes.BILL
-            obj_format = u"pdf"
+            obj_format = "pdf"
 
             # TableCell('date') can have other info like: 'duplicata'
             obj_date = Date(CleanText('./td[@headers="ec-dateCol"]/text()[not(preceding-sibling::br)]'), parse_func=parse_french_date, dayfirst=True)
@@ -108,12 +134,12 @@ class BillsPage(LoggedPage, HTMLPage):
 
             # Only when a list of documents is present
             obj__url_base = Regexp(CleanText('.//ul[@class="liste"]/script', default=None), '.*?contentList[\d]+ \+= \'<li><a href=".*\"(.*?idDocument=2)"', default=None)
+
             def obj_url(self):
                 if Field('_url_base')(self):
                     # URL won't work if HTML is not unescape
                     return HTMLParser().unescape(str(Field('_url_base')(self)))
-                else :
-                    return Link(TableCell(Field('_cell')(self))(self)[0].xpath('./a'), default=NotAvailable)(self)
+                return Link(TableCell(Field('_cell')(self))(self)[0].xpath('./a'), default=NotAvailable)(self)
 
             obj__label_base = Regexp(CleanText('.//ul[@class="liste"]/script', default=None), '.*</span>(.*?)</a.*', default=None)
 
@@ -124,6 +150,7 @@ class BillsPage(LoggedPage, HTMLPage):
                     return CleanText(TableCell(Field('_cell')(self))(self)[0].xpath('.//span[@class="ec_visually_hidden"]'))(self)
 
             obj__ht = CleanDecimal(TableCell('ht', default=NotAvailable), replace_dots=True, default=NotAvailable)
+
             def obj_vat(self):
                 if Field('_ht')(self) is NotAvailable or Field('price')(self) is NotAvailable:
                     return
@@ -161,6 +188,22 @@ class SubscriptionsPage(LoggedPage, HTMLPage):
                 # unsubscripted contracts may still be there, skip them else
                 # facture-historique could yield wrong bills
                 return bool(obj.id) and obj._page != 'nec-tdb-ouvert'
+
+
+class SubscriptionsApiPage(LoggedPage, JsonPage):
+    @method
+    class iter_subscription(DictElement):
+        item_xpath = 'contracts'
+
+        class item(ItemElement):
+            klass = Subscription
+
+            def condition(self):
+                return Dict('contractStatus')(self) != 'CLOS'
+
+            obj_id = Dict('contractId')
+            obj_label = Dict('offerName')
+            obj__is_pro = False
 
 
 class ContractsPage(LoggedPage, JsonPage):

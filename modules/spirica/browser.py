@@ -26,7 +26,7 @@ from .pages import LoginPage, AccountsPage, DetailsPage, MaintenancePage
 
 
 class SpiricaBrowser(LoginBrowser):
-    TIMEOUT = 60
+    TIMEOUT = 180
 
     login = URL('/securite/login.xhtml', LoginPage)
     accounts = URL('/sylvea/client/synthese.xhtml', AccountsPage)
@@ -38,6 +38,7 @@ class SpiricaBrowser(LoginBrowser):
         self.BASEURL = website
         self.cache = {}
         self.cache['invs'] = {}
+        self.transaction_page = None
 
     def do_login(self):
         self.login.go().login(self.username, self.password)
@@ -65,25 +66,34 @@ class SpiricaBrowser(LoginBrowser):
             self.cache['invs'][account.id] = invs
         return self.cache['invs'][account.id]
 
+    def check_if_logged_in(self, url):
+        if self.login.is_here():
+            self.logger.warning('We were logged out during iter_history, proceed to re-login.')
+            self.do_login()
+            self.location(url)
+            self.page.go_historytab()
+            # Store new transaction_page after login:
+            self.transaction_page = self.page
+
     @need_login
     def iter_history(self, account):
         self.location(account.url)
         self.page.go_historytab()
-        transaction_page = self.page
+        self.transaction_page = self.page
 
         # Determining the number of transaction pages:
         total_pages = int(self.page.count_transactions()) // 100
-
-        # Scraping transactions for each page:
         for page_number in range(total_pages + 1):
-            self.page.go_historyall(page_number)
+            self.check_if_logged_in(account.url)
+            if not self.transaction_page.go_historyall(page_number):
+                self.logger.warning('The first go_historyall() failed, go back to account details and retry.')
+                self.location(account.url)
+                self.page.go_historytab()
+                self.transaction_page = self.page
+                if not self.transaction_page.go_historyall(page_number):
+                    self.logger.warning('The go_historyall() failed twice, these transactions will be skipped.')
+                    continue
             for transaction in self.page.iter_history():
-                transaction_page.go_investments_form(transaction._index)
-                transaction.investments = []
-                for inv in self.page.iter_transactions_investments():
-                    # Only keep investments that have at least a label and a valuation:
-                    if inv.label and inv.valuation:
-                        transaction.investments.append(inv)
                 yield transaction
 
     def fill_from_list(self, invs, objects_list):

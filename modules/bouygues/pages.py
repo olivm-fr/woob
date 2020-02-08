@@ -1,74 +1,91 @@
 # -*- coding: utf-8 -*-
-# Copyright(C) 2010-2015 Bezleputh
+
+# Copyright(C) 2019      Budget Insight
 #
 # This file is part of a weboob module.
 #
 # This weboob module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
+# it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
 # This weboob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
+# GNU Lesser General Public License for more details.
 #
-# You should have received a copy of the GNU Affero General Public License
+# You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
 
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-from weboob.capabilities.messages import CantSendMessage
-from weboob.exceptions import BrowserIncorrectPassword, ParseError
-
-from weboob.capabilities.base import NotLoaded
-from weboob.capabilities.bill import Bill, Subscription
-from weboob.capabilities.profile import Profile
-from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage, PDFPage
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, Regexp
 from weboob.browser.elements import DictElement, ItemElement, method
+from weboob.browser.filters.json import Dict
+from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage
+from weboob.capabilities import NotAvailable
+from weboob.capabilities.bill import Subscription, Bill
+from weboob.browser.filters.standard import Date, CleanDecimal, Env, Format, Coalesce, CleanText
+from weboob.exceptions import BrowserIncorrectPassword
 
 
 class LoginPage(HTMLPage):
-    def login(self, login, password, lastname):
-        form = self.get_form(id='log_data')
-
-        form['username'] = login
+    def login(self, username, password, lastname):
+        form = self.get_form()
+        form['username'] = username
         form['password'] = password
 
         if 'lastname' in form:
             if not lastname:
-                raise BrowserIncorrectPassword('Le nom de famille est obligatoire.')
+                raise BrowserIncorrectPassword('Veuillez renseigner votre nom de famille.')
             form['lastname'] = lastname
 
         form.submit()
 
-    def get_error(self):
-        return CleanText('//div[@id="alert_msg"]//p')(self.doc)
+    def get_error_message(self):
+        return CleanText('//div[@id="alert_msg"]')(self.doc)
 
 
-class HomePage(LoggedPage, HTMLPage):
+class ForgottenPasswordPage(HTMLPage):
     pass
+
+
+class AppConfigPage(JsonPage):
+    def get_client_id(self):
+        return self.doc['config']['oauth']['clientId']
 
 
 class SubscriberPage(LoggedPage, JsonPage):
     def get_subscriber(self):
+        assert self.doc['type'] in ('INDIVIDU', 'ENTREPRISE'), "%s is unknown" % self.doc['type']
+
         if self.doc['type'] == 'INDIVIDU':
-            sub_dict = self.doc
-        else:
-            sub_dict = self.doc['representantLegal']
-        return "%s %s %s" % (sub_dict['civilite'], sub_dict['prenom'], sub_dict['nom'])
+            subscriber_dict = self.doc
+        elif self.doc['type'] == 'ENTREPRISE':
+            subscriber_dict = self.doc['representantLegal']
 
-    def get_phone_list(self):
-        num_tel_list = []
-        for phone in self.doc.get('comptesAcces', []):
-            num_tel_list.append(' '.join(phone[i:i + 2] for i in range(0, len(phone), 2)))
+        subscriber = '%s %s %s' % (subscriber_dict.get('civilite', ''), subscriber_dict['prenom'], subscriber_dict['nom'])
+        return subscriber.strip()
 
-        return ' - '.join(num_tel_list)
+
+class SubscriptionDetail(LoggedPage, JsonPage):
+    def get_label(self):
+        phone_numbers = list(self.get_phone_numbers())
+        account_id = self.params['id_account']
+
+        label = str(account_id)
+
+        if phone_numbers:
+            label += " ({})".format(" - ".join(phone_numbers))
+        return label
+
+    def get_phone_numbers(self):
+        for s in self.doc['items']:
+            if 'numeroTel' in s:
+                phone = re.sub(r'^\+\d{2}', '0', s['numeroTel'])
+                yield ' '.join([phone[i:i + 2] for i in range(0, len(phone), 2)])
 
 
 class SubscriptionPage(LoggedPage, JsonPage):
@@ -81,61 +98,22 @@ class SubscriptionPage(LoggedPage, JsonPage):
 
             obj_id = Dict('id')
             obj_url = Dict('_links/factures/href')
-            obj_subscriber = Env('subscriber')
 
 
-class SubscriptionDetailPage(LoggedPage, JsonPage):
-    def get_label(self):
-        label_list = []
-        for s in self.doc['items']:
-            if 'numeroTel' in s:
-                phone = re.sub(r'^\+\d{2}', '0', s['numeroTel'])
-                label_list.append(' '.join([phone[i:i + 2] for i in range(0, len(phone), 2)]))
-            else:
-                continue
-
-        return ' - '.join(label_list)
-
-    def is_holder(self):
-        return any(CleanText(Dict('utilisateur/libelleProfilDroits'), default=None)(s) == 'Accès titulaire' for s in self.doc['items'] if 'utilisateur' in s)
+class MyDate(Date):
+    """
+    some date are datetime and contains date at GMT, and always at 22H or 23H
+    but date inside PDF file is at GMT +1H or +2H (depends of summer or winter hour)
+    so we add one day and skip time to get good date
+    """
+    def filter(self, txt):
+        date = super(MyDate, self).filter(txt)
+        if date:
+            date += timedelta(days=1)
+        return date
 
 
-class SendSMSPage(HTMLPage):
-    def send_sms(self, message, receivers):
-        sms_number = CleanDecimal(Regexp(CleanText('//span[@class="txt12-o"][1]/strong'), r'(\d*) SMS.*'))(self.doc)
-
-        if sms_number == 0:
-            msg = CleanText('//span[@class="txt12-o"][1]')(self.doc)
-            raise CantSendMessage(msg)
-
-        form = self.get_form('//form[@name="formSMS"]')
-        form["fieldMsisdn"] = receivers
-        form["fieldMessage"] = message.content
-
-        form.submit()
-
-
-class SendSMSErrorPage(HTMLPage):
-    def get_error_message(self):
-        return CleanText('//span[@class="txt12-o"][1]')(self.doc)
-
-
-class DocumentsPage(LoggedPage, JsonPage):
-    FRENCH_MONTHS = {
-        1: 'Janvier',
-        2: 'Février',
-        3: 'Mars',
-        4: 'Avril',
-        5: 'Mai',
-        6: 'Juin',
-        7: 'Juillet',
-        8: 'Août',
-        9: 'Septembre',
-        10: 'Octobre',
-        11: 'Novembre',
-        12: 'Décembre',
-    }
-
+class DocumentPage(LoggedPage, JsonPage):
     @method
     class iter_documents(DictElement):
         item_xpath = 'items'
@@ -144,76 +122,25 @@ class DocumentsPage(LoggedPage, JsonPage):
             klass = Bill
 
             obj_id = Format('%s_%s', Env('subid'), Dict('idFacture'))
-
-            def obj_url(self):
-                try:
-                    link = Dict('_links/facturePDF/href')(self)
-                except ParseError:
-                    # yes, sometimes it's just a misspelling word, but just sometimes...
-                    link = Dict('_links/facturePDFDF/href')(self)
-
-                return 'https://api.bouyguestelecom.fr%s' % link
-
-            obj_date = Env('date')
-            obj_duedate = Env('duedate')
-            obj_format = 'pdf'
-            obj_label = Env('label')
             obj_price = CleanDecimal(Dict('mntTotFacture'))
+            obj_url = Coalesce(
+                    Dict('_links/facturePDF/href', default=NotAvailable),
+                    Dict('_links/facturePDFDF/href', default=NotAvailable)
+            )
+            obj_date = MyDate(Dict('dateFacturation'))
+            obj_duedate = MyDate(Dict('dateLimitePaieFacture', default=NotAvailable), default=NotAvailable)
+            obj_label = Format('Facture %s', Dict('idFacture'))
+            obj_format = 'pdf'
             obj_currency = 'EUR'
 
-            def parse(self, el):
-                bill_date = datetime.strptime(Dict('dateFacturation')(self), "%Y-%m-%dT%H:%M:%SZ").date()
 
-                # dateFacturation is like: 'YYYY-MM-DDTHH:00:00Z' where Z is UTC time and HH 23 in winter and 22 in summer
-                # which always correspond to the day after at midnight in French time zone
-                # so we remove hour and consider the day after as date (which is also the date inside pdf)
-                self.env['date'] = bill_date + timedelta(days=1)
-
-                duedate = Dict('dateLimitePaieFacture', default=NotLoaded)(self)
-                if duedate:
-                    self.env['duedate'] = datetime.strptime(duedate, "%Y-%m-%dT%H:%M:%SZ").date() + timedelta(days=1)
-                else:
-                    # for some connections we don't have duedate (why ?)
-                    self.env['duedate'] = NotLoaded
-
-                self.env['label'] = "%s %d" % (self.page.FRENCH_MONTHS[self.env['date'].month], self.env['date'].year)
-
-    def get_one_shot_download_url(self):
-        return self.doc['_actions']['telecharger']['action']
+class DocumentDownloadPage(LoggedPage, JsonPage):
+    def on_load(self):
+        # this url change each time we want to download document, (the same one or another)
+        self.browser.location(self.doc['_actions']['telecharger']['action'])
 
 
-class ProfilePage(LoggedPage, JsonPage):
-    def get_profile(self, subscriber):
-        data = self.doc
-
-        last_address = data['adressesPostales'][0]
-        for address in data['adressesPostales']:
-            if address['dateMiseAJour'] > last_address['dateMiseAJour']:
-                last_address = address
-
-        p = Profile()
-        p.name = subscriber
-        p.address = '%s %s %s %s' % (last_address['numero'], last_address['rue'],
-                                     last_address['codePostal'], last_address['ville'])
-        p.country = last_address['pays']
-
-        for email in data['emails']:
-            if email['emailPrincipal']:
-                p.email = email['email']
-                break
-
-        if 'telephones' in data:
-            for phone in data['telephones']:
-                if phone['telephonePrincipal']:
-                    p.phone = phone['numero']
-                    break
-
-        return p
-
-
-class UselessPage(HTMLPage):
-    pass
-
-
-class DocumentFilePage(PDFPage):
+class DocumentFilePage(LoggedPage, RawPage):
+    # since url of this file is almost the same than url of DocumentDownloadPage (which is a JsonPage)
+    # we have to define it to avoid mismatching
     pass

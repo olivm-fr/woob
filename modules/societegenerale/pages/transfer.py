@@ -30,7 +30,7 @@ from weboob.capabilities.base import NotAvailable
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Env, Date, Field, Format,
 )
-from weboob.browser.filters.html import Link
+from weboob.browser.filters.html import Link, ReplaceEntities
 from weboob.browser.filters.json import Dict
 from weboob.tools.json import json
 from weboob.exceptions import BrowserUnavailable, ActionNeeded
@@ -40,13 +40,19 @@ from .login import MainPage
 
 
 class TransferJson(LoggedPage, JsonPage):
+    @property
+    def logged(self):
+        return Dict('commun/raison', default=None)(self.doc) != "niv_auth_insuff"
+
     def on_load(self):
         if Dict('commun/statut')(self.doc).upper() == 'NOK':
             if self.doc['commun'].get('action'):
-                raise TransferBankError(message=Dict('commun/action')(self.doc))
+                raise TransferBankError(message=ReplaceEntities(Dict('commun/action'))(self.doc))
             elif self.doc['commun'].get('raison') in ('err_tech', 'err_is'):
                 # on SG website, there is unavalaible message 'Le service est momentanément indisponible.'
                 raise BrowserUnavailable()
+            elif self.doc['commun'].get('raison') == "niv_auth_insuff":
+                return
             else:
                 assert False, 'Something went wrong, transfer is not created: %s' % self.doc['commun'].get('raison')
 
@@ -101,6 +107,9 @@ class TransferJson(LoggedPage, JsonPage):
             def condition(self):
                 return Field('id')(self) != Env('account_id')(self) and is_iban_valid(Field('iban')(self))
 
+            def validate(self, obj):
+                return obj.label  # some recipients have an empty label
+
     def init_transfer(self, account, recipient, transfer):
         assert self.is_able_to_transfer(account), 'Account %s seems to be not able to do transfer' % account.id
 
@@ -152,15 +161,15 @@ class SignTransferPage(LoggedPage, MainPage):
 
     def get_confirm_transfer_data(self, password):
         token = self.get_token()
-        authentication_data = self.get_authentication_data()
+        keyboard_data = self.get_keyboard_data()
 
-        pwd = authentication_data['img'].get_codes(password[:6])
+        pwd = keyboard_data['img'].get_codes(password[:6])
         t = pwd.split(',')
         newpwd = ','.join(t[self.strange_map[j]] for j in range(6))
 
         return {
             'codsec': newpwd,
-            'cryptocvcs': authentication_data['infos']['crypto'].encode('iso-8859-1'),
+            'cryptocvcs': keyboard_data['infos']['crypto'].encode('iso-8859-1'),
             'vkm_op': 'sign',
             'cl1000_jtn': token,
         }
@@ -172,6 +181,8 @@ class SignRecipientPage(LoggedPage, JsonPage):
             'Something went wrong on sign recipient page: %s' % Dict('commun/raison')(self.doc)
 
     def get_sign_method(self):
+        if Dict('donnees/unavailibility_reason', default='')(self.doc) == 'oob_non_enrole':
+            raise AddRecipientBankError(message="Pour réaliser cette opération il est nécessaire d'utiliser le PASS SECURITE")  # message from the website
         return Dict('donnees/sign_proc')(self.doc).upper()
 
     def check_recipient_status(self):

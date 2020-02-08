@@ -28,6 +28,7 @@ from weboob.exceptions import BrowserUnavailable, BrowserPasswordExpired, Action
 from weboob.browser.pages import HTMLPage, JsonPage
 from weboob.browser.filters.standard import CleanText
 from weboob.browser.filters.json import Dict
+from weboob.capabilities.bank import AddRecipientBankError
 
 from .base import BasePage
 from ..captcha import Captcha, TileError
@@ -38,7 +39,10 @@ class PasswordPage(object):
     strange_map = None
 
     def decode_grid(self, infos):
-        grid = b64decode(infos['grid']).decode('ascii')
+        grid = infos['grid']
+        if isinstance(infos['grid'], list):
+            grid = infos['grid'][0]
+        grid = b64decode(grid).decode('ascii')
         grid = [int(x) for x in re.findall('[0-9]{3}', grid)]
         n = int(infos['nbrows']) * int(infos['nbcols'])
 
@@ -63,15 +67,28 @@ class PasswordPage(object):
 
 
 class MainPage(BasePage, PasswordPage):
-    def get_authentication_data(self):
-        url = self.browser.BASEURL + '//sec/vkm/gen_crypto?estSession=0'
+    """
+    be carefull : those differents methods and PREFIX_URL are used
+    in another page of an another module which is an abstract of this page
+    """
+    PREFIX_URL = '//sec'
+
+    def get_url(self, path):
+        return (self.browser.BASEURL + self.PREFIX_URL + path)
+
+    def get_keyboard_infos(self):
+        url = self.get_url('/vkm/gen_crypto?estSession=0')
         infos_data = self.browser.open(url).text
         infos_data = re.match('^_vkCallback\((.*)\);$', infos_data).group(1)
         infos = json.loads(infos_data.replace("'", '"'))
+        return infos
+
+    def get_keyboard_data(self):
+        infos = self.get_keyboard_infos()
 
         infos['grid'] = self.decode_grid(infos)
 
-        url = self.browser.BASEURL + '//sec/vkm/gen_ui?modeClavier=0&cryptogramme=' + infos["crypto"]
+        url = self.get_url('/vkm/gen_ui?modeClavier=0&cryptogramme=' + infos['crypto'])
         img = Captcha(BytesIO(self.browser.open(url).content), infos)
 
         try:
@@ -87,9 +104,9 @@ class MainPage(BasePage, PasswordPage):
         }
 
     def login(self, login, password):
-        authentication_data = self.get_authentication_data()
+        keyboard_data = self.get_keyboard_data()
 
-        pwd = authentication_data['img'].get_codes(password[:6])
+        pwd = keyboard_data['img'].get_codes(password[:6])
         t = pwd.split(',')
         newpwd = ','.join(t[self.strange_map[j]] for j in range(6))
 
@@ -100,17 +117,44 @@ class MainPage(BasePage, PasswordPage):
             'cible': 300,
             'user_id': login.encode('iso-8859-1'),
             'codsec': newpwd,
-            'cryptocvcs': authentication_data['infos']['crypto'].encode('iso-8859-1'),
+            'cryptocvcs': keyboard_data['infos']['crypto'].encode('iso-8859-1'),
             'vkm_op': 'auth',
         }
-        self.browser.location(self.browser.absurl('/sec/vk/authent.json'), data=data)
+        self.browser.location(self.get_url('/vk/authent.json'), data=data)
+
+    def handle_error(self):
+        error_msg = CleanText('//span[@class="error_msg"]')(self.doc)
+        if error_msg:
+            # WARNING: this error occured during a recipient adding
+            # I don't know if it can happen at another time
+            raise AddRecipientBankError(message=error_msg)
 
 
 class LoginPage(JsonPage):
-    def get_error(self):
-        if (Dict('commun/statut')(self.doc)).lower() != 'ok':
-            return Dict('commun/raison')(self.doc), Dict('commun/action')(self.doc)
-        return None, None
+    # statut, status...
+    def get_reason(self):
+        if Dict('commun/statut')(self.doc).lower() != 'ok':
+            return Dict('commun/raison')(self.doc)
+
+    def has_twofactor(self):
+        # no auth method, probably no 2FA
+        return bool(Dict('chgtnivauth', default=None)(self.doc))
+
+    def get_auth_method(self):
+        data = Dict('chgtnivauth')(self.doc)
+        if data['status'].lower() != 'ok':
+            return
+
+        auth_methods = []
+        for auth_method in data['list_proc']:
+            if not auth_method['unavailability_reason']:
+                auth_methods.append(auth_method)
+
+        # if we can't find any methods available we send the highest priority
+        # so we can raise the right exception to the user
+        auth_methods = auth_methods or data['list_proc']
+        if auth_methods:
+            return sorted(auth_methods, key=lambda k: k['priorite'])[0]
 
 
 class BadLoginPage(BasePage):

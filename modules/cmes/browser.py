@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2016      Edouard Lambert
+# Copyright(C) 2019      Budget Insight
 #
 # This file is part of a weboob module.
 #
@@ -17,30 +17,48 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
-from weboob.exceptions import  BrowserIncorrectPassword
+from datetime import datetime
+
+from dateutil.relativedelta import relativedelta
 from weboob.browser import LoginBrowser, URL, need_login
-
+from weboob.exceptions import  BrowserIncorrectPassword
 from .pages import (
-    LoginPage, AccountsPage, FCPEInvestmentPage,
-    CCBInvestmentPage, HistoryPage, CustomPage,
-    )
+    LoginPage, AccountsPage, OperationsListPage, OperationPage, ActionNeededPage,
+    InvestmentPage, InvestmentDetailsPage, AssetManagementPage,
+)
 
 
 class CmesBrowser(LoginBrowser):
     BASEURL = 'https://www.cic-epargnesalariale.fr'
 
-    login = URL('/espace-client/fr/identification/authentification.html', LoginPage)
-    accounts = URL('(?P<subsite>.*)fr/espace/devbavoirs.aspx\?mode=net&menu=cpte$', AccountsPage)
-    fcpe_investment = URL(r'/fr/.*GoPositionsParFond.*',
-                          r'/fr/espace/devbavoirs.aspx\?.*SituationParFonds.*GoOpenDetailFond.*',
-                          r'(?P<subsite>.*)fr/espace/devbavoirs.aspx\?_tabi=(C|I1)&a_mode=net&a_menu=cpte&_pid=Situation(Globale|ParPlan)&_fid=GoPositionsParFond',
-                          r'(?P<subsite>.*)fr/espace/devbavoirs.aspx\?_tabi=(C|I1)&a_mode=net&a_menu=cpte&_pid=SituationParFonds.*', FCPEInvestmentPage)
-    ccb_investment = URL(r'(?P<subsite>.*)fr/espace/devbavoirs.aspx\?_tabi=C&a_mode=net&a_menu=cpte&_pid=SituationGlobale(&_fid=GoCCB|&k_support=CCB&_fid=GoPrint)', CCBInvestmentPage)
-    history = URL('(?P<subsite>.*)fr/espace/devbavoirs.aspx\?mode=net&menu=cpte&page=operations',
-                  '(?P<subsite>.*)fr/.*GoOperationsTraitees',
-                  '(?P<subsite>.*)fr/.*GoOperationDetails', HistoryPage)
-    custom_page = URL('/fr/espace/personnel/index.html', CustomPage)
+    login = URL(r'(?P<client_space>.*)fr/identification/authentification.html', LoginPage)
+
+    action_needed = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/premiers-pas/saisir-vos-coordonnees.*',
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/conditions-generales-d-utilisation/index.html',
+        ActionNeededPage
+    )
+
+    accounts = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/mon-epargne/situation-financiere-detaillee/index.html',
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/tableau-de-bord/index.html',
+        AccountsPage
+    )
+
+    investments = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/supports/fiche-du-support.html', InvestmentPage)
+    investment_details = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/supports/epargne-sur-le-support.html', InvestmentDetailsPage)
+    asset_management = URL(
+        r'https://www.cmcic-am.fr/fr/conseillers-gestion-patrimoine/nos-fonds/VALE_FicheSynthese.aspx',
+        r'https://www.cmcic-am.fr/fr/conseillers-gestion-patrimoine/nos-fonds/VALE_Fiche.aspx',
+        AssetManagementPage
+    )
+    operations_list = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/operations/index.html', OperationsListPage)
+
+    operation = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/operations/consulter-une-operation/index.html\?param_=(?P<idx>\d+)', OperationPage)
+
+    client_space = 'espace-client/'
 
     def __init__(self, username, password, website, subsite="", *args, **kwargs):
         super(LoginBrowser, self).__init__(*args, **kwargs)
@@ -49,8 +67,12 @@ class CmesBrowser(LoginBrowser):
         self.password = password
         self.subsite = subsite
 
+    @property
+    def logged(self):
+        return 'IdSes' in self.session.cookies
+
     def do_login(self):
-        self.login.go()
+        self.login.go(client_space=self.client_space)
         self.page.login(self.username, self.password)
 
         if self.login.is_here():
@@ -58,55 +80,83 @@ class CmesBrowser(LoginBrowser):
 
     @need_login
     def iter_accounts(self):
-        self.accounts.go(subsite=self.subsite)
-
-        if self.custom_page.is_here():
-            # it can be redirected by accounts page, return on accounts page should be enough
-            self.accounts.go(subsite=self.subsite)
-            if self.custom_page.is_here():
-                # Need to do it twice
-                self.accounts.go(subsite=self.subsite)
-
+        self.accounts.go(subsite=self.subsite, client_space=self.client_space)
         return self.page.iter_accounts()
 
     @need_login
     def iter_investment(self, account):
-        fcpe_link = self.accounts.go(subsite=self.subsite).get_investment_link()
-        ccb_link = self.accounts.go(subsite=self.subsite).get_pocket_link()
+        if 'compte courant bloqué' in account.label.lower():
+            # CCB accounts have Pockets but no Investments
+            return
+        self.accounts.stay_or_go(subsite=self.subsite, client_space=self.client_space)
+        for inv in self.page.iter_investments(account=account):
+            if inv._url:
+                # Go to the investment details to get employee savings attributes
+                self.location(inv._url)
+                asset_management_url = self.page.get_asset_management_url()
 
-        if fcpe_link or ccb_link:
-            return self._iter_investment(fcpe_link, ccb_link)
-        else:
-            return []
+                # Fetch SRRI, asset category & recommended period
+                self.page.fill_investment(obj=inv)
 
-    def _iter_investment(self, fcpe_link, ccb_link):
-        if fcpe_link:
-            for inv in self.location(fcpe_link).page.iter_investment():
-                yield inv
+                if asset_management_url:
+                    self.location(asset_management_url)
+                    self.asset_management.go(params=self.page.get_page_params())
 
-        if ccb_link:
-            for inv in self.location(ccb_link).page.iter_investment():
-                yield inv
+                    # Fetch performance history & asset category (more reliable on this page)
+                    self.page.fill_investment(obj=inv)
 
-    @need_login
-    def iter_pocket(self, account):
-        self.accounts.go(subsite=self.subsite)
-        for inv in self.iter_investment(account):
-            if inv._pocket_url:
-                # Only FCPE investments have pocket link:
-                self.location(inv._pocket_url)
-                for pocket in self.page.iter_pocket(inv=inv):
-                    yield pocket
+                    # We need to return to the investment page
+                    self.location(inv._url)
+                else:
+                    performances = {}
+                    # Get 1-year performance
+                    url = self.page.get_form_url()
+                    self.location(url, data={'_FID_DoFilterChart_timePeriod:1Year': ''})
+                    performances[1] = self.page.get_performance()
 
-        ccb_link = self.accounts.go(subsite=self.subsite).get_pocket_link()
-        if ccb_link:
-            for inv in self.location(ccb_link).page.iter_investment():
-                for poc in self.page.iter_pocket(inv=inv):
-                    yield poc
+                    # Get 5-years performance
+                    url = self.page.get_form_url()
+                    self.location(url, data={'_FID_DoFilterChart_timePeriod:5Years': ''})
+                    performances[5] = self.page.get_performance()
+
+                    # There is no available form for 3-year history, we must build the request
+                    url = self.page.get_form_url()
+                    data = {
+                        '[t:dbt%3adate;]Data_StartDate': (datetime.today() - relativedelta(years=3)).strftime(
+                            '%d/%m/%Y'),
+                        '[t:dbt%3adate;]Data_EndDate': datetime.today().strftime('%d/%m/%Y'),
+                        '_FID_DoDateFilterChart': '',
+                    }
+                    self.location(url, data=data)
+                    performances[3] = self.page.get_performance()
+                    inv.performance_history = performances
+
+                # Fetch investment quantity on the 'Mes Avoirs' tab
+                self.page.go_investment_details()
+                inv.quantity = self.page.get_quantity()
+                self.page.go_back()
+
+            else:
+                self.logger.info('No available details for investment %s.', inv.label)
+            yield inv
 
     @need_login
     def iter_history(self, account):
-        link = self.history.go(subsite=self.subsite).get_link()
-        if link:
-            return self.location(link).page.iter_history()
-        return iter([])
+        self.operations_list.stay_or_go(subsite=self.subsite, client_space=self.client_space)
+        for idx in self.page.get_operations_idx():
+            self.operation.go(subsite=self.subsite, client_space=self.client_space, idx=idx)
+            for tr in self.page.get_transactions():
+                if account.label == tr._account_label:
+                    yield tr
+
+    @need_login
+    def iter_pocket(self, account):
+        self.accounts.stay_or_go(subsite=self.subsite, client_space=self.client_space)
+        if 'compte courant bloqué' in account.label.lower():
+            # CCB accounts have a specific table containing only Pockets
+            for pocket in self.page.iter_ccb_pockets(account=account):
+                yield pocket
+        else:
+            for inv in self.iter_investment(account=account):
+                for pocket in self.page.iter_pocket(inv=inv):
+                    yield pocket

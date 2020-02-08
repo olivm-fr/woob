@@ -27,10 +27,11 @@ import sys
 import os
 import subprocess
 import hashlib
-from datetime import datetime
-from contextlib import closing
 from compileall import compile_dir
+from contextlib import closing, contextmanager
+from datetime import datetime
 from io import BytesIO, StringIO
+from tempfile import NamedTemporaryFile
 
 from weboob.exceptions import BrowserHTTPError, BrowserHTTPNotFound, ModuleInstallError
 from .modules import LoadedModule
@@ -43,11 +44,18 @@ except ImportError:
     from configparser import RawConfigParser, DEFAULTSECT
 
 
+@contextmanager
 def open_for_config(filename):
     if sys.version_info.major == 2:
-        return open(filename, 'wb')
+        f = NamedTemporaryFile(mode='wb',
+                               dir=os.path.dirname(filename),
+                               delete=False)
     else:
-        return open(filename, 'w', encoding='utf-8')
+        f = NamedTemporaryFile(mode='w', encoding='utf-8',
+                               dir=os.path.dirname(filename),
+                               delete=False)
+    yield f
+    os.rename(f.name, filename)
 
 
 class ModuleInfo(object):
@@ -164,8 +172,8 @@ class Repository(object):
         Retrieve the index file of this repository. It can use network
         if this is a remote repository.
 
-        :param repo_path: path to save the downloaded index file.
-        :type repo_path: str
+        :param repo_path: path to save the downloaded index file (if any).
+        :type repo_path: str or None
         """
         built = False
         if self.local:
@@ -194,7 +202,8 @@ class Repository(object):
             self.build_index(self.localurl2path(), filename)
 
         # Save the repository index in ~/.weboob/repositories/
-        self.save(repo_path, private=True)
+        if repo_path:
+            self.save(repo_path, private=True)
 
     def retrieve_keyring(self, browser, keyring_path, progress):
         # ignore local
@@ -702,13 +711,13 @@ class Repositories(object):
         module_dir = os.path.join(self.modules_dir, module.name)
         installed = self.versions.get(module.name)
         if installed is None or not os.path.exists(module_dir):
-            progress.progress(0.3, 'Module %s is not installed yet' % module.name)
+            progress.progress(0.2, 'Module %s is not installed yet' % module.name)
         elif module.version > installed:
-            progress.progress(0.3, 'A new version of %s is available' % module.name)
+            progress.progress(0.2, 'A new version of %s is available' % module.name)
         else:
             raise ModuleInstallError('The latest version of %s is already installed' % module.name)
 
-        progress.progress(0.2, 'Downloading module...')
+        progress.progress(0.3, 'Downloading module...')
         try:
             tardata = self.browser.open(module.url).content
         except BrowserHTTPError as e:

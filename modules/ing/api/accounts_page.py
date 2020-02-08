@@ -27,23 +27,24 @@ from weboob.browser.filters.json import Dict
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Date, Eval, Lower, Format, Field, Map, Upper,
 )
-from weboob.capabilities.bank import Account
+from weboob.capabilities.bank import Account, AccountOwnership
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
+from weboob.capabilities.base import NotAvailable
 
 
 class Transaction(FrenchTransaction):
     PATTERNS = [
-        (re.compile(u'^retrait dab (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^retrait dab (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
         # Withdrawal in foreign currencies will look like "retrait 123 currency"
-        (re.compile(u'^retrait (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
-        (re.compile(u'^carte (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
-        (re.compile(u'^virement (sepa )?(emis vers|recu|emis)? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
-        (re.compile(u'^remise cheque(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
-        (re.compile(u'^cheque (?P<text>.*)'), FrenchTransaction.TYPE_CHECK),
-        (re.compile(u'^prelevement (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(u'^prlv sepa (?P<text>.*?) : .*'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(u'^prélèvement sepa en faveur de (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(u'^commission sur (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^retrait (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^carte (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
+        (re.compile(r'^virement (sepa )?(emis vers|recu|emis)? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'^remise cheque(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^cheque (?P<text>.*)'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^prelevement (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^prlv sepa (?P<text>.*?) : .*'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^prélèvement sepa en faveur de (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^commission sur (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
     ]
 
     TYPES = {
@@ -73,6 +74,18 @@ class AccountsPage(LoggedPage, JsonPage):
                 if not Dict('hasPositiveBalance')(self):
                     return -CleanDecimal(Dict('ledgerBalance'))(self)
                 return CleanDecimal(Dict('ledgerBalance'))(self)
+
+            def obj_ownership(self):
+                ownership = Dict('ownership/code', default=None)(self)
+                role = Dict('role/label', default=None)(self)
+
+                if ownership == 'JOINT':
+                    return AccountOwnership.CO_OWNER
+                elif ownership == 'SINGLE':
+                    if role == 'Titulaire':
+                        return AccountOwnership.OWNER
+                    elif role == 'Procuration':
+                        return AccountOwnership.ATTORNEY
 
 
 class HistoryPage(LoggedPage, JsonPage):
@@ -110,3 +123,9 @@ class ComingPage(LoggedPage, JsonPage):
 
             def obj_raw(self):
                 return Transaction.Raw(Lower(Dict('label')))(self) or Format('%s %s', Field('date'), Field('amount'))(self)
+
+    @method
+    class get_account_coming(ItemElement):
+        klass = Account
+
+        obj_coming = CleanDecimal(Dict('totalAmount', default=NotAvailable), default=NotAvailable)

@@ -22,8 +22,6 @@ from __future__ import unicode_literals
 from datetime import timedelta
 
 from weboob.browser import LoginBrowser, need_login, URL
-from weboob.browser.exceptions import ClientError
-from weboob.exceptions import BrowserIncorrectPassword
 from weboob.tools.date import new_datetime
 
 from .pages import (
@@ -35,9 +33,9 @@ from .pages import (
 class LuccaBrowser(LoginBrowser):
     BASEURL = 'https://www.ilucca.net'
 
-    login = URL('/login', LoginPage)
+    login = URL('/identity/login', LoginPage)
     home = URL('/home', HomePage)
-    calendar = URL('/api/leaveAMPMs', CalendarPage)
+    calendar = URL('/api/v3/leaves', CalendarPage)
     users = URL(r'/api/departments\?fields=id%2Cname%2Ctype%2Clevel%2Cusers.id%2Cusers.displayName%2Cusers.dtContractStart%2Cusers.dtContractEnd%2Cusers.manager.id%2Cusers.manager2.id%2Cusers.legalEntityID%2Cusers.calendar.id&date=since%2C1970-01-01', UsersPage)
     subscriptions = URL(r'/api/v3/users/me\?fields=id,firstName,lastName,allowsElectronicPayslip,culture,login,mail,personalemail', SubscriptionPage)
     payslips = URL(r'/api/v3/payslips\?fields=id,import\[name,endDate\]&orderby=import\.endDate,desc,import\.startDate,desc,import\.creationDate,desc&ownerID=(?P<subid>\d+)', DocumentsPage)
@@ -47,18 +45,12 @@ class LuccaBrowser(LoginBrowser):
         self.BASEURL = 'https://%s.ilucca.net' % subdomain
 
     def do_login(self):
-        try:
-            self.login.go(data={
-                'Login': self.username,
-                'Password': self.password,
-            })
-        except ClientError as exc:
-            if 'Incorrect credentials' in exc.response.text:
-                raise BrowserIncorrectPassword()
-            raise
+        self.login.go()
+        self.page.do_login(self.username, self.password)
 
         if not self.home.is_here():
-            raise BrowserIncorrectPassword()
+            self.page.check_error()
+            raise Exception('error is not handled')
 
     @need_login
     def all_events(self, start, end):
@@ -79,9 +71,8 @@ class LuccaBrowser(LoginBrowser):
 
             params = {
                 'date': 'between,%s,%s' % (start.strftime('%Y-%m-%d'), window_end.strftime('%Y-%m-%d')),
-                'paging': '0,10000',
-                'owner.id': ','.join(str(u.id) for u in users.values()),
-                'fields': 'u,a,o,ls,mc,r,c,rw',
+                'leavePeriod.ownerId': ','.join(str(u.id) for u in users.values()),
+                'fields': 'leavePeriod[id,ownerId,isConfirmed],isAm,date,color,isRemoteWork,leaveAccount[name,isRemoteWork]',
             }
             self.calendar.go(params=params)
             events = self.page.iter_events(start, users=users)
@@ -91,7 +82,7 @@ class LuccaBrowser(LoginBrowser):
                 yield event
                 last = new_datetime(event.start_date)
 
-            start = window_end
+            start = window_end + timedelta(days=1)
 
     @need_login
     def get_subscription(self):

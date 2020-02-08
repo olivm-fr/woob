@@ -16,13 +16,17 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import unicode_literals
+
 import time
-from requests.exceptions import HTTPError, TooManyRedirects
+from requests.exceptions import HTTPError, TooManyRedirects, ConnectionError
 from datetime import datetime, timedelta
 
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.exceptions import BrowserIncorrectPassword, BrowserQuestion
+from weboob.exceptions import BrowserIncorrectPassword, BrowserQuestion, BrowserUnavailable
 from weboob.tools.value import Value
+from weboob.tools.decorators import retry
 
 from .pages import LoginPage, ProfilePage, BillsPage
 
@@ -30,10 +34,13 @@ from .pages import LoginPage, ProfilePage, BillsPage
 class OvhBrowser(LoginBrowser, StatesMixin):
     BASEURL = 'https://www.ovh.com'
 
-    login = URL('/auth/',
-                '/manager/web/', LoginPage)
-    profile = URL('/engine/api/me', ProfilePage)
-    documents = URL('/engine/2api/sws/billing/bills\?count=0&date=(?P<fromDate>.*)&dateTo=(?P<toDate>.*)&offset=0', BillsPage)
+    login = URL(
+        r'/auth/',
+        r'/manager/web/',
+        LoginPage,
+    )
+    profile = URL(r'/engine/api/me', ProfilePage)
+    documents = URL(r'/engine/2api/sws/billing/bills\?count=0&date=(?P<fromDate>.*)&dateTo=(?P<toDate>.*)&offset=0', BillsPage)
 
     __states__ = ('otp_form', 'otp_url')
     STATE_DURATION = 10
@@ -60,16 +67,19 @@ class OvhBrowser(LoginBrowser, StatesMixin):
 
         self.location(self.url, data=res_form)
 
+    @retry(BrowserUnavailable)
     def do_login(self):
         if self.config['pin_code'].get():
             self.validate_security_form()
 
             if not self.page.is_logged():
                 raise BrowserIncorrectPassword("Login / Password or authentication pin_code incorrect")
-            else:
-                return
+            return
 
-        self.login.go()
+        try:
+            self.login.go()
+        except ConnectionError as e:
+            raise BrowserUnavailable(e)
 
         if self.page.is_logged():
             return
@@ -82,16 +92,20 @@ class OvhBrowser(LoginBrowser, StatesMixin):
             self.otp_form = self.page.get_security_form()
             self.otp_url = self.url
 
-            raise BrowserQuestion(Value('pin_code', label=self.page.get_otp_message()[0] or 'Please type the OTP you received'))
+            raise BrowserQuestion(Value('pin_code', label=self.page.get_otp_message() or 'Please type the OTP you received'))
 
         if not self.page.is_logged():
-            raise BrowserIncorrectPassword
+            raise BrowserIncorrectPassword(self.page.get_error_message())
 
     @need_login
     def get_subscription_list(self):
-        return self.profile.stay_or_go().get_list()
+        self.profile.stay_or_go()
+        return self.page.get_subscriptions()
 
     @need_login
     def iter_documents(self, subscription):
-        return self.documents.stay_or_go(fromDate=(datetime.now() - timedelta(days=2*365)).strftime("%Y-%m-%dT00:00:00Z"),
-                                         toDate=time.strftime("%Y-%m-%dT%H:%M:%S.999Z")).get_documents(subid=subscription.id)
+        self.documents.stay_or_go(
+            fromDate=(datetime.now() - timedelta(days=2 * 365)).strftime("%Y-%m-%dT00:00:00Z"),
+            toDate=time.strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+        )
+        return self.page.get_documents(subid=subscription.id)

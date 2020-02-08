@@ -19,63 +19,144 @@
 
 from __future__ import unicode_literals
 
+import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import ItemElement, method, ListElement
+from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage, RawPage
+from weboob.browser.elements import ItemElement, method, DictElement
 from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal,
-    Regexp, DateGuesser, Field
+    CleanText, CleanDecimal, Currency, Field, Eval,
+    Date, Regexp,
 )
+from weboob.browser.filters.json import Dict
 from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.date import LinearDateGuesser
-from datetime import timedelta
+from weboob.capabilities.base import NotAvailable, empty
+from weboob.tools.json import json
+from weboob.tools.compat import urlparse, parse_qs
 
 
-def MyDecimal(*args, **kwargs):
-    kwargs.update(replace_dots=True, default=NotAvailable)
-    return CleanDecimal(*args, **kwargs)
+class HomePage(HTMLPage):
+    def get_href_randomstring(self, filename):
+        # The filename has a random string like `3eacdd2f` that changes often
+        # (at least once a week).
+        # We can get this string easily because file path is always like that:
+        # `/js/<filename>.<randomstring>.js`
+        #
+        # We can't use Regexp(Link(..)) because all the links are in the <head>
+        # tag on the page. That would require to do something like  `//link[25]`
+        # to get the correct link, and if they modify/add/remove one link then the
+        # regex is going to crash or give us the wrong result.
+        href = re.search(r'link href=/js/%s.(\w+).js' % filename, self.text)
+        return href.group(1)
+
+
+class JsParamsPage(RawPage):
+    def get_json_content(self):
+        json_data = re.search(r"JSON\.parse\('(.*)'\)", self.text)
+        return json.loads(json_data.group(1))
+
+
+class JsUserPage(RawPage):
+    def get_json_content(self):
+        # The regex below will match the JSON by searching for at least one
+        # key in it (code_challenge). This JSON is available only one time in the
+        # file, so there is no risk of duplicates.
+        json_data = re.search(r'({[^{}]+code_challenge:[^{}]+})', self.text).group(1)
+        # Delete values that are variables concatenation (like `r + "/connect"`),
+        # we do not need them.
+        json_data = re.sub(r':([^{\",]+\+)', ':', json_data)
+        # There are values without quotes in the json, so we add quotes for the
+        # json.loads to work.
+        json_data = re.sub(r':([^\",+]+)', r':"\1"', json_data)
+        # Keys do not have quotes, adding them for the json.loads to work
+        json_data = re.sub(r'([^{\",+]+):', r'"\1":', json_data)
+        return json.loads(json_data)
+
+
+class JsAppPage(RawPage):
+    def get_code_verifier(self):
+        return re.search(r'code_verifier:"([^"]+)', self.text).group(1)
+
+
+class InitLoginPage(HTMLPage):
+    pass
 
 
 class LoginPage(HTMLPage):
-    def get_error(self):
-        return CleanText('//li[@class="notification-summary-message-error"][1]')(self.doc)
+    def get_json_model(self):
+        return json.loads(CleanText('//script[@id="modelJson"]', replace=[('&quot;', '"')])(self.doc))
 
 
-class AccountsPage(LoggedPage, HTMLPage):
+class ConnectCodePage(LoggedPage, HTMLPage):
+    def get_code(self):
+        return parse_qs(urlparse(self.url).query)['code'][0]
+
+
+class TokenPage(LoggedPage, JsonPage):
+    def get_access_token(self):
+        return CleanText(Dict('access_token'))(self.doc)
+
+
+class AccountsPage(LoggedPage, JsonPage):
     @method
-    class iter_accounts(ListElement):
-        item_xpath = '//ul[@id="navSideProducts"]/li'
+    class iter_accounts(DictElement):
+        item_xpath = 'data'
 
         class item(ItemElement):
             klass = Account
 
+            def condition(self):
+                return CleanText(Dict('status'))(self) == 'active'
+
             obj_type = Account.TYPE_CARD
-            obj_id = CleanText('./a/p', replace=[('N° ', '')])
-            obj_label = obj_id
-            obj_currency = u'EUR'
-            obj_balance = MyDecimal(u'//p[@class="num"]//strong')
+            obj_label = obj_id = obj_number = CleanText(Dict('card_ref'))
+            # The amount has no `.` or `,` in it. In order to get the amount we have
+            # to divide the amount we retrieve by 100 (like the website does).
+            obj_balance = Eval(lambda x: x / 100, CleanDecimal(Dict('balances/0/remaining_amount')))
+            obj_currency = Currency(Dict('balances/0/currency'))
+            obj_cardlimit = Eval(lambda x: x / 100, CleanDecimal(Dict('balances/0/daily_remaining_amount')))
+            obj__card_class = CleanText(Dict('class'))
+            obj__account_ref = CleanText(Dict('account_ref'))
 
-            # Every subscription a product token and a type ex: card = 240
-            obj__product_token = Regexp(CleanText('./@id'), r'navSideProduct_(\d*)')
-            obj__product_type = Regexp(CleanText('(//div[@class="logo"])[1]//img/@src'), "/img/product_(\d*).png")
 
-
-class TransactionsPage(LoggedPage, HTMLPage):
+class TransactionsPage(LoggedPage, JsonPage):
     @method
-    class iter_transactions(ListElement):
-        item_xpath = '(//table[contains(@class, "table-transaction")])[1]/tbody/tr'
+    class iter_transactions(DictElement):
+        item_xpath = 'data'
 
         class item(ItemElement):
             klass = Transaction
 
-            obj_date = DateGuesser(CleanText('.//span[contains(., "/")]'), LinearDateGuesser(date_max_bump=timedelta(45)))
-            obj_label = CleanText('.//h3/strong')
-            obj_raw = Field('label')
-            obj_amount = MyDecimal('./td[@class="al-r"]/div/span[has-class("badge")]')
+            def condition(self):
+                return CleanText(Dict('status'))(self) != 'failed'
+
+            obj_date = Date(Dict('date'))
+            obj_amount = Eval(lambda x: x / 100, CleanDecimal(Dict('amount')))
+
+            def obj_raw(self):
+                name = Dict('outlet/name', default=NotAvailable)(self)
+                reason = Dict('reason', default=NotAvailable)(self)
+                if not empty(name) and ('-' in name or empty(reason)):
+                    return CleanText().filter(name)
+                return CleanText().filter(reason)
+
+            def obj_label(self):
+                raw = Field('raw')(self)
+                if 'Annulation' in raw:
+                    return raw
+
+                # Raw labels can be like this :
+                # PASTA ANGERS,FRA
+                # O SEIZE - 16 RUE D ALSACE, ANGERS,49100,FRA
+                # SFR DISTRIBUTION-23-9.20-0.00-2019
+                # The regexp is to get the part with only the name
+                # The .strip() is to remove any leading whitespaces due to the ` ?-`
+                if '-' not in raw:
+                    return Regexp(pattern=r'^([^|]+)').filter(raw)
+                return Regexp(pattern=r'([^,-]+)(?: ?-|,).*').filter(raw).strip()
+
             def obj_type(self):
-                amount = Field('amount')(self)
-                if amount < 0:
+                if Field('amount')(self) < 0:
                     return Transaction.TYPE_CARD
-                else:
-                    return Transaction.TYPE_TRANSFER
+                elif 'Annulation' in Field('label')(self):
+                    return Transaction.TYPE_PAYBACK
+                return Transaction.TYPE_TRANSFER

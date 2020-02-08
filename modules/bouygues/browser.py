@@ -1,158 +1,132 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2010-2015 Bezleputh
+# Copyright(C) 2019      Budget Insight
 #
 # This file is part of a weboob module.
 #
 # This weboob module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
+# it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
 # This weboob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
+# GNU Lesser General Public License for more details.
 #
-# You should have received a copy of the GNU Affero General Public License
+# You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
+from time import time
 from jose import jwt
 
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
-from weboob.browser.exceptions import ClientError, HTTPNotFound
-from weboob.tools.compat import urlparse, parse_qs
+from weboob.browser.exceptions import HTTPNotFound, ClientError
+from weboob.exceptions import BrowserIncorrectPassword
+from weboob.tools.compat import urlparse, parse_qsl
+
 from .pages import (
-    DocumentsPage, HomePage, LoginPage, SubscriberPage, SubscriptionPage, SubscriptionDetailPage,
-    SendSMSPage, SendSMSErrorPage, UselessPage, DocumentFilePage, ProfilePage,
+    LoginPage, ForgottenPasswordPage, AppConfigPage, SubscriberPage, SubscriptionPage, SubscriptionDetail, DocumentPage,
+    DocumentDownloadPage, DocumentFilePage,
 )
 
-from weboob.capabilities.messages import CantSendMessage
 
-__all__ = ['BouyguesBrowser']
+class MyURL(URL):
+    def go(self, *args, **kwargs):
+        kwargs['id_personne'] = self.browser.id_personne
+        kwargs['headers'] = self.browser.headers
+        return super(MyURL, self).go(*args, **kwargs)
 
 
 class BouyguesBrowser(LoginBrowser):
     BASEURL = 'https://api.bouyguestelecom.fr'
-    TIMEOUT = 20
 
-    login = URL(r'https://www.mon-compte.bouyguestelecom.fr/cas/login', LoginPage)
-    home = URL(r'https://www.bouyguestelecom.fr/mon-compte', HomePage)
-    subscriber = URL(r'/personnes/(?P<idUser>\d+)$', SubscriberPage)
-    subscriptions = URL(r'/personnes/(?P<idUser>\d+)/comptes-facturation', SubscriptionPage)
-
-    subscriptions_details = URL(r'/comptes-facturation/(?P<idSub>\d+)/contrats-payes', SubscriptionDetailPage)
-    document_file = URL(r'/comptes-facturation/(?P<idSub>\d+)/factures/.*/documents', DocumentFilePage)
-    documents = URL(r'/comptes-facturation/(?P<idSub>\d+)/factures', DocumentsPage)
-
-    sms_page = URL(r'https://www.secure.bbox.bouyguestelecom.fr/services/SMSIHD/sendSMS.phtml',
-                   r'https://www.secure.bbox.bouyguestelecom.fr/services/SMSIHD/confirmSendSMS.phtml',
-                   SendSMSPage)
-    confirm = URL(r'https://www.secure.bbox.bouyguestelecom.fr/services/SMSIHD/resultSendSMS.phtml', UselessPage)
-    sms_error_page = URL(r'https://www.secure.bbox.bouyguestelecom.fr/services/SMSIHD/SMS_erreur.phtml',
-                         SendSMSErrorPage)
-    profile = URL(r'/personnes/(?P<idUser>\d+)/coordonnees', ProfilePage)
+    login_page = URL(r'https://www.mon-compte.bouyguestelecom.fr/cas/login', LoginPage)
+    forgotten_password_page = URL(
+            r'https://www.mon-compte.bouyguestelecom.fr/mon-compte/mot-de-passe-oublie',
+            r'https://www.bouyguestelecom.fr/mon-compte/mot-de-passe-oublie',
+            ForgottenPasswordPage
+    )
+    app_config = URL(r'https://www.bouyguestelecom.fr/mon-compte/data/app-config.json', AppConfigPage)
+    subscriber_page = MyURL(r'/personnes/(?P<id_personne>\d+)$', SubscriberPage)
+    subscriptions_page = MyURL(r'/personnes/(?P<id_personne>\d+)/comptes-facturation', SubscriptionPage)
+    subscription_detail_page = URL(r'/comptes-facturation/(?P<id_account>\d+)/contrats-payes', SubscriptionDetail)
+    document_file_page = URL(r'/comptes-facturation/(?P<id_account>\d+)/factures/.*/documents/.*', DocumentFilePage)
+    documents_page = URL(r'/comptes-facturation/(?P<id_account>\d+)/factures(\?|$)', DocumentPage)
+    document_download_page = URL(r'/comptes-facturation/(?P<id_account>\d+)/factures/.*(\?|$)', DocumentDownloadPage)
 
     def __init__(self, username, password, lastname, *args, **kwargs):
         super(BouyguesBrowser, self).__init__(username, password, *args, **kwargs)
         self.lastname = lastname
+        self.id_personne = None
         self.headers = None
-        self.id_user = None
 
     def do_login(self):
-        self.login.go()
+        self.login_page.go()
 
-        if self.home.is_here():
-            return
+        try:
+            self.page.login(self.username, self.password, self.lastname)
+        except ClientError as e:
+            if e.response.status_code == 401:
+                raise BrowserIncorrectPassword()
+            raise
 
-        self.page.login(self.username, self.password, self.lastname)
+        if self.login_page.is_here():
+            msg = self.page.get_error_message()
+            raise BrowserIncorrectPassword(msg)
 
-        if self.login.is_here():
-            error = self.page.get_error()
-            if error and 'mot de passe' in error:
-                raise BrowserIncorrectPassword(error)
-            raise AssertionError("Unhandled error at login: {}".format(error))
+        if self.forgotten_password_page.is_here():
+            # when too much attempt has been done in a short time, bouygues redirect us here,
+            # but no message is available on this page
+            raise BrowserIncorrectPassword()
 
-        # after login we need to get some tokens to use bouygues api
-        data = {
+        # q is timestamp millisecond
+        self.app_config.go(params={'q': int(time()*1000)})
+        client_id = self.page.get_client_id()
+
+        params = {
+            'client_id': client_id,
             'response_type': 'id_token token',
-            'client_id': 'a360.bouyguestelecom.fr',
             'redirect_uri': 'https://www.bouyguestelecom.fr/mon-compte/'
         }
-        self.location('https://oauth2.bouyguestelecom.fr/authorize', params=data)
+        self.location('https://oauth2.bouyguestelecom.fr/authorize', params=params)
+        fragments = dict(parse_qsl(urlparse(self.url).fragment))
 
-        parsed_url = urlparse(self.response.url)
-        fragment = parse_qs(parsed_url.fragment)
-
-        if not fragment:
-            query = parse_qs(parsed_url.query)
-            if 'server_error' in query.get('error', []):
-                raise BrowserUnavailable(query['error_description'][0])
-
-        claims = jwt.get_unverified_claims(fragment['id_token'][0])
-        self.headers = {'Authorization': 'Bearer %s' % fragment['access_token'][0]}
-        self.id_user = claims['id_personne']
-
-    @need_login
-    def post_message(self, message):
-        self.sms_page.go()
-
-        if self.sms_error_page.is_here():
-            raise CantSendMessage(self.page.get_error_message())
-
-        receivers = ";".join(message.receivers) if message.receivers else self.username
-        self.page.send_sms(message, receivers)
-
-        if self.sms_error_page.is_here():
-            raise CantSendMessage(self.page.get_error_message())
-
-        self.confirm.open()
+        self.id_personne = jwt.get_unverified_claims(fragments['id_token'])['id_personne']
+        authorization = 'Bearer ' + fragments['access_token']
+        self.headers = {'Authorization': authorization}
 
     @need_login
     def iter_subscriptions(self):
-        self.subscriber.go(idUser=self.id_user, headers=self.headers)
-        subscriber = self.page.get_subscriber()
-        phone_list = self.page.get_phone_list()
-
-        self.subscriptions.go(idUser=self.id_user, headers=self.headers)
-        for sub in self.page.iter_subscriptions(subscriber=subscriber):
+        subscriber = self.subscriber_page.go().get_subscriber()
+        self.subscriptions_page.go()
+        for sub in self.page.iter_subscriptions():
+            sub.subscriber = subscriber
             try:
-                self.subscriptions_details.go(idSub=sub.id, headers=self.headers)
-                sub.label = self.page.get_label()
-                sub._is_holder = self.page.is_holder()
-            except ClientError:
-                # if another person pay for your subscription you may not have access to this page with your credentials
-                sub.label = phone_list
-            if not sub.label:
-                if not sub._is_holder:
-                    sub.label = subscriber
+                sub.label = self.subscription_detail_page.go(id_account=sub.id, headers=self.headers).get_label()
+            except ClientError as e:
+                if e.response.status_code == 403:
+                    # Sometimes, subscription_detail_page is not available for a subscription.
+                    # It's impossible to get the tel number associated with it and create a label with.
+                    sub.label = sub.id
                 else:
-                    # If the subscriber is the holder but the subscription does not have a phone number anyway
-                    # It means that the subscription has not been activated yet
-                    continue
+                    raise
             yield sub
 
     @need_login
     def iter_documents(self, subscription):
         try:
             self.location(subscription.url, headers=self.headers)
-            return self.page.iter_documents(subid=subscription.id)
         except HTTPNotFound as error:
-            if error.response.json()['error'] in ('facture_introuvable', 'compte_jamais_facture'):
+            json_response = error.response.json()
+            if json_response['error'] in ('facture_introuvable', 'compte_jamais_facture'):
                 return []
             raise
+        return self.page.iter_documents(subid=subscription.id)
 
     @need_login
     def download_document(self, document):
-        self.location(document.url, headers=self.headers)
-        return self.open(self.page.get_one_shot_download_url()).content
-
-    @need_login
-    def get_profile(self):
-        self.subscriber.go(idUser=self.id_user, headers=self.headers)
-        subscriber = self.page.get_subscriber()
-
-        self.profile.go(idUser=self.id_user, headers=self.headers)
-
-        return self.page.get_profile(subscriber=subscriber)
+        if document.url:
+            return self.location(document.url, headers=self.headers).content

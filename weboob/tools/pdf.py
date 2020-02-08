@@ -17,7 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
-from io import BytesIO
+import sys
+from io import BytesIO, StringIO
 from collections import namedtuple
 import logging
 import os
@@ -306,7 +307,7 @@ def get_pdf_rows(data, miner_layout=True):
     try:
         from pdfminer.pdfparser import PDFParser, PDFSyntaxError
     except ImportError:
-        raise ImportError('Please install python-pdfminer')
+        raise ImportError('Please install python3-pdfminer')
 
     try:
         from pdfminer.pdfdocument import PDFDocument
@@ -434,7 +435,7 @@ def html_to_pdf(browser, url=None, data=None, extra_options=None):
     try:
         import pdfkit # https://pypi.python.org/pypi/pdfkit
     except ImportError:
-        raise ImportError('Please install python-pdfkit')
+        raise ImportError('Please install python3-pdfkit')
 
     assert (url or data) and not (url and data), 'Please give only url or data parameter'
 
@@ -456,6 +457,47 @@ def html_to_pdf(browser, url=None, data=None, extra_options=None):
     return callback(url or data, False, options=options)
 
 
+def blinkpdf(browser, url, extra_options=None, filter_cookie=None):
+    xvfb_exists = False
+    blinkpdf_exists = False
+    paths = os.getenv('PATH', os.defpath).split(os.pathsep)
+    for path in paths:
+        fpath = os.path.join(path, 'xvfb-run')
+        if os.path.exists(fpath) and os.access(fpath, os.X_OK):
+            xvfb_exists = True
+        fpath = os.path.join(path, 'blinkpdf')
+        if os.path.exists(fpath) and os.access(fpath, os.X_OK):
+            blinkpdf_exists = True
+
+    if not xvfb_exists or not blinkpdf_exists:
+        raise NotImplementedError()
+
+    args = []
+    for c in browser.session.cookies:
+        if c.value:
+            if not filter_cookie or filter_cookie(c):
+                args.append('--cookie')
+                args.append('%s=%s' % (c.name, c.value))
+
+    for key, value in browser.session.headers.items():
+        args.append('--header')
+        args.append('%s=%s' % (key, value))
+
+    if extra_options and 'run-script' in extra_options:
+        args.append('--run-script')
+        args.append(extra_options['run-script'][0])
+
+    args.append(url)
+    args.append('-')  # - : don't write it on disk, simply return value
+
+    # put a very small resolution to reduce used memory, because we don't really need it, it doesn't influence pdf size
+    # -screen 0 width*height*bit depth
+    prepend = ['xvfb-run', '-a', '-s', '-screen 0 2x2x8', 'blinkpdf']
+
+    cmd = list(prepend) + list(args)
+    return subprocess.check_output(cmd)
+
+
 # extract all text from PDF
 def extract_text(data):
     try:
@@ -470,7 +512,7 @@ def extract_text(data):
         from pdfminer.converter import TextConverter
         from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
     except ImportError:
-        raise ImportError('Please install python-pdfminer to parse PDF')
+        raise ImportError('Please install python3-pdfminer to parse PDF')
     else:
         parser = PDFParser(BytesIO(data))
         try:
@@ -484,7 +526,10 @@ def extract_text(data):
             return
 
         rsrcmgr = PDFResourceManager()
-        out = BytesIO()
+        if sys.version_info.major == 2:
+            out = BytesIO()
+        else:
+            out = StringIO()
         device = TextConverter(rsrcmgr, out)
         interpreter = PDFPageInterpreter(rsrcmgr, device)
         if newapi:

@@ -28,9 +28,8 @@ from weboob.browser.filters.standard import CleanText, Date, Regexp, CleanDecima
 from weboob.browser.filters.html import Attr, Link, TableCell
 from weboob.capabilities.bank import Account, Investment, Transaction
 from weboob.capabilities.base import NotAvailable, empty
-from weboob.exceptions import BrowserUnavailable
+from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword
 from weboob.tools.compat import urljoin
-
 
 
 def MyDecimal(*args, **kwargs):
@@ -44,6 +43,15 @@ class MaintenancePage(HTMLPage):
 
 
 class LoginPage(HTMLPage):
+    def on_load(self):
+        error_msg = CleanText('//li[@class="globalErreurMessage"]')(self.doc)
+        if error_msg:
+            # Catch wrongpass accordingly
+            wrongpass_messages = ("mot de passe incorrect", "votre compte n'est plus utilisable")
+            if any(message in error_msg.lower() for message in wrongpass_messages):
+                raise BrowserIncorrectPassword(error_msg)
+            raise BrowserUnavailable(error_msg)
+
     def login(self, login, password):
         form = self.get_form('//form[@id="loginForm"]')
         form['loginForm:name'] = login
@@ -59,6 +67,7 @@ class AccountsPage(LoggedPage, HTMLPage):
     TYPES = {
         'Assurance Vie': Account.TYPE_LIFE_INSURANCE,
         'Capitalisation': Account.TYPE_MARKET,
+        'Epargne Handicap': Account.TYPE_LIFE_INSURANCE,
         'Unknown': Account.TYPE_UNKNOWN,
     }
 
@@ -110,6 +119,11 @@ class ItemInvestment(ItemElement):
     obj_vdate = Date(CleanText(TableCell('vdate', default="")), dayfirst=True, default=NotAvailable)
     obj_code = Regexp(CleanText('.//td[contains(text(), "Isin")]'), ':[\s]+([\w]+)', default=NotAvailable)
     obj__invest_type = Regexp(CleanText('.//td[contains(text(), "Type")]'), ':[\s]+([\w ]+)', default=NotAvailable)
+
+    def obj_code_type(self):
+        if Field('code')(self) == NotAvailable:
+            return NotAvailable
+        return Investment.CODE_TYPE_ISIN
 
     def obj_valuation(self):
         valuation = MyDecimal(TableCell('valuation', default=None))(self)
@@ -185,8 +199,7 @@ class DetailsPage(LoggedPage, HTMLPage):
                     path = 'ancestor::tr/preceding-sibling::tr[@data-ri][position() = 1][1]/td[%d]' % (share_idx + 1)
 
                     profile_share = MyDecimal(path)(self)
-                    assert profile_share
-                    #raise Exception('dtc')
+                    assert not empty(profile_share), 'profile_share is %s' % profile_share
                     profile_share = Eval(lambda x: x / 100, profile_share)(self)
                     return inv_share * profile_share
                 else:
@@ -203,10 +216,10 @@ class DetailsPage(LoggedPage, HTMLPage):
 
         class item(ItemInvestment):
             obj_diff = MyDecimal(TableCell('diff'), default=NotAvailable)
-            obj_diff_percent = Eval(lambda x: x/100, MyDecimal(TableCell('diff_percent')))
+            obj_diff_ratio = Eval(lambda x: x/100, MyDecimal(TableCell('diff_percent')))
             obj_unitprice = MyDecimal(TableCell('unitprice'))
 
-            def obj_diff_percent(self):
+            def obj_diff_ratio(self):
                 diff_percent = MyDecimal(TableCell('diff_percent'))(self)
                 if diff_percent:
                     return diff_percent / 100
@@ -227,8 +240,11 @@ class DetailsPage(LoggedPage, HTMLPage):
 
     def go_historyall(self, page_number):
         form = self.get_form(xpath='//form[contains(@id, "ongletHistoOperations:ongletHistoriqueOperations")]')
-        # The form value varies (for example j_idt913 or j_idt62081) so we need to scrape it dynamically:
-        form_value = Attr('//div[@id="ongletHistoOperations:ongletHistoriqueOperations:newoperations"]/div[1]', 'id')(self.doc)
+        # The form value varies (for example j_idt913 or j_idt62081) so we need to scrape it dynamically.
+        # However, sometimes the form does not contain the 'id' attribute, in which case we must reload the page.
+        form_value = Attr('//div[@id="ongletHistoOperations:ongletHistoriqueOperations:newoperations"]/div[1]', 'id', default=None)(self.doc)
+        if not form_value:
+            return False
         form['javax.faces.partial.ajax'] =      'true'
         form['javax.faces.partial.execute'] =   form_value
         form['javax.faces.partial.render'] =    form_value
@@ -239,20 +255,7 @@ class DetailsPage(LoggedPage, HTMLPage):
         form[form_value + '_rows'] =            '100'
         form[form_value + '_first'] =           page_number * 100
         form.submit()
-
-    def go_investments_form(self, index):
-        form = self.get_form(xpath='//form[contains(@id, "ongletHistoOperations:ongletHistoriqueOperations")]')
-        form['javax.faces.behavior.event'] = 'rowToggle'
-        form['javax.faces.partial.event'] = 'rowToggle'
-        id_ = Attr('//div[contains(@id, "ongletHistoOperations:ongletHistoriqueOperations")][has-class("listeAvecDetail")]', 'id')(self.doc)
-        form['javax.faces.source'] = id_
-        form['javax.faces.partial.execute'] = id_
-        form['javax.faces.partial.render'] = id_ + ':detail ' + id_
-        form[id_ + '_rowExpansion'] = 'true'
-        form[id_ + '_encodeFeature'] = 'true'
-        form[id_ + '_expandedRowIndex'] = index
-        form.submit()
-
+        return True
 
     @method
     class iter_history(ListElement):
@@ -283,31 +286,3 @@ class DetailsPage(LoggedPage, HTMLPage):
                     and "Arrêté annuel" not in Field('label')(self)
                     and "Fusion-absorption" not in Field('label')(self)
                 )
-
-    @method
-    class iter_transactions_investments(TableInvestment):
-        item_xpath = '//table[thead[.//span[text()="ISIN"]]]/tbody/tr'
-        head_xpath = '//thead[.//span[text()="ISIN"]]//th'
-
-        col_isin = 'ISIN'
-        col_valuation = 'Montant net'
-        col_portfolio_share = '%'
-
-        class item(ItemElement):
-            klass = Investment
-
-            # Columns do not always appear depending on transactions so we need
-            # to precise "default=NotAvailable" for all TableCell filters.
-            obj_label = CleanText(TableCell('label', default=NotAvailable), default=NotAvailable)
-            obj_vdate = Date(CleanText(TableCell('vdate', default="")), dayfirst=True, default=NotAvailable)
-            obj_unitvalue = MyDecimal(TableCell('unitvalue', default=NotAvailable), default=NotAvailable)
-            obj_quantity = MyDecimal(TableCell('quantity', default=NotAvailable), default=NotAvailable)
-            obj_valuation = MyDecimal(TableCell('valuation', default=NotAvailable), default=NotAvailable)
-            obj_portfolio_share = MyDecimal(TableCell('portfolio_share', default=NotAvailable), default=NotAvailable)
-
-            def obj_code(self):
-                code = CleanText(TableCell('isin', default=NotAvailable), default=NotAvailable)(self)
-                return code if code != '-' else NotAvailable
-
-            def obj_code_type(self):
-                return Investment.CODE_TYPE_ISIN if Field('code')(self) else NotAvailable

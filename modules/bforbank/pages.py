@@ -27,9 +27,10 @@ from base64 import b64decode
 from PIL import Image
 
 from weboob.exceptions import ActionNeeded
-from weboob.browser.pages import LoggedPage, HTMLPage, pagination, AbstractPage
+from weboob.browser.pages import LoggedPage, HTMLPage, pagination, AbstractPage, JsonPage
 from weboob.browser.elements import method, ListElement, ItemElement, TableElement
-from weboob.capabilities.bank import Account
+from weboob.capabilities.bank import Account, AccountOwnership
+from weboob.capabilities.profile import Person
 from weboob.browser.filters.html import Link, Attr, TableCell
 from weboob.browser.filters.standard import (
     CleanText, Regexp, Field, Map, CleanDecimal, Date, Format,
@@ -98,8 +99,9 @@ class LoginPage(HTMLPage):
         form.submit()
 
 
-class ErrorPage(HTMLPage):
-    pass
+class ErrorPage(JsonPage):
+    def get_error_message(self):
+        return self.doc.get('errorMessage', None)
 
 
 class UserValidationPage(HTMLPage):
@@ -168,6 +170,16 @@ class AccountsPage(LoggedPage, HTMLPage):
 
             def condition(self):
                 return not len(self.el.xpath('./td[@class="chart"]'))
+
+            def obj_ownership(self):
+                owner = CleanText('./td//div[contains(@class, "-synthese-text") and not(starts-with(., "N°"))]', default=None)(self)
+
+                if owner:
+                    if re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)', owner, re.IGNORECASE):
+                        return AccountOwnership.CO_OWNER
+                    elif all(n in owner.upper() for n in self.env['name'].split()):
+                        return AccountOwnership.OWNER
+                    return AccountOwnership.ATTORNEY
 
 
 class Transaction(FrenchTransaction):
@@ -290,7 +302,7 @@ class CardHistoryPage(LoggedPage, HTMLPage):
 
             obj_type = Transaction.TYPE_DEFERRED_CARD
             obj_raw = CleanText(TableCell('raw'))
-            obj_vdate = obj_rdate = Date(CleanText(TableCell('vdate')), dayfirst=True)
+            obj_vdate = obj_rdate = obj_bdate = Date(CleanText(TableCell('vdate')), dayfirst=True)
             obj_amount = MyDecimal(TableCell('amount'), replace_dots=True)
 
             def obj_date(self):
@@ -300,15 +312,20 @@ class CardHistoryPage(LoggedPage, HTMLPage):
 class CardPage(LoggedPage, HTMLPage):
     def has_no_card(self):
         # Persistent message for cardless accounts
-        return CleanText('//div[@id="alert"]/p[contains(text(), "Aucune donnée n\'a été retournée par le service")]')(self.doc)
+        return (
+            CleanText('//div[@id="alert"]/p[contains(text(), "Aucune donnée n\'a été retournée par le service")]')(self.doc)
+            or not self.doc.xpath('//div[@class="content-boxed"]')
+        )
 
     def get_cards(self, account_id):
         divs = self.doc.xpath('//div[@class="content-boxed"]')
-        assert len(divs)
-        msgs = re.compile(u'Vous avez fait opposition sur cette carte bancaire.' +
-                           '|Votre carte bancaire a été envoyée.' +
-                           '|BforBank a fait opposition sur votre carte' +
-                           '|Pour des raisons de sécurité, la demande de réception du code confidentiel de votre carte par SMS est indisponible')
+        msgs = re.compile(
+            'Vous avez fait opposition sur cette carte bancaire.' +
+            '|Votre carte bancaire a été envoyée.' +
+            '|Carte bancaire commandée.' +
+            '|BforBank a fait opposition sur votre carte' +
+            '|Pour des raisons de sécurité, la demande de réception du code confidentiel de votre carte par SMS est indisponible'
+        )
         divs = [d for d in divs if not msgs.search(CleanText('.//div[has-class("alert")]', default='')(d))]
         divs = [d.xpath('.//div[@class="m-card-infos"]')[0] for d in divs]
         divs = [d for d in divs if not d.xpath('.//div[@class="m-card-infos-body-text"][text()="Débit immédiat"]')]
@@ -379,10 +396,30 @@ class BoursePage(AbstractPage):
     PARENT = 'lcl'
     PARENT_URL = 'bourse'
 
+    def get_logout_link(self):
+        return Link('//a[@title="Retour à l\'accueil"]')(self.doc)
+
 
 class BourseDisconnectPage(LoggedPage, HTMLPage):
-    def get_relocation(self):
-        link = re.search(r"window\.location= \'(.+)\';", self.content)
-        if link:
-            m = link.group(1)
-            return m
+    pass
+
+
+class ProfilePage(LoggedPage, HTMLPage):
+    @method
+    class get_profile(ItemElement):
+        klass = Person
+
+        obj_birth_date = Date(CleanText('//td[text()="Date de naissance"]/following::td[1]'))
+        obj_name = CleanText('//div[contains(@class,"tab-pane")]/table/thead/tr/th')
+        obj_nationality = CleanText('//td[text()="Nationalité(s)"]/following::td[1]')
+        obj_family_situation = CleanText('//td[text()="Situation Familiale"]/following::td[1]')
+        obj_email = CleanText('//td[text()="Adresse e-mail"]/following::td[1]')
+        obj_phone = CleanText('//td[text()="Téléphone portable"]/following::td[1]//td[1]')
+        obj_country = CleanText('//td[text()="Pays"]/following::td[1]')
+        obj_socioprofessional_category = CleanText('//td[text()="Situation professionnelle"]/following::td[1]')
+        obj_address = Format(
+            '%s %s %s',
+            CleanText('//td[text()="Adresse"]/following::td[1]'),
+            CleanText('//td[text()="Code postal"]/following::td[1]'),
+            CleanText('//td[text()="Ville"]/following::td[1]')
+        )

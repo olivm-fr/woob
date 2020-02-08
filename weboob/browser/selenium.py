@@ -28,11 +28,12 @@ import os
 import hashlib
 from tempfile import NamedTemporaryFile
 import time
+import logging
 
 try:
     from selenium import webdriver
 except ImportError:
-    raise ImportError('Please install python-selenium')
+    raise ImportError('Please install python3-selenium')
 
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.common.proxy import Proxy, ProxyType
@@ -416,13 +417,20 @@ class SeleniumBrowser(object):
 
     MAX_SAVED_RESPONSES = (1 << 30)  # limit to 1GiB
 
-    def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None):
+    def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None, proxy_headers=None):
         super(SeleniumBrowser, self).__init__()
         self.responses_dirname = responses_dirname
         self.responses_count = 0
         self.weboob = weboob
         self.logger = getLogger('browser', logger)
         self.proxy = proxy or {}
+
+        # We set the default value of selenium logger to ERROR to avoid
+        # spamming logs with useless information.
+        # Also, the data we send to the browser using selenium (with send_keys)
+        # can be displayed clearly in the log, if the log level is
+        # set to DEBUG.
+        logging.getLogger('selenium').setLevel(logging.ERROR)
 
         self.implicit_timeout = 0
         self.last_page_hash = None
@@ -448,11 +456,15 @@ class SeleniumBrowser(object):
 
     def _setup_driver(self):
         proxy = Proxy()
-        proxy.proxy_type = ProxyType.DIRECT
         if 'http' in self.proxy:
+            proxy.proxy_type = ProxyType.MANUAL
             proxy.http_proxy = self.proxy['http']
         if 'https' in self.proxy:
+            proxy.proxy_type = ProxyType.MANUAL
             proxy.ssl_proxy = self.proxy['https']
+
+        if proxy.proxy_type != ProxyType.MANUAL:
+            proxy.proxy_type = ProxyType.DIRECT
 
         capa = self._build_capabilities()
         proxy.add_to_capabilities(capa)
@@ -600,6 +612,9 @@ class SeleniumBrowser(object):
 
     def wait_xpath_visible(self, xpath, timeout=None):
         self.wait_until(EC.visibility_of_element_located(xpath_locator(xpath)), timeout)
+
+    def wait_xpath_invisible(self, xpath, timeout=None):
+        self.wait_until(EC.invisibility_of_element_located(xpath_locator(xpath)), timeout)
 
     def wait_xpath_clickable(self, xpath, timeout=None):
         self.wait_until(EC.element_to_be_clickable(xpath_locator(xpath)), timeout)

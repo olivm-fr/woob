@@ -25,7 +25,7 @@ from weboob.tools.value import ValueBackendPassword, Value
 from weboob.capabilities.profile import CapProfile
 
 from .par.browser import EdfBrowser
-from .pro.browser import EdfproBrowser
+from .pro.proxy_browser import ProxyBrowser
 
 
 __all__ = ['EdfModule']
@@ -42,12 +42,12 @@ class EdfModule(Module, CapDocument, CapProfile):
                            ValueBackendPassword('password', label='Mot de passe'),
                            Value('website', label='Type de compte', default='par',
                                  choices={'par': 'Particulier', 'pro': 'Entreprise'}),
-                           Value('captcha_response', label='Reponse Captcha', required=False, default=''))
+                           Value('otp', label='Entrez le code reçu par SMS', required=False))
 
     accepted_document_types = (DocumentTypes.BILL,)
 
     def create_default_browser(self):
-        browsers = {'pro': EdfproBrowser, 'par': EdfBrowser}
+        browsers = {'pro': ProxyBrowser, 'par': EdfBrowser}
         self.BROWSER = browsers[self.config['website'].get()]
 
         return self.create_browser(self.config)

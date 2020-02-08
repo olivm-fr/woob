@@ -1,4 +1,3 @@
-#! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Copyright(C) 2013-2019      Laurent Bachelier, Sébastien Jean
@@ -56,7 +55,7 @@ class Recipe(object):
     def configure_subparser(cls, subparsers):
         subparser = subparsers.add_parser(cls.NAME)
         subparser.add_argument('name', help='Module name')
-        subparser.set_defaults(recipe=cls)
+        subparser.set_defaults(recipe_class=cls)
         return subparser
 
     def __init__(self, args):
@@ -79,7 +78,7 @@ class Recipe(object):
                     # workaround, as it's also a mako directive
                     coding='# -*- coding: utf-8 -*-',
                     login=self.login,
-                    **kwargs)
+                    **kwargs).strip() + u'\n'
 
     def generate(self):
         raise NotImplementedError()

@@ -50,17 +50,18 @@ class TransferVirtualKeyboard(SimpleVirtualKeyboard):
     margin = 1
     tile_margin = 10
 
-    symbols = {'0': '715df9c139fc7b46829526229c415a67',
-               '1': '12d398f7f389711c5f8298ee68a8af28',
-               '2': 'f43ca3a5dd649d30bf02060ab65c4eff',
-               '3': 'b6dd7864cfd941badb0784be37f7eeb3',
-               '4': ('7138d0a663eef56c699d85dc6c3ac639', '0faced58777f371097a7a70bb9570dd7', ),
-               '5': 'b71bd38e71ce0b611642a01b6900218f',
-               '6': 'f71f7249413c189165da7b588c2f0493',
-               '7': '81fc65230d7df341e80d02e414f183d4',
-               '8': '8106671a6b24aee3475d6f12a650f59b',
-               '9': 'e8c4567eb46dba5e2a92619076441a8a'
-              }
+    symbols = {
+        '0': '715df9c139fc7b46829526229c415a67',
+        '1': '12d398f7f389711c5f8298ee68a8af28',
+        '2': 'f43ca3a5dd649d30bf02060ab65c4eff',
+        '3': 'b6dd7864cfd941badb0784be37f7eeb3',
+        '4': ('7138d0a663eef56c699d85dc6c3ac639', '0faced58777f371097a7a70bb9570dd7', ),
+        '5': 'b71bd38e71ce0b611642a01b6900218f',
+        '6': 'f71f7249413c189165da7b588c2f0493',
+        '7': '81fc65230d7df341e80d02e414f183d4',
+        '8': '8106671a6b24aee3475d6f12a650f59b',
+        '9': 'e8c4567eb46dba5e2a92619076441a8a',
+    }
 
     # Clean image
     def alter_image(self):
@@ -148,6 +149,17 @@ class RecipientConfirmationPage(LoggedPage, HTMLPage):
     def is_add_recipient_confirmation(self):
         return self.doc.xpath('//table[@id="idConfirmation"]//p[contains(., "Votre bénéficiaire est en cours de création automatique")]')
 
+    def check_errors(self):
+        # check if user can add new recipient
+        errors_id = ('popinClientNonEligible', 'popinClientNonEligibleBis')
+
+        for error_id in errors_id:
+            if self.doc.xpath('//script[contains(text(), "showDivJQInfo(\'%s\')")]' % error_id):
+                msg = CleanText('//div[@id="%s"]//p' % error_id)(self.doc)
+                # get the first sentence of information message
+                # beacause the message is too long and contains unnecessary recommendations
+                raise AddRecipientBankError(message=msg.split('.')[0])
+
 
 class AddRecipientPage(LoggedPage, HTMLPage):
     is_here = '//table[@id="tab_SaisieBenef"]'
@@ -158,19 +170,29 @@ class AddRecipientPage(LoggedPage, HTMLPage):
         form = self.get_form(id='saisieBeneficiaireSepa')
         form = remove_useless_form_params(form)
 
-        form[bank_field_disabled_id] = 'find_object,'
+        form[bank_field_disabled_id] = ''
         form['ibanContenuZone2'] = form['ibanContenuZone2Hidden'] = rcpt_iban[2:4]
 
         # fill iban part
         _iban_rcpt_part = 4
-        for i in range(3,10):
+        for i in range(3, 10):
             form_key = 'ibanContenuZone{}Hidden'.format(i)
-            form[form_key] = rcpt_iban[_iban_rcpt_part: _iban_rcpt_part+4]
+            form[form_key] = rcpt_iban[_iban_rcpt_part: _iban_rcpt_part + 4]
             if form[form_key]:
                 form['ibanContenuZone{}'.format(i)] = form[form_key]
             _iban_rcpt_part += 4
 
-        form.pop('ibanContenuZone1')
+        remove_form_keys = (
+            'ibanContenuZone1',
+            'bicContenuZone',
+            'saisieBeneficiaireSepa:idBeneficiaireSepaGestion:boutonValiderInactifIban',
+            'nomTitulaire',
+            'intituleCompte',
+        )
+        for form_key in remove_form_keys:
+            if form_key in form:
+                form.pop(form_key)
+
         form['saisieBeneficiaireSepa:idBeneficiaireSepaGestion:paysIbanSelectionne'] = rcpt_iban[0:2]
         form.submit()
 
@@ -318,7 +340,7 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
         date = Regexp(pattern=r'(\d+/\d+/\d+)').filter(self.get_element_by_name('Date du virement'))
         transfer.exec_date = Date(dayfirst=True).filter(date)
 
-        account_label_id = self.get_element_by_name(u'Compte à débiter')
+        account_label_id = self.get_element_by_name('Compte à débiter')
         transfer.account_id = (Regexp(pattern=r'(\d+)').filter(account_label_id))
         transfer.account_label = Regexp(pattern=r'([\w \.]+)').filter(account_label_id)
         # account iban is not in the summary page
@@ -326,7 +348,7 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
 
         transfer.recipient_id = recipient.id
         transfer.recipient_iban = self.get_element_by_name('IBAN').replace(' ', '')
-        transfer.recipient_label = self.get_element_by_name(u'Nom du bénéficiaire')
+        transfer.recipient_label = self.get_element_by_name('Nom du bénéficiaire')
         transfer.label = CleanText('//table[@id="table-confLibelle"]//p')(self.doc)
 
         return transfer
@@ -336,7 +358,7 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
         f = BytesIO(self.browser.open(img_src).content)
 
         vk = TransferVirtualKeyboard(file=f, cols=8, rows=3,
-                                     matching_symbols=string.ascii_lowercase[:8*3], browser=self.browser)
+                                     matching_symbols=string.ascii_lowercase[:8 * 3], browser=self.browser)
 
         return vk.get_string_code(password)
 

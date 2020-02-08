@@ -20,35 +20,39 @@
 from __future__ import unicode_literals
 
 import re
+from decimal import Decimal
 
+from weboob.browser.elements import ItemElement, ListElement, TableElement, method
+from weboob.browser.filters.html import AbsoluteLink, Attr, TableCell
+from weboob.browser.filters.javascript import JSVar
+from weboob.browser.filters.standard import (
+    CleanDecimal, CleanText, Currency, Date, DateGuesser, Env, Field, Filter, Format, MapIn, Regexp,
+)
+from weboob.browser.pages import HTMLPage, LoggedPage, pagination
 from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account
+from weboob.capabilities.bank import Account, AccountOwnerType
+from weboob.capabilities.profile import Person
+from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.compat import urljoin
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded
-from weboob.browser.elements import ListElement, ItemElement, method, TableElement
-from weboob.browser.pages import HTMLPage, pagination, LoggedPage
-from weboob.browser.filters.standard import (
-    Filter, Env, CleanText, CleanDecimal, Field, DateGuesser, Regexp, Currency, Format, Date
-)
-from weboob.browser.filters.html import AbsoluteLink, TableCell
-from weboob.browser.filters.javascript import JSVar
-from weboob.capabilities.profile import Person
 from .landing_pages import GenericLandingPage
 
 
 class Transaction(FrenchTransaction):
-    PATTERNS = [(re.compile(r'^VIR(EMENT)? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
-                (re.compile(r'^PRLV (?P<text>.*)'),        FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'^CB (?P<text>.*?)\s+(?P<dd>\d+)/(?P<mm>[01]\d)\s+(?P<loc>.*)'),
-                                                           FrenchTransaction.TYPE_CARD),
-                (re.compile(r'^DAB (?P<dd>\d{2})/(?P<mm>\d{2}) ((?P<HH>\d{2})H(?P<MM>\d{2}) )?(?P<text>.*?)( CB N°.*)?$'),
-                                                           FrenchTransaction.TYPE_WITHDRAWAL),
-                (re.compile(r'^CHEQUE( \d+)?$'),           FrenchTransaction.TYPE_CHECK),
-                (re.compile(r'^COTIS\.? (?P<text>.*)'),    FrenchTransaction.TYPE_BANK),
-                (re.compile(r'^REMISE (?P<text>.*)'),      FrenchTransaction.TYPE_DEPOSIT),
-                (re.compile(r'^FACTURES CB (?P<text>.*)'), FrenchTransaction.TYPE_CARD_SUMMARY),
-                ]
+    PATTERNS = [
+        (re.compile(r'^VIR(EMENT)? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'^TRANSFERT? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'^(PRLV|OPERATION|(TVA )?FACT ABONNEMENTS) (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^CB (?P<text>.*?)\s+(?P<dd>\d+)/(?P<mm>[01]\d)'), FrenchTransaction.TYPE_CARD),
+        (re.compile(r'^DAB (?P<dd>\d{2})/(?P<mm>\d{2}) ((?P<HH>\d{2})H(?P<MM>\d{2}) )?(?P<text>.*?)( CB N°.*)?$'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^(IMPAYE REMISE )?CHEQUE( \d+)?'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^IMPAYE REMISE CHEQUE'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^(COM\.?|COTIS\.?|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^ARRETE DE COMPTE.*'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^REMISE (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^FACTURES CB (?P<text>.*)'), FrenchTransaction.TYPE_CARD_SUMMARY),
+        (re.compile(r'^REJET VIR (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+    ]
 
 
 class FrameContainer(GenericLandingPage):
@@ -57,7 +61,7 @@ class FrameContainer(GenericLandingPage):
     # main page, a frameset
     def on_load(self):
         txt = CleanText('//p[@class="debit"]', default='')(self.doc)
-        if u"Vos données d'identification (identifiant - code secret) sont incorrectes" in txt:
+        if "Vos données d'identification (identifiant - code secret) sont incorrectes" in txt:
             raise BrowserIncorrectPassword()
 
     def get_js_url(self):
@@ -66,7 +70,7 @@ class FrameContainer(GenericLandingPage):
 
     def get_frame(self):
         try:
-            a = self.doc.xpath(u'//frame["@name=FrameWork"]')[0]
+            a = self.doc.xpath('//frame["@name=FrameWork"]')[0]
         except IndexError:
             return None
         else:
@@ -104,7 +108,7 @@ class AccountsType(Filter):
         (r'essentiel', Account.TYPE_LIFE_INSURANCE),
         (r'elysee', Account.TYPE_LIFE_INSURANCE),
         (r'abondance', Account.TYPE_LIFE_INSURANCE),
-        (r'ely\. retraite', Account.TYPE_LIFE_INSURANCE),
+        (r'ely\. retraite', Account.TYPE_PERP),
         (r'lae option assurance', Account.TYPE_LIFE_INSURANCE),
         (r'carte ', Account.TYPE_CARD),
         (r'business ', Account.TYPE_CARD),
@@ -130,26 +134,110 @@ class Label(Filter):
 
 
 class AccountsPage(GenericLandingPage):
-    is_here = '//h1[text()="Synthèse"]'
+    def is_here(self):
+        return CleanText('//h1[contains(text(), "Synthèse")]')(self.doc) \
+            or CleanText('//p[contains(text(), "Tous mes comptes au ")]|//span[contains(text(), "Tous mes comptes au ")]')(self.doc)
 
-    def iter_spaces_account(self):
+    def get_web_space(self):
+        """ Several spaces on HSBC, need to get which one we are on to adapt parsing to owners"""
         if self.doc.xpath('//p[text()="HSBC Fusion"]'):
-            space = 'fusion'
+            # TODO ckeck GrayLog and get rid of fusion space code if clients are no longer using it
+            self.logger.warning('Passed through the HSBC Fusion webspace')
+            return 'fusion'
+        elif self.doc.xpath('//a/img[@alt="HSBC"]'):
+            return 'new_space'
         else:
-            space = 'default'
+            return 'default'
 
+    def iter_spaces_account(self, space):
         accounts = {
             'fusion': self.iter_fusion_accounts,
             'default': self.iter_accounts,
+            'new_space': self.iter_new_space_accounts,
         }
         return accounts[space]()
 
     def go_history_page(self, account):
-        for acc in self.doc.xpath('//div[@onclick]'):
-            # label contains account number, it's enough to check if it's the right account
-            if account.label == Label(CleanText('.//p[@class="title"]'))(acc):
-                form_id = CleanText('.//form/@id')(acc)
-                return self.get_form(id=form_id).submit()
+        if self.browser.web_space == 'new_space':
+            # Must iterate through forms and find a match between account number and the input 'value' attribute to know which form to submit
+            # ids for card accounts are like '123400XXXXXX5678'
+            # ids for checking accounts are like '01234567891EUR'
+            for form in self.doc.xpath('//form[@id]'):
+                value = Attr('.//input[@name="CPT_IdPrestation" or @name="CB_IdPrestation"]', 'value')(form)
+                # * if needed, all the card numbers could be fetched at that point to replace 'XXXX' as they appear in 'value'
+                pattern = ".*{}.*".format(account.id.replace('XXXXXX', '\\d{6}'))
+                if re.match(pattern, value):
+                    # certain forms have the same id atribute, we must submit the one with the same input 'value' attribute
+                    self.get_form(xpath='//form[@id][input[@value="%s"]]' % value).submit()
+                    return
+        # TODO get rid of old space code if clients are no longer using it
+        else:
+            for acc in self.doc.xpath('//div[@onclick]'):
+                # label contains account number, it's enough to check if it's the right account
+                if account.label == Label(CleanText('.//p[@class="title"]'))(acc):
+                    form_id = CleanText('.//form/@id')(acc)
+                    self.get_form(id=form_id).submit()
+                    return
+
+    @method
+    class iter_new_space_accounts(ListElement):
+        def find_elements(self):
+            # In case of pro/perso space, if we do not precise '//div\[@id="rbb-all"\]', and just leave //form[@id]/parent::*
+            # the forms will be fetched twice by weboob because it will go through //div\[@id="rbb-all"\] but also //div\[@id="rbb-pro"\] and //div\[@id="rbb-perso"\].
+            all_xpaths = (
+                '//div[@id="rbb-all"]//form[@id]/parent::*',  # new space with nav between 'avoirs pro' and 'avoirs perso'
+                '//form[@id]/parent::*',  # new space with default accounts page
+            )
+            for xpath in all_xpaths:
+                ret = self.xpath(xpath)
+                if ret:
+                    return ret
+            return {}
+
+        class item(ItemElement):
+            klass = Account
+
+            # If user has professional accounts, owner_type must be defined
+            OWNER_TYPE = {
+                'Mes avoirs professionnels': AccountOwnerType.ORGANIZATION,
+                'Mes avoirs personnels': AccountOwnerType.PRIVATE,
+                'Mes crédits personnels': AccountOwnerType.PRIVATE,
+            }
+
+            # MapIn because, in case of private account, we actually catch "Mes avoirs personnels Mes crédits personnels" with CleanText which both can be use to recognize the owner_type as PRIVATE
+            obj_owner_type = MapIn(CleanText('.//form[@id]/ancestor::div/h2'), OWNER_TYPE, NotAvailable)
+
+            obj_label = Label(CleanText('.//form[@id]/preceding-sibling::p/span[@class="hsbc-pib-text hsbc-pib-bloc-account-name" or @class="hsbc-pib-text--small"]'))
+            obj_type = AccountsType(Field('label'))
+            obj_url = CleanText('.//form/@action')
+            obj_currency = Currency('.//form[@id]/following-sibling::*[1]')
+            obj__is_form = bool(CleanText('.//form/@id'))
+            obj__amount = CleanDecimal.French('.//form[@id]/following-sibling::*[1]')
+
+            def obj_balance(self):
+                if Field('type')(self) == Account.TYPE_CARD:
+                    return Decimal(0)
+                elif 'Mes crédits' in CleanText('.//ancestor::div[1]/preceding-sibling::*')(self):
+                    return - abs(Field('_amount')(self))
+                return Field('_amount')(self)
+
+            def obj_coming(self):
+                if Field('type')(self) == Account.TYPE_CARD:
+                    return Field('_amount')(self)
+                return NotAvailable
+
+            def obj_id(self):
+                # Investment accounts and main account can have the same id
+                _id = CleanText('.//form[@id]/preceding-sibling::*[1]/span[2]', replace=[('.', ''), (' ', '')])(self)
+                if "Scpi" in Field('label')(self):
+                    return _id + ".SCPI"
+                # Same problem with scpi accounts.
+                if Field('type')(self) == Account.TYPE_MARKET:
+                    return _id + ".INVEST"
+                # Cards are displayed like '4561 00XX XXXX 5813 - Carte à  débit différé'
+                if 'Carte' in _id:
+                    _id = Regexp(pattern=r'(.*)-Carte').filter(_id)
+                return _id
 
     @method
     class iter_accounts(ListElement):
@@ -182,14 +270,14 @@ class AccountsPage(GenericLandingPage):
 
             @property
             def obj_balance(self):
-                if self.el.xpath('./parent::*/tr/th') and self.el.xpath('./parent::*/tr/th')[0].text in [u'Credits', u'Crédits']:
+                if self.el.xpath('./parent::*/tr/th') and self.el.xpath('./parent::*/tr/th')[0].text in ['Credits', 'Crédits']:
                     return CleanDecimal(replace_dots=True, sign=lambda x: -1).filter(self.el.xpath('./td[3]'))
                 return CleanDecimal(replace_dots=True).filter(self.el.xpath('./td[3]'))
 
             @property
             def obj_id(self):
                 # Investment account and main account can have the same id
-                # so we had account type in case of Investment to prevent conflict
+                # so we had account type in case of Investment to prevent conflict
                 # and also the same problem with scpi accounts.
                 if "Scpi" in Field('label')(self):
                     return CleanText(replace=[('.', ''), (' ', '')]).filter(self.el.xpath('./td[2]')) + ".SCPI"
@@ -228,7 +316,7 @@ class AccountsPage(GenericLandingPage):
                 def obj_id(self):
                     account_id = CleanText('.//p[@class="title"]/span', replace=[('.', ''), (' ', '')])(self)
                     # Investment account and main account can have the same id
-                    # so we had account type in case of Investment to prevent conflict
+                    # so we had account type in case of Investment to prevent conflict
                     # and also the same problem with scpi accounts.
                     if Field('type')(self) == Account.TYPE_MARKET:
                         return account_id + ".INVEST"
@@ -236,10 +324,25 @@ class AccountsPage(GenericLandingPage):
 
 
 class OwnersListPage(AccountsPage):
-    is_here = '//h1[text()="Comptes de tiers"]'
+    """
+    Within the new space the 'Mes comptes de tiers' service is not activated by default, so this page is empty.
+    The only owner in then the 'self owner' which is attached to home_url in `get_owners_urls()`
+    Otherwise `get_owners_urls()` fetch urls of other owners and appends it to the self owner url
+    """
+
+    def is_here(self):
+        return (
+            CleanText('//h1[text()="Comptes de tiers"]')(self.doc)  # old space
+            or CleanText('//h1[text()="Gérer les comptes de mes tiers"]')(self.doc)  # new space
+        )
 
     def get_owners_urls(self):
-        return self.doc.xpath('//div[@class="GoBack"]/a/@href')
+        if self.browser.web_space == 'new_space':
+            owners_url_list = self.doc.xpath('//img[contains(@alt, "Accès aux comptes du tiers")]/parent::a/@href')  # new space
+            # the self owner is not diplayed on the page but can be access through a js request
+            owners_url_list.insert(0, self.browser.js_url + 'COMPTES_PAN')
+            return owners_url_list
+        return self.doc.xpath('//div[@class="GoBack"]/a/@href')  # old space
 
 
 class RibPage(GenericLandingPage):
@@ -250,15 +353,15 @@ class RibPage(GenericLandingPage):
         for id, acc in accounts.items():
             if acc.iban or acc.type is not Account.TYPE_CHECKING:
                 continue
-            digit_id = ''.join(re.findall('\d', id))
+            digit_id = ''.join(re.findall(r'\d', id))
             if digit_id in CleanText('//div[@class="RIB_content"]')(self.doc):
-                acc.iban = re.search('(FR\d{25})', CleanText('//div[strong[contains(text(), "IBAN")]]', replace=[(' ', '')])(self.doc)).group(1)
+                acc.iban = re.search(r'(FR\d{25})', CleanText('//div[strong[contains(text(), "IBAN")]]', replace=[(' ', '')])(self.doc)).group(1)
 
     def get_rib(self, accounts):
         self.link_rib(accounts)
         for nb in range(len(self.doc.xpath('//select/option')) - 1):
             form = self.get_form(name="FORM_RIB")
-            form['index_rib'] = str(nb+1)
+            form['index_rib'] = str(nb + 1)
             form.submit()
             if self.browser.rib.is_here():
                 self.browser.page.link_rib(accounts)
@@ -281,22 +384,37 @@ class Pagination(object):
 
 
 class CBOperationPage(GenericLandingPage):
-    is_here = '//h1[text()="Historique des opérations"]'
+    def is_here(self):
+        return (
+            CleanText('//h1[text()="Historique des opérations"]')(self.doc)
+            and CleanText('//a[contains(text(), "Opérations débitées le")]')(self.doc)
+        )
+
+    def history_tabs_urls(self):
+        return [Attr('.', 'href')(tab) for tab in self.doc.xpath('//ul//a[contains(text(), "Débit le")]')]
 
     @pagination
     @method
     class get_history(Pagination, Transaction.TransactionsElement):
-        head_xpath = '//table//tr/th'
-        item_xpath = '//table//tr'
+        head_xpath = '//table/thead/tr/th'
+        item_xpath = '//table/tbody/tr[not(has-class("rupture"))]'
+        # items to fetch are contained in /tr with at least 4 /td
+        # but avoid /tr that are categories such as 'Opérations débitées le ...'
+
+        col_raw = Transaction.TransactionsElement.col_raw + ['Description']
 
         class item(Transaction.TransactionElement):
-            def condition(self):
-                return len(self.el.xpath('./td')) >= 4
 
             obj_rdate = Transaction.Date(TableCell('date'))
 
             def obj_date(self):
-                return DateGuesser(Regexp(CleanText(self.page.doc.xpath('//table/tr[2]/td[1]')), r'(\d{2}/\d{2})'), Env("date_guesser"))(self)
+                # debit date is guessed in text such as 'Opérations débitées le 05/07'
+                guessed_date = DateGuesser(Regexp(CleanText(self.xpath('./preceding-sibling::tr[.//a[contains(text(), "Opérations débitées le")]][1]')), r'(\d{2}/\d{2})'), Env("date_guesser"))(self)
+                # Handle the case where the guessed debit date would be before the rdate (happens when
+                # the debit date is in january whereas the rdate is in december).
+                if guessed_date < Field('rdate')(self):
+                    return guessed_date.replace(year=guessed_date.year + 1)
+                return guessed_date
 
     def get_parent_id(self):
         # The parent id is in the details of the card
@@ -304,23 +422,27 @@ class CBOperationPage(GenericLandingPage):
 
     def get_all_parent_id(self):
         all_parent_id = []
-        all_card = [CleanText('.')(card) for card in self.doc.xpath('//select[@name="choix_carte"]/option')]
-
-        for index, card in enumerate(all_card):
-            form = self.get_form(name='FORM_LIB_CARTE')
-            form['index_carte'] = index
-            form['choix_carte'] = card
-            all_parent_id.append((card, form.submit().page.get_parent_id()))
-
+        for card in self.doc.xpath('//div/img[contains(@src, "produits/cartes")]'):  # deferred cards are displayed with an image contrary to other accounts
+            card_id = CleanText('./following-sibling::span[1]')(card)
+            # fetch the closest /li sibling (with 'COMPTE'), it is the one that corresponds the parent acount
+            parent_id = CleanText('./ancestor::li/preceding-sibling::li[.//span[contains(text(), "COMPTE")]][1]/@data-num-compte')(card)
+            all_parent_id.append((card_id, parent_id))
         return all_parent_id
 
 
 class CPTOperationPage(GenericLandingPage):
-    is_here = '''//h1[text()="Historique des opérations"] and //h2[text()="Recherche d'opération"]'''
+    def is_here(self):
+        return (
+            CleanText('//h1[text()="Historique des opérations"]')(self.doc) and (
+                CleanText('''//h2[text()="Recherche d'opération"]''')(self.doc)  # old space
+                or CleanText('//label[text()="Rechercher"]')(self.doc)  # new space
+            ) and not
+            CleanText('//a[contains(text(), "Opérations débitées le")]')(self.doc)  # to differ from CBOperationPage
+        )
 
     def get_history(self):
         if self.doc.xpath('//form[@name="FORM_SUITE"]'):
-            m = re.search('suite[\s]+=[\s]+([\w]+)', CleanText().filter(self.doc.xpath('//script[contains(text(), "var suite")]')))
+            m = re.search(r'suite[\s]+=[\s]+([\w]+)', CleanText().filter(self.doc.xpath('//script[contains(text(), "var suite")]')))
             if m and m.group(1) == "true":
                 form = self.get_form(name="FORM_SUITE")
                 self.doc = self.browser.location("%s" % form.url, params=dict(form)).page.doc
@@ -332,7 +454,7 @@ class CPTOperationPage(GenericLandingPage):
             first_history = None
             for m in re.finditer(r"CL\((\d+),'(.+)','(.+)','(.+)','([\d -\.,]+)',('([\d -\.,]+)',)?'\d+','\d+','[\w\s]+'\);", script.text, flags=re.MULTILINE | re.UNICODE):
                 op = Transaction()
-                raw = re.sub(u'[ ]+', u' ', m.group(4).replace(u'\n', u' ').replace(r"\'", "'"))
+                raw = re.sub(r'\s+', ' ', m.group(4).replace('\n', ' ').replace("\'", "'"))
                 op.parse(date=m.group(3), raw=raw)
                 op.set_amount(m.group(5))
                 op._coming = (re.match(r'\d+/\d+/\d+', m.group(2)) is None)
@@ -355,7 +477,7 @@ class AppGonePage(HTMLPage):
 class LoginPage(HTMLPage):
     @property
     def logged(self):
-        if self.doc.xpath(u'//p[contains(text(), "You are now being redirected to your Personal Internet Banking.")]'):
+        if self.doc.xpath('//p[contains(text(), "You are now being redirected to your Personal Internet Banking.")]'):
             return True
         return False
 
@@ -363,6 +485,7 @@ class LoginPage(HTMLPage):
         for message in self.doc.xpath('//div[has-class("csPanelErrors")]'):
             error_msg = CleanText('.')(message)
             if any(msg in error_msg for msg in ['Please enter valid credentials for memorable answer and password.',
+                                                'Please enter a valid Username.',
                                                 'mot de passe invalide']):
                 raise BrowserIncorrectPassword(error_msg)
             else:
@@ -378,7 +501,7 @@ class LoginPage(HTMLPage):
 
     def get_no_secure_key(self):
         try:
-            a = self.doc.xpath(u'//a[contains(text(), "Without HSBC Secure Key")]')[0]
+            a = self.doc.xpath('//a[contains(text(), "Without HSBC Secure Key")]')[0]
         except IndexError:
             return None
         else:
@@ -387,8 +510,8 @@ class LoginPage(HTMLPage):
     def login_w_secure(self, password, secret):
         form = self.get_form(nr=0)
         form['memorableAnswer'] = secret
-        inputs = self.doc.xpath(u'//input[starts-with(@id, "keyrcc_password_first")]')
-        split_pass = u''
+        inputs = self.doc.xpath('//input[starts-with(@id, "keyrcc_password_first")]')
+        split_pass = ''
         if len(password) < len(inputs):
             raise BrowserIncorrectPassword('The password must be at least %d characters' % len(inputs))
         elif len(password) > len(inputs):

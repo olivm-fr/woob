@@ -29,11 +29,12 @@ from weboob.browser.elements import ListElement, TableElement, ItemElement, meth
 from weboob.browser.filters.standard import CleanDecimal, CleanText, Date, Regexp, Env
 from weboob.browser.filters.html import Link, Attr, TableCell
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.tools.compat import unicode
+from weboob.tools.capabilities.bank.investments import create_french_liquidity, IsinCode
+
 
 class NetissimaPage(HTMLPage):
     pass
+
 
 class Transaction(FrenchTransaction):
     pass
@@ -41,8 +42,9 @@ class Transaction(FrenchTransaction):
 
 class TitreValuePage(LoggedPage, HTMLPage):
     def get_isin(self):
-        isin = self.doc.xpath('//div[@id="headFiche"]//span[@id="test3"]/text()')
-        return unicode(isin[0].split(' - ')[0].strip()) if isin else NotAvailable
+        # redirection page with a url which contains the ISIN
+        # example: https://bourse.ing.fr/fr/marche/euronext-paris/<label>-<ISIN>-UG-EUR-XPAR/seance?headerless=true
+        return IsinCode(Regexp(CleanText('//script'), r'-([A-Z]{2}[A-Z0-9]{9}\d)-'), default=NotAvailable)(self.doc)
 
 
 class TitrePage(LoggedPage, RawPage):
@@ -76,10 +78,12 @@ class TitrePage(LoggedPage, RawPage):
                 _pl = columns[start].split('{')[1]
                 _id = columns[start].split('{')[2]
             invest = Investment()
-            invest.label = columns[start].split('{')[-1]
+            # If the link with the label and ISIN code is present we use it to fill the label and code.
+            # If not, the label can still be found in the first column of the row but the ISIN is unavailable.
+            invest.label = columns[start].split('{')[-1] or columns[0]
             invest.code = _id or NotAvailable
             if invest.code and ':' in invest.code:
-                invest.code = self.browser.titrevalue.open(val=invest.code,pl=_pl).get_isin()
+                invest.code = self.browser.titrevalue.open(val=invest.code, pl=_pl).get_isin()
             # The code we got is not a real ISIN code.
             if invest.code and not re.match('^[A-Z]{2}[\d]{10}$|^[A-Z]{2}[\d]{5}[A-Z]{1}[\d]{4}$', invest.code):
                 m = re.search('\{([A-Z]{2}[\d]{10})\{|\{([A-Z]{2}[\d]{5}[A-Z]{1}[\d]{4})\{', line)
@@ -99,7 +103,7 @@ class TitrePage(LoggedPage, RawPage):
 
             # On some case we have a multine investment with a total column
             # for now we have only see this on 2 lines, we will need to adapt it when o
-            if columns[9 if start == 0 else 0] == u'|Total' and _id == 'fichevaleur':
+            if columns[9 if start == 0 else 0] == '|Total' and _id == 'fichevaleur':
                 prev_inv = invest
                 invest = invests.pop(-1)
                 if prev_inv.quantity:
@@ -114,7 +118,7 @@ class TitrePage(LoggedPage, RawPage):
         # There is no investment on life insurance in the process to be created.
         if len(message.split('&')) >= 4:
             # We also have to get the liquidity as an investment.
-            valuation = CleanDecimal(None, True).filter(message.split('&')[3].replace('euro;{','').strip())
+            valuation = CleanDecimal(None, True).filter(message.split('&')[3].replace('euro;{', '').strip())
             invests.append(create_french_liquidity(valuation))
         for invest in invests:
             yield invest
@@ -128,11 +132,12 @@ class TitreHistory(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Transaction
 
-            condition = lambda self: len(self.el.xpath('td[@class="impaire"]')) > 0
-
             obj_raw = Transaction.Raw('td[4] | td[3]')
             obj_date = Date(CleanText('td[2]'), dayfirst=True)
             obj_amount = CleanDecimal('td[7]', replace_dots=True)
+
+            def condition(self):
+                return len(self.el.xpath('td[@class="impaire"]')) > 0
 
 
 class ASVHistory(LoggedPage, HTMLPage):
@@ -141,11 +146,11 @@ class ASVHistory(LoggedPage, HTMLPage):
         item_xpath = '//table[@class="Tableau"]/tr[td[not(has-class("enteteTableau"))]]'
         head_xpath = '//table[@class="Tableau"]/tr[td[has-class("enteteTableau")]]/td'
 
-        col_label = u'Support(s)'
-        col_vdate = u'Date de valeur'
-        col_unitvalue = u'Valeur de part'
-        col_quantity = [u'(*) Nb de parts', u'Nb de parts']
-        col_valuation = [u'Montant', u'Montant versé']
+        col_label = 'Support(s)'
+        col_vdate = 'Date de valeur'
+        col_unitvalue = 'Valeur de part'
+        col_quantity = ['(*) Nb de parts', 'Nb de parts']
+        col_valuation = ['Montant', 'Montant versé']
 
         class item(ItemElement):
             klass = Investment
@@ -158,16 +163,15 @@ class ASVHistory(LoggedPage, HTMLPage):
 
             obj__code_url = Regexp(Attr('./td/a', 'onclick', default=""), r'PageExterne\(\'([^\']+)', default=None)
 
-
     @pagination
     @method
     class iter_history(TableElement):
         item_xpath = '//table[@class="Tableau"]/tr[td[not(has-class("enteteTableau"))]]'
         head_xpath = '//table[@class="Tableau"]/tr[td[has-class("enteteTableau")]]/td'
 
-        col_date = u'Date d\'effet'
-        col_raw = u'Nature du mouvement'
-        col_amount = u'Montant brut'
+        col_date = 'Date d\'effet'
+        col_raw = 'Nature du mouvement'
+        col_amount = 'Montant brut'
 
         next_page = Link('//a[contains(@href, "PageSuivante")]', default=None)
 

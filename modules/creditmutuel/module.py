@@ -33,7 +33,7 @@ from weboob.capabilities.bill import (
     Document, DocumentNotFound, DocumentTypes,
 )
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from weboob.tools.value import ValueBackendPassword, Value
 
 from .browser import CreditMutuelBrowser
 
@@ -52,14 +52,19 @@ class CreditMutuelModule(
     VERSION = '1.6'
     DESCRIPTION = u'Crédit Mutuel'
     LICENSE = 'LGPLv3+'
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
-                           ValueBackendPassword('password', label='Mot de passe'))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Identifiant', masked=False),
+        ValueBackendPassword('password', label='Mot de passe'),
+        Value('resume', label='resume', default=None, required=False, noprompt=True),
+        Value('request_information', label='request_information', default=None, required=False, noprompt=True),
+        Value('code', label='code de confirmation', required=False, default='', noprompt=True, regexp=r'^\d{6}$'),
+    )
     BROWSER = CreditMutuelBrowser
 
     accepted_document_types = (DocumentTypes.OTHER,)
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config, weboob=self.weboob)
 
     def iter_accounts(self):
         for account in self.browser.get_accounts_list():
@@ -89,6 +94,7 @@ class CreditMutuelModule(
 
     def iter_transfer_recipients(self, origin_account):
         if not self.browser.is_new_website:
+            self.logger.info('On old creditmutuel website')
             raise NotImplementedError()
 
         if not isinstance(origin_account, Account):
@@ -96,6 +102,11 @@ class CreditMutuelModule(
         return self.browser.iter_recipients(origin_account)
 
     def new_recipient(self, recipient, **params):
+        # second step of the new_recipient
+        # there should be a parameter
+        if any(p in params for p in ('Bic', 'code', 'Clé')):
+            return self.browser.set_new_recipient(recipient, **params)
+
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):

@@ -20,17 +20,28 @@
 from __future__ import unicode_literals
 
 import re
-from decimal import Decimal
 import datetime
 
 from weboob.browser.pages import HTMLPage, LoggedPage
 from weboob.browser.elements import method, ItemElement, TableElement
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Currency
-from weboob.browser.filters.html import TableCell, Attr
+from weboob.browser.filters.standard import CleanText, CleanDecimal, Currency, Map, Field, Regexp
+from weboob.browser.filters.html import TableCell, Attr, Link
 from weboob.capabilities.bank import Investment, Account
 from weboob.capabilities.base import NotAvailable
-from weboob.tools.capabilities.bank.investments import is_isin_valid, create_french_liquidity
+from weboob.tools.capabilities.bank.investments import is_isin_valid, create_french_liquidity, IsinType
 
+
+ACCOUNT_TYPES = {
+    'D.A.T.': Account.TYPE_DEPOSIT,
+    'COMPTE PEA': Account.TYPE_PEA,
+    'INTEGRAL PEA': Account.TYPE_PEA,
+    'COMPTE PEA-PME': Account.TYPE_PEA,
+    'INTEGRAL C.T.O.': Account.TYPE_MARKET,
+    'COMPTE TITRES': Account.TYPE_MARKET,
+    'CTO VENDOME PRIVILEGE': Account.TYPE_MARKET,
+    'PARTS SOCIALES': Account.TYPE_MARKET,
+    'PEA VENDOME PATRIMOINE': Account.TYPE_PEA,
+}
 
 class AccountsPage(LoggedPage, HTMLPage):
 
@@ -52,13 +63,15 @@ class AccountsPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Account
 
-            obj_owner = CleanText(TableCell('owner'))
-            obj_type = Account.TYPE_MARKET
+            obj_type = Map(Field('label'), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
+            obj__owner = CleanText(TableCell('owner'))
 
             def obj_id(self):
                 tablecell = TableCell('id')(self)[0]
-                id = tablecell.xpath('./div[position()=2]')
-                return CleanText().filter(id)
+                _id = tablecell.xpath('./div[position()=2]')
+                return CleanText(_id)(self)
+
+            obj_number = obj_id
 
             def obj_label(self):
                 tablecell = TableCell('label')(self)[0]
@@ -67,17 +80,14 @@ class AccountsPage(LoggedPage, HTMLPage):
 
             def obj_balance(self):
                 tablecell = TableCell('balance')(self)[0]
-                b = tablecell.xpath('./span[@class="intraday"]')
-                balance = CleanDecimal(replace_dots=True).filter(b)
-                return Decimal(balance)
+                balance = tablecell.xpath('./span[@class="intraday"]')
+                return CleanDecimal.French(balance)(self)
 
             def obj_currency(self):
                 tablecell = TableCell('balance')(self)[0]
-                text = tablecell.xpath('./span/text()')[0]
-                regex = '[0-9,.]* (.*)'
-                currency = Currency().filter(re.search(regex, text).group(1))
+                currency = tablecell.xpath('./span[@class="intraday"]')
+                return Currency(currency)(self)
 
-                return currency
 
     def get_nump_id(self, account):
         # Return an element needed in the request in order to access investments details
@@ -110,31 +120,39 @@ class InvestmentsPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Investment
 
-            obj_diff = CleanDecimal(TableCell('diff', colspan=True), replace_dots=True)
-            obj_unitprice = CleanDecimal(TableCell('unitprice', colspan=True), replace_dots=True)
-            obj_valuation = CleanDecimal(TableCell('valuation', colspan=True), replace_dots=True)
+            obj_valuation = CleanDecimal.French(TableCell('valuation'))
+            obj_diff = CleanDecimal.French(TableCell('diff'))
+
+            # Some invests have a format such as '22,120' but some others have '0,7905 (79,05%)'
+            obj_unitprice = CleanDecimal.French(
+                Regexp(
+                    CleanText(TableCell('unitprice')),
+                    r'([0-9]+,[0-9]+)',
+                    default=NotAvailable
+                ),
+                default=NotAvailable
+            )
 
             def obj_quantity(self):
-                tablecell = TableCell('quantity', colspan=True)(self)[0]
-                return CleanDecimal(tablecell.xpath('./span'), replace_dots=True)(self)
+                tablecell = TableCell('quantity')(self)[0]
+                return CleanDecimal.French(tablecell.xpath('./span'))(self)
 
             def obj_label(self):
-                tablecell = TableCell('label', colspan=True)(self)[0]
-                label = CleanText(tablecell.xpath('./following-sibling::td[@class=""]/div/a')[0])(self)
-                return label
+                tablecell = TableCell('label')(self)[0]
+                return CleanText(tablecell.xpath('./following-sibling::td[@class=""]/div/a')[0])(self)
 
             def obj_code(self):
                 # We try to get the code from <a> div. If we didn't find code in url,
                 # we try to find it in the cell text
-
-                tablecell = TableCell('label', colspan=True)(self)[0]
+                tablecell = TableCell('label')(self)[0]
                 # url find try
-                url = tablecell.xpath('./following-sibling::td[position()=1]/div/a')[0].attrib['href']
-                code_match = re.search(r'sico=([A-Z0-9]*)', url)
-
-                if code_match:
-                    if is_isin_valid(code_match.group(1)):
-                        return code_match.group(1)
+                code_match = Regexp(
+                    Link(tablecell.xpath('./following-sibling::td[position()=1]/div/a')),
+                    r'sico=([A-Z0-9]*)',
+                    default=None
+                )(self)
+                if is_isin_valid(code_match):
+                    return code_match
 
                 # cell text find try
                 text = CleanText(tablecell.xpath('./following-sibling::td[position()=1]/div')[0])(self)
@@ -144,11 +162,7 @@ class InvestmentsPage(LoggedPage, HTMLPage):
                         return code
                 return NotAvailable
 
-            def obj_code_type(self):
-                if is_isin_valid(self.obj_code()):
-                    return Investment.CODE_TYPE_ISIN
-                return NotAvailable
-
+            obj_code_type = IsinType(Field('code'))
 
             def obj_unitvalue(self):
                 currency, unitvalue = self.original_unitvalue()
@@ -170,36 +184,31 @@ class InvestmentsPage(LoggedPage, HTMLPage):
                     return unitvalue
 
             def obj_vdate(self):
-                tablecell = TableCell('vdate', colspan=True)(self)[0]
-                vdate_scrapped = tablecell.xpath('./preceding-sibling::td[position()=1]//span/text()')[0]
+                tablecell = TableCell('vdate')(self)[0]
+                vdate_scraped = tablecell.xpath('./preceding-sibling::td[position()=1]//span/text()')[0]
 
                 # Scrapped date could be a schedule time (00:00) or a date (01/01/1970)
                 vdate = NotAvailable
 
-                if ':' in vdate_scrapped:
+                if ':' in vdate_scraped:
                     today = datetime.date.today()
-                    h, m = [int(x) for x in vdate_scrapped.split(':')]
+                    h, m = [int(x) for x in vdate_scraped.split(':')]
                     hour = datetime.time(hour=h, minute=m)
                     vdate = datetime.datetime.combine(today, hour)
 
-                elif '/' in vdate_scrapped:
-                    vdate = datetime.datetime.strptime(vdate_scrapped, '%d/%m/%y')
+                elif '/' in vdate_scraped:
+                    vdate = datetime.datetime.strptime(vdate_scraped, '%d/%m/%y')
 
                 return vdate
 
             # extract unitvalue and currency
             def original_unitvalue(self):
-                tablecell = TableCell('unitvalue', colspan=True)(self)[0]
-                text = tablecell.xpath('./text()')[0]
-
-                regex = '[0-9,]* (.*)'
-                currency = Currency().filter(re.search(regex, text).group(1))
-
-                return currency, CleanDecimal(replace_dots=True).filter(text)
+                tablecell = TableCell('unitvalue')(self)[0]
+                text = tablecell.xpath('./text()')
+                return Currency(text, default=NotAvailable)(self), CleanDecimal.French(text, default=NotAvailable)(self)
 
     def get_liquidity(self):
-        liquidity_element = self.doc.xpath('//td[contains(text(), "Solde espèces en euros")]//following-sibling::td[position()=1]')
-        assert len(liquidity_element) <= 1
+        # Not all accounts have a Liquidity element
+        liquidity_element = CleanDecimal.French('//td[contains(text(), "Solde espèces en euros")]//following-sibling::td[position()=1]', default=None)(self.doc)
         if liquidity_element:
-            valuation = CleanDecimal(replace_dots=True).filter(liquidity_element[0])
-            return create_french_liquidity(valuation)
+            return create_french_liquidity(liquidity_element)

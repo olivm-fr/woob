@@ -23,20 +23,30 @@ import requests
 import datetime
 import re
 
+from dateutil.relativedelta import relativedelta
 from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Investment, Loan
+from weboob.capabilities.bank import Account, Investment, Loan, AccountOwnership
+from weboob.capabilities.bill import Subscription
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.investments import is_isin_valid, create_french_liquidity
+from weboob.tools.compat import urlsplit, urlunsplit, urlencode
 from weboob.browser.elements import DictElement, ItemElement, TableElement, method, ListElement
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Regexp, Currency, Eval, Field, Format, Date, Env,
+    CleanText, CleanDecimal, Regexp, Currency, Eval, Field, Format, Date, Env, Map, Coalesce,
+    empty,
 )
-from weboob.browser.filters.html import Link, TableCell
+from weboob.browser.filters.html import Link, TableCell, Attr
 from weboob.browser.pages import HTMLPage, XMLPage, JsonPage, LoggedPage, pagination
 from weboob.exceptions import BrowserUnavailable, ActionNeeded, NoAccountsException
+
+
+class TemporaryBrowserUnavailable(BrowserUnavailable):
+    # To handle temporary errors (like 'err_tech') that are usually
+    # solved by just making a retry
+    pass
 
 
 def MyDecimal(*args, **kwargs):
@@ -51,6 +61,10 @@ def eval_decimal_amount(value, decimal_position):
 
 
 class JsonBasePage(LoggedPage, JsonPage):
+    @property
+    def logged(self):
+        return Dict('commun/raison', default=None)(self.doc) != "niv_auth_insuff"
+
     def on_load(self):
         if Dict('commun/statut')(self.doc).upper() == 'NOK':
             reason = Dict('commun/raison')(self.doc)
@@ -59,15 +73,23 @@ class JsonBasePage(LoggedPage, JsonPage):
             if action and 'BLOCAGE' in action:
                 raise ActionNeeded()
 
+            if reason and 'err_tech' in reason:
+                # This error is temporary and usually do not happens on the next try
+                raise TemporaryBrowserUnavailable()
+
             if ('le service est momentanement indisponible' in reason and
             Dict('commun/origine')(self.doc) != 'cbo'):
                 raise BrowserUnavailable()
 
+            if reason == "niv_auth_insuff":
+                return
+
             conditions = (
                 'pas encore géré' in reason, # this page is not handled by SG api website
-                'le service est momentanement indisponible' in reason, # can't access new website
+                'le service est momentanement indisponible' in reason,  # can't access new website
             )
             assert any(conditions), 'Error %s is not handled yet' % reason
+            self.logger.warning('Handled Error "%s"', reason)
 
 
 class AccountsMainPage(LoggedPage, HTMLPage):
@@ -115,9 +137,17 @@ class AccountDetailsPage(LoggedPage, HTMLPage):
 
 
 class AccountsPage(JsonBasePage):
+    def is_new_website_available(self):
+        if not Dict('commun/raison')(self.doc):
+            return True
+        elif 'le service est momentanement indisponible' not in Dict('commun/raison')(self.doc):
+            return True
+        self.logger.warning("SG new website is not available yet for this user")
+        return False
+
     @method
     class iter_accounts(DictElement):
-        item_xpath = 'donnees'
+        item_xpath = 'donnees/syntheseParGroupeProduit/*/prestations'
 
         class item(ItemElement):
             def condition(self):
@@ -149,9 +179,11 @@ class AccountsPage(JsonBasePage):
                 'PEA_PME_ESPECES': Account.TYPE_PEA,
                 'COMPTE_TITRE_PEA': Account.TYPE_PEA,
                 'COMPTE_TITRE_PEA_PME': Account.TYPE_PEA,
+                'VIE_LMP': Account.TYPE_LIFE_INSURANCE,
                 'PROJECTIS': Account.TYPE_LIFE_INSURANCE,
                 'VIE_FEDER': Account.TYPE_LIFE_INSURANCE,
                 'PALISSANDRE': Account.TYPE_LIFE_INSURANCE,
+                'PROJECTIS_PROFESS': Account.TYPE_LIFE_INSURANCE,
                 'SOGECAPI_PATRIMOINE': Account.TYPE_LIFE_INSURANCE,
                 'EBENE_CAPITALISATION': Account.TYPE_LIFE_INSURANCE,
                 'ASSURANCE_VIE_GENERALE': Account.TYPE_LIFE_INSURANCE,
@@ -165,6 +197,13 @@ class AccountsPage(JsonBasePage):
                 'PERP_EPICEA': Account.TYPE_PERP,
             }
 
+            ACCOUNTS_OWNERSHIP = {
+                'COTITULAIRE': AccountOwnership.CO_OWNER,
+                'MANDATAIRE': AccountOwnership.ATTORNEY,
+                'REPRESENTATION': AccountOwnership.ATTORNEY,  # Credentials owner children
+                'TITULAIRE': AccountOwnership.OWNER,
+            }
+
             obj_id = obj_number = CleanText(Dict('numeroCompteFormate'), replace=[(' ', '')])
             obj_label = Dict('labelToDisplay')
             obj_balance = CleanDecimal(Dict('soldes/soldeActuel'))
@@ -174,6 +213,15 @@ class AccountsPage(JsonBasePage):
 
             def obj_type(self):
                 return self.TYPES.get(Dict('produit')(self), Account.TYPE_UNKNOWN)
+
+            def obj_ownership(self):
+                # 'groupeRoleDTO' can contains 'TITULAIRE', 'MANDATAIRE' or 'REPRESENTATION'
+                # 'role' contains 'groupeRoleDTO' sub-categories. If the groupeRoleDTO is
+                # 'TUTULAIRE', we have to check the role to know if it's 'TITULAIRE' or 'COTITULAIRE'
+                ownership = Map(Dict('groupeRoleDTO'), self.ACCOUNTS_OWNERSHIP, NotAvailable)(self)
+                if ownership == AccountOwnership.OWNER:
+                    ownership = Map(Dict('role'), self.ACCOUNTS_OWNERSHIP, NotAvailable)(self)
+                return ownership
 
             # Useful for navigation
             obj__internal_id = Dict('idTechnique')
@@ -195,25 +243,48 @@ class AccountsPage(JsonBasePage):
                 not Dict('produit')(self) in ('PLAN_EPARGNE_POPULAIRE', ):
                     return True
 
-class AccountsSynthesesPage(JsonBasePage):
-    def is_new_website_available(self):
-        if not Dict('commun/raison')(self.doc):
-            return True
-        elif not 'le service est momentanement indisponible' in Dict('commun/raison')(self.doc):
-            return True
-        self.logger.warning("SG new website is not available yet for this user")
-        return False
+    @method
+    class iter_subscription(DictElement):
+        item_xpath = 'donnees/syntheseParGroupeProduit/*/prestations'
 
-    def get_account_comings(self):
-        account_comings = {}
+        class item(ItemElement):
+            klass = Subscription
 
-        for product in Dict('donnees/syntheseParGroupeProduit')(self.doc):
-            for prestation in Dict('prestations')(product):
-                account_comings[Dict('id')(prestation)] = CleanDecimal(Dict('soldes/soldeEnCours'))(prestation)
-        return account_comings
+            obj_id = CleanText(Dict('numeroCompteFormate'), replace=[(' ', '')])
+            obj_subscriber = Env('subscriber')
+            obj_label = Format('%s %s', Dict('labelToDisplay'), Field('id'))
+            obj__internal_id = Dict('idTechnique')
+
+
+class LoanDetailsPage(LoggedPage, JsonPage):
+    def set_loan_details(self, account):
+        # If there are no available details for the loan, the statut will be "NOK"
+        if Dict('commun/statut')(self.doc) == 'NOK':
+            return
+        else:
+            # There is no default value in the Coalesce because we want it to crash in case of
+            # unknown value to be able to add it
+            rate = Coalesce(
+                Dict('donnees/caracteristiquesReservea/tauxHorsAssurance', NotAvailable),
+                Dict('donnees/caracteristiquesCreditConfiance/taux', NotAvailable),
+            )(self.doc)
+
+            account.rate = CleanDecimal().filter(rate)
 
 
 class LoansPage(JsonBasePage):
+
+    def set_parent_account_id(self, loan, acc):
+        account_parent = Coalesce(
+            Dict('prestationCAV', default=NotAvailable),
+            Dict('comptePrelevement1', default=NotAvailable),
+            default=NotAvailable
+        )(acc)
+
+        loan._parent_id = None
+        if not empty(account_parent):
+            loan._parent_id = account_parent.replace(' ', '')
+
     def get_loan_account(self, account):
         assert account._prestation_id in Dict('donnees/tabIdAllPrestations')(self.doc), \
             'Loan with prestation id %s should be on this page ...' % account._prestation_id
@@ -224,6 +295,7 @@ class LoansPage(JsonBasePage):
                 loan.id = loan.number = account.id
                 loan.label = account.label
                 loan.type = account.type
+                loan.ownership = account.ownership
 
                 loan.currency = Currency(Dict('capitalRestantDu/devise'))(acc)
                 loan.balance = Eval(lambda x: x / 100, CleanDecimal(Dict('capitalRestantDu/valeur')))(acc)
@@ -235,6 +307,23 @@ class LoansPage(JsonBasePage):
                 loan.duration = Dict('dureeNbMois')(acc)
                 loan.maturity_date = datetime.datetime.strptime(Dict('dateFin')(acc), '%Y%m%d')
 
+                # We only know the next payment day (without the month or the year). But since we know that's
+                # a monthly repayment, we can guess it.
+                if CleanText(Dict('periodicite'))(acc) == 'MENSUELLE':
+                    repayment_day = CleanDecimal(Dict('jourEcheanceMensuelle'))(acc)
+                    if not repayment_day:
+                        loan.next_payment_date = NotAvailable
+                    else:
+                        now = datetime.datetime.now().date()
+                        next_payment_date = now.replace(day=repayment_day)
+                        if repayment_day < now.day:
+                            next_payment_date += relativedelta(months=1)
+                        loan.next_payment_date = next_payment_date
+                else:
+                    self.logger.warning('Not handled periodicity: %s', CleanText(Dict('periodicite'))(acc))
+
+                self.set_parent_account_id(loan, acc)
+
                 loan._internal_id = account._internal_id
                 loan._prestation_id = account._prestation_id
                 loan._loan_type = account._loan_type
@@ -245,6 +334,7 @@ class LoansPage(JsonBasePage):
         loan.id = loan.number = account.id
         loan.label = account.label
         loan.type = account.type
+        loan.ownership = account.ownership
 
         loan.currency = account.currency
         loan.balance = account.balance
@@ -254,6 +344,7 @@ class LoansPage(JsonBasePage):
         loan._prestation_id = account._prestation_id
         loan._loan_type = account._loan_type
         loan._is_json_histo = account._is_json_histo
+        loan._parent_id = None
 
         if Dict('donnees/tabIdAllPrestations')(self.doc):
             for acc in Dict('donnees/tabPrestations')(self.doc):
@@ -280,8 +371,11 @@ class LoansPage(JsonBasePage):
                     # used amount
                     if Dict('reserveUtilisee', default=NotAvailable)(acc):
                         loan.used_amount = eval_decimal_amount('reserveUtilisee/valeur', 'reserveUtilisee/posDecimale')(acc)
+                        # in some cases, the displayed balance is the available amount and must be overriden
+                        loan.balance = loan.used_amount
                     elif Dict('montantUtilise', default=NotAvailable)(acc):
-                        loan.available_amount = eval_decimal_amount('montantUtilise/valeur', 'montantUtilise/posDecimale')(acc)
+                        loan.used_amount = eval_decimal_amount('montantUtilise/valeur', 'montantUtilise/posDecimale')(acc)
+                        loan.balance = loan.used_amount
 
                     # next payment amount
                     if Dict('prochaineEcheance', default=NotAvailable)(acc):
@@ -291,6 +385,12 @@ class LoansPage(JsonBasePage):
                         loan.last_payment_amount = loan.next_payment_amount
 
                     loan.duration = Dict('dureeNbMois')(acc)
+
+                    if Dict('dateMensualite', default=NotAvailable)(acc):
+                        loan.next_payment_date = datetime.datetime.strptime(Dict('dateMensualite')(acc), '%Y%m%d')
+
+                    self.set_parent_account_id(loan, acc)
+
                     return loan
         return loan
 
@@ -387,8 +487,10 @@ class HistoryPage(JsonBasePage):
     @pagination
     @method
     class iter_history(DictElement):
-        def next_page(self):
-            return self.page.hist_pagination('history')
+        def condition(self):
+            # If we reach this point and it's "NOK", that's mean it's a known error handled
+            # in JsonBasePage and we can't have history for now.
+            return Dict('commun/statut')(self.el).upper() != 'NOK'
 
         item_xpath = 'donnees/listeOperations'
 
@@ -399,9 +501,6 @@ class HistoryPage(JsonBasePage):
     @pagination
     @method
     class iter_card_transactions(DictElement):
-        def next_page(self):
-            return self.page.hist_pagination('history')
-
         item_xpath = 'donnees/listeOperations'
 
         class item(TransactionItemElement):
@@ -428,14 +527,16 @@ class HistoryPage(JsonBasePage):
                     def condition(self):
                         return Dict('statutOperation')(self) == 'COMPTABILISE'
 
-                    obj_raw = Dict('libOpe')
-                    obj_type = Transaction.TYPE_DEFERRED_CARD
+                    obj_raw = Transaction.Raw(Dict('libOpe'))
+                    obj_bdate = Eval(lambda t: datetime.date.fromtimestamp(int(t) / 1000), Dict('dateOpe'))
 
     @pagination
     @method
     class iter_intraday_comings(DictElement):
-        def next_page(self):
-            return self.page.hist_pagination('intraday')
+        def condition(self):
+            # If we reach this point and it's "NOK", that mean it's a known error handled
+            # in JsonBasePage and we can't have history for now.
+            return Dict('commun/statut')(self.el).upper() != 'NOK'
 
         item_xpath = 'donnees/listeOperations'
 
@@ -446,9 +547,6 @@ class HistoryPage(JsonBasePage):
     @pagination
     @method
     class iter_future_transactions(DictElement):
-        def next_page(self):
-            return self.page.hist_pagination('future')
-
         item_xpath = 'donnees/listeOperationsFutures'
 
         class item(ItemElement):
@@ -472,7 +570,7 @@ class HistoryPage(JsonBasePage):
                     klass = Transaction
 
                     obj_amount = CleanDecimal(Dict('montant/value'))
-                    obj_date = obj_vdate = Date(Dict('dateEcheance'))
+                    obj_date = obj_vdate = obj_bdate = Date(Dict('dateEcheance'))
                     obj_raw = Transaction.Raw(Dict('libelleOrigine'))
 
 
@@ -512,6 +610,11 @@ class CreditPage(LoggedPage, HTMLPage):
         if history_link:
             return history_link.group(1)
 
+    def get_error_msg(self):
+        # to be consistent with other iter_history from old website
+        # not encounter yet
+        pass
+
 
 class CreditHistoryPage(LoggedPage, HTMLPage):
     def build_doc(self, content):
@@ -544,15 +647,32 @@ class OldHistoryPage(LoggedPage, HTMLPage):
         if history_link:
             return history_link.group(1)
 
-    def iter_history(self):
-        is_no_transaction_msg = any((
-            self.doc.xpath(u'//div[contains(text(), "Aucune opération trouvée sur la période de restitution possible")]'),
-            self.doc.xpath(u'//div[contains(text(), "Aucune opération n\'a été réalisée depuis le dernier relevé")]'),
-        ))
-        assert is_no_transaction_msg, 'There are transactions, retrieve them !'
+    @method
+    class iter_history(TableElement):
+        head_xpath = '//table[not(@id)]//td/div[contains(@class, "tableauHead")]'
+        item_xpath = '//table[@id]//tr'
 
-        # waiting for account with history
-        return []
+        def condition(self):
+            no_transaction_msg = any((
+                self.xpath('//div[contains(text(), "Aucune opération trouvée sur la période de restitution possible")]'),
+                self.xpath('//div[contains(text(), "Aucune opération n\'a été réalisée depuis le dernier relevé")]'),
+            ))
+            return not no_transaction_msg
+
+        col_label = 'Libellé'
+        col_amount = 'Montant'
+        col_date = 'Date'
+
+        class item(ItemElement):
+            klass = Transaction
+
+            obj_label = CleanText(TableCell('label'))
+            obj_amount = CleanDecimal(TableCell('amount'))
+            obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
+
+    def get_error_msg(self):
+        assert self.doc.xpath('//div[@class="error_content"]'), 'There should have link to history page.'
+        return CleanText('//div[@class="error_content"]//span[@class="error_msg"]')(self.doc)
 
 
 class LifeInsurance(LoggedPage, HTMLPage):
@@ -573,8 +693,12 @@ class LifeInsurance(LoggedPage, HTMLPage):
         return Link('//a[@href="asvcns20a.html"]', default=NotAvailable)(self.doc)
 
     def get_history_url(self):
-        history_url = Link('//a[img[@alt="Suivi des opérations"]]', default=NotAvailable)(self.doc)
-        return history_url
+        return Link('//a[img[@alt="Suivi des opérations"]]', default=None)(self.doc)
+
+    def get_error_msg(self):
+        # to be consistent with other iter_history from old website
+        # not encounter yet
+        pass
 
     def get_pages(self):
         pages = CleanText('//div[@class="net2g_asv_tableau_pager"]')(self.doc)
@@ -632,6 +756,14 @@ class LifeInsuranceInvest(LifeInsurance):
 
 
 class LifeInsuranceInvest2(LifeInsuranceInvest):
+    def get_history_url(self):
+        return NotAvailable
+
+    def iter_history(self):
+        # on SG website, there are no transactions for this type of account
+        # there no trace on any space for the history on this page
+        return []
+
     @method
     class iter_investment(TableElement):
         item_xpath = '//table/tbody/tr[starts-with(@class, "net2g_asv_tableau_ligne_")]'
@@ -682,8 +814,40 @@ class LifeInsuranceHistory(LifeInsurance):
 
 
 class MarketPage(LoggedPage, HTMLPage):
+    def get_dropdown_menu(self, account_id):
+        # Get the 'idCptSelect' in a drop-down menu that corresponds the current account
+        for cpt in self.doc.xpath('//select[@id="idCptSelect"]//option[@value]'):
+            if account_id in CleanText('.', replace=[(' ', '')])(cpt):
+                return Attr('.', 'value')(cpt)
+
+    def get_pages(self):
+        several_pages = CleanText('//tr[td[contains(@class,"TabTit1l")]][count(td)=3]')(self.doc)
+        if several_pages:
+            # "several_pages" value is "1/5" for example
+            return re.search(r'(\d+)/(\d+)', several_pages).group(1, 2)
+
+    def market_pagination(self, account_id):
+        # Next page is handled by js. Need to build the right url by changing params in current url
+        several_pages = self.get_pages()
+        if several_pages:
+            current_page, total_pages = map(int, several_pages)
+            if current_page < total_pages:
+                params = {
+                    'action': 11,
+                    'idCptSelect': self.get_dropdown_menu(account_id),
+                    'numPage': current_page + 1,
+                }
+                url_to_keep = urlsplit(self.browser.url)[:3]
+                url_to_complete = (urlencode(params), '')  # '' is the urlsplit().fragment needed for urlunsplit
+                next_page_url = urlunsplit(url_to_keep + url_to_complete)
+                return next_page_url
+
+    @pagination
     @method
     class iter_investments(TableElement):
+        def next_page(self):
+            return self.page.market_pagination(Env('account')(self).id)
+
         table_xpath = '//tr[td[contains(@class,"TabTit1l")]]/following-sibling::tr//table'
         head_xpath = table_xpath + '//tr[1]/td'
         item_xpath = table_xpath + '//tr[position()>1]'

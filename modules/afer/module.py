@@ -19,10 +19,8 @@
 
 from __future__ import unicode_literals
 
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from weboob.capabilities.bank import CapBankWealth
+from weboob.tools.backend import AbstractModule
 
 from .browser import AferBrowser
 
@@ -30,35 +28,20 @@ from .browser import AferBrowser
 __all__ = ['AferModule']
 
 
-class AferModule(Module, CapBankWealth):
+class AferModule(AbstractModule, CapBankWealth):
     NAME = 'afer'
-    DESCRIPTION = u'Association française d\'épargne et de retraite'
-    MAINTAINER = u'James GALT'
-    EMAIL = 'jgalt@budget-insight.com'
+    DESCRIPTION = "Association française d'épargne et de retraite"
+    MAINTAINER = 'Quentin Defenouillère'
+    EMAIL = 'quentin.defenouillere@budget-insight.com'
     LICENSE = 'LGPLv3+'
     VERSION = '1.6'
 
+    PARENT = 'aviva'
     BROWSER = AferBrowser
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label='Username', regexp='[A-z]\d+', masked=False),
-                           ValueBackendPassword('password', label=u"mdp", regexp='\d{1,8}'))
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(),
-                                   self.config['password'].get())
-
-
-    def get_account(self, id):
-        return find_object(self.iter_accounts(), id=id, error=AccountNotFound)
-
-
-    def iter_accounts(self):
-        return self.browser.iter_accounts()
-
-    def iter_coming(self, account):
-        raise NotImplementedError()
-
-    def iter_history(self, account):
-        return self.browser.iter_history(account)
-
-    def iter_investment(self, account):
-        return self.browser.iter_investment(account)
+        return self.create_browser(
+            self.config['login'].get(),
+            self.config['password'].get(),
+            weboob=self.weboob
+        )

@@ -17,91 +17,14 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
-from io import BytesIO
-from PIL import Image, ImageFilter
-import random
+from __future__ import unicode_literals
 
-from weboob.tools.captcha.virtkeyboard import SimpleVirtualKeyboard
+from io import BytesIO
+
 from weboob.browser.pages import JsonPage
 from weboob.browser.filters.json import Dict
 
-
-class INGVirtKeyboard(SimpleVirtualKeyboard):
-    # from parent
-    tile_margin = 3
-    margin = (0, 4, 0, 0)
-    convert = 'RGB'
-
-    # for children
-    safe_tile_margin = 10
-    small_img_size = (100, 40)
-    alter_img_params = {
-        'radius': 2,
-        'percent': 135,
-        'threshold': 3,
-        'limit_pixel': 160
-    }
-
-    symbols = {
-        '0': ('117b18365105224c7207d3ec0ce7516f',),
-        '1': ('112a72c31ebdf0cdafb84e67c6e1f8f2',),
-        '2': ('df8534cb28a19e600976d39af2c4f6fe',),
-        '3': ('911dbe595604da336fbdd360f89bada1',),
-        '4': ('8a22058801980e4afb25c414e388bfa8',),
-        '5': ('c7d430083b55fbe2834c912c7cded124', 'a85d836c231f9e2ee30adbfb8e3f8d96'),
-        '6': ('64f8b9f3a93bc534443646f0b54e26ad',),
-        '7': ('6c14303e9bffdcd1880ce415b6f0efb2',),
-        '8': ('a62e9e25b047160090de1634c8d3b0f6',),
-        '9': ('2b9bc97ce4ccc67d4ae0c3ca54957b33', 'afc9d2840290b7da08bf1d0b27b6c302'),
-    }
-
-    # Clean image
-    def alter_image(self):
-        # original image size is (484, 190), save the original image
-        self.original_image = self.image
-
-        # create miniature of image to get more reliable hash
-        self.image = self.image.resize(self.small_img_size, resample=Image.BILINEAR)
-        # See ImageFilter.UnsharpMask from Pillow
-        self.image = self.image.filter(ImageFilter.UnsharpMask(
-            radius=self.alter_img_params['radius'],
-            percent=self.alter_img_params['percent'],
-            threshold=self.alter_img_params['threshold'])
-        )
-        self.image = Image.eval(self.image, lambda px: 0 if px <= self.alter_img_params['limit_pixel'] else 255)
-
-    def password_tiles_coord(self, password):
-        # get image original size to get password coord
-        image_width, image_height = self.original_image.size
-        tile_width, tile_height = image_width // self.cols, image_height // self.rows
-
-        password_tiles = []
-        for digit in password:
-            for tile in self.tiles:
-                if tile.md5 in self.symbols[digit]:
-                    password_tiles.append(tile)
-                    break
-            else:
-                # Dump file only when the symbol is not found
-                self.dump_tiles(self.path)
-                raise Exception("Symbol '%s' not found; all symbol hashes are available in %s"
-                                % (digit, self.path))
-
-        formatted_password = []
-        safe_margin = self.safe_tile_margin
-        for tile in password_tiles:
-            # default matching_symbol is str(range(cols*rows))
-            x0 = (int(tile.matching_symbol) % self.cols) * tile_width
-            y0 = (int(tile.matching_symbol) // self.cols) * tile_height
-            tile_original_coords = (
-                x0 + safe_margin, y0 + safe_margin,
-                x0 + tile_width - safe_margin, y0 + tile_height - safe_margin,
-            )
-            formatted_password.append([
-                random.uniform(tile_original_coords[0], tile_original_coords[2]),
-                random.uniform(tile_original_coords[1], tile_original_coords[3]),
-            ])
-        return formatted_password
+from .transfer_page import TransferINGVirtKeyboard
 
 
 class LoginPage(JsonPage):
@@ -109,14 +32,19 @@ class LoginPage(JsonPage):
     def is_logged(self):
         return 'firstName' in self.doc
 
-    def get_password_coord(self, img, password):
-        assert 'pinPositions' in self.doc, 'Virtualkeyboard position has failed'
-        assert 'keyPadUrl' in self.doc, 'Virtualkeyboard image url is missing'
-
+    def init_vk(self, img, password):
         pin_position = Dict('pinPositions')(self.doc)
         image = BytesIO(img)
 
-        vk = INGVirtKeyboard(image, cols=5, rows=2, browser=self.browser)
+        vk = TransferINGVirtKeyboard(image, cols=5, rows=2, browser=self.browser)
         password_random_coords = vk.password_tiles_coord(password)
         # pin positions (website side) start at 1, our positions start at 0
-        return [password_random_coords[index-1] for index in pin_position]
+        return [password_random_coords[index - 1] for index in pin_position]
+
+    def get_password_coord(self, img, password):
+        assert 'pinPositions' in self.doc, 'Virtualkeyboard position has failed'
+        assert 'keyPadUrl' in self.doc, 'Virtualkeyboard image url is missing'
+        return self.init_vk(img, password)
+
+    def get_keypad_url(self):
+        return Dict('keyPadUrl')(self.doc)

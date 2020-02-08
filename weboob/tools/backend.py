@@ -25,6 +25,7 @@ from weboob.capabilities.base import BaseObject, Capability, FieldNotFound, NotA
 from weboob.exceptions import ModuleInstallError
 from weboob.tools.compat import basestring, getproxies
 from weboob.tools.log import getLogger
+from weboob.tools.json import json
 from weboob.tools.misc import iter_fields
 from weboob.tools.value import ValuesDict
 
@@ -282,6 +283,16 @@ class Module(object):
     def __repr__(self):
         return "<Backend %r>" % self.name
 
+    def __new__(cls, *args, **kwargs):
+        """ Accept any arguments, necessary for AbstractModule __new__ override.
+
+        AbstractModule, in its overridden __new__, removes itself from class hierarchy
+        so its __new__ is called only once. In python 3, default (object) __new__ is
+        then used for next instantiations but it's a slot/"fixed" version supporting
+        only one argument (type to instanciate).
+        """
+        return object.__new__(cls)
+
     def __init__(self, weboob, name, config=None, storage=None, logger=None, nofail=False):
         self.logger = getLogger(name, parent=logger)
         self.weboob = weboob
@@ -353,6 +364,11 @@ class Module(object):
             return None
 
         kwargs['proxy'] = self.get_proxy()
+        if '_proxy_headers' in self._private_config:
+            kwargs['proxy_headers'] = self._private_config['_proxy_headers']
+            if isinstance(kwargs['proxy_headers'], basestring):
+                kwargs['proxy_headers'] = json.loads(kwargs['proxy_headers'])
+
         kwargs['logger'] = self.logger
 
         if self.logger.settings['responses_dirname']:
@@ -392,7 +408,7 @@ class Module(object):
         :rtype: iter[:class:`weboob.capabilities.base.Capability`]
         """
         for base in klass.mro():
-            if issubclass(base, Capability) and base != Capability and base != klass:
+            if issubclass(base, Capability) and base != Capability and base != klass and not issubclass(base, Module):
                 yield base
 
     def has_caps(self, *caps):
@@ -484,13 +500,25 @@ class AbstractModule(Module):
     allow to simplify code with a fake inheritance: weboob will install (if needed) and
     load a PARENT module and build our AbstractModule on top of this class.
 
-    PARENT is a mandatory attribute of any AbstractModule
+    PARENT is a mandatory attribute of any AbstractModule.
+
+    By default an AbstractModule inherits its parent backends CONFIG.
+    To add backend values, use ADDITIONAL_CONFIG.
+    To remove backend values, you must override CONFIG definition.
 
     Note that you must pass a valid weboob instance as first argument of the constructor.
     """
     PARENT = None
 
-    def __new__(cls, weboob, name, config=None, storage=None, logger=None, nofail=False):
+    ADDITIONAL_CONFIG = BackendConfig()
+    """Optional additional Values for backends, appended to parent CONFIG
+
+    Values must be weboob.tools.value.Value objects.
+    """
+
+    @classmethod
+    def _resolve_abstract(cls, weboob, name):
+        """ Replace AbstractModule parent with the real base class """
         if cls.PARENT is None:
             raise AbstractModuleMissingParentError("PARENT is not defined for module %s" % cls.__name__)
 
@@ -499,5 +527,24 @@ class AbstractModule(Module):
         except ModuleInstallError as err:
             raise ModuleInstallError('The module %s depends on %s module but %s\'s installation failed with: %s' % (name, cls.PARENT, cls.PARENT, err))
 
-        cls.__bases__ = tuple([parent] + list(cls.iter_caps()))
-        return object.__new__(cls)
+        # Parent may have defined an ADDITIONAL_CONFIG
+        if getattr(parent, 'ADDITIONAL_CONFIG', None):
+            cls.ADDITIONAL_CONFIG = BackendConfig(*(list(parent.ADDITIONAL_CONFIG.values()) + list(cls.ADDITIONAL_CONFIG.values())))
+
+        # Parent may be an AbstractModule as well
+        if hasattr(parent, '_resolve_abstract'):
+            parent._resolve_abstract(weboob, name)
+
+        parent_caps = parent.iter_caps()
+        cls.__bases__ = tuple([parent] + [cap for cap in cls.iter_caps() if cap not in parent_caps])
+        return parent
+
+    def __new__(cls, weboob, name, config=None, storage=None, logger=None, nofail=False):
+        parent = cls._resolve_abstract(weboob=weboob, name=name)
+
+        # fake backend config inheritance, override existing Values
+        # do not use CONFIG to allow the children to overwrite completely the parent CONFIG.
+        if getattr(cls, 'ADDITIONAL_CONFIG', None):
+            cls.CONFIG = BackendConfig(*(list(parent.CONFIG.values()) + list(cls.ADDITIONAL_CONFIG.values())))
+
+        return Module.__new__(cls, weboob, name, config, storage, logger, nofail)

@@ -36,17 +36,17 @@ from .collection import CapCollection
 
 __all__ = [
     'CapBank', 'BaseAccount', 'Account', 'Loan', 'Transaction', 'AccountNotFound',
-    'AccountType',
+    'AccountType', 'AccountOwnership',
     'CapBankWealth', 'Investment', 'CapBankPockets', 'Pocket',
     'CapBankTransfer', 'Transfer', 'Recipient',
     'TransferError', 'TransferBankError', 'TransferInvalidAmount', 'TransferInsufficientFunds',
     'TransferInvalidCurrency', 'TransferInvalidLabel',
-    'TransferInvalidEmitter', 'TransferInvalidRecipient',
+    'TransferInvalidEmitter', 'TransferInvalidOTP', 'TransferInvalidRecipient',
     'TransferStep',
     'CapBankTransferAddRecipient',
     'RecipientNotFound', 'AddRecipientError', 'AddRecipientBankError', 'AddRecipientTimeout',
-    'AddRecipientStep', 'RecipientInvalidIban', 'RecipientInvalidLabel',
-    'Rate', 'CapCurrencyRate',
+    'AddRecipientStep', 'RecipientInvalidIban', 'RecipientInvalidLabel', 'RecipientInvalidOTP',
+    'Rate', 'CapCurrencyRate', 'BeneficiaryType',
 ]
 
 
@@ -133,6 +133,10 @@ class TransferInvalidDate(TransferError):
     code = 'invalidDate'
 
 
+class TransferInvalidOTP(TransferError):
+    code = 'invalidOTP'
+
+
 class AddRecipientError(UserError):
     """
     Failed trying to add a recipient.
@@ -168,6 +172,10 @@ class RecipientInvalidIban(AddRecipientError):
 
 class RecipientInvalidLabel(AddRecipientError):
     code = 'invalidLabel'
+
+
+class RecipientInvalidOTP(AddRecipientError):
+    code = 'invalidOTP'
 
 
 class BaseAccount(BaseObject, Currency):
@@ -249,6 +257,8 @@ class AccountType(Enum):
     "Consumer credit"
     REVOLVING_CREDIT = 19
     "Revolving credit"
+    PER = 20
+    "Pension plan PER"
 
 
 class AccountOwnerType(object):
@@ -261,6 +271,18 @@ class AccountOwnerType(object):
     """professional account"""
     ASSOCIATION = u'ASSO'
     """association account"""
+
+
+class AccountOwnership(object):
+    """
+    Relationship between the credentials owner (PSU) and the account
+    """
+    OWNER = u'owner'
+    """The PSU is the account owner"""
+    CO_OWNER = u'co-owner'
+    """The PSU is the account co-owner"""
+    ATTORNEY = u'attorney'
+    """The PSU is the account attorney"""
 
 
 class Account(BaseAccount):
@@ -287,12 +309,14 @@ class Account(BaseAccount):
     TYPE_MORTGAGE         = AccountType.MORTGAGE
     TYPE_CONSUMER_CREDIT  = AccountType.CONSUMER_CREDIT
     TYPE_REVOLVING_CREDIT = AccountType.REVOLVING_CREDIT
+    TYPE_PER              = AccountType.PER
 
     type =      EnumField('Type of account', AccountType, default=TYPE_UNKNOWN)
     owner_type = StringField('Usage of account')  # cf AccountOwnerType class
     balance =   DecimalField('Balance on this bank account')
     coming =    DecimalField('Sum of coming movements')
     iban =      StringField('International Bank Account Number', mandatory=False)
+    ownership = StringField('Relationship between the credentials owner (PSU) and the account')  # cf AccountOwnership class
 
     # card attributes
     paydate =   DateField('For credit cards. When next payment is due.')
@@ -300,9 +324,13 @@ class Account(BaseAccount):
     cardlimit = DecimalField('For credit cards. Credit limit.')
 
     number =    StringField('Shown by the bank to identify your account ie XXXXX7489')
-    # market and lifeinssurance accounts
+
+    # Wealth accounts (market, life insurance...)
     valuation_diff = DecimalField('+/- values total')
     valuation_diff_ratio = DecimalField('+/- values ratio')
+
+    # Employee savings (PERP, PERCO, Article 83...)
+    company_name = StringField('Name of the company of the stock - only for employee savings')
 
     # parent account
     #  - A checking account parent of a card account
@@ -396,15 +424,20 @@ class Transaction(BaseObject):
     raw =       StringField('Raw label of the transaction')
     category =  StringField('Category of the transaction')
     label =     StringField('Pretty label')
-    amount =    DecimalField('Amount of the transaction')
+    amount = DecimalField('Net amount of the transaction, used to compute account balance')
 
     card =              StringField('Card number (if any)')
     commission =        DecimalField('Commission part on the transaction (in account currency)')
+    gross_amount = DecimalField('Amount of the transaction without the commission')
 
     # International
-    original_amount =   DecimalField('Original amount (in another currency)')
+    original_amount = DecimalField('Original net amount (in another currency)')
     original_currency = StringField('Currency of the original amount')
     country =           StringField('Country of transaction')
+
+    original_commission =          DecimalField('Original commission (in another currency)')
+    original_commission_currency = StringField('Currency of the original commission')
+    original_gross_amount = DecimalField('Original gross amount (in another currency)')
 
     # Financial arbitrations
     investments =       Field('List of investments related to the transaction', list, default=[])
@@ -455,18 +488,22 @@ class Investment(BaseObject):
     CODE_TYPE_ISIN =     u'ISIN'
     CODE_TYPE_AMF =      u'AMF'
 
-    label =              StringField('Label of stocks')
-    code =               StringField('Identifier of the stock')
-    code_type =          StringField('Type of stock code (ISIN or AMF)')
-    description =        StringField('Short description of the stock')
-    quantity =           DecimalField('Quantity of stocks')
-    unitprice =          DecimalField('Buy price of one stock')
-    unitvalue =          DecimalField('Current value of one stock')
-    valuation =          DecimalField('Total current valuation of the Investment')
-    vdate     =          DateField('Value date of the valuation amount')
-    diff =               DecimalField('Difference between the buy cost and the current valuation')
-    diff_ratio =         DecimalField('Difference in ratio (1 meaning 100%) between the buy cost and the current valuation')
-    portfolio_share =    DecimalField('Ratio (1 meaning 100%) of the current amount relative to the total')
+    label = StringField('Label of stocks')
+    code = StringField('Identifier of the stock')
+    code_type = StringField('Type of stock code (ISIN or AMF)')
+    description = StringField('Short description of the stock')
+    quantity = DecimalField('Quantity of stocks')
+    unitprice = DecimalField('Buy price of one stock')
+    unitvalue = DecimalField('Current value of one stock')
+    valuation = DecimalField('Total current valuation of the Investment')
+    vdate = DateField('Value date of the valuation amount')
+    diff = DecimalField('Difference between the buy cost and the current valuation')
+    diff_ratio = DecimalField('Difference in ratio (1 meaning 100%) between the buy cost and the current valuation')
+    portfolio_share = DecimalField('Ratio (1 meaning 100%) of the current amount relative to the total')
+    performance_history = Field('History of the performances of the stock (key=years, value=diff_ratio)', dict)
+    srri = IntField('Synthetic Risk and Reward Indicator of the stock (from 1 to 7)')
+    asset_category = StringField('Category of the stock')
+    recommended_period = StringField('Recommended investment period of the stock')
 
     # International
     original_currency = StringField('Currency of the original amount')
@@ -546,27 +583,38 @@ class AddRecipientStep(BrowserQuestion):
         self.recipient = recipient
 
 
+class BeneficiaryType(object):
+    RECIPIENT =          'recipient'
+    IBAN =               'iban'
+    PHONE_NUMBER =       'phone_number'
+
+
 class Transfer(BaseObject, Currency):
     """
     Transfer from an account to a recipient.
     """
-
     amount =          DecimalField('Amount to transfer')
     currency =        StringField('Currency', default=None)
     fees =            DecimalField('Fees', default=None)
 
     exec_date =       Field('Date of transfer', date, datetime)
+    label =           StringField('Reason')
 
     account_id =      StringField('ID of origin account')
     account_iban =    StringField('International Bank Account Number')
     account_label =   StringField('Label of origin account')
     account_balance = DecimalField('Balance of origin account before transfer')
 
-    recipient_id =    StringField('ID of recipient account')
-    recipient_iban =  StringField('International Bank Account Number')
-    recipient_label = StringField('Label of recipient account')
+    # Information for beneficiary in recipient list
+    recipient_id =      StringField('ID of recipient account')
+    recipient_iban =    StringField('International Bank Account Number')
+    recipient_label =   StringField('Label of recipient account')
 
-    label =           StringField('Reason')
+    # Information for beneficiary not only in recipient list
+    # Like transfer to iban beneficiary
+    beneficiary_type =    StringField('Transfer creditor number type', default=BeneficiaryType.RECIPIENT)
+    beneficiary_number =  StringField('Transfer creditor number')
+    beneficiary_label =  StringField('Transfer creditor label')
 
 
 class CapBank(CapCollection):
@@ -675,6 +723,8 @@ class CapBankPockets(CapBankWealth):
 
 
 class CapBankTransfer(CapBank):
+    accepted_beneficiary_types = (BeneficiaryType.RECIPIENT, )
+
     def iter_transfer_recipients(self, account):
         """
         Iter recipients availables for a transfer from a specific account.
@@ -715,12 +765,18 @@ class CapBankTransfer(CapBank):
         :raises: :class:`TransferError`
         """
 
+        transfer_not_check_fields = {
+            BeneficiaryType.RECIPIENT: ('id', 'beneficiary_number', 'beneficiary_label',),
+            BeneficiaryType.IBAN: ('id', 'recipient_id', 'recipient_iban', 'recipient_label',),
+            BeneficiaryType.PHONE_NUMBER: ('id', 'recipient_id', 'recipient_iban', 'recipient_label',),
+        }
+
         if not transfer.amount or transfer.amount <= 0:
             raise TransferInvalidAmount('amount must be strictly positive')
 
         t = self.init_transfer(transfer, **params)
         for key, value in t.iter_fields():
-            if hasattr(transfer, key) and key != 'id':
+            if hasattr(transfer, key) and (key not in transfer_not_check_fields[transfer.beneficiary_type]):
                 transfer_val = getattr(transfer, key)
                 try:
                     if hasattr(self, 'transfer_check_%s' % key):

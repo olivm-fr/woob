@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
 from collections import OrderedDict
 import re
 from decimal import Decimal, InvalidOperation
@@ -27,7 +29,7 @@ from weboob.browser.pages import HTMLPage, PDFPage, LoggedPage, AbstractPage
 from weboob.browser.elements import ItemElement, TableElement, method
 from weboob.browser.filters.standard import CleanText, CleanDecimal, Date, Regexp, Field, Env, Currency
 from weboob.browser.filters.html import Attr, Link, TableCell
-from weboob.capabilities.bank import Account, Investment
+from weboob.capabilities.bank import Account, Investment, AccountOwnership
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.capabilities.base import NotAvailable, empty
 from weboob.capabilities.profile import Person
@@ -39,6 +41,7 @@ from weboob.tools.pdf import extract_text
 def MyDecimal(*args, **kwargs):
     kwargs.update(replace_dots=True, default=NotAvailable)
     return CleanDecimal(*args, **kwargs)
+
 
 class UnavailablePage(HTMLPage):
     def on_load(self):
@@ -69,22 +72,23 @@ class MyHTMLPage(HTMLPage):
         sub = re.search('oamSubmitForm.+?,\'([^:]+).([^\']+)', s)
         args['%s:_idcl' % sub.group(1)] = "%s:%s" % (sub.group(1), sub.group(2))
         args['%s_SUBMIT' % sub.group(1)] = 1
-        args['_form_name'] = sub.group(1) # for weboob only
+        args['_form_name'] = sub.group(1)  # for weboob only
 
         return args
 
 
 class AccountsPage(LoggedPage, MyHTMLPage):
     ACCOUNT_TYPES = OrderedDict((
-        ('visa',               Account.TYPE_CARD),
-        ('courant-titre',      Account.TYPE_CHECKING),
-        ('courant',            Account.TYPE_CHECKING),
-        ('livret',             Account.TYPE_SAVINGS),
-        ('ldd',                Account.TYPE_SAVINGS),
-        ('pel',                Account.TYPE_SAVINGS),
-        ('pea',                Account.TYPE_PEA),
-        ('titres',             Account.TYPE_MARKET),
-        ('valorisation',       Account.TYPE_MARKET),
+        ('visa', Account.TYPE_CARD),
+        ('pea', Account.TYPE_PEA),
+        ('valorisation', Account.TYPE_MARKET),
+        ('courant-titre', Account.TYPE_CHECKING),
+        ('courant', Account.TYPE_CHECKING),
+        ('livret', Account.TYPE_SAVINGS),
+        ('ldd', Account.TYPE_SAVINGS),
+        ('pel', Account.TYPE_SAVINGS),
+        ('cel', Account.TYPE_SAVINGS),
+        ('titres', Account.TYPE_MARKET),
     ))
 
     def get_tabs(self):
@@ -119,18 +123,20 @@ class AccountsPage(LoggedPage, MyHTMLPage):
         for table in self.has_accounts():
             tds = table.xpath('./tbody/tr')[0].findall('td')
             if len(tds) < 3:
-                if tds[0].text_content() == u'Pr\xeat Personnel':
+                if tds[0].text_content() == 'Prêt Personnel':
 
                     account = Account()
                     args = self.js2args(table.xpath('.//a')[0].attrib['onclick'])
                     account._args = args
                     account.label = CleanText().filter(tds[0].xpath('./ancestor::table[has-class("tableaux-pret-personnel")]/caption'))
                     account.id = account.label.split()[-1] + args['paramNumContrat']
+                    account.number = account.id
                     loan_details = self.browser.open('/webapp/axabanque/jsp/panorama.faces', data=args).page
                     # Need to go back on home page after open
                     self.browser.bank_accounts.open()
                     account.balance = loan_details.get_loan_balance()
                     account.currency = loan_details.get_loan_currency()
+                    account.ownership = loan_details.get_loan_ownership()
                     # Skip loans without any balance (already fully reimbursed)
                     if empty(account.balance):
                         continue
@@ -151,23 +157,28 @@ class AccountsPage(LoggedPage, MyHTMLPage):
 
                 if len(box.xpath('.//a')) != 0 and 'onclick' in box.xpath('.//a')[0].attrib:
                     args = self.js2args(box.xpath('.//a')[0].attrib['onclick'])
-                    account.label =  u'{0} {1}'.format(unicode(table.xpath('./caption')[0].text.strip()), unicode(box.xpath('.//a')[0].text.strip()))
+                    account.label = '%s %s' % (table.xpath('./caption')[0].text.strip(), box.xpath('.//a')[0].text.strip())
                 elif len(foot[0].xpath('.//a')) != 0 and 'onclick' in foot[0].xpath('.//a')[0].attrib:
                     args = self.js2args(foot[0].xpath('.//a')[0].attrib['onclick'])
-                    account.label =  unicode(table.xpath('./caption')[0].text.strip())
+                    account.label = table.xpath('./caption')[0].text.strip()
+                    # Adding 'Valorisation' to the account label in order to differentiate it
+                    # from the card and checking account associate to the './caption'
+                    if 'Valorisation' not in account.label and len(box.xpath('./td[contains(text(), "Valorisation")]')):
+                        account.label = '%s Valorisation Titres' % CleanText('./caption')(table)
                 else:
                     continue
 
                 self.logger.debug('Args: %r' % args)
                 if 'paramNumCompte' not in args:
-                    #The displaying of life insurances is very different from the other
+                    # The displaying of life insurances is very different from the other
                     if args.get('idPanorama:_idcl').split(":")[1] == 'tableaux-direct-solution-vie':
                         account_details = self.browser.open("#", data=args)
                         scripts = account_details.page.doc.xpath('//script[@type="text/javascript"]/text()')
-                        script = filter(lambda x: "src" in x, scripts)[0]
+                        script = list(filter(lambda x: "src" in x, scripts))[0]
                         iframe_url = re.search("src:(.*),", script).group()[6:-2]
                         account_details_iframe = self.browser.open(iframe_url, data=args)
                         account.id = CleanText('//span[contains(@id,"NumeroContrat")]/text()')(account_details_iframe.page.doc)
+                        account.number = account.id
                         account._url = iframe_url
                         account.type = account.TYPE_LIFE_INSURANCE
                         account.balance = MyDecimal('//span[contains(@id,"MontantEpargne")]/text()')(account_details_iframe.page.doc)
@@ -196,16 +207,15 @@ class AccountsPage(LoggedPage, MyHTMLPage):
                             break
 
                     # get accounts id
-                    try:
-                        account.id = args['paramNumCompte'] + args['paramNumContrat']
-                        if 'Visa' in account.label:
-                            card_id = re.search('(\d+)', box.xpath('./td[2]')[0].text.strip())
-                            if card_id:
-                                account.id += card_id.group(1)
-                        if u'Valorisation' in account.label or u'Liquidités' in account.label:
-                            account.id += args[next(k for k in args.keys() if "_idcl" in k)].split('Jsp')[-1]
-                    except KeyError:
-                        account.id = args['paramNumCompte']
+                    account.id = args['paramNumCompte'] + args.get('paramNumContrat', '')
+
+                    if 'Visa' in account.label:
+                        account.number = Regexp(CleanText('./td[contains(@class,"libelle")]', replace=[(' ', ''), ('x', 'X')]), r'(X{12}\d{4})')(box)
+                        account.id += Regexp(CleanText('./td[contains(@class,"libelle")]'), r'(\d+)')(box)
+
+                    if 'Valorisation' in account.label or 'Liquidités' in account.label:
+                        account.id += args[next(k for k in args.keys() if '_idcl' in k)].split('Jsp')[-1]
+                        account.number = account.id
 
                     # get accounts balance
                     try:
@@ -213,7 +223,7 @@ class AccountsPage(LoggedPage, MyHTMLPage):
 
                         # skip debit card
                         # some cards don't have information in balance tab, skip them
-                        if balance_value == u'Débit immédiat' or balance_value == '':
+                        if balance_value == 'Débit immédiat' or balance_value == '':
                             account._is_debit_card = True
                         else:
                             account._is_debit_card = False
@@ -224,11 +234,12 @@ class AccountsPage(LoggedPage, MyHTMLPage):
                             account.balance = Decimal(0)
 
                     except InvalidOperation:
-                        #The account doesn't have a amount
+                        # The account doesn't have a amount
                         pass
 
                     account._url = self.doc.xpath('//form[contains(@action, "panorama")]/@action')[0]
                     account._acctype = "bank"
+                    account._owner = CleanText('./td[has-class("libelle")]')(box)
 
                 # get accounts currency
                 currency_title = table.xpath('./thead//th[@class="montant"]')[0].text.strip()
@@ -246,10 +257,13 @@ class AccountsPage(LoggedPage, MyHTMLPage):
     def get_form_action(self, form_name):
         return self.get_form(id=form_name).url
 
+    def get_profile_name(self):
+        return Regexp(CleanText('//div[@id="bloc_identite"]/h5'), r'Bonjour (.*)')(self.doc)
+
 
 class IbanPage(PDFPage):
     def get_iban(self):
-        iban = u''
+        iban = ''
 
         # according to re module doc, list returned by re.findall always
         # be in the same order as they are in the source text
@@ -257,7 +271,7 @@ class IbanPage(PDFPage):
             # findall will find something like
             # ['FRXX', '1234', ... , '9012', 'FRXX', '1234', ... , '9012']
             iban += part
-        iban = iban[:len(iban)/2]
+        iban = iban[:len(iban) // 2]
 
         # we suppose that all iban are French iban
         iban_last_part = re.findall(r'([A-Z0-9]{3})\1\1Titulaire', extract_text(self.data), flags=re.MULTILINE)
@@ -271,24 +285,21 @@ class IbanPage(PDFPage):
 
 
 class BankTransaction(FrenchTransaction):
-    PATTERNS = [(re.compile('^RET(RAIT) DAB (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'),
-                                                              FrenchTransaction.TYPE_WITHDRAWAL),
-                (re.compile('^(CARTE|CB ETRANGER) (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'),
-                                                              FrenchTransaction.TYPE_CARD),
-                (re.compile('^(?P<category>VIR(EMEN)?T? (SEPA)?(RECU|FAVEUR)?)( /FRM)?(?P<text>.*)'),
-                                                              FrenchTransaction.TYPE_TRANSFER),
-                (re.compile('^PRLV (?P<text>.*)( \d+)?$'),    FrenchTransaction.TYPE_ORDER),
-                (re.compile('^(CHQ|CHEQUE) .*$'),             FrenchTransaction.TYPE_CHECK),
-                (re.compile('^(AGIOS /|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-                (re.compile('^(CONVENTION \d+ |F )?COTIS(ATION)? (?P<text>.*)'),
-                                                              FrenchTransaction.TYPE_BANK),
-                (re.compile('^REMISE (?P<text>.*)'),          FrenchTransaction.TYPE_DEPOSIT),
-                (re.compile('^(?P<text>.*)( \d+)? QUITTANCE .*'),
-                                                              FrenchTransaction.TYPE_ORDER),
-                (re.compile('^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'),
-                                                              FrenchTransaction.TYPE_UNKNOWN),
-                (re.compile('^ACHATS (CARTE|CB)'),                  FrenchTransaction.TYPE_CARD_SUMMARY),
-               ]
+    PATTERNS = [
+        (re.compile(r'^RET(RAIT) DAB (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^(CARTE|CB ETRANGER|CB) (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
+        (re.compile(r'^(?P<category>VIR(EMEN)?T? (SEPA)?(RECU|FAVEUR)?)( /FRM)?(?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'^PRLV (?P<text>.*)( \d+)?$'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^(CHQ|CHEQUE) .*$'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^(AGIOS /|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(CONVENTION \d+ |F )?COTIS(ATION)? (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(F|R)-(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^REMISE (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^(?P<text>.*)( \d+)? QUITTANCE .*'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'), FrenchTransaction.TYPE_UNKNOWN),
+        (re.compile(r'^ACHATS (CARTE|CB)'), FrenchTransaction.TYPE_CARD_SUMMARY),
+        (re.compile(r'^ANNUL (?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK)
+    ]
 
 
 class TransactionsPage(LoggedPage, MyHTMLPage):
@@ -306,6 +317,12 @@ class TransactionsPage(LoggedPage, MyHTMLPage):
 
     def get_loan_currency(self):
         return Currency('//*[@id="table-detail"]/tbody/tr/td[@class="capital"]', default=NotAvailable)(self.doc)
+
+    def get_loan_ownership(self):
+        co_owner = CleanText('//td[@class="coEmprunteur"]')(self.doc)
+        if co_owner:
+            return AccountOwnership.CO_OWNER
+        return AccountOwnership.OWNER
 
     def open_market(self):
         # only for netfinca PEA
@@ -326,12 +343,12 @@ class TransactionsPage(LoggedPage, MyHTMLPage):
         item_xpath = '//table[contains(@id, "titres") or contains(@id, "OPCVM")]/tbody/tr'
         head_xpath = '//table[contains(@id, "titres") or contains(@id, "OPCVM")]/thead/tr/th[not(caption)]'
 
-        col_label = u'Intitulé'
-        col_quantity = u'NB'
-        col_unitprice = re.compile(u'Prix de revient')
-        col_unitvalue = u'Dernier cours'
-        col_diff = re.compile(u'\+/\- Values latentes')
-        col_valuation = re.compile(u'Montant')
+        col_label = 'Intitulé'
+        col_quantity = 'NB'
+        col_unitprice = re.compile('Prix de revient')
+        col_unitvalue = 'Dernier cours'
+        col_diff = re.compile('\+/- Values latentes')
+        col_valuation = re.compile('Montant')
 
         class item(ItemElement):
             klass = Investment
@@ -364,24 +381,26 @@ class TransactionsPage(LoggedPage, MyHTMLPage):
 
         if link is None:
             # this is a check account
-            args = {'categorieMouvementSelectionnePagination': 'afficherTout',
-                    'nbLigneParPageSelectionneHautPagination': -1,
-                    'nbLigneParPageSelectionneBasPagination': -1,
-                    'nbLigneParPageSelectionneComponent': -1,
-                    'idDetail:btnRechercherParNbLigneParPage': '',
-                    'idDetail_SUBMIT': 1,
-                    'javax.faces.ViewState': self.get_view_state(),
-                   }
+            args = {
+                'categorieMouvementSelectionnePagination': 'afficherTout',
+                'nbLigneParPageSelectionneHautPagination': -1,
+                'nbLigneParPageSelectionneBasPagination': -1,
+                'nbLigneParPageSelectionneComponent': -1,
+                'idDetail:btnRechercherParNbLigneParPage': '',
+                'idDetail_SUBMIT': 1,
+                'javax.faces.ViewState': self.get_view_state(),
+            }
         else:
             # something like a PEA or so
             value = link.attrib['id']
             id = value.split(':')[0]
-            args = {'%s:_idcl' % id: value,
-                    '%s:_link_hidden_' % id: '',
-                    '%s_SUBMIT' % id: 1,
-                    'javax.faces.ViewState': self.get_view_state(),
-                    'paramNumCompte': '',
-                   }
+            args = {
+                '%s:_idcl' % id: value,
+                '%s:_link_hidden_' % id: '',
+                '%s_SUBMIT' % id: 1,
+                'javax.faces.ViewState': self.get_view_state(),
+                'paramNumCompte': '',
+            }
 
         self.browser.location(form.attrib['action'], data=args)
         return True
@@ -407,10 +426,10 @@ class TransactionsPage(LoggedPage, MyHTMLPage):
         return True
 
     def get_history(self):
-        #DAT account can't have transaction
+        # DAT account can't have transaction
         if self.doc.xpath('//table[@id="table-dat"]'):
             return
-        #These accounts have investments, no transactions
+        # These accounts have investments, no transactions
         if self.doc.xpath('//table[@id="InfosPortefeuille"]'):
             return
         tables = self.doc.xpath('//table[@id="table-detail-operation"]')
@@ -428,10 +447,10 @@ class TransactionsPage(LoggedPage, MyHTMLPage):
                 continue
 
             t = BankTransaction()
-            date = u''.join([txt.strip() for txt in tds[self.COL_DATE].itertext()])
-            raw = u''.join([txt.strip() for txt in tds[self.COL_TEXT].itertext()])
-            debit = self.parse_number(u''.join([txt.strip() for txt in tds[self.COL_DEBIT].itertext()]))
-            credit = self.parse_number(u''.join([txt.strip() for txt in tds[self.COL_CREDIT].itertext()]))
+            date = ''.join([txt.strip() for txt in tds[self.COL_DATE].itertext()])
+            raw = ''.join([txt.strip() for txt in tds[self.COL_TEXT].itertext()])
+            debit = self.parse_number(''.join([txt.strip() for txt in tds[self.COL_DEBIT].itertext()]))
+            credit = self.parse_number(''.join([txt.strip() for txt in tds[self.COL_CREDIT].itertext()]))
 
             t.parse(date, re.sub(r'[ ]+', ' ', raw), vdate=date)
             t.set_amount(credit, debit)
@@ -453,9 +472,9 @@ class CBTransactionsPage(TransactionsPage):
                 continue
 
             t = BankTransaction()
-            date = u''.join([txt.strip() for txt in tds[self.COL_DATE].itertext()])
-            raw = self.parse_number(u''.join([txt.strip() for txt in tds[self.COL_TEXT].itertext()]))
-            credit = self.parse_number(u''.join([txt.strip() for txt in tds[self.COL_CB_CREDIT].itertext()]))
+            date = ''.join([txt.strip() for txt in tds[self.COL_DATE].itertext()])
+            raw = self.parse_number(''.join([txt.strip() for txt in tds[self.COL_TEXT].itertext()]))
+            credit = self.parse_number(''.join([txt.strip() for txt in tds[self.COL_CB_CREDIT].itertext()]))
             debit = ""
 
             t.parse(date, re.sub(r'[ ]+', ' ', raw))
@@ -512,9 +531,9 @@ class LifeInsuranceIframe(LoggedPage, HTMLPage):
             obj_code = Regexp(CleanText(TableCell('code')), r'(.{12})', default=NotAvailable)
             obj_code_type = lambda self: Investment.CODE_TYPE_ISIN if Field('code')(self) is not NotAvailable else NotAvailable
 
-            def obj_diff_percent(self):
+            def obj_diff_ratio(self):
                 diff_percent = MyDecimal(TableCell('diff')(self)[0])(self)
-                return diff_percent/100 if diff_percent != NotAvailable else diff_percent
+                return diff_percent / 100 if diff_percent != NotAvailable else diff_percent
 
     @method
     class iter_history(TableElement):
@@ -522,8 +541,8 @@ class LifeInsuranceIframe(LoggedPage, HTMLPage):
         head_xpath = '//table[@id="ctl00_ContentPlaceHolderMain_PaymentListing_gvInfos"]/tr[@class="Header"]/th'
 
         col_date = 'Date'
-        col_label = re.compile(u'^Nature')
-        col_amount = re.compile(u'^Montant net de frais')
+        col_label = re.compile('^Nature')
+        col_amount = re.compile('^Montant net de frais')
 
         class item(ItemElement):
             klass = BankTransaction
@@ -543,11 +562,11 @@ class LifeInsuranceIframe(LoggedPage, HTMLPage):
         item_xpath = '//table[@id="ctl00_ContentPlaceHolderPopin_UcDetailMouvement_UcInvestissement_gvInfos"]/tr[not(contains(@class, "Header"))]'
         head_xpath = '//table[@id="ctl00_ContentPlaceHolderPopin_UcDetailMouvement_UcInvestissement_gvInfos"]/tr[@class="Header"]/th'
 
-        col_label = u'Support'
-        col_vdate = u'Date de valeur'
-        col_unitprice = u"Valeur de l'UC"
-        col_quantity = u"Nombre d'UC"
-        col_valuation = u'Montant'
+        col_label = 'Support'
+        col_vdate = 'Date de valeur'
+        col_unitprice = "Valeur de l'UC"
+        col_quantity = "Nombre d'UC"
+        col_valuation = 'Montant'
 
         class item(ItemElement):
             klass = Investment

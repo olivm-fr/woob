@@ -31,7 +31,7 @@ from weboob.browser.elements import method, ItemElement
 from weboob.browser.filters.html import Link, Attr
 from weboob.browser.filters.standard import CleanText, CleanDecimal, RawText, Regexp, Date
 from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account, Investment, Loan
+from weboob.capabilities.bank import Account, Investment, Loan, AccountOwnership
 from weboob.capabilities.profile import Person
 from weboob.browser.pages import HTMLPage, LoggedPage, FormNotFound, CsvPage
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
@@ -70,6 +70,15 @@ class PeaHistoryPage(LoggedPage, HTMLPage):
     COL_VALUATION = 5
     COL_PERF = 6
     COL_WEIGHT = 7
+
+    def on_load(self):
+        err_msgs = [
+            "vos informations personnelles n'ayant pas été modifiées récemment, nous vous remercions de bien vouloir les compléter",
+            "nous vous remercions de mettre à jour et/ou de compléter vos informations personnelles",
+        ]
+        text = CleanText('//div[@class="block_cadre"]//div/p')(self.doc)
+        if any(err_msg in text for err_msg in err_msgs):
+            raise ActionNeeded(text)
 
     def get_investments(self, account):
         if account is not None:
@@ -118,6 +127,7 @@ class PeaHistoryPage(LoggedPage, HTMLPage):
             return False
         form['dateDebut'] = (date.today() - relativedelta(years=2)).strftime('%d/%m/%Y')
         form['nbResultats'] = '100'
+        form['typeOperation'] = '01'
         form.submit()
         return True
 
@@ -171,26 +181,32 @@ class InvestmentHistoryPage(LoggedPage, HTMLPage):
 
             inv = Investment()
             inv.id = re.search('cdReferentiel=(.*)', cols[self.COL_LABEL].find('a').attrib['href']).group(1)
-            inv.code = re.match('^[A-Z]+[0-9]+(.*)$', inv.id).group(1)
-            inv.label = CleanText(None).filter(cols[self.COL_LABEL])
-            inv.quantity = self.parse_decimal(cols[self.COL_QUANTITY])
-            inv.unitprice = self.parse_decimal(cols[self.COL_UNITPRICE])
-            inv.unitvalue = self.parse_decimal(cols[self.COL_UNITVALUE])
-            inv.vdate = Date(CleanText(cols[self.COL_DATE], default=NotAvailable), dayfirst=True, default=NotAvailable)(self.doc)
-            inv.valuation = self.parse_decimal(cols[self.COL_VALUATION])
-            inv.diff = self.parse_decimal(cols[self.COL_PERF])
-            diff_percent =  self.parse_decimal(cols[self.COL_PERF_PERCENT])
-            inv.diff_percent = diff_percent / 100 if diff_percent else NotAvailable
-            if is_isin_valid(inv.code):
-                inv.code_type = Investment.CODE_TYPE_ISIN
 
+            inv.label = CleanText(None).filter(cols[self.COL_LABEL])
+            inv.quantity = self.parse_decimal(cols[self.COL_QUANTITY], True)
+            inv.unitprice = self.parse_decimal(cols[self.COL_UNITPRICE], True)
+            inv.unitvalue = self.parse_decimal(cols[self.COL_UNITVALUE], True)
+            inv.vdate = Date(CleanText(cols[self.COL_DATE], default=NotAvailable), dayfirst=True, default=NotAvailable)(self.doc)
+            inv.valuation = self.parse_decimal(cols[self.COL_VALUATION], True)
+            inv.diff = self.parse_decimal(cols[self.COL_PERF], True)
+            diff_percent = self.parse_decimal(cols[self.COL_PERF_PERCENT], True)
+            inv.diff_ratio = diff_percent / 100 if diff_percent else NotAvailable
+            code = re.match('^[A-Z]+[0-9]+(.*)$', inv.id).group(1)
+            if is_isin_valid(code):
+                inv.code = CleanText().filter(code)
+                inv.code_type = Investment.CODE_TYPE_ISIN
+            else:
+                inv.code = inv.code_type = NotAvailable
             yield inv
 
-    def parse_decimal(self, string):
+    def parse_decimal(self, string, replace_dots):
         string = CleanText(None).filter(string)
-        if string == '-' or string == '*':
+        if string in ('-', '*'):
             return NotAvailable
-        return CleanDecimal(None, replace_dots=True).filter(string)
+        # Decimal separators can be ',' or '.' depending on the column
+        if replace_dots:
+            return CleanDecimal.French().filter(string)
+        return CleanDecimal.SI().filter(string)
 
     def select_period(self):
         assert isinstance(self.browser.page, type(self))
@@ -256,7 +272,6 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
         return iter([])
 
     def select_period(self):
-        # form = self.get_form(name='ConsultationHistoriqueOperationsForm')
         try:
             form = self.get_form(xpath='//form[@name="ConsultationHistoriqueOperationsForm" '
                                        ' or @name="form_historique_titres" '
@@ -294,6 +309,12 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
             amount          = tables[i].xpath("./td[5]/text() | ./td[6]/text()")
 
             operation.parse(date=date_oper, raw=label, vdate=date_val)
+
+            # There is no difference between card transaction and deferred card transaction
+            # on the history.
+            if operation.type == FrenchTransaction.TYPE_CARD:
+                operation.bdate = operation.rdate
+
             # Needed because operation.parse overwrite operation.label
             # Theses lines must run after operation.parse.
             #if tables[i].xpath("./td[4]/div/text()"):
@@ -325,12 +346,12 @@ class CardHistoryPage(LoggedPage, HTMLPage):
             rdate =  cleaner(op.xpath('./td[1]')[0])
             date =   cleaner(op.xpath('./td[2]')[0])
             raw =    cleaner(op.xpath('./td[3]')[0])
-            credit = cleaner(op.xpath('./td[4]')[0])
-            debit =  cleaner(op.xpath('./td[5]')[0])
+            debit =  cleaner(op.xpath('./td[4]')[0])
+            credit = cleaner(op.xpath('./td[5]')[0])
 
             tr = Transaction()
             tr.parse(date=date, raw=raw)
-            tr.rdate = tr.parse_date(rdate)
+            tr.rdate = tr.bdate = tr.parse_date(rdate)
             tr.type = tr.TYPE_DEFERRED_CARD
             if credit:
                 tr.amount = CleanDecimal(None, replace_dots=True).filter(credit)
@@ -361,6 +382,14 @@ class AccountsList(LoggedPage, HTMLPage):
                                    )
             if warning:
                 raise ActionNeeded(warning[0].text)
+
+    @method
+    class fill_person_name(ItemElement):
+        klass = Account
+
+        # Contains the title (M., Mme., etc) + last name.
+        # The first name isn't available in the person's details.
+        obj_name = CleanText('//span[has-class("mon_espace_nom")]')
 
     def get_iframe_url(self):
         iframe = self.doc.xpath('//iframe[@id="iframe_centrale"]')
@@ -454,6 +483,7 @@ class AccountsList(LoggedPage, HTMLPage):
                 account.account_label = account_history_page.get_account_label()
                 account.subscription_date = account_history_page.get_subscription_date()
                 account.maturity_date = account_history_page.get_maturity_date()
+                account.ownership = account_history_page.get_owner()
 
             if len(accounts) == 0:
                 global_error_message = page.doc.xpath('//div[@id="as_renouvellementMIFID.do_"]/div[contains(text(), "Bonjour")] '
@@ -488,26 +518,40 @@ class AccountsList(LoggedPage, HTMLPage):
                     break
 
             investment_page = None
-            if account.type in {Account.TYPE_PEA, Account.TYPE_MARKET, Account.TYPE_LIFE_INSURANCE}:
+            if account.type in (Account.TYPE_PEA, Account.TYPE_MARKET, Account.TYPE_LIFE_INSURANCE):
                 account._investment_link = Link('./ul/li/a[contains(@id, "portefeuille")]')(cpt)
-                investment_page = self.browser.open(account._investment_link).page
+                investment_page = self.browser.location(account._investment_link).page
                 balance = investment_page.get_balance(account.type)
-                if account.type in {Account.TYPE_PEA, Account.TYPE_MARKET}:
+                if account.type in (Account.TYPE_PEA, Account.TYPE_MARKET):
                     self.browser.investments[account.id] = list(self.browser.open(account._investment_link).page.get_investments(account))
             else:
                 balance = page.get_balance()
                 if account.type is not Account.TYPE_LOAN:
                     account.coming = page.get_coming()
 
-            if account.type in {Account.TYPE_PEA, Account.TYPE_MARKET}:
+            if account.type in (Account.TYPE_PEA, Account.TYPE_MARKET):
                 account.currency = investment_page.get_currency()
             elif balance:
                 account.currency = account.get_currency(balance)
-            account.balance = CleanDecimal(None, replace_dots=True).filter(balance)
+
+            account.balance = CleanDecimal.French().filter(balance)
 
             if account.type in (Account.TYPE_CHECKING, Account.TYPE_SAVINGS):
                 # Need a token sent by SMS to customers
                 account.iban = NotAvailable
+
+            if account.type is not Account.TYPE_LOAN:
+                regexp = re.search(r'(m\. |mme\. )(.+)', CleanText('//span[has-class("mon_espace_nom")]')(self.doc), re.IGNORECASE)
+                if regexp and len(regexp.groups()) == 2:
+                    gender = regexp.group(1).replace('.', '').rstrip()
+                    name = regexp.group(2)
+                    label = account.label
+                    if re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)', label, re.IGNORECASE):
+                        account.ownership = AccountOwnership.CO_OWNER
+                    elif re.search(r'{} {}'.format(gender, name), label, re.IGNORECASE):
+                        account.ownership = AccountOwnership.OWNER
+                    else:
+                        account.ownership = AccountOwnership.ATTORNEY
 
             if (account.label, account.id, account.balance) not in [(a.label, a.id, a.balance) for a in accounts]:
                 accounts.append(account)
@@ -538,6 +582,11 @@ class LoanPage(LoggedPage, HTMLPage):
 
     def get_maturity_date(self):
         return Date(CleanText(u'//p[@id="c_dateFin"]//strong'), dayfirst=True)(self.doc)
+
+    def get_owner(self):
+        if bool(CleanText('//p[@id="c_emprunteurSecondaire"]')(self.doc)):
+            return AccountOwnership.CO_OWNER
+        return AccountOwnership.OWNER
 
 
 class ProfilePage(LoggedPage, HTMLPage):
@@ -581,4 +630,3 @@ class ProfilePageCSV(LoggedPage, CsvPage):
 
 class SecurityPage(LoggedPage, HTMLPage):
     pass
-

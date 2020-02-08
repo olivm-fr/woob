@@ -19,7 +19,7 @@ class JSMiddleFramePage(LoggedPage, HTMLPage):
         return self.content.decode('iso-8859-1').startswith('var mc')
 
     def get_patrimoine_url(self):
-        return Link('//a[contains(., "Espace patrimoine")]', default=None)(self.doc)
+        return Link('//a[contains(., "Espace Patrimoine")]', default=None)(self.doc)
 
 
 class JSMiddleAuthPage(LoggedPage, HTMLPage):
@@ -27,7 +27,7 @@ class JSMiddleAuthPage(LoggedPage, HTMLPage):
         return "https://www.hsbc.fr/1/3/authentication/sso-cwd" in self.content.decode('iso-8859-1')
 
     def get_middle_auth_link(self):
-        return Regexp(CleanText('//body/@onload'), 'top.location.replace\(\'(https://.*)\'\)')(self.doc)
+        return Regexp(CleanText('//body/@onload'), r'top.location.replace\(\'(https://.*)\'\)')(self.doc)
 
     def go_next(self):
         self.browser.location(self.get_middle_auth_link())

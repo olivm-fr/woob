@@ -29,16 +29,17 @@ from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Date,
     Env, Regexp, Field, Format,
 )
-from weboob.browser.filters.html import Attr
+from weboob.browser.filters.html import Attr, Link
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.capabilities.profile import Profile, Person
-from weboob.capabilities.bill import Document, Subscription
+from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 from weboob.tools.json import json
 
 from weboob.capabilities.base import NotAvailable
 
 from ..captcha import Captcha, TileError
+from ..pages.login import LoginPage as LoginParPage
 
 
 class Transaction(FrenchTransaction):
@@ -53,6 +54,8 @@ class Transaction(FrenchTransaction):
                 (re.compile(r'^CREDIT MENSUEL CARTE.*'),
                                                             FrenchTransaction.TYPE_CARD_SUMMARY),
                 (re.compile(r'^(?P<category>CARTE) \w+ (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'),
+                                                            FrenchTransaction.TYPE_CARD),
+                (re.compile(r'^(?P<yy>\d{4})\/(?P<mm>\d{2})(?P<dd>\d{2})\d{4}?$'),
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^(?P<dd>\d{2})(?P<mm>\d{2})/(?P<text>.*?)/?(-[\d,]+)?$'),
                                                             FrenchTransaction.TYPE_CARD),
@@ -94,17 +97,31 @@ class ChangePassPage(SGPEPage):
         raise ActionNeeded(message)
 
 
-class LoginPage(SGPEPage):
+class LoginEntPage(SGPEPage):
+    """
+    be carefull : those differents methods and PREFIX_URL are used
+    in another page of an another module which is an abstract of this page
+    """
+    PREFIX_URL = '/sec'
+
     @property
     def logged(self):
         return self.doc.xpath('//a[text()="Déconnexion" and @href="/logout"]')
 
-    def get_authentication_data(self):
-        infos_data = self.browser.open('/sec/vk/gen_crypto?estSession=0').text
+    def get_url(self, path):
+        return (self.browser.BASEURL + self.PREFIX_URL + path)
+
+    def get_keyboard_infos(self):
+        url = self.get_url('/vk/gen_crypto?estSession=0')
+        infos_data = self.browser.open(url).text
         infos_data = re.match('^_vkCallback\((.*)\);$', infos_data).group(1)
         infos = json.loads(infos_data.replace("'", '"'))
+        return infos
 
-        url = '/sec/vk/gen_ui?modeClavier=0&cryptogramme=' + infos["crypto"]
+    def get_keyboard_data(self):
+        infos = self.get_keyboard_infos()
+
+        url = self.get_url('/vk/gen_ui?modeClavier=0&cryptogramme=' + infos['crypto'])
         img = Captcha(BytesIO(self.browser.open(url).content), infos)
 
         try:
@@ -119,16 +136,44 @@ class LoginPage(SGPEPage):
             'img': img,
         }
 
-    def login(self, login, password):
-        authentication_data = self.get_authentication_data()
+    def get_authentication_url(self):
+        return self.browser.absurl('/authent.html')
 
-        data = {
+    def get_authentication_data(self, login, password):
+        keyboard_data = self.get_keyboard_data()
+        return {
             'user_id': login,
-            'codsec': authentication_data['img'].get_codes(password[:6]),
-            'cryptocvcs': authentication_data['infos']['crypto'],
+            'codsec': keyboard_data['img'].get_codes(password[:6]),
+            'cryptocvcs': keyboard_data['infos']['crypto'],
             'vk_op': 'auth',
         }
-        self.browser.location(self.browser.absurl('/authent.html'), data=data)
+
+    def login(self, login, password):
+        self.browser.location(
+            self.get_authentication_url(),
+            data=self.get_authentication_data(login, password)
+        )
+
+
+class MainProPage(LoginEntPage):
+    def get_authentication_url(self):
+        return self.browser.absurl('/sec/vk/authent.json')
+
+    def login(self, login, password):
+        authentication_data = self.get_authentication_data(login, password)
+        authentication_data.update({
+            'top_code_etoile': 0,
+            'top_ident': 0,
+            'cible': 300,
+        })
+        self.browser.location(
+            self.get_authentication_url(),
+            data=authentication_data
+        )
+
+
+class LoginProPage(LoginParPage):
+    pass
 
 
 class CardsPage(LoggedPage, SGPEPage):
@@ -154,8 +199,10 @@ class CardHistoryPage(LoggedPage, SGPEPage):
             obj_rdate = Date(CleanText('./td[1]'), dayfirst=True)
             obj_date = Date(Env('date'), dayfirst=True, default=NotAvailable)
             obj_raw = Transaction.Raw(CleanText('./td[2]'))
-            obj_type = Transaction.TYPE_DEFERRED_CARD
             obj__coming = True
+
+            def obj_type(self):
+                return Transaction.TYPE_DEFERRED_CARD
 
             def obj_amount(self):
                 return CleanDecimal('./td[3]', replace_dots=True, default=NotAvailable)(self)  \
@@ -241,7 +288,7 @@ class SubscriptionPage(LoggedPage, SGPEPage):
             obj_date = Date(Regexp(Field('label'), r'au (\d{4}\-\d{2}\-\d{2})'))
             obj_id = Format('%s_%s', Env('sub_id'), CleanText(Regexp(Field('label'), r'au (\d{4}\-\d{2}\-\d{2})'), replace=[('-', '')]))
             obj_format = 'pdf'
-            obj_type = 'document'
+            obj_type = DocumentTypes.STATEMENT
             obj_url = Format(
                     '/Pgn/PrintServlet?PageID=ReleveRIE&MenuID=BANRELRIE&urlTypeTransfert=ipdf&REPORTNAME=ReleveInteretElectronique.sgi&numeroRie=%s',
                     Regexp(Attr('./td[2]/a', 'onclick'), r"impression\('(.*)'\);")
@@ -269,3 +316,16 @@ class InscriptionPage(SGPEPage):
 
 class UselessPage(LoggedPage, SGPEPage):
     pass
+
+
+class MainPage(LoggedPage, SGPEPage):
+    def get_market_accounts_link(self):
+        # this is for "ent" website, don't know if it works like "pro" website
+        market_accounts_link = Link('//li/a[@title="Comptes-titres"]', default=None)(self.doc)
+
+        if market_accounts_link:
+            return market_accounts_link
+        elif self.doc.xpath('//span[contains(text(), "Comptes-titres") and contains(@title, "pas habilité à utiliser ce service")]'):
+            return NotAvailable
+        # return None when we don't know if there are market accounts or not
+        # it will be handled in `browser.py`

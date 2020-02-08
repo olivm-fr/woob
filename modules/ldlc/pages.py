@@ -19,12 +19,16 @@
 
 from __future__ import unicode_literals
 
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, QueryValue, TableCell, Currency
+from weboob.browser.pages import HTMLPage, LoggedPage, PartialHTMLPage
+from weboob.browser.filters.standard import (
+    CleanDecimal, CleanText, Env, Format, QueryValue, TableCell, Currency, Regexp, Async, Date, Field,
+)
 from weboob.browser.elements import ListElement, ItemElement, method, TableElement
-from weboob.browser.filters.html import Attr
-from weboob.capabilities.bill import Bill, Subscription
+from weboob.browser.filters.html import Attr, Link
+from weboob.capabilities import NotAvailable
+from weboob.capabilities.bill import Bill, Subscription, DocumentTypes
 from weboob.tools.date import parse_french_date
+from .materielnet_pages import MyAsyncLoad
 
 
 class HiddenFieldPage(HTMLPage):
@@ -35,8 +39,9 @@ class HiddenFieldPage(HTMLPage):
 
 class HomePage(LoggedPage, HTMLPage):
     @method
-    class get_list(ListElement):
+    class get_subscriptions(ListElement):
         item_xpath = '//div[@id="divAccueilInformationClient"]//div[@id="divInformationClient"]'
+
         class item(ItemElement):
             klass = Subscription
 
@@ -45,56 +50,51 @@ class HomePage(LoggedPage, HTMLPage):
             obj_label = CleanText('.//div[@id="divlblTitleFirstNameLastName"]//span')
 
 
-class LoginPage(HiddenFieldPage):
-    def login(self, username, password, website):
+class LoginPage(HTMLPage):
+    def get_recaptcha_sitekey(self):
+        return Attr('//div[@class="g-recaptcha"]', 'data-sitekey', default=NotAvailable)(self.doc)
+
+    def login(self, username, password, captcha_response=None):
         form = self.get_form(id='aspnetForm')
-        if website == 'part':
-            form["ctl00$ctl00$cphMainContent$cphMainContent$txbMail"] = username
-            form["ctl00$ctl00$cphMainContent$cphMainContent$txbPassword"] = password
-            form["__EVENTTARGET"] = "ctl00$ctl00$cphMainContent$cphMainContent$butConnexion"
-            form["ctl00_ctl00_actScriptManager_HiddenField"] = self.get_ctl00_actScriptManager_HiddenField()
-        else:
-            form["ctl00$cphMainContent$txbMail"] = username
-            form["ctl00$cphMainContent$txbPassword"] = password
-            form["__EVENTTARGET"] = "ctl00$cphMainContent$butConnexion"
-            form["ctl00_ctl00_actScriptManager_HiddenField"] = self.get_ctl00_actScriptManager_HiddenField()
+        form['__EVENTTARGET'] = 'ctl00$cphMainContent$butConnexion'
+        form['ctl00$cphMainContent$txbMail'] = username
+        form['ctl00$cphMainContent$txbPassword'] = password
+
+        # remove this, else error message will be empty if there is a wrongpass
+        del form['ctl00$SaveCookiesChoices']
+        if captcha_response:
+            form['g-recaptcha-response'] = captcha_response
+
         form.submit()
 
     def get_error(self):
         return CleanText('//span[contains(text(), "Identifiants incorrects")]')(self.doc)
 
 
-class BillsPage(LoggedPage, HiddenFieldPage):
-    def get_range(self):
-        for value in self.doc.xpath('//div[@class="commandListing content clearfix"]//select/option/@value'):
-            yield value
-
-
-class ParBillsPage(BillsPage):
+class DocumentsPage(LoggedPage, PartialHTMLPage):
     @method
-    class iter_documents(TableElement):
-        ignore_duplicate = True
-        item_xpath = '//table[@id="TopListing"]/tr[position()>1]'
-        head_xpath = '//table[@id="TopListing"]/tr[@class="TopListingHeader"]/td'
-
-        col_id = 'N° de commande'
-        col_date = 'Date'
-        col_price = 'Montant TTC'
+    class get_documents(ListElement):
+        item_xpath = '//div[@class="dsp-row"]'
 
         class item(ItemElement):
             klass = Bill
 
-            obj_id = Format('%s_%s', Env('subid'), CleanText(TableCell('id')))
-            obj_url = Attr('./td[@class="center" or @class="center pdf"]/a', 'href')
+            load_details = Link('.//a[contains(text(), "détails")]') & MyAsyncLoad
+
+            obj_id = Format('%s_%s', Env('subid'), Field('label'))
+            obj_url = Async('details') & Link('//a[span[contains(text(), "Télécharger la facture")]]', default=NotAvailable)
+            obj_date = Date(CleanText('./div[contains(@class, "cell-date")]'), dayfirst=True)
             obj_format = 'pdf'
-            obj_price = CleanDecimal(TableCell('price'), replace_dots=True)
-            obj_currency = Currency(TableCell('price'))
+            obj_label = Regexp(CleanText('./div[contains(@class, "cell-nb-order")]'), r' (.*)')
+            obj_type = DocumentTypes.BILL
+            obj_price = CleanDecimal(CleanText('./div[contains(@class, "cell-value")]'), replace_dots=(' ', '€'))
+            obj_currency = 'EUR'
 
-            def obj_date(self):
-                return parse_french_date(CleanText(TableCell('date'))(self)).date()
 
-            def condition(self):
-                return CleanText().filter(self.el.xpath('.//td')[-1]) != "" and len(self.el.xpath('./td[@class="center" or @class="center pdf"]/a/@href')) == 1
+class BillsPage(LoggedPage, HiddenFieldPage):
+    def get_range(self):
+        for value in self.doc.xpath('//div[@class="commandListing content clearfix"]//select/option/@value'):
+            yield value
 
 
 class ProBillsPage(BillsPage):

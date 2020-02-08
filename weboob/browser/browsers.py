@@ -44,14 +44,19 @@ try:
     if int(requests.__version__.split('.')[0]) < 2:
         raise ImportError()
 except ImportError:
-    raise ImportError('Please install python-requests >= 2.0')
+    raise ImportError('Please install python3-requests >= 2.0')
 
-from weboob.exceptions import BrowserHTTPSDowngrade, ModuleInstallError, BrowserRedirect, BrowserIncorrectPassword
+from weboob.exceptions import (
+    BrowserHTTPSDowngrade, ModuleInstallError, BrowserRedirect, BrowserIncorrectPassword,
+    NeedInteractiveFor2FA
+)
 
 from weboob.tools.log import getLogger
 from weboob.tools.compat import basestring, unicode, urlparse, urljoin, urlencode, parse_qsl
 from weboob.tools.json import json
+from weboob.tools.value import Value
 
+from .adapters import HTTPAdapter
 from .cookies import WeboobCookieJar
 from .exceptions import HTTPNotFound, ClientError, ServerError
 from .sessions import FuturesSession
@@ -87,9 +92,10 @@ class Browser(object):
     Check SSL certificates.
     """
 
-    PROXIES = None
-
     MAX_RETRIES = 2
+    """
+    Maximum retries on failed requests.
+    """
 
     MAX_WORKERS = 10
     """
@@ -116,7 +122,17 @@ class Browser(object):
             return localfile
         return os.path.join(os.path.dirname(inspect.getfile(cls)), localfile)
 
-    def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None):
+    def __new__(cls, *args, **kwargs):
+        """ Accept any arguments, necessary for AbstractBrowser __new__ override.
+
+        AbstractBrowser, in its overridden __new__, removes itself from class hierarchy
+        so its __new__ is called only once. In python 3, default (object) __new__ is
+        then used for next instantiations but it's a slot/"fixed" version supporting
+        only one argument (type to instanciate).
+        """
+        return object.__new__(cls)
+
+    def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None, proxy_headers=None):
         self.logger = getLogger('browser', logger)
         self.responses_dirname = responses_dirname
         self.responses_count = 1
@@ -126,6 +142,7 @@ class Browser(object):
             self.VERIFY = self.asset(self.VERIFY)
 
         self.PROXIES = proxy
+        self.proxy_headers = proxy_headers or {}
         self._setup_session(self.PROFILE)
         self.url = None
         self.response = None
@@ -199,7 +216,7 @@ class Browser(object):
 
     def _setup_session(self, profile):
         """
-        Set up a python-requests session for our usage.
+        Set up a python3-requests session for our usage.
         """
         session = self._create_session()
 
@@ -215,13 +232,14 @@ class Browser(object):
 
         # defines a max_retries. It's mandatory in case a server is not
         # handling keep alive correctly, like the proxy burp
-        adapter_kwargs = dict(max_retries=self.MAX_RETRIES)
+        adapter_kwargs = dict(max_retries=self.MAX_RETRIES,
+                              proxy_headers=self.proxy_headers)
         # set connection pool size equal to MAX_WORKERS if needed
         if self.MAX_WORKERS > requests.adapters.DEFAULT_POOLSIZE:
             adapter_kwargs.update(pool_connections=self.MAX_WORKERS,
                                   pool_maxsize=self.MAX_WORKERS)
-        session.mount('https://', requests.adapters.HTTPAdapter(**adapter_kwargs))
-        session.mount('http://', requests.adapters.HTTPAdapter(**adapter_kwargs))
+        session.mount('https://', HTTPAdapter(**adapter_kwargs))
+        session.mount('http://', HTTPAdapter(**adapter_kwargs))
 
         if self.TIMEOUT:
             session.timeout = self.TIMEOUT
@@ -352,7 +370,7 @@ class Browser(object):
             self.raise_for_status(response)
             return callback(response)
 
-        # call python-requests
+        # call python3-requests
         response = self.session.send(preq,
                                      allow_redirects=allow_redirects,
                                      stream=stream,
@@ -706,7 +724,7 @@ class PagesBrowser(DomainBrowser):
                 regexp = r'^(?P<proto>\w+)://.*'
 
                 proto_response = re.match(regexp, response.url)
-                if proto_response:
+                if proto_response and self.BASEURL:
                     proto_response = proto_response.group('proto')
                     proto_base = re.match(regexp, self.BASEURL).group('proto')
 
@@ -761,8 +779,8 @@ class PagesBrowser(DomainBrowser):
         ...             raise NextPage(next.attrib['href'])
         ...
         >>> class Browser(PagesBrowser):
-        ...     BASEURL = 'https://people.symlink.me'
-        ...     list = URL('/~rom1/projects/weboob/list-(?P<pagenum>\d+).html', Page)
+        ...     BASEURL = 'https://romain.bignon.me'
+        ...     list = URL('/projects/weboob/list-(?P<pagenum>\d+).html', Page)
         ...
         >>> b = Browser()
         >>> b.list.go(pagenum=1) # doctest: +ELLIPSIS
@@ -857,7 +875,7 @@ class StatesMixin(object):
             pass
 
     def load_state(self, state):
-        if 'expire' in state and parser.parse(state['expire']) < datetime.now():
+        if state.get('expire') and parser.parse(state['expire']) < datetime.now():
             return self.logger.info('State expired, not reloading it from storage')
         if 'cookies' in state:
             try:
@@ -873,6 +891,9 @@ class StatesMixin(object):
         if 'url' in state:
             self.locate_browser(state)
 
+    def get_expire(self):
+        return unicode((datetime.now() + timedelta(minutes=self.STATE_DURATION)).replace(microsecond=0))
+
     def dump_state(self):
         state = {}
         if hasattr(self, 'page') and self.page:
@@ -884,7 +905,7 @@ class StatesMixin(object):
             except AttributeError:
                 pass
         if self.STATE_DURATION is not None:
-            state['expire'] = unicode((datetime.now() + timedelta(minutes=self.STATE_DURATION)).replace(microsecond=0))
+            state['expire'] = self.get_expire()
         self.logger.info('Stored cookies into storage')
         return state
 
@@ -939,7 +960,7 @@ class AbstractBrowser(Browser):
 
     PARENT is a mandatory attribute, it's the name of the module providing the parent Browser
 
-    PARENT_ATTR is an optionnal attribute used when the parent module does not have only one
+    PARENT_ATTR is an optional attribute used when the parent module does not have only one
     browser defined as BROWSER class attribute: you can customized the path of the object to load.
 
     Note that you must pass a valid weboob instance as first argument of the constructor.
@@ -947,9 +968,8 @@ class AbstractBrowser(Browser):
     PARENT = None
     PARENT_ATTR = None
 
-    def __new__(cls, *args, **kwargs):
-        weboob = kwargs['weboob']
-
+    @classmethod
+    def _resolve_abstract(cls, weboob):
         if cls.PARENT is None:
             raise AbstractBrowserMissingParentError("PARENT is not defined for browser %s" % cls)
 
@@ -966,8 +986,17 @@ class AbstractBrowser(Browser):
         if parent is None:
             raise AbstractBrowserMissingParentError("Failed to load parent class")
 
+        # Parent may be an AbstractBrowser as well
+        if hasattr(parent, '_resolve_abstract'):
+            parent._resolve_abstract(weboob)
+
         cls.__bases__ = (parent,)
-        return object.__new__(cls)
+        cls.weboob = weboob
+
+    def __new__(cls, *args, **kwargs):
+        weboob = kwargs['weboob']
+        cls._resolve_abstract(weboob)
+        return Browser.__new__(cls, *args, **kwargs)
 
 
 class OAuth2Mixin(StatesMixin):
@@ -983,6 +1012,7 @@ class OAuth2Mixin(StatesMixin):
     auth_uri = None
     token_type = None
     refresh_token = None
+    oauth_state = None
 
     def __init__(self, *args, **kwargs):
         super(OAuth2Mixin, self).__init__(*args, **kwargs)
@@ -1002,9 +1032,15 @@ class OAuth2Mixin(StatesMixin):
         super(OAuth2Mixin, self).load_state(state)
         self.access_token_expire = parser.parse(self.access_token_expire) if self.access_token_expire else None
 
+    def raise_for_status(self, response):
+        if response.status_code == 401:
+            self.access_token = None
+
+        return super(OAuth2Mixin, self).raise_for_status(response)
+
     @property
     def logged(self):
-        return self.access_token is not None and self.access_token_expire > datetime.now()
+        return self.access_token is not None and (not self.access_token_expire or self.access_token_expire > datetime.now())
 
     def do_login(self):
         if self.refresh_token:
@@ -1015,11 +1051,15 @@ class OAuth2Mixin(StatesMixin):
             self.request_authorization()
 
     def build_authorization_parameters(self):
-        return {'redirect_uri':    self.redirect_uri,
-                'scope':           self.SCOPE,
-                'client_id':       self.client_id,
-                'response_type':   'code',
-               }
+        params = {
+            'redirect_uri':    self.redirect_uri,
+            'scope':           self.SCOPE,
+            'client_id':       self.client_id,
+            'response_type':   'code',
+        }
+        if self.oauth_state:
+            params['state'] = self.oauth_state
+        return params
 
     def build_authorization_uri(self):
         p = urlparse(self.AUTHORIZATION_URI)
@@ -1030,6 +1070,11 @@ class OAuth2Mixin(StatesMixin):
     def request_authorization(self):
         self.logger.info('request authorization')
         raise BrowserRedirect(self.build_authorization_uri())
+
+    def handle_callback_error(self, values):
+        # Here we try to catch callback errors occurring during enrollment
+        # Ideally overload this method in each module to catch specific error
+        assert values.get('code'), "No 'code' was found into the callback url, please raise the right error: %s" % values
 
     def build_access_token_parameters(self, values):
         return {'code':             values['code'],
@@ -1049,6 +1094,7 @@ class OAuth2Mixin(StatesMixin):
             values = auth_uri
         else:
             values = dict(parse_qsl(urlparse(auth_uri).query))
+        self.handle_callback_error(values)
         data = self.build_access_token_parameters(values)
         try:
             auth_response = self.do_token_request(data).json()
@@ -1057,21 +1103,29 @@ class OAuth2Mixin(StatesMixin):
 
         self.update_token(auth_response)
 
+    def build_refresh_token_parameters(self):
+        return {
+            'grant_type': 'refresh_token',
+            'refresh_token': self.refresh_token,
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'redirect_uri': self.redirect_uri,
+        }
+
     def use_refresh_token(self):
         self.logger.info('refreshing token')
 
-        data = {'grant_type':       'refresh_token',
-                'refresh_token':    self.refresh_token,
-               }
+        data = self.build_refresh_token_parameters()
         try:
             auth_response = self.do_token_request(data).json()
         except ClientError:
+            self.refresh_token = None
             raise BrowserIncorrectPassword()
 
         self.update_token(auth_response)
 
     def update_token(self, auth_response):
-        self.token_type = auth_response['token_type'].capitalize() # don't know yet if this is a good idea, but required by bnpstet
+        self.token_type = auth_response.get('token_type', 'Bearer').capitalize() # don't know yet if this is a good idea, but required by bnpstet
         if 'refresh_token' in auth_response:
             self.refresh_token = auth_response['refresh_token']
         self.access_token = auth_response['access_token']
@@ -1090,15 +1144,19 @@ class OAuth2PKCEMixin(OAuth2Mixin):
         return base64.urlsafe_b64encode(os.urandom(bytes_number)).rstrip(b'=').decode('ascii')
 
     def code_challenge(self, verifier):
-        digest = sha256(verifier).digest()
+        digest = sha256(verifier.encode('utf8')).digest()
         return base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
 
     def build_authorization_parameters(self):
-        return {'redirect_uri':    self.redirect_uri,
-                'code_challenge_method': 'S256',
-                'code_challenge':  self.pkce_challenge,
-                'client_id':       self.client_id
-               }
+        params = {
+            'redirect_uri':    self.redirect_uri,
+            'code_challenge_method': 'S256',
+            'code_challenge':  self.pkce_challenge,
+            'client_id':       self.client_id,
+        }
+        if self.oauth_state:
+            params['state'] = self.oauth_state
+        return params
 
     def build_access_token_parameters(self, values):
         return {'code':             values['code'],
@@ -1108,3 +1166,103 @@ class OAuth2PKCEMixin(OAuth2Mixin):
                 'client_id':        self.client_id,
                 'client_secret':    self.client_secret,
                 }
+
+
+class TwoFactorBrowser(LoginBrowser, StatesMixin):
+    # period to keep the same state
+    # it is different from STATE_DURATION which updates the expire date at each dump
+    TWOFA_DURATION = None
+
+    INTERACTIVE_NAME = 'request_information'
+    # dict of config keys and methods used for double authentication
+    # must be set up in the init to handle function pointers
+    AUTHENTICATION_METHODS = {}
+
+    # list of cookie keys to clear before dumping state
+    COOKIES_TO_CLEAR = ()
+
+    # login can also be done with credentials without 2FA
+    HAS_CREDENTIALS_ONLY = False
+
+    def __init__(self, config, *args, **kwargs):
+        super(TwoFactorBrowser, self).__init__(*args, **kwargs)
+        self.config = config
+        self.is_interactive = config.get(self.INTERACTIVE_NAME, Value()).get() is not None
+        self.twofa_logged_date = None
+        self.__states__ += ('twofa_logged_date',)
+
+    def get_expire(self):
+        expires_dates = [datetime.now() + timedelta(minutes=self.STATE_DURATION)]
+
+        if getattr(self, 'twofa_logged_date', None) and self.TWOFA_DURATION is not None:
+            expires_dates.append(self.twofa_logged_date + timedelta(minutes=self.TWOFA_DURATION))
+
+        return unicode(max(expires_dates).replace(microsecond=0))
+
+    def dump_state(self):
+        self.clear_not_2fa_cookies()
+        # so the date can be parsed in json
+        # because twofa_logged_date is in state
+        self.twofa_logged_date = str(self.twofa_logged_date)
+        return super(TwoFactorBrowser, self).dump_state()
+
+    def init_login(self):
+        """
+        Abstract method to implement initiation of login on website.
+
+        This method should raise an exception.
+
+        SCA exceptions :
+        - AppValidation for polling method
+        - BrowserQuestion for SMS method, token method etc.
+
+        Any other exceptions, default to BrowserIncorrectPassword.
+        """
+        raise NotImplementedError()
+
+    def clear_init_cookies(self):
+        # clear cookies to avoid some errors
+        self.session.cookies.clear()
+
+    def clear_not_2fa_cookies(self):
+        # clear cookies that we don't need for 2FA
+        for cookie_key in self.COOKIES_TO_CLEAR:
+            if cookie_key in self.session.cookies:
+                del self.session.cookies[cookie_key]
+
+    def check_interactive(self):
+        if not self.is_interactive:
+            raise NeedInteractiveFor2FA()
+
+    def do_double_authentication(self):
+        """
+        This method will check AUTHENTICATION_METHODS
+        to dispatch to the right handle_* method.
+
+        If no backend configuration could be found,
+        it will then call init_login method.
+        """
+        assert self.AUTHENTICATION_METHODS, 'There is no config for the double authentication.'
+        self.twofa_logged_date = None
+
+        for config_key, handle_method in self.AUTHENTICATION_METHODS.items():
+            setattr(self, config_key, self.config.get(config_key, Value()).get())
+            if getattr(self, config_key):
+                handle_method()
+
+                self.twofa_logged_date = datetime.now()
+
+                # cleaning authentication config keys
+                for config_key in self.AUTHENTICATION_METHODS.keys():
+                    if config_key in self.config:
+                        self.config[config_key] = self.config[config_key].default
+
+                break
+        else:
+            if not self.HAS_CREDENTIALS_ONLY:
+                self.check_interactive()
+
+            self.clear_init_cookies()
+            self.init_login()
+
+    do_login = do_double_authentication

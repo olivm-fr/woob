@@ -19,45 +19,56 @@
 
 from __future__ import unicode_literals
 
+import time
+
 from datetime import datetime
 from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 
-from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable
-from weboob.capabilities.bank import Account, TransferBankError, AddRecipientStep
+from weboob.browser import URL, need_login
+from weboob.browser.browsers import TwoFactorBrowser
+from weboob.capabilities.bill import Document, DocumentTypes
+from weboob.exceptions import (
+    BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable,
+    AppValidation, BrowserQuestion, AppValidationError, AppValidationCancelled,
+    AppValidationExpired,
+)
+from weboob.capabilities.bank import Account, TransferBankError, AddRecipientStep, TransactionType, AccountOwnerType
 from weboob.capabilities.base import find_object, NotAvailable
 from weboob.browser.exceptions import BrowserHTTPNotFound, ClientError
 from weboob.capabilities.profile import ProfileMissing
 from weboob.tools.value import Value, ValueBool
+from weboob.tools.decorators import retry
 
 from .pages.accounts_list import (
     AccountsMainPage, AccountDetailsPage, AccountsPage, LoansPage, HistoryPage,
-    CardHistoryPage, PeaLiquidityPage, AccountsSynthesesPage,
+    CardHistoryPage, PeaLiquidityPage,
     AdvisorPage, HTMLProfilePage, CreditPage, CreditHistoryPage, OldHistoryPage,
     MarketPage, LifeInsurance, LifeInsuranceHistory, LifeInsuranceInvest, LifeInsuranceInvest2,
-    UnavailableServicePage,
+    UnavailableServicePage, LoanDetailsPage, TemporaryBrowserUnavailable,
 )
 from .pages.transfer import AddRecipientPage, SignRecipientPage, TransferJson, SignTransferPage
 from .pages.login import MainPage, LoginPage, BadLoginPage, ReinitPasswordPage, ActionNeededPage, ErrorPage
-from .pages.subscription import BankStatementPage
+from .pages.subscription import BankStatementPage, RibPdfPage
 
 
 __all__ = ['SocieteGenerale']
 
 
-class SocieteGenerale(LoginBrowser, StatesMixin):
+class SocieteGenerale(TwoFactorBrowser):
+    HAS_CREDENTIALS_ONLY = True
+
     BASEURL = 'https://particuliers.societegenerale.fr'
-    STATE_DURATION = 5
+    STATE_DURATION = 10
 
     # Bank
     accounts_main_page = URL(r'/restitution/cns_listeprestation.html',
                              r'/com/icd-web/cbo/index.html', AccountsMainPage)
     account_details_page = URL(r'/restitution/cns_detailPrestation.html', AccountDetailsPage)
-    accounts = URL(r'/icd/cbo/data/liste-prestations-navigation-authsec.json', AccountsPage)
-    accounts_syntheses = URL(r'/icd/cbo/data/liste-prestations-authsec.json\?n10_avecMontant=1', AccountsSynthesesPage)
+    accounts = URL(r'/icd/cbo/data/liste-prestations-authsec.json\?n10_avecMontant=1', AccountsPage)
     history = URL(r'/icd/cbo/data/liste-operations-authsec.json', HistoryPage)
     loans = URL(r'/abm/restit/listeRestitutionPretsNET.json\?a100_isPretConso=(?P<conso>\w+)', LoansPage)
+    loan_details_page = URL(r'icd/cbo/data/recapitulatif-prestation-authsec.json', LoanDetailsPage)
 
     card_history = URL(r'/restitution/cns_listeReleveCarteDd.xml', CardHistoryPage)
     credit = URL(r'/restitution/cns_detailAVPAT.html', CreditPage)
@@ -99,6 +110,7 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
     bank_statement = URL(r'/restitution/rce_derniers_releves.html', BankStatementPage)
     bank_statement_search = URL(r'/restitution/rce_recherche.html\?noRedirect=1',
                                 r'/restitution/rce_recherche_resultat.html', BankStatementPage)
+    rib_pdf_page = URL(r'/com/icd-web/cbo/pdf/rib-authsec.pdf', RibPdfPage)
 
     bad_login = URL(r'/acces/authlgn.html', r'/error403.html', BadLoginPage)
     reinit = URL(r'/acces/changecodeobligatoire.html',
@@ -108,39 +120,52 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
                         r'/com/icd-web/forms/kyc-index.html',
                         ActionNeededPage)
     unavailable_service_page = URL(r'/com/service-indisponible.html',
-                                   r'.*/Technical-pages/503-error-page/unavailable.html', UnavailableServicePage)
-    error = URL(r'https://static.societegenerale.fr/pri/erreur.html', ErrorPage)
-    login = URL(r'/sec/vk', LoginPage)
+                                   r'.*/Technical-pages/503-error-page/unavailable.html',
+                                   r'.*/Technical-pages/service-indisponible/service-indisponible.html',
+                                   UnavailableServicePage)
+    error = URL(r'https://static.societegenerale.fr/pri/erreur.html',
+                r'https://.*/pri/erreur.html', ErrorPage)
+    login = URL(r'https://particuliers.societegenerale.fr//sec/vk/',  # yes, it works only with double slash
+                r'/sec/oob_sendooba.json',
+                r'/sec/oob_pollingooba.json',
+                r'/sec/oob_auth.json',
+                r'/sec/csa/check.json', LoginPage)
     main_page = URL(r'https://particuliers.societegenerale.fr', MainPage)
 
     context = None
     dup = None
     id_transaction = None
+    polling_transaction = None
+    polling_duration = 300  # default to 5 minutes
 
-    __states__ = ('context', 'dup', 'id_transaction')
+    __states__ = ('context', 'dup', 'id_transaction', 'polling_transaction',)
+
+    def __init__(self, config, *args, **kwargs):
+        super(SocieteGenerale, self).__init__(config, *args, **kwargs)
+
+        self.AUTHENTICATION_METHODS = {
+            'resume': self.handle_polling,
+            'code': self.handle_sms,
+        }
+
+    def transfer_condition(self, state):
+        return state.get('dup') is not None and state.get('context') is not None
 
     def locate_browser(self, state):
-        self.location('/com/icd-web/cbo/index.html')
+        if self.transfer_condition(state):
+            self.location('/com/icd-web/cbo/index.html')
+        elif all(url not in state['url'] for url in self.login.urls):
+            super(SocieteGenerale, self).locate_browser(state)
 
-    def load_state(self, state):
-        if state.get('dup') is not None and state.get('context') is not None:
-            super(SocieteGenerale, self).load_state(state)
-
-    def do_login(self):
+    def check_password(self):
         if not self.password.isdigit() or len(self.password) not in (6, 7):
             raise BrowserIncorrectPassword()
         if not self.username.isdigit() or len(self.username) < 8:
             raise BrowserIncorrectPassword()
-        self.username = self.username[:8]
 
-        self.main_page.go()
-        try:
-            self.page.login(self.username, self.password)
-        except BrowserHTTPNotFound:
-            raise BrowserIncorrectPassword()
+    def check_login_reason(self):
+        reason = self.page.get_reason()
 
-        assert self.login.is_here()
-        reason, action = self.page.get_error()
         if reason == 'echec_authent':
             raise BrowserIncorrectPassword()
         elif reason in ('acces_bloq', 'acces_susp', 'pas_acces_bad', ):
@@ -149,6 +174,136 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
             # there is message "Service momentanément indisponible. Veuillez réessayer."
             # in SG website in that case ...
             raise BrowserUnavailable()
+
+    def check_auth_method(self):
+        auth_method = self.page.get_auth_method()
+
+        if not auth_method:
+            self.logger.warning('No auth method available !')
+            raise ActionNeeded(
+                'Veuillez ajouter un numéro de téléphone sur votre banque et/ou activer votre Pass Sécurité'
+            )
+
+        if auth_method['unavailability_reason'] == "ts_non_enrole":
+            raise ActionNeeded(
+                'Veuillez ajouter un numéro de téléphone sur votre banque'
+            )
+
+        elif auth_method['unavailability_reason']:
+            assert False, 'Unknown unavailability reason "%s" found' % auth_method['unavailability_reason']
+
+        if auth_method['type_proc'].lower() == 'auth_oob':
+            self.location('/sec/oob_sendooba.json', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},)
+
+            donnees = self.page.doc['donnees']
+            self.polling_transaction = donnees['id-transaction']
+
+            if donnees.get('expiration_date_hh') and donnees.get('expiration_date_mm'):
+                now = datetime.now()
+                expiration_date = now.replace(
+                    hour=int(donnees['expiration_date_hh']),
+                    minute=int(donnees['expiration_date_mm'])
+                )
+                self.polling_duration = int((expiration_date - now).total_seconds())
+
+            message = "Veuillez valider l'opération dans votre application"
+            terminal_name = auth_method['terminal'][0]['nom']
+            if terminal_name:
+                message += " sur " + terminal_name
+
+            raise AppValidation(message)
+
+        elif auth_method['type_proc'].lower() == 'auth_csa':
+            if auth_method['mode'] == "SMS":
+                self.location(
+                    '/sec/csa/send.json',
+                    data={'csa_op': "auth",}
+                )
+                raise BrowserQuestion(
+                    Value(
+                        'code',
+                        label='Entrez le Code Sécurité reçu par SMS sur le numéro ' + auth_method['ts']
+                    )
+                )
+
+            self.logger.warning('Unknown CSA method "%s" found', auth_method['mod'])
+
+        else:
+            self.logger.warning('Unknown sign method "%s" found', auth_method['type_proc'])
+
+        assert False, 'Unknown auth method "%s: %s" found' % (auth_method['type_proc'], auth_method.get('mod'))
+
+    def init_login(self):
+        self.check_password()
+
+        self.main_page.go()
+        try:
+            self.page.login(self.username[:8], self.password)
+        except BrowserHTTPNotFound:
+            raise BrowserIncorrectPassword()
+
+        assert self.login.is_here(), "An error has occured, we should be on login page."
+
+        self.check_login_reason()
+
+        if self.page.has_twofactor():
+            self.check_interactive()
+            self.check_auth_method()
+
+    def check_polling_errors(self, status):
+        if status == "rejected":
+            raise AppValidationCancelled(
+                "L'opération dans votre application a été annulée"
+            )
+
+        if status == "aborted":
+            raise AppValidationExpired(
+                "L'opération dans votre application a expirée"
+            )
+
+        if status != "available":
+            raise AppValidationError()
+
+    def handle_polling(self):
+        assert self.polling_transaction, "polling_transaction is mandatory !"
+
+        data = {'n10_id_transaction': self.polling_transaction}
+        timeout = time.time() + self.polling_duration
+        while time.time() < timeout:
+            self.location('/sec/oob_pollingooba.json', data=data)
+
+            status = self.page.doc['donnees']['transaction_status']
+            if status != "in_progress":
+                break
+
+            time.sleep(3)
+        else:
+            status = "aborted"
+
+        self.check_polling_errors(status)
+
+        data.update({'oob_op': "auth",})
+        self.location('/sec/oob_auth.json', data=data)
+
+        if self.page.doc.get('commun', {}).get('statut').lower() == "nok":
+            raise BrowserUnavailable()
+
+        self.polling_transaction = None
+
+    def handle_sms(self):
+        if len(self.code) != 6:
+            raise BrowserIncorrectPassword(
+                'Le Code Sécurité doit avoir une taille de 6 caractères'
+            )
+
+        data = {
+            'code': self.code,
+            'csa_op': "auth",
+        }
+        self.location('/sec/csa/check.json', data=data)
+
+        if self.page.doc.get('commun', {}).get('statut').lower() == "nok":
+            raise BrowserIncorrectPassword('Le Code Sécurité est invalide')
 
     def iter_cards(self, account):
         for el in account._cards:
@@ -162,6 +317,7 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
                 card.currency = account.currency
                 card._internal_id = el['idTechnique']
                 card._prestation_id = el['id']
+                card.owner_type = AccountOwnerType.PRIVATE
                 yield card
 
     @need_login
@@ -183,7 +339,8 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
         else:
             account_ibans = self.page.get_account_ibans_dict()
 
-        self.accounts_syntheses.go()
+        go = retry(TemporaryBrowserUnavailable)(self.accounts.go)
+        go()
 
         if not self.page.is_new_website_available():
             # return in old pages to get accounts
@@ -192,20 +349,19 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
                 yield acc
             return
 
-        # get accounts coming
-        account_comings = self.page.get_account_comings()
-
-        self.accounts.go()
+        accounts = {}
         for account in self.page.iter_accounts():
+            account._parent_id = None
             for card in self.iter_cards(account):
                 card.parent = account
+                card.ownership = account.ownership
+                card.owner_type = AccountOwnerType.PRIVATE
                 yield card
+
+            account.owner_type = AccountOwnerType.PRIVATE
 
             if account._prestation_id in account_ibans:
                 account.iban = account_ibans[account._prestation_id]
-
-            if account._prestation_id in account_comings:
-                account.coming = account_comings[account._prestation_id]
 
             if account.type in (account.TYPE_LOAN, account.TYPE_CONSUMER_CREDIT, ):
                 self.loans.stay_or_go(conso=(account._loan_type == 'PR_CONSO'))
@@ -214,8 +370,25 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
             if account.type == account.TYPE_REVOLVING_CREDIT:
                 self.loans.stay_or_go(conso=(account._loan_type == 'PR_CONSO'))
                 account = self.page.get_revolving_account(account)
+                self.loan_details_page.go(params={'b64e200_prestationIdTechnique': account._internal_id})
+                self.page.set_loan_details(account)
+
+            accounts[account.id] = account
+
+        # Adding parent account to LOAN account
+        for account_id, account in accounts.items():
+            if account._parent_id:
+                account.parent = accounts.get(account._parent_id, NotAvailable)
 
             yield account
+
+    def next_page_retry(self, condition):
+        next_page = self.page.hist_pagination(condition)
+        if next_page:
+            location = retry(TemporaryBrowserUnavailable)(self.location)
+            location(next_page)
+            return True
+        return False
 
     @need_login
     def iter_history(self, account):
@@ -235,28 +408,50 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
                 account.type == account.TYPE_REVOLVING_CREDIT and account._loan_type != 'PR_CONSO',
                 account.type in (account.TYPE_REVOLVING_CREDIT, account.TYPE_SAVINGS) and not account._is_json_histo
         )):
-            self.account_details_page.go(params={'idprest': account._prestation_id})
+            go = retry(TemporaryBrowserUnavailable)(self.account_details_page.go)
+            go(params={'idprest': account._prestation_id})
+
             history_url = self.page.get_history_url()
-            assert history_url
-            self.location(self.absurl(history_url))
+
+            # history_url return NotAvailable when history page doesn't exist
+            # it return None when we don't know if history page exist
+            if history_url is None:
+                error_msg = self.page.get_error_msg()
+                assert error_msg, 'There should have error or history url'
+                raise BrowserUnavailable(error_msg)
+            elif history_url:
+                self.location(self.absurl(history_url))
 
             for tr in self.page.iter_history():
                 yield tr
             return
 
         if account.type == account.TYPE_CARD:
-            self.history.go(params={'b64e200_prestationIdTechnique': account.parent._internal_id})
-            for summary_card_tr in self.page.iter_card_transactions(card_number=account.number):
-                yield summary_card_tr
+            go = retry(TemporaryBrowserUnavailable)(self.history.go)
+            go(params={'b64e200_prestationIdTechnique': account.parent._internal_id})
 
-                for card_tr in summary_card_tr._card_transactions:
-                    card_tr.date = summary_card_tr.date
-                    yield card_tr
+            next_page = True
+            while next_page:
+                for summary_card_tr in self.page.iter_card_transactions(card_number=account.number):
+                    yield summary_card_tr
+
+                    for card_tr in summary_card_tr._card_transactions:
+                        card_tr.date = summary_card_tr.date
+                        # We use the Raw pattern to set the rdate automatically, but that make
+                        # the transaction type to "CARD", so we have to correct it in the browser.
+                        card_tr.type = TransactionType.DEFERRED_CARD
+                        yield card_tr
+                next_page = self.next_page_retry('history')
             return
 
-        self.history.go(params={'b64e200_prestationIdTechnique': account._internal_id})
-        for transaction in self.page.iter_history():
-            yield transaction
+        go = retry(TemporaryBrowserUnavailable)(self.history.go)
+        go(params={'b64e200_prestationIdTechnique': account._internal_id})
+
+        next_page = True
+        while next_page:
+            for transaction in self.page.iter_history():
+                yield transaction
+            next_page = self.next_page_retry('history')
 
     @need_login
     def iter_coming(self, account):
@@ -275,20 +470,31 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
         internal_id = account._internal_id
         if account.type == account.TYPE_CARD:
             internal_id = account.parent._internal_id
-        self.history.go(params={'b64e200_prestationIdTechnique': internal_id})
+
+        go = retry(TemporaryBrowserUnavailable)(self.history.go)
+        go(params={'b64e200_prestationIdTechnique': internal_id})
 
         if account.type == account.TYPE_CARD:
-            for transaction in self.page.iter_future_transactions(acc_prestation_id=account._prestation_id):
-                # coming transactions on this page are not include in coming balance
-                # use it only to retrive deferred card coming transactions
-                if transaction._card_coming:
-                    for card_coming in transaction._card_coming:
-                        card_coming.date = transaction.date
-                        yield card_coming
+            next_page = True
+            while next_page:
+                for transaction in self.page.iter_future_transactions(acc_prestation_id=account._prestation_id):
+                    # coming transactions on this page are not included in coming balance
+                    # use it only to retrive deferred card coming transactions
+                    if transaction._card_coming:
+                        for card_coming in transaction._card_coming:
+                            card_coming.date = transaction.date
+                            # We use the Raw pattern to set the rdate automatically, but that makes
+                            # the transaction type to "CARD", so we have to correct it in the browser.
+                            card_coming.type = TransactionType.DEFERRED_CARD
+                            yield card_coming
+                next_page = self.next_page_retry('future')
             return
 
-        for intraday_tr in self.page.iter_intraday_comings():
-            yield intraday_tr
+        next_page = True
+        while next_page:
+            for intraday_tr in self.page.iter_intraday_comings():
+                yield intraday_tr
+            next_page = self.next_page_retry('intraday')
 
     @need_login
     def iter_investment(self, account):
@@ -407,6 +613,10 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
             return self.end_oob_recipient(recipient, **params)
 
         self.add_recipient.go()
+        if self.main_page.is_here():
+            self.page.handle_error()
+            assert False, 'Should not be on this page.'
+
         self.page.post_iban(recipient)
         self.page.post_label(recipient)
 
@@ -439,40 +649,72 @@ class SocieteGenerale(LoginBrowser, StatesMixin):
         try:
             profile = self.get_profile()
             subscriber = profile.name
-        except ProfileMissing:
+        except (ProfileMissing, BrowserUnavailable):
             subscriber = NotAvailable
 
-        # subscriptions which have statements are present on the last statement page
-        self.bank_statement.go()
-        subscriptions_list = list(self.page.iter_subscription())
+        self.accounts.go()
+        subscriptions_list = list(self.page.iter_subscription(subscriber=subscriber))
 
-        # this way the no statement accounts are excluded
-        # and the one keeped have all the data and parameters needed
         self.bank_statement_search.go()
-        for sub in self.page.iter_searchable_subscription(subscriber=subscriber):
-            found_sub = find_object(subscriptions_list, id=sub.id)
+        searchable_subscription_list = list(self.page.iter_searchable_subscription())
+        for sub in subscriptions_list:
+            found_sub = find_object(searchable_subscription_list, id=sub.id)
             if found_sub:
-                yield sub
+                # we need it to get bank statement, but not all subscription have it
+                sub._rad_button_id = found_sub._rad_button_id
+            else:
+                # even without bank statement we still can get RIB document, so we yield subscription anyway
+                sub._rad_button_id = NotAvailable
+            yield sub
 
-    @need_login
-    def iter_documents(self, subscribtion):
-        end_date = datetime.today()
+    def _fetch_rib_document(self, subscription):
+        d = Document()
+        d.id = subscription.id + '_RIB'
+        d.url = self.rib_pdf_page.build(params={'b64e200_prestationIdTechnique': subscription._internal_id})
+        d.type = DocumentTypes.RIB
+        d.format = 'pdf'
+        d.label = 'RIB'
+        return d
+
+    def _iter_statements(self, subscription):
+        # we need _rad_button_id for post_form function
+        # if not present it means this subscription doesn't have any bank statement
+        if subscription._rad_button_id is NotAvailable:
+            return
 
         # 5 years since it goes with a 2 months step
         security_limit = 30
+        end_date = datetime.today()
         i = 0
         while i < security_limit:
             self.bank_statement_search.go()
-            self.page.post_form(subscribtion, end_date)
+            self.page.post_form(subscription, end_date)
 
             # No more documents
             if self.page.has_error_msg():
                 break
 
-            for d in self.page.iter_documents(subscribtion):
+            for d in self.page.iter_documents(subscription):
                 yield d
 
             # 3 months step because the documents list is inclusive
             # from the 08 to the 06, the 06 statement is included
             end_date = end_date - relativedelta(months=+3)
             i += 1
+
+    @need_login
+    def iter_documents(self, subscription):
+        yield self._fetch_rib_document(subscription)
+        for doc in self._iter_statements(subscription):
+            yield doc
+
+    @need_login
+    def iter_documents_by_types(self, subscription, accepted_types):
+        if DocumentTypes.RIB in accepted_types:
+            yield self._fetch_rib_document(subscription)
+
+        if DocumentTypes.STATEMENT not in accepted_types:
+            return
+
+        for doc in self._iter_statements(subscription):
+            yield doc

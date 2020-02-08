@@ -17,61 +17,60 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
 import re
+from decimal import Decimal
 
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination
-from weboob.browser.elements import ListElement, ItemElement, method, TableElement
+from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from weboob.browser.elements import ListElement, ItemElement, TableElement, DictElement, method
 from weboob.browser.filters.standard import (
-    CleanText, Date, Regexp, CleanDecimal, Eval, Field, Async, AsyncLoad,
-    QueryValue, Currency,
+    CleanDecimal, CleanText, Currency, Date,
+    Eval, Field, Lower, MapIn, QueryValue, Regexp,
 )
+from weboob.browser.filters.json import Dict
 from weboob.browser.filters.html import Attr, Link, TableCell
-from weboob.capabilities.bank import Account, Investment
+from weboob.capabilities.bank import Account, Investment, AccountOwnership
 from weboob.capabilities.profile import Person
-from weboob.capabilities.base import NotAvailable, NotLoaded
+from weboob.capabilities.base import NotAvailable, NotLoaded, empty
+from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 
 
-def MyDecimal(*args, **kwargs):
-    kwargs.update(replace_dots=True, default=NotAvailable)
-    return CleanDecimal(*args, **kwargs)
+def float_to_decimal(f):
+    if empty(f):
+        return NotAvailable
+    return Decimal(str(f))
 
 
 class AccountsPage(LoggedPage, HTMLPage):
-    TYPES = {u'assurance vie': Account.TYPE_LIFE_INSURANCE,
-             u'perp': Account.TYPE_PERP,
-             u'novial avenir': Account.TYPE_MADELIN,
-             u'epargne retraite novial': Account.TYPE_LIFE_INSURANCE,
-            }
-
     @method
     class iter_accounts(ListElement):
-        item_xpath = '//div[contains(@data-route, "/savings/")]'
+        item_xpath = '//div[contains(@data-module-open-link--link, "/savings/")]'
 
         class item(ItemElement):
             klass = Account
 
-            condition = lambda self: Field('balance')(self) is not NotAvailable
+            TYPES = {
+                'assurance vie': Account.TYPE_LIFE_INSURANCE,
+                'perp': Account.TYPE_PERP,
+                'epargne retraite agipi pair': Account.TYPE_PERP,
+                'epargne retraite agipi far': Account.TYPE_MADELIN,
+                'epargne retraite ma retraite': Account.TYPE_PER,
+                'novial avenir': Account.TYPE_MADELIN,
+                'epargne retraite novial': Account.TYPE_LIFE_INSURANCE,
+            }
 
-            obj_id = Regexp(CleanText('.//span[has-class("small-title")]'), '(\d+)')
+            obj_id = Regexp(CleanText('.//span[has-class("small-title")]'), r'([\d/]+)')
+            obj_number = obj_id
             obj_label = CleanText('.//h3[has-class("card-title")]')
-            obj_balance = MyDecimal('.//p[has-class("amount-card")]')
-            obj_valuation_diff = MyDecimal('.//p[@class="performance"]')
-
-            def obj_url(self):
-                url = Attr('.', 'data-route')(self)
-                # The Assurance Vie xpath recently changed so we must verify that all
-                # the accounts now have "/savings/" instead of "/assurances-vie/".
-                assert "/savings/" in url
-                return url
-
+            obj_balance = CleanDecimal.French('.//p[has-class("amount-card")]')
+            obj_valuation_diff = CleanDecimal.French('.//p[@class="performance"]', default=NotAvailable)
             obj_currency = Currency('.//p[has-class("amount-card")]')
             obj__acctype = "investment"
-
-            def obj_type(self):
-                types = [v for k, v in self.page.TYPES.items() if k in Field('label')(self).lower()]
-                return types[0] if len(types) else Account.TYPE_UNKNOWN
+            obj_type = MapIn(Lower(Field('label')), TYPES, Account.TYPE_UNKNOWN)
+            obj_url = Attr('.', 'data-module-open-link--link')
+            obj_ownership = AccountOwnership.OWNER
 
 
 class InvestmentPage(LoggedPage, HTMLPage):
@@ -83,7 +82,7 @@ class InvestmentPage(LoggedPage, HTMLPage):
         col_label = 'Nom des supports'
         col_valuation = re.compile('.*Montant')
         col_vdate = 'Date de valorisation'
-        col_portfolio_share = u'Répartition'
+        col_portfolio_share = 'Répartition'
         col_quantity = re.compile('Nombre de parts')
         col_unitvalue = re.compile('Valeur de la part')
 
@@ -149,72 +148,122 @@ class InvestmentPage(LoggedPage, HTMLPage):
                 return cur if self.env['currency'] != cur else NotLoaded
 
     def detailed_view(self):
-        return Attr(u'//button[contains(text(), "Vision détaillée")]', 'data-url', default=None)(self.doc)
+        return Attr('//button[contains(text(), "Vision détaillée")]', 'data-module-open-link--link', default=None)(self.doc)
 
     def is_detail(self):
-        return bool(self.doc.xpath(u'//th[contains(text(), "Valeur de la part")]'))
+        return bool(self.doc.xpath('//th[contains(text(), "Valeur de la part")]'))
 
 
-class Transaction(FrenchTransaction):
-    PATTERNS = [(re.compile(u'^(?P<text>souscription.*)'), FrenchTransaction.TYPE_DEPOSIT),
-                (re.compile(u'^(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-               ]
-
-
-class HistoryPage(LoggedPage, HTMLPage):
-    def build_doc(self, content):
-        # we got empty pages at end of pagination
-        if not content.strip():
-            content = b"<html></html>"
-        return super(HistoryPage, self).build_doc(content)
-
-    def get_account_url(self, url):
-        return Attr(u'//a[@href="%s"]' % url, 'data-target')(self.doc)
-
-    def get_investment_url(self):
-        return Attr('//div[has-class("card-distribution")]', 'data-url', default=None)(self.doc)
-
-    def get_pagination_url(self):
-        return Attr('//div[contains(@class, "default")][@data-module-card-list--current-page]', 'data-module-card-list--url')(self.doc)
+class InvestmentMonAxaPage(LoggedPage, HTMLPage):
+    def get_performance_url(self):
+        return Link('//a[contains(text(), "Performance")]', default=None)(self.doc)
 
     @method
-    class get_investments(ListElement):
-        item_xpath = '//div[@class="white-bg"][.//strong[contains(text(), "support")]]/following-sibling::div'
+    class iter_investment(TableElement):
+        item_xpath = '//div[@id="tabVisionContrat"]/table/tbody/tr'
+        head_xpath = '//div[@id="tabVisionContrat"]/table/thead//th'
+
+        col_label = 'Nom'
+        col_code = 'ISIN'
+        col_asset_category = 'Catégorie'
+        col_valuation = 'Montant'
+        col_portfolio_share = 'Poids'
 
         class item(ItemElement):
             klass = Investment
 
-            obj_label = CleanText('.//div[has-class("t-data__label")]')
-            obj_valuation = MyDecimal('.//div[has-class("t-data__amount") and has-class("desktop")]')
-            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal('.//div[has-class("t-data__amount_label")]'))
+            obj_label = CleanText(TableCell('label'))
+            obj_code = IsinCode(TableCell('code'), default=NotAvailable)
+            obj_code_type = IsinType(TableCell('code'), default=NotAvailable)
+            obj_asset_category = CleanText(TableCell('asset_category'))
+            obj_valuation = CleanDecimal.French(TableCell('valuation'), default=NotAvailable)
 
-    @pagination
+            def obj_portfolio_share(self):
+                share_percent = CleanDecimal.French(TableCell('portfolio_share'), default=None)(self)
+                if not empty(share_percent):
+                    return share_percent / 100
+                return NotAvailable
+
+
+class PerformanceMonAxaPage(LoggedPage, HTMLPage):
     @method
-    class iter_history(ListElement):
-        item_xpath = '//div[contains(@data-url, "savingsdetailledcard")]'
+    class fill_investment(ItemElement):
+        obj_vdate = Date(CleanText('//span[@id="cellDateValorisation"]'), dayfirst=True, default=NotAvailable)
+        # TODO Other values (like `quantity`) may be available. They are not available for the account we have.
 
-        def next_page(self):
-            if not CleanText(self.item_xpath, default=None)(self):
-                return
-            elif self.env.get('no_pagination'):
-                return
 
-            return re.sub(r'(?<=\bskip=)(\d+)', lambda m: str(int(m.group(1)) + 10), self.page.url)
+class Transaction(FrenchTransaction):
+    PATTERNS = [
+        (re.compile(r'^(?P<text>souscription.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+    ]
+
+
+class AccountDetailsPage(LoggedPage, HTMLPage):
+    def get_account_url(self, url):
+        return Attr('//a[@href="%s"]' % url, 'data-url')(self.doc)
+
+    def get_investment_url(self):
+        return Attr('//div[contains(@data-analytics-label, "repartition_par_fond")]', 'data-url', default=None)(self.doc)
+
+    def get_iframe_url(self):
+        return Attr('//div[contains(@class, "iframe-quantalys")]', 'data-module-iframe-quantalys--iframe-url', default=None)(self.doc)
+
+    def get_pid(self):
+        return Attr('//div[@data-module="operations-movements"]', 'data-module-operations-movements--pid', default=None)(self.doc)
+
+
+class HistoryPage(LoggedPage, JsonPage):
+    def has_operations(self):
+        return Dict('response/operations')(self.doc)
+
+    @method
+    class iter_history(DictElement):
+        item_xpath = 'response/operations'
 
         class item(ItemElement):
             klass = Transaction
 
-            load_details = Attr('.', 'data-url') & AsyncLoad
+            def condition(self):
+                # Only return validated transactions
+                return Dict('status')(self) == 'DONE'
 
-            obj_raw = Transaction.Raw('.//div[has-class("desktop")]//em')
-            obj_date = Date(CleanText('.//div[has-class("t-data__date") and has-class("desktop")]'), dayfirst=True)
-            obj_amount = MyDecimal('.//div[has-class("t-data__amount") and has-class("desktop")]')
+            obj_raw = Transaction.Raw(Dict('label'))
+            obj_date = Date(Dict('date'))
+            obj_amount = Eval(float_to_decimal, Dict('net_amount/value'))
+            obj_gross_amount = Eval(float_to_decimal, Dict('gross_amount/value'))
+            obj_type = Transaction.TYPE_BANK
 
-            def obj_investments(self):
-                investments = list(Async('details').loaded_page(self).get_investments())
-                for inv in investments:
-                    inv.vdate = Field('date')(self)
-                return investments
+            # 'oid' is used to get the transaction's investments
+            obj__oid = Dict('id')
+
+
+class HistoryInvestmentsPage(LoggedPage, JsonPage):
+    @method
+    class iter_transaction_investments(DictElement):
+        item_xpath = 'response/operationDetail/transaction_lines'
+
+        class item(ItemElement):
+            klass = Investment
+
+            def condition(self):
+                # Some lines don't even have a label, we skip them
+                return Dict('fund_label', default=None)(self)
+
+            obj_label = Dict('fund_label')
+            obj_valuation = Eval(float_to_decimal, Dict('amount/value'))
+            obj_unitvalue = Eval(float_to_decimal, Dict('fund_unit_value/value', default=None))
+            obj_quantity = Eval(float_to_decimal, Dict('fund_shares_count/value', default=None))
+            obj_vdate = Date(Dict('fund_unit_value/date', default=None), default=NotAvailable)
+
+            def obj_portfolio_share(self):
+                raw_value = Eval(float_to_decimal, Dict('percentage', default=None))(self)
+                if empty(raw_value):
+                    return NotAvailable
+                return raw_value / 100
+
+    def has_investments(self):
+        return Dict('response/operationDetail/transaction_lines', default=None)(self.doc)
 
 
 class ProfilePage(LoggedPage, HTMLPage):

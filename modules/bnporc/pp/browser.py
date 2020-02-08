@@ -24,20 +24,22 @@ from dateutil.relativedelta import relativedelta
 import time
 from requests.exceptions import ConnectionError
 
-from weboob.browser.browsers import LoginBrowser, URL, need_login
+from weboob.browser.browsers import LoginBrowser, URL, need_login, StatesMixin
 from weboob.capabilities.base import find_object
 from weboob.capabilities.bank import (
     AccountNotFound, Account, AddRecipientStep, AddRecipientTimeout,
-    TransferInvalidRecipient,
+    TransferInvalidRecipient, Loan,
 )
+from weboob.capabilities.bill import Subscription
 from weboob.capabilities.profile import ProfileMissing
 from weboob.tools.decorators import retry
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 from weboob.tools.json import json
 from weboob.browser.exceptions import ServerError
 from weboob.browser.elements import DataError
-from weboob.exceptions import BrowserIncorrectPassword
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from weboob.tools.value import Value, ValueBool
+from weboob.tools.capabilities.bank.investments import create_french_liquidity
 
 from .pages import (
     LoginPage, AccountsPage, AccountsIBANPage, HistoryPage, TransferInitPage,
@@ -46,9 +48,10 @@ from .pages import (
     MarketListPage, MarketPage, MarketHistoryPage, MarketSynPage, BNPKeyboard,
     RecipientsPage, ValidateTransferPage, RegisterTransferPage, AdvisorPage,
     AddRecipPage, ActivateRecipPage, ProfilePage, ListDetailCardPage, ListErrorPage,
-    UselessPage, TransferAssertionError,
+    UselessPage, TransferAssertionError, LoanDetailsPage,
 )
 
+from .document_pages import DocumentsPage, DocumentsResearchPage, TitulairePage
 
 __all__ = ['BNPPartPro', 'HelloBank']
 
@@ -72,55 +75,68 @@ class JsonBrowserMixin(object):
         return super(JsonBrowserMixin, self).open(*args, **kwargs)
 
 
-class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
+class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser, StatesMixin):
     TIMEOUT = 30.0
 
     login = URL(r'identification-wspl-pres/identification\?acceptRedirection=true&timestamp=(?P<timestamp>\d+)',
-                'SEEA-pa01/devServer/seeaserver',
-                'https://mabanqueprivee.bnpparibas.net/fr/espace-prive/comptes-et-contrats\?u=%2FSEEA-pa01%2FdevServer%2Fseeaserver',
+                r'SEEA-pa01/devServer/seeaserver',
+                r'https://mabanqueprivee.bnpparibas.net/fr/espace-prive/comptes-et-contrats\?u=%2FSEEA-pa01%2FdevServer%2Fseeaserver',
                 LoginPage)
 
-    list_error_page = URL('https://mabanque.bnpparibas/rsc/contrib/document/properties/identification-fr-part-V1.json', ListErrorPage)
+    list_error_page = URL(r'https://mabanque.bnpparibas/rsc/contrib/document/properties/identification-fr-part-V1.json', ListErrorPage)
 
-    useless_page = URL('/fr/connexion/comptes-et-contrats', UselessPage)
+    useless_page = URL(r'/fr/connexion/comptes-et-contrats', UselessPage)
 
-    con_threshold = URL('/fr/connexion/100-connexions',
-                        '/fr/connexion/mot-de-passe-expire',
-                        '/fr/espace-prive/100-connexions.*',
-                        '/fr/espace-pro/100-connexions-pro.*',
-                        '/fr/espace-pro/changer-son-mot-de-passe',
-                        '/fr/espace-client/100-connexions',
-                        '/fr/espace-prive/mot-de-passe-expire',
-                        '/fr/client/100-connexion',
-                        '/fr/systeme/page-indisponible', ConnectionThresholdPage)
-    accounts = URL('udc-wspl/rest/getlstcpt', AccountsPage)
-    ibans = URL('rib-wspl/rpc/comptes', AccountsIBANPage)
-    history = URL('rop-wspl/rest/releveOp', HistoryPage)
-    transfer_init = URL('virement-wspl/rest/initialisationVirement', TransferInitPage)
+    con_threshold = URL(r'/fr/connexion/100-connexions',
+                        r'/fr/connexion/mot-de-passe-expire',
+                        r'/fr/espace-prive/100-connexions.*',
+                        r'/fr/espace-pro/100-connexions-pro.*',
+                        r'/fr/espace-pro/changer-son-mot-de-passe',
+                        r'/fr/espace-client/100-connexions',
+                        r'/fr/espace-prive/mot-de-passe-expire',
+                        r'/fr/client/mdp-expire',
+                        r'/fr/client/100-connexion',
+                        r'/fr/systeme/page-indisponible', ConnectionThresholdPage)
+    accounts = URL(r'udc-wspl/rest/getlstcpt', AccountsPage)
+    loan_details = URL(r'caraccomptes-wspl/rpc/(?P<loan_type>.*)', LoanDetailsPage)
+    ibans = URL(r'rib-wspl/rpc/comptes', AccountsIBANPage)
+    history = URL(r'rop2-wspl/rest/releveOp', HistoryPage)
+    history_old = URL(r'rop-wspl/rest/releveOp', HistoryPage)
+    transfer_init = URL(r'virement-wspl/rest/initialisationVirement', TransferInitPage)
 
-    lifeinsurances = URL('mefav-wspl/rest/infosContrat', LifeInsurancesPage)
-    lifeinsurances_history = URL('mefav-wspl/rest/listMouvements', LifeInsurancesHistoryPage)
-    lifeinsurances_detail = URL('mefav-wspl/rest/detailMouvement', LifeInsurancesDetailPage)
+    lifeinsurances = URL(r'mefav-wspl/rest/infosContrat', LifeInsurancesPage)
+    lifeinsurances_history = URL(r'mefav-wspl/rest/listMouvements', LifeInsurancesHistoryPage)
+    lifeinsurances_detail = URL(r'mefav-wspl/rest/detailMouvement', LifeInsurancesDetailPage)
 
-    natio_vie_pro = URL('/mefav-wspl/rest/natioViePro', NatioVieProPage)
-    capitalisation_page = URL('https://www.clients.assurance-vie.fr/servlets/helios.cinrj.htmlnav.runtime.FrontServlet', CapitalisationPage)
+    natio_vie_pro = URL(r'/mefav-wspl/rest/natioViePro', NatioVieProPage)
+    capitalisation_page = URL(r'https://www.clients.assurance-vie.fr/servlets/helios.cinrj.htmlnav.runtime.FrontServlet', CapitalisationPage)
 
-    market_list = URL('pe-war/rpc/SAVaccountDetails/get', MarketListPage)
-    market_syn = URL('pe-war/rpc/synthesis/get', MarketSynPage)
-    market = URL('pe-war/rpc/portfolioDetails/get', MarketPage)
-    market_history = URL('/pe-war/rpc/turnOverHistory/get', MarketHistoryPage)
+    market_list = URL(r'pe-war/rpc/SAVaccountDetails/get', MarketListPage)
+    market_syn = URL(r'pe-war/rpc/synthesis/get', MarketSynPage)
+    market = URL(r'pe-war/rpc/portfolioDetails/get', MarketPage)
+    market_history = URL(r'/pe-war/rpc/turnOverHistory/get', MarketHistoryPage)
 
-    recipients = URL('/virement-wspl/rest/listerBeneficiaire', RecipientsPage)
-    add_recip = URL('/virement-wspl/rest/ajouterBeneficiaire', AddRecipPage)
-    activate_recip_sms = URL('/virement-wspl/rest/activerBeneficiaire', ActivateRecipPage)
-    activate_recip_digital_key = URL('/virement-wspl/rest/verifierAuthentForte', ActivateRecipPage)
-    validate_transfer = URL('/virement-wspl/rest/validationVirement', ValidateTransferPage)
-    register_transfer = URL('/virement-wspl/rest/enregistrerVirement', RegisterTransferPage)
+    recipients = URL(r'/virement-wspl/rest/listerBeneficiaire', RecipientsPage)
+    add_recip = URL(r'/virement-wspl/rest/ajouterBeneficiaire', AddRecipPage)
+    activate_recip_sms = URL(r'/virement-wspl/rest/activerBeneficiaire', ActivateRecipPage)
+    activate_recip_digital_key = URL(r'/virement-wspl/rest/verifierAuthentForte', ActivateRecipPage)
+    validate_transfer = URL(r'/virement-wspl/rest/validationVirement', ValidateTransferPage)
+    register_transfer = URL(r'/virement-wspl/rest/enregistrerVirement', RegisterTransferPage)
 
-    advisor = URL('/conseiller-wspl/rest/monConseiller', AdvisorPage)
+    advisor = URL(r'/conseiller-wspl/rest/monConseiller', AdvisorPage)
+
+    titulaire = URL(r'/demat-wspl/rest/listerTitulairesDemat', TitulairePage)
+    document = URL(r'/demat-wspl/rest/listerDocuments', DocumentsPage)
+    document_research = URL(r'/demat-wspl/rest/rechercheCriteresDemat', DocumentsResearchPage)
 
     profile = URL(r'/kyc-wspl/rest/informationsClient', ProfilePage)
     list_detail_card = URL(r'/udcarte-wspl/rest/listeDetailCartes', ListDetailCardPage)
+
+    STATE_DURATION = 10
+
+    need_reload_state = False
+
+    __states__ = ('need_reload_state', 'rcpt_transfer_id')
 
     def __init__(self, config, *args, **kwargs):
         super(BNPParibasBrowser, self).__init__(config['login'].get(), config['password'].get(), *args, **kwargs)
@@ -128,6 +144,7 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
         self.card_to_transaction_type = {}
         self.rotating_password = config['rotating_password'].get()
         self.digital_key = config['digital_key'].get()
+        self.rcpt_transfer_id = None
 
     @retry(ConnectionError, tries=3)
     def open(self, *args, **kwargs):
@@ -140,6 +157,13 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
         self.login.go(timestamp=timestamp())
         if self.login.is_here():
             self.page.login(self.username, self.password)
+
+    def load_state(self, state):
+        # reload state only for new recipient feature
+        if state.get('need_reload_state'):
+            state.pop('url', None)
+            self.need_reload_state = False
+            super(BNPParibasBrowser, self).load_state(state)
 
     def change_pass(self, oldpass, newpass):
         res = self.open('/identification-wspl-pres/grille?accessible=false')
@@ -166,6 +190,15 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
             return profile
         raise ProfileMissing(self.page.get_error_message())
 
+    def is_loan(self, account):
+        return account.type in (
+            Account.TYPE_LOAN,
+            Account.TYPE_MORTGAGE,
+            Account.TYPE_CONSUMER_CREDIT,
+            Account.TYPE_REVOLVING_CREDIT
+        )
+
+
     @need_login
     def iter_accounts(self):
         if self.accounts_list is None:
@@ -179,11 +212,25 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
             except (TransferAssertionError, AttributeError):
                 pass
 
-            accounts = list(self.accounts.go().iter_accounts(ibans))
+            accounts = list(self.accounts.go().iter_accounts(ibans=ibans))
             self.market_syn.go(data=JSON({}))  # do a post on the given URL
             market_accounts = self.page.get_list()  # get the list of 'Comptes Titres'
             checked_accounts = set()
             for account in accounts:
+                if self.is_loan(account):
+                    account = Loan.from_dict(account.to_dict())
+                    if account.type in (Account.TYPE_MORTGAGE, Account.TYPE_CONSUMER_CREDIT):
+                        self.loan_details.go(data={'iban': account.id}, loan_type='creditPret')
+                        self.page.fill_loan_details(obj=account)
+
+                    elif account.type == Account.TYPE_REVOLVING_CREDIT:
+                        self.loan_details.go(data={'iban': account.id}, loan_type='creditConsoProvisio')
+                        self.page.fill_revolving_details(obj=account)
+
+                    elif account.type == Account.TYPE_LOAN:
+                        self.loan_details.go(data={'iban': account.id}, loan_type='creditPretPersoPro')
+                        self.page.fill_loan_details(obj=account)
+
                 for market_acc in market_accounts:
                     if all((
                         market_acc['securityAccountNumber'].endswith(account.number[-4:]),
@@ -250,14 +297,21 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
             if not self.card_to_transaction_type:
                 self.list_detail_card.go()
                 self.card_to_transaction_type = self.page.get_card_to_transaction_type()
-
-            self.history.go(data=JSON({
+            data = JSON({
                 "ibanCrypte": account.id,
                 "pastOrPending": 1,
                 "triAV": 0,
-                "startDate": (datetime.now() - relativedelta(years=2)).strftime('%d%m%Y'),
+                "startDate": (datetime.now() - relativedelta(years=1)).strftime('%d%m%Y'),
                 "endDate": datetime.now().strftime('%d%m%Y')
-            }))
+            })
+            try:
+                self.history.go(data=data)
+            except BrowserUnavailable:
+                # old url is still used for certain connections bu we don't know which one is,
+                # so the same HistoryPage is attained by the old url in another URL object
+                data[1]['startDate'] = (datetime.now() - relativedelta(years=3)).strftime('%d%m%Y')
+                # old url authorizes up to 3 years of history
+                self.history_old.go(data=data)
 
             if coming:
                 return sorted_transactions(self.page.iter_coming())
@@ -286,8 +340,8 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
 
     @need_login
     def iter_investment(self, account):
-        if account.type == Account.TYPE_PEA and account.label.endswith('Espèces'):
-            return []
+        if account.type == Account.TYPE_PEA and 'espèces' in account.label.lower():
+            return [create_french_liquidity(account.balance)]
 
         # Life insurances and PERP may be scraped from the API or from the "Assurance Vie" space,
         # so we need to discriminate between both using account._details:
@@ -389,6 +443,8 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
                 data=json.dumps(data),
                 headers={'Content-Type': 'application/json'}
             ).get_recipient(recipient)
+            self.rcpt_transfer_id = recipient._transfer_id
+            self.need_reload_state = True
             raise AddRecipientStep(recipient, Value('code', label='Saisissez le code reçu par SMS.'))
         elif type_activation == 'digital_key':
             # recipient validated with digital key are immediatly available
@@ -404,9 +460,10 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
         add recipient with sms otp authentication
         """
         data = {}
-        data['idBeneficiaire'] = recipient._transfer_id
+        data['idBeneficiaire'] = self.rcpt_transfer_id
         data['typeActivation'] = 1
         data['codeActivation'] = params['code']
+        self.rcpt_transfer_id = None
         return self.activate_recip_sms.go(data=json.dumps(data), headers={'Content-Type': 'application/json'}).get_recipient(recipient)
 
     @need_login
@@ -484,6 +541,60 @@ class BNPParibasBrowser(JsonBrowserMixin, LoginBrowser):
     @need_login
     def get_thread(self, thread):
         raise NotImplementedError()
+
+    @need_login
+    def iter_documents(self, subscription):
+        titulaires = self.titulaire.go().get_titulaires()
+        # Calling '/demat-wspl/rest/listerDocuments' before the request on 'document'
+        # is necessary when you specify an ikpi, otherwise no documents are returned
+        self.document.go()
+        docs = []
+        id_docs = []
+        iter_documents_functions = [self.page.iter_documents, self.page.iter_documents_pro]
+        for iter_documents in iter_documents_functions:
+            for doc in iter_documents(sub_id=subscription.id, sub_number=subscription._number, baseurl=self.BASEURL):
+                docs.append(doc)
+                id_docs.append(doc.id)
+
+        # documents are sorted by type then date, sort them directly by date
+        docs = sorted(docs, key=lambda doc: doc.date, reverse=True)
+        for doc in docs:
+            yield doc
+
+        # When we only have one titulaire, no need to use the ikpi parameter in the request,
+        # all document are provided with this simple request
+        data = {
+            'dateDebut': (datetime.now() - relativedelta(years=3)).strftime('%d/%m/%Y'),
+            'dateFin': datetime.now().strftime('%d/%m/%Y'),
+        }
+
+        len_titulaires = len(titulaires)
+        self.logger.info('The total number of titulaires on this connection is %s.', len_titulaires)
+        # Ikpi is necessary for multi titulaires accounts to get each document of each titulaires
+        if len_titulaires > 1:
+            data['ikpiPersonne'] = subscription._iduser
+
+        self.document_research.go(json=data)
+        for doc in self.page.iter_documents(sub_id=subscription.id, sub_number=subscription._number, baseurl=self.BASEURL):
+            if doc.id not in id_docs:
+                yield doc
+
+    @need_login
+    def iter_subscription(self):
+        acc_list = self.iter_accounts()
+
+        for acc in acc_list:
+            sub = Subscription()
+            sub.label = acc.label
+            sub.subscriber = acc._subscriber
+            sub.id = acc.id
+            # number is the hidden number of an account like "****1234"
+            # and it's used in the parsing of the docs in iter_documents
+            sub._number = acc.number
+            # iduser is the ikpi affiliate to the account,
+            # usefull for multi titulaires connexions
+            sub._iduser = acc._iduser
+            yield sub
 
 
 class BNPPartPro(BNPParibasBrowser):

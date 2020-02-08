@@ -73,6 +73,9 @@ class SubscriptionsPage(LoggedPage, JsonPage):
             klass = Subscription
 
             obj_id = CleanText(Dict('idPFLabel'))
+            # this label will be override if we find a good contract with _get_similarity_among_id,
+            # but it's not always the case, so take it here for now
+            obj_label = CleanText(Dict('idPFLabel'))
             obj__account_id = CleanText(Dict('idCompteDeFacturation'))
 
 
@@ -132,7 +135,7 @@ class DocumentsPage(LoggedPage, JsonPage):
             doc.label = 'Facture %s' % document['numFactureLabel']
             doc.type = DocumentTypes.BILL
             doc.price = CleanDecimal().filter(document['montantTTC'])
-            doc.currency = '€'
+            doc.currency = 'EUR'
             doc._account_billing = document['compteFacturation']
             doc._bill_number = document['numFacture']
 

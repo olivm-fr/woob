@@ -33,8 +33,8 @@ from weboob.capabilities.base import find_object
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 
 from .pages import (
-    LogoutPage, InfosPage, AccountsPage, HistoryPage, LifeinsurancePage, MarketPage,
-    AdvisorPage, LoginPage, ProfilePage,
+    LogoutPage, AccountsPage, HistoryPage, LifeinsurancePage, MarketPage,
+    AdvisorPage, LoginPage, ProfilePage, RedirectInsurancePage,
 )
 from .transfer_pages import TransferInfoPage, RecipientsListPage, TransferPage
 
@@ -79,21 +79,24 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
     STATE_DURATION = 1
     headers = None
 
-    login = URL('/securityapi/tokens',
-                '/auth/checkuser', LoginPage)
-    logout = URL('/securityapi/revoke',
-                 '/auth/errorauthn',
-                 '/\/auth/errorauthn', LogoutPage)
-    infos = URL('/comptes/', InfosPage)
-    accounts = URL('/domiapi/oauth/json/accounts/synthese(?P<type>.*)', AccountsPage)
-    history = URL('/domiapi/oauth/json/accounts/(?P<page>.*)', HistoryPage)
-    loans = URL('/creditapi/rest/oauth/v1/synthese', AccountsPage)
-    lifeinsurance = URL('/assuranceapi/v1/oauth/sso/suravenir/DETAIL_ASSURANCE_VIE/(?P<accid>.*)',
-                        'https://domiweb.suravenir.fr/', LifeinsurancePage)
-    market = URL('/domiapi/oauth/json/ssoDomifronttitre',
-                 'https://www.(?P<website>.*)/domifronttitre/front/sso/domiweb/01/(?P<action>.*)Portefeuille\?csrf=',
-                 'https://www.*/domiweb/prive/particulier', MarketPage)
-    advisor = URL('/edrapi/v(?P<version>\w+)/oauth/(?P<page>\w+)', AdvisorPage)
+    login = URL(r'/securityapi/tokens',
+                r'/auth/checkuser', LoginPage)
+    logout = URL(r'/securityapi/revoke',
+                 r'/auth/errorauthn',
+                 r'/\/auth/errorauthn', LogoutPage)
+    accounts = URL(r'/domiapi/oauth/json/accounts/synthese(?P<type>.*)', AccountsPage)
+    history = URL(r'/domiapi/oauth/json/accounts/(?P<page>.*)', HistoryPage)
+    loans = URL(r'/creditapi/rest/oauth/v1/synthese', AccountsPage)
+    redirect_insurance = URL(
+        r'assuranceapi/v1/oauth/sso/suravenir/SYNTHESE_ASSURANCEVIE',
+        r'/assuranceapi/v1/oauth/sso/suravenir/DETAIL_ASSURANCE_VIE/(?P<accid>.*)',
+        RedirectInsurancePage
+    )
+    lifeinsurance = URL(r'https://domiweb.suravenir.fr', LifeinsurancePage)
+    market = URL(r'/domiapi/oauth/json/ssoDomifronttitre',
+                 r'https://www.(?P<website>.*)/domifronttitre/front/sso/domiweb/01/(?P<action>.*)Portefeuille\?csrf=',
+                 r'https://www.*/domiweb/prive/particulier', MarketPage)
+    advisor = URL(r'/edrapi/v(?P<version>\w+)/oauth/(?P<page>\w+)', AdvisorPage)
 
     # transfer
     transfer_info = URL(r'/domiapi/oauth/json/transfer/transferinfos', TransferInfoPage)
@@ -164,15 +167,16 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
             return self.accounts_list
 
         seen = {}
+        seen_savings = {}
+        owner_name = self.get_profile().name.upper()
 
-        self.transfer_info.go(json={"beneficiaryType":"INTERNATIONAL"})
+        self.transfer_info.go(json={"beneficiaryType": "INTERNATIONAL"})
         numbers = self.page.get_numbers()
         # to know if account can do transfer
         accounts_eligibilite_debit = self.page.get_eligibilite_debit()
 
         # First get all checking accounts...
-        data = dict(self.infos.stay_or_go().get_typelist())
-        self.accounts.go(data=json.dumps(data), type='comptes', headers=self.json_headers)
+        self.accounts.go(json={'typeListeCompte': 'COMPTE_SOLDE_COMPTES_CHEQUES'}, type='comptes')
         self.page.check_response()
         for key in self.page.get_keys():
             for a in self.page.iter_accounts(key=key):
@@ -186,13 +190,29 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
         numbers.update(self.page.get_numbers())
         page = self.accounts.go(data=json.dumps({}), type='epargne', headers=self.json_headers)
         for key in page.get_keys():
-            for a in page.iter_savings(key=key, numbers=numbers):
+            for a in page.iter_savings(key=key, numbers=numbers, name=owner_name):
+                seen_savings[a.id] = a
                 a._eligible_debit = accounts_eligibilite_debit.get(a.id, False)
                 if a._index in seen:
                     acc = seen[a._index]
                     self.accounts_list.remove(acc)
                     self.logger.warning('replace %s because it seems to be a duplicate of %s', seen[a._index], a)
                 self.accounts_list.append(a)
+
+        # Some saving accounts are not on the same page
+        # In this case we have no _index, we have the details url directly
+        url = self.redirect_insurance.go().get_url()
+        self.location(url)
+        for a in self.page.iter_accounts():
+            # Accounts can be on both pages. Info are slightly out-of-sync on both sites (balances are different).
+            # We keep this one because it's more coherent with invests data.
+            if a.id in seen_savings:
+                acc = seen_savings[a.id]
+                # We keep the _index because it's not available on the other website
+                a._index = acc._index
+                self.accounts_list.remove(acc)
+                self.logger.warning('replace %s because it seems to be a duplicate of %s', seen_savings[a.id], a)
+            self.accounts_list.append(a)
 
         # Then, get loans
         for key in self.loans.go().get_keys():
@@ -219,7 +239,7 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
         return self.accounts_list
 
     def _go_market_history(self):
-        content = self.market.go(data=json.dumps({'place': 'SITUATION_PORTEFEUILLE'}), headers=self.json_headers).content
+        content = self.market.go(data=json.dumps({'place': 'SITUATION_PORTEFEUILLE'}), headers=self.json_headers).text
         self.location(json.loads(content)['urlSSO'])
 
         return self.market.go(website=self.website, action='historique')
@@ -229,13 +249,15 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
     def iter_history(self, account):
         account = self.get_account(account.id)
 
-        if account.type is Account.TYPE_LOAN:
-            return iter([])
+        if account.type in (Account.TYPE_LOAN, Account.TYPE_PEE):
+            return []
 
         if account.type == Account.TYPE_LIFE_INSURANCE:
-            url = json.loads(self.lifeinsurance.go(accid=account._index).content)['url']
+            if not account.url and not hasattr(account, '_index'):
+                # No url and no _index, we can't get history
+                return []
+            url = account.url or self.redirect_insurance.go(accid=account._index).get_url()
             url = self.location(url).page.get_link("opérations")
-
             return self.location(url).page.iter_history()
         elif account.type in (Account.TYPE_PEA, Account.TYPE_MARKET):
             self._go_market_history()
@@ -261,11 +283,16 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
 
         self.history.go(data=json.dumps({'index': account._index}), page="detailcompte", headers=self.json_headers)
 
-        self.trs = {'lastdate': None, 'list': []}
+        self.trs = set()
 
         for tr in self.page.iter_history(index=account._index, nbs=nbs):
+            # Check for duplicates
+            if tr.id in self.trs:
+                continue
+            self.trs.add(tr.id)
             if has_deferred_cards and tr.type == Transaction.TYPE_CARD:
                 tr.type = Transaction.TYPE_DEFERRED_CARD
+                tr.bdate = tr.rdate
 
             trs.append(tr)
 
@@ -277,16 +304,19 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
         account = self.get_account(account.id)
 
         if account.type is Account.TYPE_LOAN:
-            return iter([])
+            return []
 
         comings = []
 
+        if not hasattr(account, '_index'):
+            # No _index, we can't get coming
+            return []
         self.history.go(data=json.dumps({"index": account._index}), page="pendingListOperations", headers=self.json_headers)
-
+        # There is no ids for comings, so no check for duplicates
         for key in self.page.get_keys():
-            self.trs = {'lastdate': None, 'list': []}
             for c in self.page.iter_history(key=key):
                 if hasattr(c, '_deferred_date'):
+                    c.bdate = c.rdate
                     c.date = c._deferred_date
                     c.type = Transaction.TYPE_DEFERRED_CARD # force deferred card type for comings inside cards
 
@@ -300,16 +330,19 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
     def iter_investment(self, account):
         account = self.get_account(account.id)
 
-        if account.type == Account.TYPE_LIFE_INSURANCE:
-            url = json.loads(self.lifeinsurance.go(accid=account._index).content)['url']
+        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP):
+            if not account.url and not hasattr(account, '_index'):
+                # No url and no _index, we can't get investments
+                return []
+            url = account.url or self.redirect_insurance.go(accid=account._index).get_url()
             url = self.location(url).page.get_link("supports")
             if not url:
-                return iter([])
+                return []
             return self.location(url).page.iter_investment()
         elif account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
             data = {"place": "SITUATION_PORTEFEUILLE"}
             response = self.market.go(data=json.dumps(data), headers=self.json_headers)
-            self.location(json.loads(response.content)['urlSSO'])
+            self.location(json.loads(response.text)['urlSSO'])
             self.market.go(website=self.website, action="situation")
             if self.page.go_account(account.label, account._owner):
                 return self.page.iter_investment()
@@ -319,12 +352,12 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
     @retry((ClientError, ServerError))
     @need_login
     def iter_recipients(self, account):
-        self.transfer_info.go(json={"beneficiaryType":"INTERNATIONAL"})
-
-        if account.type in (Account.TYPE_LOAN, ):
+        if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE, ):
             return
         if not account._eligible_debit:
             return
+
+        self.transfer_info.go(json={"beneficiaryType":"INTERNATIONAL"})
 
         # internal recipient
         for rcpt in self.page.iter_titu_accounts():

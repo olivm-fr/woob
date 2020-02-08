@@ -28,7 +28,7 @@ from weboob.capabilities.bank import (
 )
 from weboob.capabilities.bill import (
     CapDocument, Subscription, SubscriptionNotFound,
-    Document, DocumentNotFound,
+    Document, DocumentNotFound, DocumentTypes,
 )
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
@@ -55,13 +55,31 @@ class SocieteGeneraleModule(Module, CapBankWealth, CapBankTransferAddRecipient, 
         ValueBackendPassword('login',      label='Code client', masked=False),
         ValueBackendPassword('password',   label='Code secret'),
         Value('website', label='Type de compte', default='par',
-              choices={'par': 'Particuliers', 'pro': 'Professionnels', 'ent': 'Entreprises'}))
+              choices={'par': 'Particuliers', 'pro': 'Professionnels', 'ent': 'Entreprises'}),
+        # SCA
+        Value('code', label='Code SMS', required=False, default='', noprompt=True),
+        Value('resume', noprompt=True, default=''),
+        Value('request_information', default=None, noprompt=True, required=False),
+    )
+
+    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.RIB)
 
     def create_default_browser(self):
-        b = {'par': SocieteGenerale, 'pro': SGProfessionalBrowser, 'ent': SGEnterpriseBrowser}
-        self.BROWSER = b[self.config['website'].get()]
-        return self.create_browser(self.config['login'].get(),
-                                   self.config['password'].get())
+        website = self.config['website'].get()
+        browsers = {'par': SocieteGenerale, 'pro': SGProfessionalBrowser, 'ent': SGEnterpriseBrowser}
+        self.BROWSER = browsers[website]
+
+        if website in ('par', 'pro',):
+            return self.create_browser(
+                self.config,
+                self.config['login'].get(),
+                self.config['password'].get()
+            )
+        else:
+            return self.create_browser(
+                self.config['login'].get(),
+                self.config['password'].get()
+            )
 
     def iter_accounts(self):
         for account in self.browser.get_accounts_list():
@@ -154,6 +172,18 @@ class SocieteGeneraleModule(Module, CapBankWealth, CapBankTransferAddRecipient, 
             subscription = self.get_subscription(subscription)
 
         return self.browser.iter_documents(subscription)
+
+    def iter_documents_by_types(self, subscription, accepted_types):
+        if not isinstance(subscription, Subscription):
+            subscription = self.get_subscription(subscription)
+
+        if self.config['website'].get() not in ('ent', 'pro'):
+            for doc in self.browser.iter_documents_by_types(subscription, accepted_types):
+                yield doc
+        else:
+            for doc in self.browser.iter_documents(subscription):
+                if doc.type in accepted_types:
+                    yield doc
 
     def download_document(self, document):
         if not isinstance(document, Document):

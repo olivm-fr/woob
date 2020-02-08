@@ -30,19 +30,21 @@ from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from .pages import (
     LoginPage, HomePage, AccountsPage, OldAccountsPage, HistoryPage, InvestmentPage, InvestDetailPage,
     InvestmentListPage, QuestionPage, ChangePassPage, LogonFlowPage, ViewPage, SwitchPage,
+    HandlePasswordsPage, PostponePasswords,
 )
 
 
 class BinckBrowser(LoginBrowser):
     BASEURL = 'https://web.binck.fr'
 
-    ''' Delete this attribute when old website is obsolete '''
     old_website_connection = False
+    unique_account = False
 
     login = URL(r'/Logon', LoginPage)
     view = URL('/PersonIntroduction/Index', ViewPage)
     logon_flow = URL(r'/AmlQuestionnairesOverview/LogonFlow$', LogonFlowPage)
 
+    account = URL(r'/PortfolioOverview/Index', AccountsPage)
     accounts = URL(r'/PersonAccountOverview/Index', AccountsPage)
     old_accounts = URL(r'/AccountsOverview/Index', OldAccountsPage)
 
@@ -57,13 +59,16 @@ class BinckBrowser(LoginBrowser):
     history = URL(r'/TransactionsOverview/GetTransactions',
                   r'/TransactionsOverview/FilteredOverview', HistoryPage)
     questions = URL(r'/FDL_Complex_FR_Compte',
+                    r'/FDL_NonComplex_FR_Compte',
                     r'FsmaMandatoryQuestionnairesOverview', QuestionPage)
     change_pass = URL(r'/ChangePassword/Index',
                       r'/EditSetting/GetSetting\?code=MutationPassword', ChangePassPage)
+    handle_passwords = URL(r'/PersonalCredentials/Index', HandlePasswordsPage)
+    postpone_passwords = URL(r'/PersonalCredentials/PostPone', PostponePasswords)
 
     def deinit(self):
         if self.page and self.page.logged:
-            self.location('/Account/Logoff')
+            self.location('https://www.binck.fr/deconnexion-site-client')
         super(BinckBrowser, self).deinit()
 
     def do_login(self):
@@ -71,7 +76,13 @@ class BinckBrowser(LoginBrowser):
 
         if self.login.is_here():
             error = self.page.get_error()
-            if error and 'mot de passe' in error:
+            # The message for the second error is :
+            # Vous ne pouvez plus vous servir de cet identifiant pour vous connecter,
+            # Nous vous prions d'utiliser celui que vous avez récemment créé.
+            if error and any((
+                'mot de passe' in error,
+                'Vous ne pouvez plus vous servir de cet identifiant' in error,
+            )):
                 raise BrowserIncorrectPassword(error)
             elif error and any((
                 'Votre compte a été bloqué / clôturé' in error,
@@ -93,10 +104,20 @@ class BinckBrowser(LoginBrowser):
 
     @need_login
     def iter_accounts(self):
-        self.accounts.stay_or_go()
+        # If we already know that it is an old website connection,
+        # we can call old_website_connection() right away.
+        if self.old_website_connection:
+            for account in self.iter_old_accounts():
+                yield account
+            return
+
+        if self.unique_account:
+            self.account.stay_or_go()
+        else:
+            self.accounts.stay_or_go()
+
         if self.page.has_accounts_table():
             for a in self.page.iter_accounts():
-                ''' Delete these attributes when old website is obsolete '''
                 a._invpage = None
                 a._histpages = None
 
@@ -116,51 +137,56 @@ class BinckBrowser(LoginBrowser):
         # Some Binck connections don't have any accounts on the new AccountsPage,
         # so we need to fetch them on the OldAccountsPage for now:
         else:
-            ''' Delete this part when old website is obsolete '''
             self.old_website_connection = True
-            self.old_accounts.go()
-            for a in self.page.iter_accounts():
-                try:
-                    self.old_accounts.stay_or_go().go_to_account(a.id)
-                except ServerError as exception:
-                    # get html error to parse
-                    parser = etree.HTMLParser()
-                    html_error = etree.parse(StringIO(exception.response.text), parser)
-                    account_error = html_error.xpath('//p[contains(text(), "Votre compte est")]/text()')
-                    if account_error:
-                        raise ActionNeeded(account_error[0])
-                    else:
-                        raise
+            for account in self.iter_old_accounts():
+                yield account
 
-                a.iban = self.page.get_iban()
-                # Get token
-                token = self.page.get_token()
-                # Get investment page
-                data = {'grouping': "SecurityCategory"}
-                try:
-                    a._invpage = self.investment.go(data=data, headers=token) \
-                        if self.page.is_investment() else None
-                except HTTPNotFound:
-                    # if it's not an invest account, the portfolio link may be present but hidden and return a 404
-                    a._invpage = None
+    @need_login
+    def iter_old_accounts(self):
+        self.old_accounts.go()
+        for a in self.page.iter_accounts():
+            try:
+                self.old_accounts.stay_or_go().go_to_account(a.id)
+            except ServerError as exception:
+                # get html error to parse
+                parser = etree.HTMLParser()
+                html_error = etree.parse(StringIO(exception.response.text), parser)
+                account_error = html_error.xpath('//p[contains(text(), "Votre compte est")]/text()')
+                if account_error:
+                    raise ActionNeeded(account_error[0])
+                else:
+                    raise
 
-                if a._invpage:
-                    a.valuation_diff = a._invpage.get_valuation_diff()
-                # Get history page
-                data = [('currencyCode', a.currency), ('startDate', ""), ('endDate', "")]
-                a._histpages = [self.history.go(data=data, headers=token)]
-                while self.page.doc['EndOfData'] is False:
-                    a._histpages.append(self.history.go(data=self.page.get_nextpage_data(data[:]), headers=token))
+            a.iban = self.page.get_iban()
+            # Get token
+            token = self.page.get_token()
+            # Get investment page
+            data = {'grouping': "SecurityCategory"}
+            try:
+                a._invpage = self.investment.go(data=data, headers=token) \
+                    if self.page.is_investment() else None
+            except HTTPNotFound:
+                # if it's not an invest account, the portfolio link may be present but hidden and return a 404
+                a._invpage = None
 
-                yield a
+            if a._invpage:
+                a.valuation_diff = a._invpage.get_valuation_diff()
+            # Get history page
+            data = [('currencyCode', a.currency), ('startDate', ""), ('endDate', "")]
+            a._histpages = [self.history.go(data=data, headers=token)]
+            while self.page.doc['EndOfData'] is False:
+                a._histpages.append(self.history.go(data=self.page.get_nextpage_data(data[:]), headers=token))
+
+            yield a
 
     @need_login
     def iter_investment(self, account):
+        if account.balance == 0:
+            return
         # Start with liquidities:
         if account._liquidity:
             yield create_french_liquidity(account._liquidity)
 
-        ''' Delete this part when old website is obsolete '''
         if self.old_website_connection:
             self.old_accounts.stay_or_go().go_to_account(account.id)
             if account._invpage:
@@ -187,7 +213,6 @@ class BinckBrowser(LoginBrowser):
 
     @need_login
     def iter_history(self, account):
-        ''' Delete this part when old website is obsolete '''
         if self.old_website_connection:
             if account._histpages:
                 for page in account._histpages:
