@@ -665,9 +665,12 @@ class TransactionsPage(LoggedPage, CDNBasePage):
                 date = Date(dayfirst=True, default=NotAvailable).filter(MyStrip(line[self.COL_DATE]))
                 if not date:
                     continue
-                vdate = MyStrip(line[self.COL_DEBIT_DATE])
-                if vdate != '':
-                    vdate = Date(dayfirst=True).filter(vdate)
+                if MyStrip(line[self.COL_DEBIT_DATE]):
+                    vdate = MyStrip(line[self.COL_DEBIT_DATE])
+                    if vdate != '':
+                        vdate = Date(dayfirst=True).filter(vdate)
+                else:
+                    vdate = date
             raw = MyStrip(line[self.COL_LABEL])
 
             t.parse(date, raw, vdate=vdate)
