@@ -22,10 +22,15 @@ from decimal import Decimal
 from functools import wraps
 import re
 
-from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, AccountNotFound, \
-                                     RecipientNotFound, TransferError, Account
-from weboob.capabilities.bill import CapDocument, Subscription, SubscriptionNotFound, \
-                                     Document, DocumentNotFound, DocumentTypes
+from weboob.capabilities.bank import (
+    CapBankTransferAddRecipient, AccountNotFound,
+    RecipientNotFound, TransferError, Account,
+)
+from weboob.capabilities.wealth import CapBankWealth
+from weboob.capabilities.bill import (
+    CapDocument, Subscription, SubscriptionNotFound,
+    Document, DocumentNotFound, DocumentTypes,
+)
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
@@ -57,7 +62,7 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
     NAME = 'lcl'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = u'LCL'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
@@ -70,7 +75,7 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
                                           'elcl': 'e.LCL'}))
     BROWSER = LCLBrowser
 
-    accepted_doc_types = (DocumentTypes.STATEMENT, DocumentTypes.NOTICE, DocumentTypes.REPORT, DocumentTypes.OTHER)
+    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.NOTICE, DocumentTypes.REPORT, DocumentTypes.OTHER)
 
     def create_default_browser(self):
         # assume all `website` option choices are defined here
@@ -112,7 +117,7 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
     @only_for_websites('par', 'pro', 'elcl')
     def new_recipient(self, recipient, **params):
         # Recipient label has max 15 alphanumrical chars.
-        recipient.label = ' '.join(w for w in re.sub('[^0-9a-zA-Z ]+', '', recipient.label).split())[:15]
+        recipient.label = ' '.join(w for w in re.sub('[^0-9a-zA-Z ]+', '', recipient.label).split())[:15].strip()
         return self.browser.new_recipient(recipient, **params)
 
     @only_for_websites('par', 'pro', 'elcl')
@@ -144,7 +149,7 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
         return self.browser.execute_transfer(transfer)
 
     def transfer_check_label(self, old, new):
-        old = re.sub(r"[/<\?='!\+:#&]", '', old).strip()
+        old = re.sub(r"[\(\)/<\?='!\+:#&%]", '', old).strip()
         old = old.encode('ISO8859-15', errors='replace').decode('ISO8859-15')  # latin-15
         # if no reason given, the site changes the label
         if not old and ("INTERNET-FAVEUR" in new):

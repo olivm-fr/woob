@@ -20,7 +20,8 @@
 
 from decimal import Decimal
 from datetime import timedelta
-from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
+from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.base import find_object, strict_find_object, NotAvailable
 from weboob.capabilities.profile import CapProfile
@@ -29,7 +30,7 @@ from weboob.capabilities.bill import (
     Document, DocumentNotFound,
 )
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, Value
+from weboob.tools.value import ValueBackendPassword, Value, ValueTransient
 
 from .browser import BPBrowser, BProBrowser
 
@@ -45,17 +46,17 @@ class BPModule(
     NAME = 'bp'
     MAINTAINER = u'Nicolas Duhamel'
     EMAIL = 'nicolas@jombi.fr'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'La Banque Postale'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant', masked=False),
-        Value('resume', noprompt=True, default=''),
-        Value('request_information', default=None, noprompt=True, required=False),
-        Value('code', label='Code SMS', required=False, default=''),
         ValueBackendPassword('password', label='Mot de passe', regexp='^(\d{6})$'),
         Value('website', label='Type de compte', default='par',
-              choices={'par': 'Particuliers', 'pro': 'Professionnels'})
+              choices={'par': 'Particuliers', 'pro': 'Professionnels'}),
+        ValueTransient('request_information'),
+        ValueTransient('code'),
+        ValueTransient('resume'),
     )
 
     def create_default_browser(self):
@@ -85,6 +86,9 @@ class BPModule(
     def iter_investment(self, account):
         return self.browser.iter_investment(account)
 
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
+
     def iter_transfer_recipients(self, origin_account):
         if self.config['website'].get() != 'par':
             raise NotImplementedError()
@@ -95,6 +99,9 @@ class BPModule(
     def init_transfer(self, transfer, **params):
         if self.config['website'].get() != 'par':
             raise NotImplementedError()
+
+        if 'transfer_honor_savings' in params:
+            return self.browser.validate_transfer_eligibility(transfer, **params)
 
         self.logger.info('Going to do a new transfer')
         account = strict_find_object(self.iter_accounts(), iban=transfer.account_iban)
@@ -166,3 +173,6 @@ class BPModule(
         if Subscription in objs:
             self._restrict_level(split_path)
             return self.iter_subscription()
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()

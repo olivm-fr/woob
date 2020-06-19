@@ -21,7 +21,7 @@ from __future__ import unicode_literals
 
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
-from weboob.capabilities.bank import CapBankPockets
+from weboob.capabilities.wealth import CapBankWealth
 
 from .browser import HumanisBrowser
 
@@ -29,13 +29,13 @@ from .browser import HumanisBrowser
 __all__ = ['HumanisModule']
 
 
-class HumanisModule(Module, CapBankPockets):
+class HumanisModule(Module, CapBankWealth):
     NAME = 'humanis'
     DESCRIPTION = 'Humanis Épargne Salariale'
     MAINTAINER = 'Quentin Defenouillère'
     EMAIL = 'quentin.defenouillere@budget-insight.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Code d\'accès', masked=False),
         ValueBackendPassword('password', label='Mot de passe')

@@ -19,14 +19,17 @@
 
 from __future__ import unicode_literals
 
-from weboob.browser.pages import HTMLPage, LoggedPage
+import re
+
+from weboob.browser.pages import HTMLPage, LoggedPage, RawPage
 from weboob.browser.elements import method, ItemElement, ListElement
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Currency, Date, NumberFormatError,
     Field, Env, MapIn,
 )
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Transaction, Investment
+from weboob.capabilities.base import NotAvailable, empty
+from weboob.capabilities.bank import Account, Transaction
+from weboob.capabilities.wealth import Investment, PerVersion
 from weboob.browser.filters.html import Attr
 from weboob.capabilities.profile import Profile
 from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
@@ -38,6 +41,11 @@ class LoginPage(HTMLPage):
         form['Login'] = login
         form['Password'] = password
         form.submit()
+
+
+class LoginErrorPage(HTMLPage):
+    def get_message(self):
+        return CleanText('//tr[.//img[@class="iconAlert"]]//p')(self.doc)
 
 
 class ErrorPage(HTMLPage):
@@ -99,9 +107,16 @@ class AccountPage(LoggedPage, HTMLPage):
 
             obj_number = obj_id
             obj_label = CleanText('./td[2]', replace=[(' o ', ' ')])
-            obj__login = CleanDecimal('./td[1]')
             obj_currency = Currency('./td[6]')
             obj_company_name = CleanText('./td[3]')
+
+            def obj__sublabel(self):
+                # Use the second part of the label to determine account index
+                # later on InvestmentPage and remove the 'N ' at the beginning
+                sublabel = CleanText('./td[2]', children=False)(self)
+                if sublabel.startswith('N '):
+                    sublabel = sublabel[2:]
+                return sublabel
 
             def obj_type(self):
                 return MapIn(Field('label'), self.page.ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
@@ -113,6 +128,21 @@ class AccountPage(LoggedPage, HTMLPage):
                     return CleanDecimal.French('./td[6]')(self)
                 except NumberFormatError:
                     return CleanDecimal.US('./td[6]')(self)
+
+    PER_VERSIONS = {
+        'Entreprises': PerVersion.PERCOL,
+    }
+
+    @method
+    class fill_per(ItemElement):
+        def obj_version(self):
+            return MapIn(self, self.page.PER_VERSIONS, NotAvailable).filter(self.obj.label)
+
+
+class AccountSwitchPage(LoggedPage, RawPage):
+    # This page is empty (only two blank lines)
+    # so we have to handle it with RawPage
+    pass
 
 
 class HistoryPage(LoggedPage, HTMLPage):
@@ -126,6 +156,7 @@ class HistoryPage(LoggedPage, HTMLPage):
             obj_date = Date(CleanText('./div[contains(@class, "accordion_header")]/div[1]/p'))
             obj_category = CleanText('./div[contains(@class, "accordion_header")]/div[2]/p[1]')
             obj_label = CleanText('./div[contains(@class, "accordion_header")]/div[3]/p[1]')
+            obj_type = Transaction.TYPE_BANK
 
             def obj_amount(self):
                 # This wonderful website randomly displays separators as '.' or ','
@@ -164,3 +195,12 @@ class InvestmentPage(LoggedPage, HTMLPage):
             obj_quantity = Env('quantity')
             obj_unitvalue = Env('unitvalue')
             obj_valuation = Env('valuation')
+
+    def get_account_index(self, sublabel):
+        # From the <li> tag that contains the sublabel, we fetch the
+        # account index from a string such as 'changeAffiliation(2)':
+        raw_index = Attr('//li[span[contains(text(), "%s")]]' % sublabel, 'onclick', default=None)(self.doc)
+        assert not empty(raw_index), 'Could not find the index to access investments for account %s.' % sublabel
+        m = re.search(r'\d+', raw_index)
+        assert m, 'Could not extract the index to access investments for account %s.' % sublabel
+        return m.group(0)

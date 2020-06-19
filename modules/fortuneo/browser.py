@@ -24,28 +24,45 @@ import time
 import json
 from datetime import datetime, timedelta
 
-from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.exceptions import AuthMethodNotImplemented, BrowserIncorrectPassword, ActionNeeded
-from weboob.capabilities.bank import Account, AddRecipientStep, Recipient
+from weboob.browser import TwoFactorBrowser, URL, need_login
+from weboob.exceptions import (
+    AuthMethodNotImplemented, BrowserQuestion, BrowserIncorrectPassword, ActionNeeded,
+    BrowserUnavailable,
+)
+from weboob.capabilities.bank import (
+    Account, AddRecipientStep, Recipient, Loan, Transaction,
+    AddRecipientBankError,
+)
+from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 from weboob.tools.value import Value
 
-from .pages.login import LoginPage, UnavailablePage
+from .pages.login import LoginPage, TwoFaPage, UnavailablePage
 from .pages.accounts_list import (
-    AccountsList, AccountHistoryPage, CardHistoryPage, InvestmentHistoryPage, PeaHistoryPage, LoanPage, ProfilePage, ProfilePageCSV, SecurityPage, FakeActionPage,
+    AccountsList, AccountHistoryPage, CardHistoryPage,
+    InvestmentHistoryPage, PeaHistoryPage, LoanPage,
+    ProfilePage, ProfilePageCSV, SecurityPage, FalseActionPage,
+    InformationsPage, ActionNeededPage,
 )
 from .pages.transfer import (
     RegisterTransferPage, ValidateTransferPage, ConfirmTransferPage, RecipientsPage, RecipientSMSPage
 )
 
-__all__ = ['Fortuneo']
+__all__ = ['FortuneoBrowser']
 
 
-class Fortuneo(LoginBrowser, StatesMixin):
+class FortuneoBrowser(TwoFactorBrowser):
+    HAS_CREDENTIALS_ONLY = True
     BASEURL = 'https://mabanque.fortuneo.fr'
     STATE_DURATION = 5
 
     login_page = URL(r'.*identification\.jsp.*', LoginPage)
+    twofa_page = URL(
+        r'.*/prive/mes-comptes/synthese-mes-comptes.jsp',
+        r'.*/prive/listes-personnelles.jsp',
+        r'.*/prive/obtenir-otp-connexion.jsp',
+        r'.*/prive/valider-otp-connexion.jsp',
+        TwoFaPage)
 
     accounts_page = URL(r'/fr/prive/default.jsp\?ANav=1',
                         r'.*prive/default\.jsp.*',
@@ -60,9 +77,11 @@ class Fortuneo(LoginBrowser, StatesMixin):
                       r'.*/prive/mes-comptes/compte-titres-pea/.*',
                       r'.*/prive/mes-comptes/ppe/.*', PeaHistoryPage)
     invest_history = URL(r'.*/prive/mes-comptes/assurance-vie/.*', InvestmentHistoryPage)
+    ajax_sync_call = URL(r'/AsynchAjax\?key0=(?P<params_hash>[^&]*)&div0=(?P<action>[^&]*)&time=450')
     loan_contract = URL(r'/fr/prive/mes-comptes/credit-immo/contrat-credit-immo/contrat-pret-immobilier.jsp.*', LoanPage)
     unavailable = URL(r'/customError/indispo.html', UnavailablePage)
     security_page = URL(r'/fr/prive/identification-carte-securite-forte.jsp.*', SecurityPage)
+    informations_page = URL(r'/fr/prive/accueil-informations-client-partiel.jsp', InformationsPage)
 
     # transfer
     recipients = URL(
@@ -84,21 +103,43 @@ class Fortuneo(LoginBrowser, StatesMixin):
         r'fr/prive/mes-comptes/compte-courant/.*/init-confirmer-saisie-virement.jsp',
         r'/fr/prive/mes-comptes/compte-courant/.*/confirmer-saisie-virement.jsp',
         ConfirmTransferPage)
-    fake_action_page = URL(r'fr/prive/mes-comptes/synthese-globale/synthese-mes-comptes.jsp', FakeActionPage)
+    false_action_page = URL(r'fr/prive/mes-comptes/synthese-globale/synthese-mes-comptes.jsp', FalseActionPage)
     profile = URL(r'/fr/prive/informations-client.jsp', ProfilePage)
     profile_csv = URL(r'/PdfStruts\?*', ProfilePageCSV)
 
     need_reload_state = None
 
-    __states__ = ['need_reload_state', 'add_recipient_form']
+    __states__ = ['need_reload_state', 'add_recipient_form', 'sms_form']
 
-    def __init__(self, *args, **kwargs):
-        LoginBrowser.__init__(self, *args, **kwargs)
+    def __init__(self, config, *args, **kwargs):
+        super(FortuneoBrowser, self).__init__(config, *args, **kwargs)
         self.investments = {}
         self.action_needed_processed = False
         self.add_recipient_form = None
 
-    def do_login(self):
+        self.AUTHENTICATION_METHODS = {
+            'code': self.handle_sms,
+        }
+
+    def init_login(self):
+        self.first_login_step()
+
+        if self.twofa_page.is_here():
+            information = self.page.get_warning_message()
+            if 'Cette opération sensible doit être validée par un code sécurité' in information:
+                # The user must contact its bank to add phone information for future 2fa
+                # Here we can continue the login, nevertheless in this case fortuneo always
+                # gives 2fa presence (X-Arkea-sca header) until the user doesn't give phone
+                # information and validate one 90d 2fa.
+                raise ActionNeeded(information)
+
+            # Need to convert Form object into dict for storage
+            self.sms_form = dict(self.page.get_sms_form())
+            raise BrowserQuestion(Value('code', label='Entrez le code reçu par SMS'))
+
+        self.last_login_step()
+
+    def first_login_step(self):
         if not self.login_page.is_here():
             self.location('/fr/identification.jsp')
 
@@ -108,50 +149,43 @@ class Fortuneo(LoginBrowser, StatesMixin):
             self.page.check_is_blocked()
             raise BrowserIncorrectPassword()
 
+    def handle_sms(self):
+        self.sms_form['otp'] = self.code
+        self.sms_form['typeOperationSensible'] = 'AUTHENTIFICATION_FORTE_CONNEXION'
+        self.location('/fr/prive/valider-otp-connexion.jsp', data=self.sms_form)
+        self.sms_form = None
+        self.page.check_otp_error_message()
+
+        self.location('/fr/prive/mes-comptes/synthese-mes-comptes.jsp')
+        self.last_login_step()
+
+    def last_login_step(self):
         self.location('/fr/prive/default.jsp?ANav=1')
         if self.accounts_page.is_here() and self.page.need_sms():
             raise AuthMethodNotImplemented('Authentification with sms is not supported')
 
     def load_state(self, state):
-        # reload state only for new recipient feature
-        if state.get('need_reload_state'):
-            # don't use locate browser for add recipient step
+        # reload state only for new recipient and 2fa features
+        if state.get('need_reload_state') or state.get('sms_form'):
+            # don't use locate browser for add recipient step and 2fa validation
             state.pop('url', None)
-            super(Fortuneo, self).load_state(state)
+            super(FortuneoBrowser, self).load_state(state)
 
-    @need_login
-    def get_investments(self, account):
-        if hasattr(account, '_investment_link'):
-            if account.id in self.investments:
-                return self.investments[account.id]
+    def process_skippable_message(self):
+        global_error_message = self.page.get_global_error_message()
+        if global_error_message:
+            if 'Et si vous faisiez de Fortuneo votre banque principale' in global_error_message:
+                self.location('/ReloadContext', data={'action': 4})
+                return True
             else:
-                self.location(account._investment_link)
-                return self.page.get_investments(account)
-        return []
+                raise ActionNeeded(global_error_message)
+
+        local_error_message = self.page.get_local_error_message()
+        if local_error_message:
+            raise BrowserUnavailable(local_error_message)
 
     @need_login
-    def get_history(self, account):
-        self.location(account._history_link)
-        if not account.type == Account.TYPE_LOAN:
-            if self.page.select_period():
-                return sorted_transactions(self.page.get_operations())
-
-        return []
-
-    @need_login
-    def get_coming(self, account):
-        for cb_link in account._card_links:
-            for _ in range(3):
-                self.location(cb_link)
-                if not self.page.is_loading():
-                    break
-                time.sleep(1)
-
-            for tr in sorted_transactions(self.page.get_operations()):
-                yield tr
-
-    @need_login
-    def get_accounts_list(self):
+    def iter_accounts(self):
         self.accounts_page.go()
 
         # Note: if you want to debug process_action_needed() here,
@@ -161,17 +195,134 @@ class Fortuneo(LoginBrowser, StatesMixin):
             self.process_action_needed()
 
         assert self.accounts_page.is_here()
-        accounts_list = self.page.get_list()
-        if self.fake_action_page.is_here():
-            # A false action needed is present, it's a choice to make Fortuno your main bank.
+
+        if self.false_action_page.is_here():
+            # A false action needed is present, it's a choice to make Fortuneo your main bank.
             # To avoid it, we need to first detect it on the account_page
             # Then make a post request to mimic the click on choice 'later'
             # And to finish we must to reload the page with a POST to get the accounts
             # before going on the accounts_page, which will have the data.
             self.location(self.absurl('ReloadContext?action=1&', base=True), method='POST')
             self.accounts_page.go()
-            accounts_list = self.page.get_list()
-        return accounts_list
+
+        accounts = self.page.iter_accounts()
+
+        for account in accounts:
+            if account._investment_link:
+                self.location(account._investment_link)
+                if self.process_skippable_message():
+                    self.location(account._investment_link)
+
+                self.page.fill_account(obj=account)
+            else:
+                self.location(account._history_link)
+                if self.process_skippable_message():
+                    self.location(account._history_link)
+
+                if self.loan_contract.is_here():
+                    loan = Loan.from_dict(account.to_dict())
+                    loan._ca = account._ca
+                    loan._card_links = account._card_links
+                    loan._investment_link = account._investment_link
+                    loan._history_link = account._history_link
+                    account = loan
+                    self.page.fill_account(obj=account)
+                else:
+                    self.page.fill_account(obj=account)
+            yield account
+
+    @need_login
+    def iter_investments(self, account):
+        if not account._investment_link:
+            return
+
+        self.location(account._investment_link)
+
+        for inv in self.page.iter_investments():
+            yield inv
+
+        if self.pea_history.is_here() and account.type != account.TYPE_MARKET:
+            liquidity = self.page.get_liquidity()
+            if liquidity:
+                yield create_french_liquidity(liquidity)
+
+    @need_login
+    def iter_market_orders(self, account):
+        if not getattr(account, '_market_orders_link', None):
+            return
+
+        self.location(account._market_orders_link)
+
+        # Market orders are loaded with an AJAX call
+        # It loads the market orders table and the form to choose a range of dates
+        for _ in range(3):
+            self.location(account._market_orders_link)
+            if self.page.are_market_orders_loaded():
+                break
+            self.logger.debug('Sleeping for a few seconds so market orders can load...')
+            time.sleep(3)
+
+        form = self.page.get_date_range_form()
+        # Once we submit the form with the date range,
+        # we need to reload the page until they are loaded
+        for _ in range(3):
+            form.submit()
+            if self.page.are_market_orders_loaded():
+                break
+            self.logger.debug('Sleeping for a few seconds so market orders can load...')
+            time.sleep(3)
+
+        for market_order in self.page.iter_market_orders():
+            if market_order._details_link:
+                self.location(market_order._details_link)
+                self.page.fill_market_order(obj=market_order)
+            yield market_order
+
+
+    @need_login
+    def iter_history(self, account):
+        if account.type == Account.TYPE_LOAN:
+            return []
+
+        self.location(account._history_link)
+
+        if self.page.select_period():
+            raw_transactions = list(self.page.iter_history())
+
+            # We replace transactions with their subtransactions if they have any
+            transactions = []
+            for tr in raw_transactions:
+                # There is no difference between card transaction and deferred card transaction
+                # on the history.
+                if tr.type == Transaction.TYPE_CARD:
+                    tr.bdate = tr.rdate
+
+                if tr._details_link:
+                    self.location(tr._details_link)
+                    detailed_transactions = list(self.page.iter_detail_history())
+                    if detailed_transactions:
+                        transactions.extend(detailed_transactions)
+                    else:
+                        transactions.append(tr)
+                else:
+                    transactions.append(tr)
+
+            return sorted_transactions(transactions)
+
+        return []
+
+    @need_login
+    def iter_coming(self, account):
+        for cb_link in account._card_links:
+            for _ in range(3):
+                self.location(cb_link)
+                if not self.page.is_loading():
+                    break
+                self.logger.debug('Sleeping for a second before we retry opening CB link...')
+                time.sleep(1)
+
+            for tr in sorted_transactions(self.page.iter_coming()):
+                yield tr
 
     def process_action_needed(self):
         # we have to go in an iframe to know if there are CGUs
@@ -187,10 +338,14 @@ class Fortuneo(LoginBrowser, StatesMixin):
                                    'Veuillez contacter le Service Clients pour renseigner vos coordonnées téléphoniques.')
 
             # if there are skippable CGUs, skip them
-            if self.accounts_page.is_here() and self.page.has_action_needed():
-                # Look for the request in the event listener registered to the button
-                # can be harcoded, no variable part. It is a POST request without data.
-                self.location(self.absurl('ReloadContext?action=1&', base=True), method='POST')
+            if isinstance(self.page, ActionNeededPage):
+                if self.page.has_skippable_action_needed():
+                    # Look for the request in the event listener registered to the button
+                    # can be harcoded, no variable part. It is a POST request without data.
+                    self.location(self.absurl('ReloadContext?action=1&', base=True), method='POST')
+                elif self.page.get_action_needed_message():
+                    raise ActionNeeded(self.page.get_action_needed_message())
+
             self.accounts_page.go()  # go back to the accounts page whenever there was an iframe or not
 
         self.action_needed_processed = True
@@ -233,11 +388,24 @@ class Fortuneo(LoginBrowser, StatesMixin):
     @need_login
     def new_recipient_before_otp(self, recipient, **params):
         self.recipients.go()
+
+        # Sometimes the website displays a message about preventing scams, there is a form
+        # that need to be sent to continue adding the recipient.
+        # If the form exists and has been validated, we need to go on the recipients page again
+        # because the form redirects us on another page.
+        if self.page.send_info_form():
+            self.recipients.go()
+
         self.page.check_external_iban_form(recipient)
         self.page.check_recipient_iban()
 
         # fill form
         self.page.fill_recipient_form(recipient)
+
+        error = self.page.get_error()
+        if error:
+            raise AddRecipientBankError(message=error)
+
         rcpt = self.page.get_new_recipient(recipient)
 
         # get first part of confirm form
@@ -299,3 +467,8 @@ class Fortuneo(LoginBrowser, StatesMixin):
         self.accounts_page.go()
         self.page.fill_person_name(obj=person)
         return person
+
+    @need_login
+    def iter_emitters(self):
+        self.register_transfer.go(ca='')
+        return self.page.iter_emitters()

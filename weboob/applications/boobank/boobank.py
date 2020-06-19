@@ -28,18 +28,21 @@ from decimal import Decimal, InvalidOperation
 
 from weboob.browser.browsers import APIBrowser
 from weboob.browser.profiles import Weboob
-from weboob.exceptions import BrowserHTTPError, CaptchaQuestion
+from weboob.exceptions import (
+    BrowserHTTPError, CaptchaQuestion, DecoupledValidation,
+    AppValidationCancelled, AppValidationExpired,
+)
 from weboob.core.bcall import CallErrors
 from weboob.capabilities.base import empty, find_object
 from weboob.capabilities.bank import (
     Account, Transaction,
     Transfer, TransferStep, Recipient, AddRecipientStep,
-    CapBank, CapBankTransfer, CapBankWealth, CapBankPockets,
+    CapBank, CapTransfer,
     TransferInvalidLabel, TransferInvalidAmount, TransferInvalidDate,
     TransferInvalidEmitter, TransferInvalidRecipient,
 )
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.captcha import exception_to_job
-from weboob.capabilities.contact import CapContact, Advisor
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.application.repl import ReplApplication, defaultcount
 from weboob.tools.application.captcha import CaptchaMixin
@@ -259,6 +262,20 @@ class TransferFormatter(IFormatter):
         return result
 
 
+class TransferListFormatter(IFormatter):
+    def format_obj(self, obj, alias):
+        result = [
+            u'From: %s' % self.colored('%-20s' % obj.account_label, 'red'),
+            u' Label: %s\n' % self.colored(obj.label, 'yellow'),
+            u'To: %s' % self.colored('%-22s' % obj.recipient_label, 'green'),
+            u' Amount: %s\n' % self.colored(obj.amount, 'red'),
+            u'Date: %s' % self.colored(obj.exec_date, 'yellow'),
+            u' Status: %s' % self.colored(obj.status, 'yellow'),
+            '\n',
+        ]
+        return ''.join(result)
+
+
 class InvestmentFormatter(IFormatter):
     MANDATORY_FIELDS = ('label', 'quantity', 'unitvalue')
     DISPLAYED_FIELDS = ('code', 'diff')
@@ -380,6 +397,7 @@ class AdvisorListFormatter(IFormatter):
 
         return result
 
+
 class AccountListFormatter(IFormatter):
     MANDATORY_FIELDS = ('id', 'label', 'balance', 'coming', 'type')
 
@@ -431,9 +449,59 @@ class AccountListFormatter(IFormatter):
         self.totals.clear()
 
 
+class EmitterListFormatter(IFormatter):
+    MANDATORY_FIELDS = ('id', 'label', 'currency')
+
+    def start_format(self, **kwargs):
+        self.output(
+            '       %s  Emitter              Currency   Number Type      Number     Balance ' % (
+                (' ' * 15) if not self.interactive else ''
+            )
+        )
+        self.output(
+            '----------------------------%s+----------+-------------+-------------+----------+' % (
+                ('-' * 15) if not self.interactive else ''
+            )
+        )
+
+    def format_emitter_number(self, obj):
+        account_number = ' '*11
+        if obj.number_type != 'unknown' and obj.number:
+            account_number = '%s***%s' % (obj.number[:4], obj.number[len(obj.number) - 4:])
+        return account_number
+
+    def format_obj(self, obj, alias):
+        if alias is not None:
+            obj_id = '%s' % self.colored('%3s' % ('#' + alias), 'red', 'bold')
+        else:
+            obj_id = self.colored('%30s' % obj.fullid, 'red', 'bold')
+
+        balance = ' ' * 9
+        if not empty(obj.balance):
+            balance = self.colored('%9.2f' % obj.balance, 'green' if obj.balance >= 0 else 'red')
+
+        account_number = self.format_emitter_number(obj)
+
+        return u'%s %s %s %s %s %s' % (
+            obj_id,
+            self.colored('%-25s' % obj.label[:25], 'yellow', 'bold'),
+            self.colored('%-10s' % obj.currency, 'green', 'bold'),
+            self.colored('%-13s' % obj.number_type, 'blue', 'bold'),
+            self.colored('%-11s' % account_number, 'blue', 'bold'),
+            balance
+        )
+
+    def flush(self):
+        self.output(
+            u'----------------------------%s+----------+-------------+-------------+----------+' % (
+                ('-' * 15) if not self.interactive else ''
+            )
+        )
+
+
 class Boobank(CaptchaMixin, ReplApplication):
     APPNAME = 'boobank'
-    VERSION = '1.6'
+    VERSION = '2.1'
     COPYRIGHT = 'Copyright(C) 2010-YEAR Romain Bignon, Christophe Benz'
     CAPS = CapBank
     DESCRIPTION = "Console application allowing to list your bank accounts and get their balance, " \
@@ -449,6 +517,8 @@ class Boobank(CaptchaMixin, ReplApplication):
                         'ops_list':       TransactionsFormatter,
                         'investment_list': InvestmentFormatter,
                         'advisor_list':   AdvisorListFormatter,
+                        'transfer_list': TransferListFormatter,
+                        'emitter_list':   EmitterListFormatter,
                         }
     DEFAULT_FORMATTER = 'table'
     COMMANDS_FORMATTERS = {'ls':          'account_list',
@@ -457,8 +527,10 @@ class Boobank(CaptchaMixin, ReplApplication):
                            'transfer':    'transfer',
                            'history':     'ops_list',
                            'coming':      'ops_list',
+                           'transfer_history': 'transfer_list',
                            'investment':  'investment_list',
                            'advisor':     'advisor_list',
+                           'emitters':    'emitter_list',
                            }
     COLLECTION_OBJECTS = (Account, Transaction, )
 
@@ -483,6 +555,28 @@ class Boobank(CaptchaMixin, ReplApplication):
                 next(iter(self.do('add_recipient', error.recipient, **params)))
             except CallErrors as e:
                 self.bcall_errors_handler(e)
+        elif isinstance(error, DecoupledValidation):
+            if isinstance(error.resource, Recipient):
+                func_name = 'add_recipient'
+            elif isinstance(error.resource, Transfer):
+                func_name = 'transfer'
+            else:
+                print(u'Error(%s): The resource should be of type Recipient or Transfer, not "%s"' % (backend.name, type(error.resource)), file=self.stderr)
+                return False
+
+            print(error.message)
+            params = {
+                'backends': backend,
+                'resume': True,
+            }
+            try:
+                next(iter(self.do(func_name, error.resource, **params)))
+            except CallErrors as e:
+                self.bcall_errors_handler(e)
+        elif isinstance(error, AppValidationCancelled):
+            print(u'Error(%s): %s' % (backend.name, to_unicode(error) or 'The app validation has been cancelled'), file=self.stderr)
+        elif isinstance(error, AppValidationExpired):
+            print(u'Error(%s): %s' % (backend.name, to_unicode(error) or 'The app validation has expired'), file=self.stderr)
         elif isinstance(error, TransferInvalidAmount):
             print(u'Error(%s): %s' % (backend.name, to_unicode(error) or 'The transfer amount is invalid'), file=self.stderr)
         elif isinstance(error, TransferInvalidLabel):
@@ -621,7 +715,7 @@ class Boobank(CaptchaMixin, ReplApplication):
         self.objects = []
 
         self.start_format()
-        for recipient in self.do('iter_transfer_recipients', account, backends=account.backend, caps=CapBankTransfer):
+        for recipient in self.do('iter_transfer_recipients', account, backends=account.backend, caps=CapTransfer):
             self.cached_format(recipient)
 
     @contextmanager
@@ -757,6 +851,31 @@ class Boobank(CaptchaMixin, ReplApplication):
         self.start_format()
         next(iter(self.do('transfer', transfer, backends=transfer.backend)))
 
+    def complete_transfer_history(self, text, line, *ignored):
+        return self.complete_history(self, text, line, *ignored)
+
+    @defaultcount(10)
+    def do_transfer_history(self, line):
+        """
+        transfer_history [ACCOUNT_ID]
+
+        Display history of transfer transactions.
+        """
+        id, = self.parse_command_args(line, 1, 0)
+
+        account = None
+        backends = None
+        if id:
+            account = self.get_object(id, 'get_account', [])
+            if not account:
+                print('Error: account "%s" not found (Hint: try the command "list")' % id, file=self.stderr)
+                return 2
+            backends = account.backend
+
+        self.start_format()
+        for tr in self.do('iter_transfers', account, backends=backends):
+            self.format(tr)
+
     def show_wealth(self, command, id):
         account = self.get_object(id, 'get_account', [])
         if not account:
@@ -765,7 +884,8 @@ class Boobank(CaptchaMixin, ReplApplication):
 
         caps = {
             'iter_investment': CapBankWealth,
-            'iter_pocket': CapBankPockets,
+            'iter_pocket': CapBankWealth,
+            'iter_market_orders': CapBankWealth,
         }
 
         self.start_format()
@@ -787,6 +907,15 @@ class Boobank(CaptchaMixin, ReplApplication):
         Display pockets of an account.
         """
         self.show_wealth('iter_pocket', id)
+
+    @defaultcount(10)
+    def do_market_order(self, id):
+        """
+        market_order ID
+
+        Display market orders of an account.
+        """
+        self.show_wealth('iter_market_orders', id)
 
     def do_budgea(self, line):
         """
@@ -844,21 +973,6 @@ class Boobank(CaptchaMixin, ReplApplication):
             client.request('users/me/accounts/%s' % account_id, data={'balance': account.balance})
             print('- %s (%s%s): %s new transactions' % (account.label, account.balance, account.currency_text, len(r)))
 
-    def do_advisor(self, line):
-        """
-        advisor
-
-        Display advisors.
-        """
-        self.start_format()
-        found = 0
-        for advisor in self.do('iter_contacts', caps=CapContact):
-            if isinstance(advisor, Advisor):
-                self.format(advisor)
-                found = 1
-        if not found:
-            print('Error: no advisor found', file=self.stderr)
-
     def do_profile(self, line):
         """
         profile
@@ -868,6 +982,17 @@ class Boobank(CaptchaMixin, ReplApplication):
         self.start_format()
         for profile in self.do('get_profile', caps=CapProfile):
             self.format(profile)
+
+    def do_emitters(self, line):
+        """
+        emitters
+
+        Display transfer emitter account.
+        """
+        self.objects = []
+        self.start_format()
+        for emitter in self.do('iter_emitters', backends=list(self.enabled_backends), caps=CapTransfer):
+            self.cached_format(emitter)
 
     def main(self, argv):
         self.load_config()

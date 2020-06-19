@@ -73,13 +73,15 @@ class BnpcartesentrepriseBrowser(LoginBrowser):
     def do_login(self):
         assert isinstance(self.username, basestring)
         assert isinstance(self.password, basestring)
-        if self.type == '1':
+        if self.type == '1' and self.username.isdigit():
             raise SiteSwitch('phenix')
         self.login.stay_or_go()
         assert self.login.is_here()
         self.page.login(self.type, self.username, self.password)
-        if self.error.is_here() or self.page.is_error():
+        if self.error.is_here():
             raise BrowserIncorrectPassword()
+        if self.page.is_password_expired():
+            raise BrowserPasswordExpired(self.page.get_error_msg())
         if self.type == '2' and self.page.is_corporate():
             self.logger.info('Manager corporate connection')
             raise SiteSwitch('corporate')

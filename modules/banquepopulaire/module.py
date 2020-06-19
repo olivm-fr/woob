@@ -20,9 +20,9 @@
 from __future__ import unicode_literals
 
 from collections import OrderedDict
-from functools import reduce
 
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
+from weboob.capabilities.bank import AccountNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.base import find_object
 from weboob.capabilities.bill import (
     CapDocument, SubscriptionNotFound, DocumentNotFound, Document, Subscription, DocumentTypes,
@@ -42,7 +42,7 @@ class BanquePopulaireModule(Module, CapBankWealth, CapContact, CapProfile, CapDo
     NAME = 'banquepopulaire'
     MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = 'Banque Populaire'
     LICENSE = 'LGPLv3+'
     website_choices = OrderedDict([(k, '%s (%s)' % (v, k)) for k, v in sorted({
@@ -70,9 +70,26 @@ class BanquePopulaireModule(Module, CapBankWealth, CapContact, CapProfile, CapDo
         'www.ibps.valdefrance.banquepopulaire.fr': 'Val de France',
         }.items(), key=lambda k_v: (k_v[1], k_v[0]))])
 
+    # Some regions have been renamed after bank cooptation
+    region_aliases = {
+        'www.ibps.alsace.banquepopulaire.fr': 'www.ibps.bpalc.banquepopulaire.fr',
+        'www.ibps.lorrainechampagne.banquepopulaire.fr': 'www.ibps.bpalc.banquepopulaire.fr',
+        'www.ibps.loirelyonnais.banquepopulaire.fr': 'www.ibps.bpaura.banquepopulaire.fr',
+        'www.ibps.alpes.banquepopulaire.fr': 'www.ibps.bpaura.banquepopulaire.fr',
+        'www.ibps.massifcentral.banquepopulaire.fr': 'www.ibps.bpaura.banquepopulaire.fr',
+        # creditmaritime atlantique now redirecting to Banque Populaire Aquitaine Centre Atlantique (new website)
+        'www.ibps.atlantique.creditmaritime.groupe.banquepopulaire.fr': 'www.ibps.bpaca.banquepopulaire.fr',
+        # creditmaritime sudouest now redirecting to Banque Populaire Aquitaine Centre Atlantique (new website)
+        'www.ibps.sudouest.creditmaritime.groupe.banquepopulaire.fr': 'www.ibps.bpaca.banquepopulaire.fr',
+        # creditmaritime bretagnenormandie now redirecting to Banque Populaire Grand Ouest (old website)
+        'www.ibps.bretagnenormandie.cmm.groupe.banquepopulaire.fr': 'www.ibps.cmgo.creditmaritime.groupe.banquepopulaire.fr',
+        'www.ibps.atlantique.banquepopulaire.fr': 'www.ibps.bpgo.banquepopulaire.fr',
+        'www.ibps.ouest.banquepopulaire.fr': 'www.ibps.bpgo.banquepopulaire.fr',
+    }
+
     CONFIG = BackendConfig(
-        Value('website', label='Région', choices=website_choices),
-        ValueBackendPassword('login', label='Identifiant', masked=False),
+        Value('website', label='Région', choices=website_choices, aliases=region_aliases),
+        ValueBackendPassword('login', label='Identifiant', masked=False, regexp=r'[a-zA-Z0-9]+'),
         ValueBackendPassword('password', label='Mot de passe')
     )
 
@@ -81,18 +98,7 @@ class BanquePopulaireModule(Module, CapBankWealth, CapContact, CapProfile, CapDo
     accepted_document_types = (DocumentTypes.STATEMENT,)
 
     def create_default_browser(self):
-        repls = [
-            ('alsace', 'bpalc'),
-            ('lorrainechampagne', 'bpalc'),
-            ('loirelyonnais', 'bpaura'),
-            ('alpes', 'bpaura'),
-            ('massifcentral', 'bpaura'),
-            ('atlantique.creditmaritime', 'cmgo.creditmaritime'),
-            ('bretagnenormandie.cmm', 'cmgo'),
-            ('atlantique.banquepopulaire', 'bpgo.banquepopulaire'),
-            ('ouest.banquepopulaire', 'bpgo.banquepopulaire'),
-        ]
-        website = reduce(lambda a, kv: a.replace(*kv), repls, self.config['website'].get())
+        website = self.config['website'].get()
 
         return self.create_browser(
             website,
@@ -119,6 +125,9 @@ class BanquePopulaireModule(Module, CapBankWealth, CapContact, CapProfile, CapDo
 
     def iter_investment(self, account):
         return self.browser.iter_investments(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
 
     def iter_contacts(self):
         return self.browser.get_advisor()

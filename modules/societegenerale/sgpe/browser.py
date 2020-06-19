@@ -532,6 +532,10 @@ class SGProfessionalBrowser(SGEnterpriseBrowser, SocieteGeneraleParBrowser):
         self.confirm_transfer.go(data=data)
 
         self.page.is_transfer_validated()
+
+        # Go on the accounts page to avoid reloading the confirm_transfer
+        # url in locate_browser.
+        self.accounts.go()
         return transfer
 
     @need_login
@@ -578,3 +582,8 @@ class SGProfessionalBrowser(SGEnterpriseBrowser, SocieteGeneraleParBrowser):
 
             search_date_max = search_date_min - relativedelta(days=1)
             counter += 1
+
+    @need_login
+    def iter_emitters(self):
+        self.easy_transfer.go()
+        return self.page.iter_emitters()

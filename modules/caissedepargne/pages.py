@@ -27,8 +27,12 @@ from PIL import Image, ImageFilter
 from io import BytesIO
 from decimal import Decimal
 from datetime import datetime
+from lxml import html
 
-from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage, pagination, FormNotFound, RawPage
+from weboob.browser.pages import (
+    LoggedPage, HTMLPage, JsonPage, pagination,
+    FormNotFound, RawPage, XMLPage,
+)
 from weboob.browser.elements import ItemElement, method, ListElement, TableElement, SkipItem, DictElement
 from weboob.browser.filters.standard import (
     Date, CleanDecimal, Regexp, CleanText, Env, Upper,
@@ -37,17 +41,26 @@ from weboob.browser.filters.standard import (
 from weboob.browser.filters.html import Link, Attr, TableCell
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import (
-    Account, Investment, Recipient, TransferBankError, Transfer,
-    AddRecipientBankError, Loan, AccountOwnership,
+    Account, Loan, AccountOwnership,
+    Transfer, TransferBankError, TransferInvalidOTP,
+    Recipient, AddRecipientBankError, RecipientInvalidOTP,
+    Emitter, EmitterNumberType, AddRecipientError,
 )
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.bill import DocumentTypes, Subscription, Document
 from weboob.tools.capabilities.bank.investments import is_isin_valid
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.iban import is_rib_valid, rib2iban, is_iban_valid
 from weboob.tools.captcha.virtkeyboard import SplitKeyboard, GridVirtKeyboard
 from weboob.tools.compat import unicode
-from weboob.exceptions import NoAccountsException, BrowserUnavailable, ActionNeeded
+from weboob.exceptions import (
+    NoAccountsException, BrowserUnavailable, ActionNeeded, BrowserIncorrectPassword,
+    BrowserPasswordExpired,
+)
 from weboob.browser.filters.json import Dict
+from weboob.browser.exceptions import ClientError
+
+from .base_pages import fix_form, BasePage
 
 
 def MyDecimal(*args, **kwargs):
@@ -59,13 +72,6 @@ class MyTableCell(TableCell):
     def __init__(self, *names, **kwargs):
         super(MyTableCell, self).__init__(*names, **kwargs)
         self.td = './tr[%s]/td'
-
-
-def fix_form(form):
-    keys = ['MM$HISTORIQUE_COMPTE$btnCumul', 'Cartridge$imgbtnMessagerie', 'MM$m_CH$ButtonImageFondMessagerie',
-            'MM$m_CH$ButtonImageMessagerie']
-    for name in keys:
-        form.pop(name, None)
 
 
 def float_to_decimal(f):
@@ -86,6 +92,15 @@ class LoginPage(JsonPage):
     def get_response(self):
         return self.doc
 
+    def get_wrongpass_message(self):
+        error_msg = Dict('error')(self.doc)
+        if (
+            "Nous n'avons pas réussi à vous authentifier" in error_msg or
+            'abonnement est bloqué' in error_msg
+        ):
+            return error_msg
+        assert False, 'Other error message to catch on LoginPage'
+
 
 class JsFilePage(RawPage):
     def get_client_id(self):
@@ -101,30 +116,81 @@ class AuthorizePage(HTMLPage):
         form.submit()
 
 
-class VkInitPage(JsonPage):
-    def is_here(self):
-        return 'OPS_GENERIQUE' in Dict('context')(self.doc)
-
-    def get_vk_images_url(self):
-        data = Dict('step/validationUnits')(self.doc)
-        # The data we are looking for is in a dict with a random
-        # uuid key.
-        key = list(data[0].keys())[0]
-        return data[0][key][0]['virtualKeyboard']['externalRestMediaApiUrl']
-
-    def get_vk_id(self):
-        data = Dict('step/validationUnits')(self.doc)
-        # The data we are looking for is in a dict with a random
-        # uuid key.
-        key = list(data[0].keys())[0]
-        return data[0][key][0]['id']
-
-    def get_vk_validation_id(self):
-        data = Dict('step/validationUnits')(self.doc)
-        return list(data[0].keys())[0]
-
-    def get_pwd_validation_id(self):
+class AuthenticationMethodPage(JsonPage):
+    def get_validation_id(self):
         return Dict('id')(self.doc)
+
+    @property
+    def validation_units(self):
+        units = Coalesce(
+            Dict('step/validationUnits', default=None),
+            Dict('validationUnits', default=None),
+        )(self.doc)
+        return units[0]
+
+    @property
+    def validation_unit_id(self):
+        assert len(self.validation_units) == 1
+        # The data we are looking for is in a dict with a random uuid key.
+        return next(iter(self.validation_units))
+
+    def get_authentication_method_info(self):
+        # The data we are looking for is in a dict with a random uuid key.
+        return self.validation_units[self.validation_unit_id][0]
+
+    def get_authentication_method_type(self):
+        return self.get_authentication_method_info()['type']
+
+    def login_errors(self, error):
+        # AUTHENTICATION_LOCKED is a BrowserIncorrectPassword because there is a key
+        # 'unlockingDate', in the json, that tells when the account will be unlocked.
+        # So it does not require any action from the user and is automatic.
+        if error in ('FAILED_AUTHENTICATION', 'AUTHENTICATION_LOCKED', 'AUTHENTICATION_FAILED'):
+            raise BrowserIncorrectPassword()
+        if error in ('ENROLLMENT', ):
+            raise BrowserPasswordExpired()
+
+    def transfer_errors(self, error):
+        if error == 'FAILED_AUTHENTICATION':
+            # For the moment, only otp sms is handled
+            raise TransferInvalidOTP(message="Le code SMS que vous avez renseigné n'est pas valide")
+
+    def recipient_errors(self, error):
+        if error == 'FAILED_AUTHENTICATION':
+            # For the moment, only otp sms is handled
+            raise RecipientInvalidOTP(message="Le code SMS que vous avez renseigné n'est pas valide")
+        elif error == 'AUTHENTICATION_CANCELED':
+            raise AddRecipientError(message="L'ajout a été annulée via l'application mobile.")
+
+    def check_errors(self, feature):
+        if 'response' in self.doc:
+            result = self.doc['response']['status']
+        elif 'step' in self.doc:
+            # Can have error at first authentication request,
+            # error will be handle in `if` case.
+            # If there is no error, it will retrive 'AUTHENTICATION' as result value.
+            result = self.doc['step']['phase']['state']
+        elif 'phase' in self.doc and self.get_authentication_method_type() == 'PASSWORD_ENROLL':
+            result = self.doc['phase']['state']
+        else:
+            result = self.doc['phase']['previousResult']
+
+        if result in ('AUTHENTICATION', 'AUTHENTICATION_SUCCESS'):
+            return
+
+        FEATURES_ERRORS = {
+            'login': self.login_errors,
+            'transfer': self.transfer_errors,
+            'recipient': self.recipient_errors,
+        }
+        FEATURES_ERRORS[feature](error=result)
+
+        assert False, 'Error during %s authentication is not handled yet: %s' % (feature, result)
+
+
+class AuthenticationStepPage(AuthenticationMethodPage):
+    def get_redirect_data(self):
+        return Dict('response/saml2_post')(self.doc)
 
 
 class VkImagePage(JsonPage):
@@ -132,15 +198,8 @@ class VkImagePage(JsonPage):
         return self.doc
 
 
-class LoginValidationPage(JsonPage):
-    def is_here(self):
-        return 'OPS_GENERIQUE' in Dict('context')(self.doc)
-
-    def is_login_failed(self):
-        return bool(self.doc.get('phase', {}).get('previousResult', '') == 'FAILED_AUTHENTICATION')
-
-    def get_redirect_data(self):
-        return Dict('response/saml2_post')(self.doc)
+class ValidationPageOption(LoggedPage, HTMLPage):
+    pass
 
 
 class LoginTokensPage(JsonPage):
@@ -154,7 +213,7 @@ class LoginTokensPage(JsonPage):
 class CaissedepargneNewKeyboard(SplitKeyboard):
     char_to_hash = {
         '0': '66ec79b200706e7f9c14f2b6d35dbb05',
-        '1': '529819241cce382b429b4624cb019b56',
+        '1': ('529819241cce382b429b4624cb019b56', '0ea8c08e52d992a28aa26043ffc7c044'),
         '2': 'fab68678204198b794ce580015c8637f',
         '3': '3fc5280d17cf057d1c4b58e4f442ceb8',
         '4': ('dea8800bdd5fcaee1903a2b097fbdef0', 'e413098a4d69a92d08ccae226cea9267', '61f720966ccac6c0f4035fec55f61fe6', '2cbd19a4b01c54b82483f0a7a61c88a1'),
@@ -271,7 +330,7 @@ class Transaction(FrenchTransaction):
     ]
 
 
-class IndexPage(LoggedPage, HTMLPage):
+class IndexPage(LoggedPage, BasePage):
     ACCOUNT_TYPES = {
         'Epargne liquide': Account.TYPE_SAVINGS,
         'Compte Courant': Account.TYPE_CHECKING,
@@ -293,6 +352,7 @@ class IndexPage(LoggedPage, HTMLPage):
         'LEP': Account.TYPE_SAVINGS,
         'L.EPAR POPULAIRE': Account.TYPE_SAVINGS,
         'LEL': Account.TYPE_SAVINGS,
+        'PLAN EPARG. LOGEMENT': Account.TYPE_SAVINGS,
         'L. EPAR LOGEMENT': Account.TYPE_SAVINGS,
         'CPT PARTS SOCIALES': Account.TYPE_MARKET,
         'PEL': Account.TYPE_SAVINGS,
@@ -307,10 +367,6 @@ class IndexPage(LoggedPage, HTMLPage):
         'PEA NUMERAIRE': Account.TYPE_PEA,
         'PEA': Account.TYPE_PEA,
     }
-
-    def build_doc(self, content):
-        content = content.strip(b'\x00')
-        return super(IndexPage, self).build_doc(content)
 
     def on_load(self):
 
@@ -471,6 +527,18 @@ class IndexPage(LoggedPage, HTMLPage):
             accounts_id.append(re.search("(\d{6,})", Attr('.', 'href')(a)).group(1))
         return accounts_id
 
+    def has_next_page(self):
+        return self.doc.xpath('//div[@id="MM_SYNTHESE_MESURES_m_DivLinksPrecSuiv"]//a[contains(text(), "Page suivante")]')
+
+    def goto_next_page(self):
+        form = self.get_form(id="main")
+
+        form['__EVENTTARGET'] = 'MM$SYNTHESE_MESURES$lnkSuivante'
+        form['__EVENTARGUMENT'] = ''
+        form['m_ScriptManager'] = 'MM$m_UpdatePanel|MM$SYNTHESE_MESURES$lnkSuivante'
+        fix_form(form)
+        form.submit()
+
     def get_list(self, owner_name):
         accounts = OrderedDict()
 
@@ -624,7 +692,13 @@ class IndexPage(LoggedPage, HTMLPage):
                             if 'JSESSIONID' in self.browser.session.cookies:
                                 # Need to delete this to access the consumer loans space (a new one will be created)
                                 del self.browser.session.cookies['JSESSIONID']
-                            self.go_loans_conso(tr)
+                            try:
+                                self.go_loans_conso(tr)
+                            except ClientError as e:
+                                if e.response.status_code == 401:
+                                    raise ActionNeeded('La situation actuelle de votre dossier ne vous permet pas d\'accéder à cette fonctionnalité. '
+                                        'Nous vous invitons à contacter votre Centre de relation Clientèle pour accéder à votre prêt.')
+                                raise
                             d = self.browser.loans_conso()
                             if d:
                                 account.total_amount = float_to_decimal(d['contrat']['creditMaxAutorise'])
@@ -810,6 +884,41 @@ class IndexPage(LoggedPage, HTMLPage):
 
         form.submit()
 
+    def go_checkings(self):
+        form = self.get_form(id='main')
+        form['__EVENTTARGET'] = 'MM$m_PostBack'
+        form['__EVENTARGUMENT'] = 'CPTSYNT1'
+
+        fix_form(form)
+        form.submit()
+
+    def go_transfer_list(self):
+        form = self.get_form(id='main')
+
+        form['__EVENTARGUMENT'] = 'HISVIR0&codeMenu=WVI3'
+        form['__EVENTTARGET'] = 'MM$Menu_Ajax'
+
+        fix_form(form)
+        form.submit()
+
+    @method
+    class iter_transfers(TableElement):
+        head_xpath = '//table[@summary="Liste des RICE à imprimer"]//th'
+        item_xpath = '//table[@summary="Liste des RICE à imprimer"]//tr[td]'
+
+        col_amount = 'Montant'
+        col_recipient_label = 'Bénéficiaire'
+        col_label = 'Référence'
+        col_date = 'Date'
+
+        class item(ItemElement):
+            klass = Transfer
+
+            obj_amount = CleanDecimal.French(TableCell('amount'))
+            obj_recipient_label = CleanText(TableCell('recipient_label'))
+            obj_label = CleanText(TableCell('label'))
+            obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
+
     def is_history_of(self, account_id):
         """
         Check whether the displayed history is for the correct account.
@@ -877,7 +986,7 @@ class IndexPage(LoggedPage, HTMLPage):
                 continue
 
             # Remove useless details
-            detail = tr.cssselect('div.detail')
+            detail = tr.xpath('.//div[has-class("detail")]')
             if len(detail) > 0:
                 detail[0].drop_tree()
 
@@ -970,10 +1079,10 @@ class IndexPage(LoggedPage, HTMLPage):
         if self.transfer_link():
             self.browser.page.go_transfer(account)
 
-    def go_transfer(self, account):
+    def go_transfer_page(self):
         link = self.transfer_link()
         if len(link) == 0:
-            return self.go_transfer_via_history(account)
+            return False
         else:
             link = link[0]
         m = re.search("PostBackOptions?\([\"']([^\"']+)[\"'],\s*['\"]([^\"']+)?['\"]", link.attrib.get('href', ''))
@@ -984,6 +1093,13 @@ class IndexPage(LoggedPage, HTMLPage):
         form['__EVENTARGUMENT'] = m.group(2)
         form.submit()
 
+    def go_transfer(self, account):
+        if self.go_transfer_page() is False:
+            return self.go_transfer_via_history(account)
+
+    def go_emitters(self):
+        return self.go_transfer_page()
+
     def transfer_unavailable(self):
         return CleanText('//li[contains(text(), "Pour accéder à cette fonctionnalité, vous devez disposer d’un moyen d’authentification renforcée")]')(self.doc)
 
@@ -991,14 +1107,6 @@ class IndexPage(LoggedPage, HTMLPage):
         msg = CleanText('//span[@id="MM_LblMessagePopinError"] | //p[@id="MM_ERREUR_PAGE_BLANCHE_pAlert"]')(self.doc)
         if msg:
             return msg
-
-    def go_subscription(self):
-        form = self.get_form(id='main')
-        form['m_ScriptManager'] = 'MM$m_UpdatePanel|MM$Menu_Ajax'
-        form['__EVENTTARGET'] = 'MM$Menu_Ajax'
-        link = Link('//a[contains(@title, "e-Documents") or contains(@title, "Relevés en ligne")]')(self.doc)
-        form['__EVENTARGUMENT'] = re.search(r'Ajax", "(.*)", true', link).group(1)
-        form.submit()
 
     def is_subscription_unauthorized(self):
         return 'non autorisée' in CleanText('//div[@id="MM_ContentMain"]')(self.doc)
@@ -1515,6 +1623,24 @@ class MyRecipient(ItemElement):
         return datetime.now().replace(microsecond=0)
 
 
+class MyEmitter(ItemElement):
+    klass = Emitter
+
+    obj_id = Attr('.', 'value')
+    obj_currency = Currency('.')
+    obj_number_type = EmitterNumberType.IBAN
+
+    def obj_number(self):
+        return rib2iban(Attr('.', 'value')(self))
+
+
+class MyEmitters(ListElement):
+    item_xpath = '//select[@id="MM_VIREMENT_SAISIE_VIREMENT_ddlCompteDebiter"]/option'
+
+    class Item(MyEmitter):
+        pass
+
+
 class TransferErrorPage(object):
     def on_load(self):
         errors_xpaths = [
@@ -1574,9 +1700,12 @@ class MyRecipients(ListElement):
                     self.logger.warning('skipping recipient without a label: %r', full)
                     raise SkipItem()
 
-                # <recipient name> - <account number or iban> - <bank name (optional)> <optional last dash>
-                mtc = re.match('(?P<label>.+) - (?P<id>[^-]+) -(?P<bank> [^-]*)?-?$', full)
-                assert mtc
+                # <recipient name> - <account number or iban> - <bank name (optional)>
+                # bank name can have one dash, multiple dots in their names or just be a dash (seen in palatine, example below)
+                # eg: ING-DiBan / C.PROF. / B.R.E.D
+                # Seen in palatine (the bank name can be a dash): <recipient name> - <iban> - -
+                mtc = re.match(r'(?P<label>.+) - (?P<id>[^-]+) - ?(?P<bank>[^-]+-?[\w\. ]+)?-?$', full)
+                assert mtc, "Unhandled recipient's label/iban/bank name format"
                 self.env['id'] = self.env['iban'] = mtc.group('id')
                 self.env['bank_name'] = (mtc.group('bank') and mtc.group('bank').strip()) or NotAvailable
                 self.env['label'] = mtc.group('label')
@@ -1675,6 +1804,26 @@ class TransferPage(TransferErrorPage, IndexPage):
         error_msg = CleanText('//div[@id="divPopinInfoAjout"]/p[not(a)]')(self.doc)
         if error_msg:
             raise AddRecipientBankError(message=error_msg)
+
+    @method
+    class iter_emitters(MyEmitters):
+
+        class Item(MyEmitter):
+
+            def obj_label(self):
+                """
+                Label looks like 'Mr Dupont Jean C.cheque - 52XXX87 + 176,12 €'.
+                We only keep the first half (name and account name).
+                What's left is: 'Mr Dupont Jean C.cheque'
+                """
+                raw_string = CleanText('.')(self)
+                if '-' in raw_string:
+                    return raw_string.split('-')[0]
+                return raw_string
+
+            def obj_balance(self):
+                attribute_data = Attr('.', 'data-ce-html', default=None)(self)
+                return CleanDecimal.French('//span')(html.fromstring(attribute_data))
 
 
 class TransferConfirmPage(TransferErrorPage, IndexPage):
@@ -1818,37 +1967,34 @@ class ProTransferPage(TransferPage):
         form['MM$VIREMENT$SAISIE_VIREMENT$ddlCompteCrediterPro'] = 'AC'
         form.submit()
 
+    @method
+    class iter_emitters(MyEmitters):
+
+        class Item(MyEmitter):
+
+            def obj_label(self):
+                """
+                Label looks like 'JEAN DUPONT - C.PROF. - 19XXX65 - Solde : 187,12 EUR'.
+                We only keep the first half (name and account name).
+                What's left is: 'JEAN DUPONT - C.PROF.'
+                """
+                raw_string = CleanText('.')(self)
+                if '-' in raw_string:
+                    return '-'.join(raw_string.split('-')[0:2])
+                return raw_string
+
+            def obj_balance(self):
+                balance_data = CleanText('.')(self).split('Solde')[-1]
+                return CleanDecimal().French().filter(balance_data)
+
 
 class CanceledAuth(Exception):
     pass
 
 
-class SmsPageOption(LoggedPage, HTMLPage):
-    pass
-
-
-class SmsRequestStep(LoggedPage, JsonPage):
-    pass
-
-
-class SmsRequest(LoggedPage, JsonPage):
-    def validation_unit(self):
-        if 'step' in self.doc:
-            return self.doc['step']['validationUnits'][0]
-        return self.doc['validationUnits'][0]
-
-    def get_saml(self, otp_exception):
-        if 'response' not in self.doc:
-            error = self.doc['phase']['previousResult']
-
-            if error == 'FAILED_AUTHENTICATION':
-                raise otp_exception()
-            assert not error, 'Error during recipient validation: %s' % error
-
-        return self.doc['response']['saml2_post']['samlResponse']
-
-    def get_action(self):
-        return self.doc['response']['saml2_post']['action']
+class AppValidationPage(LoggedPage, XMLPage):
+    def get_status(self):
+        return CleanText('//response/status')(self.doc)
 
 
 class SmsPage(LoggedPage, HTMLPage):

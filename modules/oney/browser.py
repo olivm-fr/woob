@@ -24,14 +24,14 @@ from dateutil.relativedelta import relativedelta
 from itertools import chain
 
 from weboob.capabilities.bank import Account
-from weboob.exceptions import BrowserIncorrectPassword
+from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.tools.date import new_date
 
 from .pages import (
     LoginPage, ClientPage, OperationsPage, ChoicePage,
     CreditHome, CreditAccountPage, CreditHistory, LastHistoryPage,
-    ContextInitPage, SendUsernamePage, SendPasswordPage, CheckTokenPage,
+    ContextInitPage, SendUsernamePage, SendPasswordPage, CheckTokenPage, ClientSpacePage
 )
 
 __all__ = ['OneyBrowser']
@@ -60,6 +60,7 @@ class OneyBrowser(LoginBrowser):
     choice_portal = URL(r'/site/s/login/loginidentifiant.html')
 
     client = URL(r'/oney/client', ClientPage)
+    client_space = URL(r'https://www.compte.oney.fr/espace-client/historique-facilypay', ClientSpacePage)
     operations = URL(r'/oney/client', OperationsPage)
     card_page = URL(r'/oney/client\?task=Synthese&process=SyntheseMultiCompte&indexSelectionne=(?P<acc_num>\d+)')
 
@@ -71,6 +72,7 @@ class OneyBrowser(LoginBrowser):
     has_oney = False
     has_other = False
     card_name = None
+    is_mail = False
 
     def do_login(self):
         self.session.cookies.clear()
@@ -90,6 +92,7 @@ class OneyBrowser(LoginBrowser):
         if '@' in self.username:
             auth_type = 'EML'
             step_type = 'EMAIL_PASSWORD'
+            self.is_mail = True
         else:
             auth_type = 'IAD'
             step_type = 'IAD_ACCESS_CODE'
@@ -112,6 +115,8 @@ class OneyBrowser(LoginBrowser):
 
         error = self.page.get_error()
         if error:
+            if error == 'Authenticator : Le facteur d’authentification est rattaché':
+                raise BrowserPasswordExpired()
             raise BrowserIncorrectPassword(error)
 
         token = self.page.get_token()
@@ -123,6 +128,7 @@ class OneyBrowser(LoginBrowser):
         })
 
         if self.choice.is_here():
+            self.other_space_url = self.page.get_redirect_other_space()
             self.has_other = self.has_oney = True
         elif self.credit_home.is_here():
             self.has_other = True
@@ -143,7 +149,13 @@ class OneyBrowser(LoginBrowser):
                 self.choice.go()
                 assert self.choice.is_here()
             if self.choice.is_here():
-                self.choice_portal.go(data={'selectedSite': 'ONEY_HISTO'})
+                # if no redirect was found in the choice_page we try the previous method. Due to a lack of example
+                # it might be deprecated
+                if self.other_space_url:
+                    self.location(self.other_space_url)
+                    self.client_space.go()
+                else:
+                    self.choice_portal.go(data={'selectedSite': 'ONEY_HISTO'})
 
         elif site == 'other':
             if self.client.is_here() or self.operations.is_here():
@@ -171,6 +183,8 @@ class OneyBrowser(LoginBrowser):
 
         if self.has_oney:
             self.go_site('oney')
+            if self.client_space.is_here():
+                return accounts
             self.client.stay_or_go()
             accounts.extend(self.page.iter_accounts())
 

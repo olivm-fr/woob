@@ -28,11 +28,19 @@ from lxml import objectify
 
 from weboob.browser.pages import HTMLPage, XMLPage, RawPage, LoggedPage, pagination, FormNotFound, PartialHTMLPage, JsonPage
 from weboob.browser.elements import ItemElement, TableElement, SkipItem, method
-from weboob.browser.filters.standard import CleanText, Date, Regexp, Eval, CleanDecimal, Env, Field, MapIn, Upper
-from weboob.browser.filters.html import Attr, TableCell
+from weboob.browser.filters.standard import (
+    CleanText, Date, Regexp, Eval, CleanDecimal,
+    Env, Field, MapIn, Upper, Format, Title, QueryValue,
+)
+from weboob.browser.filters.html import (
+    Attr, TableCell, AbsoluteLink, XPath,
+)
 from weboob.browser.filters.json import Dict
 from weboob.browser.exceptions import HTTPNotFound
-from weboob.capabilities.bank import Account, Investment, Pocket, Transaction
+from weboob.capabilities.bank import Account, Transaction
+from weboob.capabilities.wealth import Investment, Pocket
+from weboob.capabilities.profile import Person
+from weboob.capabilities.bill import Document, DocumentTypes
 from weboob.capabilities.base import NotAvailable, empty
 from weboob.tools.captcha.virtkeyboard import MappedVirtKeyboard
 from weboob.exceptions import BrowserUnavailable, ActionNeeded, BrowserQuestion, BrowserIncorrectPassword
@@ -58,17 +66,18 @@ class ErrorPage(HTMLPage):
 
 
 class S2eVirtKeyboard(MappedVirtKeyboard):
-    symbols = {'0':('8adee734aaefb163fb008d26bb9b3a42', '922d79345bf824b1186d0aa523b37a7c'),
-               '1':('b815d6ce999910d48619b5912b81ddf1', '4730473dcd86f205dff51c59c97cf8c0'),
-               '2':('54255a70694787a4e1bd7dd473b50228', '2d8b1ab0b5ce0b88abbc0170d2e85b7e'),
-               '3':('ba06373d2bfba937d00bf52a31d475eb', '08e7e7ab7b330f3cfcb819b95eba64c6'),
-               '4':('3fa795ac70247922048c514115487b10', 'ffb3d035a3a335cfe32c59d8ee1302ad'),
-               '5':('788963d15fa05832ee7640f7c2a21bc3', 'c4b12545020cf87223901b6b35b9a9e2'),
-               '6':('c8bf62dfaed9feeb86934d8617182503', '473357666949855a0794f68f3fc40127'),
-               '7':('f7543fdda3039bdd383531954dd4fc46', '5f3a71bd2f696b8dc835dfeb7f32f92a'),
-               '8':('5c4210e2d8e39f7667d7a9e5534b18b7', 'b9a1a73430f724541108ed5dd862431b'),
-               '9':('94520ac801883fbfb700f43cd4172d41', '12c18ca3d4350acd077f557ac74161e5'),
-              }
+    symbols = {
+        '0':('8adee734aaefb163fb008d26bb9b3a42', '922d79345bf824b1186d0aa523b37a7c', '914fe440741b5d905c62eb4fa89efff2'),
+        '1':('b815d6ce999910d48619b5912b81ddf1', '4730473dcd86f205dff51c59c97cf8c0', 'dc1990415f4099d77743b0a1e3da0e84'),
+        '2':('54255a70694787a4e1bd7dd473b50228', '2d8b1ab0b5ce0b88abbc0170d2e85b7e', 'bbce0f83063bb2c58b041262c598a2c2'),
+        '3':('ba06373d2bfba937d00bf52a31d475eb', '08e7e7ab7b330f3cfcb819b95eba64c6', 'ab61fd800d2f1043f36b0b5c786d28f4'),
+        '4':('3fa795ac70247922048c514115487b10', 'ffb3d035a3a335cfe32c59d8ee1302ad', 'ec4a4f06482410cf6cc6fdb488e527de'),
+        '5':('788963d15fa05832ee7640f7c2a21bc3', 'c4b12545020cf87223901b6b35b9a9e2', 'd32ddd212be9a6e2d80b1330722b1ef2'),
+        '6':('c8bf62dfaed9feeb86934d8617182503', '473357666949855a0794f68f3fc40127', '1437471444d09c19217518b602eb76a0'),
+        '7':('f7543fdda3039bdd383531954dd4fc46', '5f3a71bd2f696b8dc835dfeb7f32f92a', '4a9714321387fdd08ae893d16c75138f'),
+        '8':('5c4210e2d8e39f7667d7a9e5534b18b7', 'b9a1a73430f724541108ed5dd862431b', '86c54698f26de51f10891a02b5315290'),
+        '9':('94520ac801883fbfb700f43cd4172d41', '12c18ca3d4350acd077f557ac74161e5', 'fb555d29e5eab741cdf16ed5c50d9428'),
+    }
 
     color = (0, 0, 0)
 
@@ -217,6 +226,19 @@ class AMFAmundiPage(HTMLPage, CodePage):
         return Regexp(CleanText('//td[@class="bannerColumn"]//li[contains(., "(C)")]', default=NotAvailable),
                r'(\d+)', default=NotAvailable)(self.doc)
 
+    def get_tab_url(self, tab_id):
+        return Format(
+            '%s%d',
+            Regexp(CleanText('//script[contains(text(), "Product.init")]'), r'init\(.*?,"(.*?tab_)\d"', default=None),
+            tab_id
+        )(self.doc)
+
+    def get_details_url(self):
+        return self.get_tab_url(5)
+
+    def get_performance_url(self):
+        return self.get_tab_url(2)
+
 
 class AMFSGPage(LoggedPage, HTMLPage, CodePage):
     CODE_TYPE = Investment.CODE_TYPE_AMF
@@ -259,7 +281,7 @@ class LyxorfcpePage(LoggedPage, HTMLPage, CodePage):
 class LyxorFundsPage(LoggedPage, HTMLPage):
     @method
     class fill_investment(ItemElement):
-        obj_asset_category = CleanText('//div[contains(@class, "asset-class-list")]//div[contains(@class, "assetClass")][2]/span')
+        obj_asset_category = CleanText('//div[contains(@class, "asset-class-picto")]//h4')
 
         def obj_performance_history(self):
             # Fetching the performance history (1 year, 3 years & 5 years)
@@ -368,6 +390,7 @@ class ItemInvestment(ItemElement):
                 elif (url.startswith('http://sggestion-ede.com/product') or
                     url.startswith('https://www.lyxorfunds.com/part') or
                     url.startswith('https://www.societegeneralegestion.fr') or
+                    url.startswith('https://www.amundi-ee.com') or
                     url.startswith('http://www.etoile-gestion.com/productsheet')):
                     self.env['_link'] = url
 
@@ -375,7 +398,7 @@ class ItemInvestment(ItemElement):
                 match = re.match(r'http://www.cpr-am.fr/fr/fonds_detail.php\?isin=([A-Z0-9]+)', url)
                 match = match or re.match(r'http://www.cpr-am.fr/particuliers/product/view/([A-Z0-9]+)', url)
                 if match:
-                    self.env['code'] = m.group(1)
+                    self.env['code'] = match.group(1)
                     if is_isin_valid(match.group(1)):
                         self.env['code_type'] = Investment.CODE_TYPE_ISIN
                     else:
@@ -460,11 +483,13 @@ class AccountsPage(LoggedPage, MultiPage):
         'PLAN': Account.TYPE_PEE,
         'PAGA': Account.TYPE_PEE,
         'ABONDEMENT EXCEPTIONNEL': Account.TYPE_PEE,
+        'REINVESTISSEMENT DIVIDENDES': Account.TYPE_PEE,
         'PERCO': Account.TYPE_PERCO,
         'PERCOI': Account.TYPE_PERCO,
+        'PERECO': Account.TYPE_PER,
         'SWISS': Account.TYPE_MARKET,
         'RSP': Account.TYPE_RSP,
-        'CCB': Account.TYPE_DEPOSIT,
+        'CCB': Account.TYPE_RSP,
         'PARTICIPATION': Account.TYPE_DEPOSIT,
         'PERF': Account.TYPE_PERP,
     }
@@ -507,7 +532,7 @@ class AccountsPage(LoggedPage, MultiPage):
             obj_label = Env('label')
 
             def obj_type(self):
-                return MapIn(Upper(Field('label')), self.page.TYPES, Account.TYPE_UNKNOWN)(self)
+                return MapIn(Upper(Field('label')), self.page.TYPES, Account.TYPE_PEE)(self)
 
             def obj_balance(self):
                 return MyDecimal(TableCell('balance')(self)[0].xpath('.//div[has-class("nowrap")]'))(self)
@@ -790,10 +815,58 @@ class EsaliaDetailsPage(LoggedPage, HTMLPage):
     def get_asset_category(self):
         return CleanText('//label[text()="Classe d\'actifs:"]/following-sibling::span')(self.doc)
 
+    def get_performance_url(self):
+        return Attr('//a[contains(text(), "Performances")]', 'data-href', default=None)(self.doc)
+
+
+class EsaliaPerformancePage(LoggedPage, HTMLPage):
+    def get_performance_history(self):
+        # The positions of the columns depend on the age of the investment fund.
+        # For example, if the fund is younger than 5 years, there will be not '5 ans' column.
+        durations = [CleanText('.')(el) for el in self.doc.xpath('//div[contains(@class, "fpPerfglissanteclassique")]//th')]
+        values = [CleanText('.')(el) for el in self.doc.xpath('//div[contains(@class, "fpPerfglissanteclassique")]//tr[td[text()="Fonds"]]//td')]
+        matches = dict(zip(durations, values))
+        # We do not fill the performance dictionary if no performance is available,
+        # otherwise it will overwrite the data obtained from the JSON with empty values.
+        perfs = {}
+        for k, v in {1: '1 an', 3: '3 ans', 5: '5 ans'}.items():
+            if matches.get(v):
+                perfs[k] = percent_to_ratio(CleanDecimal.French(default=NotAvailable).filter(matches[v]))
+        return perfs
+
+
+class AmundiPerformancePage(EsaliaPerformancePage):
+    '''
+    The parsing of this page is exactly like EsaliaPerformancePage
+    but the URL is quite different so we handle it with a separated page
+    '''
+    pass
+
+
+class AmundiDetailsPage(LoggedPage, HTMLPage):
+    def get_recommended_period(self):
+        return Title(CleanText('//label[contains(text(), "Durée minimum de placement")]/following-sibling::span', default=NotAvailable))(self.doc)
+
+    def get_asset_category(self):
+        return CleanText('(//label[contains(text(), "Classe d\'actifs")])[1]/following-sibling::span', default=NotAvailable)(self.doc)
+
 
 class ProfilePage(LoggedPage, MultiPage):
     def get_company_name(self):
         return CleanText('//div[contains(@class, "operation-bloc")]//span[contains(text(), "Entreprise")]/following-sibling::span[1]')(self.doc)
+
+    @method
+    class get_profile(ItemElement):
+        klass = Person
+
+        obj__civilite = CleanText('//div/span[contains(text(), "Civilité")]/following-sibling::div/span')
+        obj_lastname = CleanText('//div/span[contains(text(), "Nom")]/following-sibling::div/span')
+        obj_firstname = CleanText('//div/span[contains(text(), "Prénom")]/following-sibling::div/span')
+        obj_name = Format(u'%s %s %s', obj__civilite, obj_firstname, obj_lastname)
+        obj_address = CleanText('//div/span[contains(text(), "Adresse postale")]/following-sibling::div/div[2]')
+        obj_phone = CleanText('//div/span[contains(text(), "Tél. portable")]/following-sibling::div/span')
+        obj_email = CleanText('//div/span[contains(text(), "E-mail")]/following-sibling::div/span')
+        obj_company_name = CleanText('//div[contains(@class, "operation-bloc")]//span[contains(text(), "Entreprise")]/following-sibling::span[1]')
 
 
 class APIInvestmentDetailsPage(LoggedPage, JsonPage):
@@ -812,3 +885,85 @@ class APIInvestmentDetailsPage(LoggedPage, JsonPage):
                     value = item['value']
                     perfs[duration] = Eval(lambda x: x / 100, CleanDecimal.US(value))(self)
             return perfs
+
+
+DOCUMENT_TYPE_LABEL = {
+    'RDC': DocumentTypes.STATEMENT,  # is this in label?
+    'Relevé de situation': DocumentTypes.STATEMENT,
+    'Relevé de compte': DocumentTypes.STATEMENT,
+    'Bulletin': DocumentTypes.STATEMENT,
+    'Sit Pat': DocumentTypes.REPORT,  # is this in label?
+    'Situation de patrimoine': DocumentTypes.REPORT,
+    'Avis': DocumentTypes.REPORT,
+}
+
+
+class EServicePage(LoggedPage, HTMLPage):
+    def select_documents_tab(self):
+        # force lowercase, it's not always the same case
+        # and label to search for depends on child module
+        edoc_td_xpath = '//td[matches(lower-case(text()),"e-documents|mes relevés|mes e-relevés|services en ligne")]'
+        try:
+            form = self.get_form(xpath=edoc_td_xpath + '/ancestor::form')
+        except FormNotFound:
+            self.logger.debug('no e-documents link, maybe we are already there')
+            return
+
+        doc_tab_id = (self.doc.xpath(edoc_td_xpath + '/ancestor::td/@id')[0])
+        # warning: lxml returns its special string type which is incompatible with "re"
+        assert re.search(':header:', doc_tab_id)
+        form_tab = re.sub(':header:.*', '', doc_tab_id)
+
+        for k, v in form.items():
+            if v == 'coordPerso':
+                form[k] = 'eService'
+                break
+
+        form['javax.faces.source'] = form_tab
+        form['javax.faces.partial.event'] = 'click'
+        form['javax.faces.partial.execute'] = '%s @component' % form_tab
+        form['org.richfaces.ajax.component'] = form_tab
+        self.logger.debug('selecting e-documents tab')
+        form.submit()
+
+    def show_more(self):
+        form = self.get_form(xpath='//div[@id="gestion"]//form')
+        try:
+            # erehsbc: tout afficher
+            # bnppere: afficher tous les e-documents
+            button_el = form.el.xpath(
+                './/input[matches(@value,"Tout afficher|Afficher tous")]'
+            )[0]
+        except IndexError:
+            self.logger.debug('no "display all" button, everything already is displayed?')
+            return
+        buttonid = button_el.attrib['id']
+
+        form['javax.faces.source'] = buttonid
+        form['javax.faces.partial.event'] = 'click'
+        form['javax.faces.partial.execute'] = '%s @component' % buttonid
+        form['org.richfaces.ajax.component'] = buttonid
+        self.logger.debug('showing all documents')
+        form.submit()
+
+    @method
+    class iter_documents(TableElement):
+        # Note: on this (partial) page, 'head' and 'items' are actually two different HTML tables.
+        # It seems to confuse TableCell filter, thus we fetch data using XPath filter.
+        # (As head_xpath is mandatory we provide its value nevertheless)
+        item_xpath = '//div[contains(@id,"panelEReleves_body")]/div/table/tbody[contains(@id,"tb")]/tr[td]'
+        head_xpath = '//div[contains(@id,"panelEReleves_body")]/table//th'
+
+        class item(ItemElement):
+            klass = Document
+
+            obj_date = Date(CleanText(XPath('.//td[1]')), dayfirst=True)
+            obj_label = Format('%s %s', CleanText(XPath('.//td[2]')), CleanText(XPath('.//td[1]')))
+            obj_format = 'pdf'
+            obj_url = AbsoluteLink('.//a')
+
+            # Note: the id is constructed from the file name, which gives us some interesting information:
+            # - Document date
+            # Ex: RDCdirect_28112018link
+            obj_id = CleanText(QueryValue(obj_url, 'titrePDF'), symbols='/ ')
+            obj_type = MapIn(Field('label'), DOCUMENT_TYPE_LABEL, default=DocumentTypes.OTHER)

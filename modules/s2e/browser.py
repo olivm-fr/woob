@@ -24,14 +24,16 @@ import re
 
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
 from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, NoAccountsException
-from weboob.capabilities.bank import Investment
+from weboob.capabilities.wealth import Investment
 from weboob.tools.capabilities.bank.investments import is_isin_valid
 
 from .pages import (
     LoginPage, AccountsPage, AMFHSBCPage, AMFAmundiPage, AMFSGPage, HistoryPage, ErrorPage,
     LyxorfcpePage, EcofiPage, EcofiDummyPage, LandingPage, SwissLifePage, LoginErrorPage,
     EtoileGestionPage, EtoileGestionCharacteristicsPage, EtoileGestionDetailsPage,
-    APIInvestmentDetailsPage, LyxorFundsPage, EsaliaDetailsPage, ProfilePage,
+    APIInvestmentDetailsPage, LyxorFundsPage, EsaliaDetailsPage, EsaliaPerformancePage,
+    AmundiDetailsPage, AmundiPerformancePage, ProfilePage,
+    EServicePage,
 )
 
 
@@ -41,25 +43,45 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                 r'/portal/j_security_check', LoginPage)
     login_error = URL(r'/portal/login', LoginErrorPage)
     landing = URL(r'(.*)portal/salarie-bnp/accueil', LandingPage)
-    accounts = URL(r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs\?language=(?P<lang>)',
-                   r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs', AccountsPage)
-    amfcode_hsbc = URL(r'https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
-    amfcode_amundi = URL(r'https://www.amundi-ee.com/entr/product', AMFAmundiPage)
-    amfcode_sg = URL(r'http://sggestion-ede.com/product', AMFSGPage)
-    isincode_ecofi = URL(r'http://www.ecofi.fr/fr/fonds/.*#yes\?bypass=clientprive', EcofiPage)
-    pdf_file_ecofi = URL(r'http://www.ecofi.fr/sites/.*', EcofiDummyPage)
-    lyxorfcpe = URL(r'http://www.lyxorfcpe.com/part', LyxorfcpePage)
-    lyxorfunds = URL(r'https://www.lyxorfunds.com', LyxorFundsPage)
+    accounts = URL(
+        r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs\?language=(?P<lang>)',
+        r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs',
+        AccountsPage
+    )
     history = URL(r'/portal/salarie-(?P<slug>\w+)/operations/consulteroperations', HistoryPage)
     error = URL(r'/maintenance/.+/', ErrorPage)
+    profile = URL(r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP', ProfilePage)
+    amfcode_hsbc = URL(r'https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
+    # Amundi pages
+    amfcode_amundi = URL(r'https://www.amundi-ee.com/entr/product', AMFAmundiPage)
+    performance_details = URL(r'https://www.amundi-ee.com/entr/ezjscore/call(.*)_tab_2', AmundiPerformancePage)
+    investment_details = URL(r'https://www.amundi-ee.com/entr/ezjscore/call(.*)_tab_5', AmundiDetailsPage)
+    # SG Gestion pages
+    amfcode_sg = URL(r'http://sggestion-ede.com/product', AMFSGPage)
+    # Ecofi pages
+    isincode_ecofi = URL(r'http://www.ecofi.fr/fr/fonds/.*#yes\?bypass=clientprive', EcofiPage)
+    pdf_file_ecofi = URL(r'http://www.ecofi.fr/sites/.*', EcofiDummyPage)
+    # Lyxor pages
+    lyxorfcpe = URL(r'http://www.lyxorfcpe.com/part', LyxorfcpePage)
+    lyxorfunds = URL(r'https://www.lyxorfunds.com', LyxorFundsPage)
+    # Swisslife pages
     swisslife = URL(r'http://fr.swisslife-am.com/fr/produits/.*', SwissLifePage)
+    # Etoile Gestion pages
     etoile_gestion = URL(r'http://www.etoile-gestion.com/index.php/etg_fr_fr/productsheet/view/.*', EtoileGestionPage)
     etoile_gestion_characteristics = URL(r'http://www.etoile-gestion.com/etg_fr_fr/ezjscore/.*', EtoileGestionCharacteristicsPage)
     etoile_gestion_details = URL(r'http://www.etoile-gestion.com/productsheet/.*', EtoileGestionDetailsPage)
-    profile = URL(r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP', ProfilePage)
+    # BNP pages
     bnp_investments = URL(r'https://optimisermon.epargne-retraite-entreprises.bnpparibas.com')
     api_investment_details = URL(r'https://funds-api.bnpparibas.com/api/performances/FromIsinCode/', APIInvestmentDetailsPage)
+    # Esalia pages
     esalia_details = URL(r'https://www.societegeneralegestion.fr/psSGGestionEntr/productsheet/view', EsaliaDetailsPage)
+    esalia_performance = URL(r'https://www.societegeneralegestion.fr/psSGGestionEntr/ezjscore/call(.*)_tab_2', EsaliaPerformancePage)
+
+    e_service_page = URL(
+        r'/portal/salarie-(?P<slug>\w+)/mesdonnees/eservice\?scenario=ConsulterEService',
+        r'/portal/salarie-(?P<slug>\w+)/mesdonnees/eservice',
+        EServicePage,
+    )
 
     STATE_DURATION = 10
 
@@ -67,6 +89,19 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         self.config = config
         kwargs['username'] = self.config['login'].get()
         kwargs['password'] = self.config['password'].get()
+
+        ''' All abstract modules have a regex on the password (such as '\d{6}'), except
+        'bnppere' because the Visiogo browser accepts non-digital passwords, since
+        there is no virtual keyboard on the visiogo website. Instead of crashing, it
+        sometimes works to extract the digits from the input and try to login if the original
+        input contains exactly 6 digits. '''
+        if not str.isdigit(str(kwargs['password'])):
+            digital_password = re.sub(r'[^0-9]', '', kwargs['password'])
+            if len(digital_password) != 6:
+                # No need to try to login, it will fail
+                raise BrowserIncorrectPassword()
+            # Try the 6 extracted digits as password
+            kwargs['password'] = digital_password
 
         self.secret = self.config['secret'].get() if 'secret' in self.config else None
         super(S2eBrowser, self).__init__(*args, **kwargs)
@@ -165,6 +200,20 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                         self.location('https://funds-api.bnpparibas.com/api/performances/FromIsinCode/' + inv.code)
                         self.page.fill_investment(obj=inv)
 
+                elif self.amfcode_amundi.match(inv._link):
+                    self.location(inv._link)
+                    details_url = self.page.get_details_url()
+                    performance_url = self.page.get_performance_url()
+                    if details_url:
+                        self.location(details_url)
+                        if self.investment_details.is_here():
+                            inv.recommended_period = self.page.get_recommended_period()
+                            inv.asset_category = self.page.get_asset_category()
+                    if performance_url:
+                        self.location(performance_url)
+                        if self.performance_details.is_here():
+                            inv.performance_history = self.page.get_performance_history()
+
                 elif self.amfcode_sg.match(inv._link) or self.lyxorfunds.match(inv._link):
                     # SGgestion-ede or Lyxor investments: not all of them have available attributes.
                     # For those requests to work in every case we need the headers from AccountsPage
@@ -181,6 +230,11 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                             inv.code_type = Investment.CODE_TYPE_ISIN
                     self.location(inv._link)
                     inv.asset_category = self.page.get_asset_category()
+                    # Fetch performance_history if available URL
+                    performance_url = self.page.get_performance_url()
+                    if performance_url:
+                        self.location('https://www.societegeneralegestion.fr' + performance_url)
+                        inv.performance_history = self.page.get_performance_history()
 
                 elif self.etoile_gestion_details.match(inv._link):
                     # Etoile Gestion investments details page:
@@ -221,6 +275,20 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                 yield tr
         # Go back to first page
         self.page.go_start()
+
+    @need_login
+    def get_profile(self):
+        self.profile.stay_or_go(slug=self.SLUG)
+        profile = self.page.get_profile()
+        return profile
+
+    @need_login
+    def iter_documents(self):
+        self.e_service_page.stay_or_go(slug=self.SLUG)
+        # we might land on the documents page, but sometimes we land on user info "tab"
+        self.page.select_documents_tab()
+        self.page.show_more()
+        return self.page.iter_documents()
 
 
 class EsaliaBrowser(S2eBrowser):

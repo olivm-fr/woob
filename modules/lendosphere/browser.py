@@ -23,7 +23,7 @@ import datetime
 
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.capabilities.bank import Investment
+from weboob.capabilities.wealth import Investment
 
 from .pages import (
     LoginPage, SummaryPage, GSummaryPage, ProfilePage, ComingPage,
@@ -53,6 +53,8 @@ class LendosphereBrowser(LoginBrowser):
     coming = AttrURL(r'/membres/(?P<user_id>[a-z0-9-]+)/mes-echeanciers.csv', ComingPage)
     profile = AttrURL(r'/membres/(?P<user_id>[a-z0-9-]+)', ProfilePage)
 
+    user_id = None
+
     def do_login(self):
         self.login.go()
         self.page.do_login(self.username, self.password)
@@ -64,8 +66,14 @@ class LendosphereBrowser(LoginBrowser):
 
     @need_login
     def iter_accounts(self):
+        self.dashboard.go()
+        liquidities = self.page.get_liquidities()
         self.global_summary.go()
-        return [self.page.get_account()]
+        account = self.page.get_account()
+        # Account balance is the sum of liquidities and invested money
+        account._liquidities = liquidities
+        account.balance = account._liquidities + account._invested
+        yield account
 
     @need_login
     def iter_investment(self, account):

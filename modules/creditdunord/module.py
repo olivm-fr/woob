@@ -21,7 +21,8 @@ from __future__ import unicode_literals
 
 from collections import OrderedDict
 
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
+from weboob.capabilities.bank import AccountNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword, Value
@@ -36,7 +37,7 @@ class CreditDuNordModule(Module, CapBankWealth, CapProfile):
     NAME = 'creditdunord'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = u'Crédit du Nord, Banque Courtois, Kolb, Nuger, Laydernier, Tarneaud, Société Marseillaise de Crédit'
     LICENSE = 'LGPLv3+'
     website_choices = OrderedDict([(k, u'%s (%s)' % (v, k)) for k, v in sorted({
@@ -55,10 +56,15 @@ class CreditDuNordModule(Module, CapBankWealth, CapProfile):
     BROWSER = CreditDuNordBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['website'].get(),
-                                   self.config['login'].get(),
-                                   self.config['password'].get(),
-                                   weboob=self.weboob)
+        browser = self.create_browser(
+            self.config['login'].get(),
+            self.config['password'].get(),
+            weboob=self.weboob,
+        )
+        browser.BASEURL = 'https://%s' % self.config['website'].get()
+        if browser.BASEURL != 'https://www.credit-du-nord.fr':
+            self.logger.warning('Please use the dedicated module instead of creditdunord')
+        return browser
 
     def iter_accounts(self):
         for account in self.browser.get_accounts_list():

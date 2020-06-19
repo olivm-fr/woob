@@ -22,12 +22,12 @@ from __future__ import unicode_literals
 import re
 from datetime import date, timedelta
 
-from weboob.browser.pages import HTMLPage, PartialHTMLPage, LoggedPage
+from weboob.browser.pages import HTMLPage, PartialHTMLPage, LoggedPage, FormNotFound
 from weboob.browser.elements import method, ListElement, ItemElement, SkipItem
 from weboob.browser.filters.standard import (
     CleanText, Date, Regexp, CleanDecimal, Currency, Field, Env,
 )
-from weboob.capabilities.bank import Recipient, Transfer, TransferBankError, AddRecipientBankError
+from weboob.capabilities.bank import Recipient, Transfer, TransferBankError, AddRecipientBankError, Emitter
 from weboob.capabilities.base import NotAvailable
 
 
@@ -99,8 +99,20 @@ class RecipientsPage(LoggedPage, HTMLPage):
         rcpt.currency = 'EUR'
         return rcpt
 
+    def get_error(self):
+        return CleanText('//div[@class="erreur_texte"]/p[1]')(self.doc)
+
     def get_send_code_form(self):
         return self.get_form(id='CompteExterneActionForm')
+
+    def send_info_form(self):
+        try:
+            form = self.get_form(name='validation_messages_bloquants')
+        except FormNotFound:
+            return False
+        else:
+            form.submit()
+            return True
 
 
 class RecipientSMSPage(LoggedPage, PartialHTMLPage):
@@ -147,6 +159,19 @@ class RegisterTransferPage(LoggedPage, HTMLPage):
             def condition(self):
                 # external recipient id contains 43 characters
                 return len(Field('id')(self)) < 40 and Env('origin_account_id')(self) != Field('id')(self)
+
+    @method
+    class iter_emitters(ListElement):
+        item_xpath = '//select[@name="compteADebiter"]/option[not(@selected)]'
+
+        class item(ItemElement):
+            klass = Emitter
+
+            obj_id = CleanText('./@value')
+            obj_currency = 'EUR'
+
+            def obj_label(self):
+                return re.sub(self.obj_id(self), '', CleanText('.')(self)).strip()
 
     def is_account_transferable(self, origin_account):
         for account in self.doc.xpath('//select[@name="compteADebiter"]/option[not(@selected)]'):

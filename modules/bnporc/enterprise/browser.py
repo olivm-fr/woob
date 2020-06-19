@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from datetime import datetime
@@ -36,27 +38,35 @@ from .pages import (
     PasswordExpiredPage, TransactionPage, MarketPage, InvestPage,
 )
 
-
 __all__ = ['BNPEnterprise']
 
 
 class BNPEnterprise(LoginBrowser):
     BASEURL = 'https://secure1.entreprises.bnpparibas.net'
 
-    login = URL('/sommaire/jsp/identification.jsp',
-                '/sommaire/generateImg', LoginPage)
+    login = URL('/sommaire/jsp/identification.jsp', '/sommaire/generateImg', LoginPage)
     auth = URL('/sommaire/PseMenuServlet', AuthPage)
     accounts = URL('/NCCPresentationWeb/e10_soldes/liste_soldes.do', AccountsPage)
-    account_history_view = URL('/NCCPresentationWeb/e10_soldes/init.do\?nccIdSelected=NCC_Soldes',
-                               '/NCCPresentationWeb/e11_releve_op/init.do\?identifiant=(?P<identifiant>)'
-                               '&typeSolde=(?P<type_solde>)&typeReleve=(?P<type_releve>)&typeDate=(?P<type_date>)'
-                               '&dateMin=(?P<date_min>)&dateMax=(?P<date_max>)&ajax=true',
-                               '/NCCPresentationWeb/e11_releve_op/init.do', AccountHistoryViewPage)
-    account_coming_view = URL('/NCCPresentationWeb/m04_selectionCompteGroupe/init.do\?type=compte&identifiant=(?P<identifiant>)', AccountHistoryViewPage)
-    account_history = URL('/NCCPresentationWeb/e11_releve_op/listeOperations.do\?identifiant=(?P<identifiant>)&typeSolde=(?P<type_solde>)&typeReleve=(?P<type_releve>)&typeDate=(?P<type_date>)&dateMin=(?P<date_min>)&dateMax=(?P<date_max>)&ajax=true',
-                          '/NCCPresentationWeb/e11_releve_op/listeOperations.do', AccountHistoryPage)
-    account_coming = URL('/NCCPresentationWeb/e12_rep_cat_op/listOperations.do\?periode=date_valeur&identifiant=(?P<identifiant>)',
-                         '/NCCPresentationWeb/e12_rep_cat_op/listOperations.do', AccountHistoryPage)
+    account_history_view = URL(
+        r'/NCCPresentationWeb/e10_soldes/init.do\?nccIdSelected=NCC_Soldes',
+        r'/NCCPresentationWeb/e11_releve_op/init.do\?identifiant=(?P<identifiant>)&typeSolde=(?P<type_solde>)&typeReleve=(?P<type_releve>)&typeDate=(?P<type_date>)&dateMin=(?P<date_min>)&dateMax=(?P<date_max>)&ajax=true',
+        r'/NCCPresentationWeb/e11_releve_op/init.do',
+        AccountHistoryViewPage
+    )
+    account_coming_view = URL(
+        r'/NCCPresentationWeb/m04_selectionCompteGroupe/init.do\?type=compte&identifiant=(?P<identifiant>)',
+        AccountHistoryViewPage
+    )
+    account_history = URL(
+        r'/NCCPresentationWeb/e11_releve_op/listeOperations.do\?identifiant=(?P<identifiant>)&typeSolde=(?P<type_solde>)&typeReleve=(?P<type_releve>)&typeDate=(?P<type_date>)&dateMin=(?P<date_min>)&dateMax=(?P<date_max>)&ajax=true',
+        '/NCCPresentationWeb/e11_releve_op/listeOperations.do',
+        AccountHistoryPage
+    )
+    account_coming = URL(
+        r'/NCCPresentationWeb/e12_rep_cat_op/listOperations.do\?periode=date_valeur&identifiant=(?P<identifiant>)',
+        '/NCCPresentationWeb/e12_rep_cat_op/listOperations.do',
+        AccountHistoryPage
+    )
 
     transaction_detail = URL(r'/NCCPresentationWeb/e21/getOptBDDF.do', TransactionPage)
     invest = URL(r'/opcvm/lister-composition/afficher.do', InvestPage)
@@ -88,12 +98,22 @@ class BNPEnterprise(LoginBrowser):
     @need_login
     def iter_accounts(self):
         accounts = []
-        # Fetch checking accounts:
-        for account in self.accounts.stay_or_go().iter_accounts():
-            accounts.append(account)
+        # Trying to go on the accounts page without any account results in a generic error handled by AccountsPage.on_load()
+        try:
+            self.accounts.go()
+        except BrowserForbidden:
+            pass
+        else:
+            # Fetch checking accounts:
+            for account in self.page.iter_accounts():
+                accounts.append(account)
+
         # Fetch market accounts:
         try:
             self.market.go()
+        except BrowserForbidden:
+            pass
+        else:
             if self.market.is_here():
                 for market_account in self.page.iter_market_accounts():
                     market_account.parent = find_object(accounts, label=market_account._parent)
@@ -105,9 +125,6 @@ class BNPEnterprise(LoginBrowser):
                 account = self.page.get_unique_market_account()
                 account.parent = find_object(accounts, label=account._parent)
                 accounts.append(account)
-
-        except BrowserForbidden:
-            pass
 
         return accounts
 
@@ -139,7 +156,11 @@ class BNPEnterprise(LoginBrowser):
         # To avoid duplicated transactions we exit as soon a transaction is not within the expected timeframe
         for date in rrule(MONTHLY, dtstart=(datetime.now() - relativedelta(months=11)), until=datetime.now())[::-1]:
 
-            params = dict(identifiant=account.iban, type_solde='C', type_releve='Previsionnel', type_date='O',
+            params = dict(
+                identifiant=account.iban,
+                type_solde='C',
+                type_releve='Previsionnel',
+                type_date='O',
                 date_min=(date + relativedelta(days=1) - relativedelta(months=1)).strftime(dformat),
                 date_max=date.strftime(dformat)
             )
@@ -153,8 +174,9 @@ class BNPEnterprise(LoginBrowser):
                     continue
 
                 if transaction.date > date:
-                    self.logger.debug('transaction not within expected timeframe, stop iterating history: %r',
-                                      transaction.to_dict())
+                    self.logger.debug(
+                        'transaction not within expected timeframe, stop iterating history: %r', transaction.to_dict()
+                    )
                     return
 
                 yield transaction
@@ -188,5 +210,5 @@ class BNPEnterprise(LoginBrowser):
 
     @need_login
     def get_profile(self):
-        profile = self.account_history_view.go().get_profile()
-        return profile
+        self.auth.go()
+        return self.page.get_profile()

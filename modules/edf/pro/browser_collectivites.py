@@ -6,17 +6,24 @@
 from __future__ import unicode_literals
 
 from weboob.browser import LoginBrowser, URL, need_login
+from weboob.exceptions import BrowserIncorrectPassword
 from weboob.tools.json import json
 
 from .collectivites_pages import (
     ClientSpace, CnicePage, AuraPage, PdfPage,
+    AuthenticationErrorPage,
 )
 
 
 class EdfproCollectivitesBrowser(LoginBrowser):
     BASEURL = 'https://entreprises-collectivites.edf.fr'
 
-    client_space = URL(r'/espaceclient/s/$', ClientSpace)
+    client_space = URL(
+        r'/espaceclient/s/$',
+        r'/espaceclient/s/aiguillage',
+        ClientSpace
+    )
+    authentication_error = URL(r'/espaceclient/_nc_external', AuthenticationErrorPage)
     cnice = URL(r'/espaceclient/services/authcallback/CNICE', CnicePage)
     aura = URL(r'/espaceclient/s/sfsites/aura', AuraPage)
     download_page = URL(r'/espaceclient/sfc/servlet.shepherd/version/download/(?P<id_download>.*)', PdfPage)
@@ -36,6 +43,9 @@ class EdfproCollectivitesBrowser(LoginBrowser):
         page = self.client_space.handle(self.response)
         url = page.handle_redirect()
         self.location(url)
+        if self.authentication_error.is_here():
+            raise BrowserIncorrectPassword(self.page.get_error_message())
+
         frontdoor_url = self.page.get_frontdoor_url()
         self.location(frontdoor_url)
         self.client_space.go()
@@ -65,9 +75,9 @@ class EdfproCollectivitesBrowser(LoginBrowser):
         message = {
             "actions":[
                 {
-                    "id": "467;a",
-                    "descriptor": "serviceComponent://ui.self.service.components.profileMenu.ProfileMenuController/ACTION$getProfileMenuResponse",
-                    "callingDescriptor": "UNKNOWN",
+                    "id": "894;a",
+                    "descriptor": "apex://CNICE_VFC172_DisplayUserProfil/ACTION$getContactInfo",
+                    "callingDescriptor": "markup://c:CNICE_LC265_DisplayUserProfil",
                     "params": {}
                 }
             ]
@@ -81,8 +91,8 @@ class EdfproCollectivitesBrowser(LoginBrowser):
         message = {
             "actions":[
                 {
-                    "id": "235;a",
-                    "descriptor": "apex://CNICE_VFC151_CompteurListe/ACTION$getCompteurListe",
+                    "id": "557;a",
+                    "descriptor": "apex://CNICE_VFC151_CompteurListe/ACTION$getCarouselInfos",
                     "callingDescriptor": "markup://c:CNICE_LC218_CompteurListe",
                     "params": {}
                 }
@@ -97,13 +107,13 @@ class EdfproCollectivitesBrowser(LoginBrowser):
         message = {
             "actions":[
                 {
-                    "id": "655;a",
+                    "id": "685;a",
                     "descriptor": "apex://CNICE_VFC158_HistoFactu/ACTION$initializeReglementSolde",
                     "callingDescriptor": "markup://c:CNICE_LC230_HistoFactu",
                     "params": {}
                 },
                 {
-                    "id": "720;a",
+                    "id": "751;a",
                     "descriptor": "apex://CNICE_VFC160_ListeFactures/ACTION$getFacturesbyId",
                     "callingDescriptor": "markup://c:CNICE_LC232_ListeFactures2",
                     "params":

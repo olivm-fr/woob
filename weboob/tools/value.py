@@ -58,10 +58,13 @@ class Value(object):
     :param regexp: if specified, on load the specified value is checked against this regexp, and an error is raised if it doesn't match
     :type regexp: str
     :param choices: if this parameter is set, the value must be in the list
+    :type choices: (list,dict)
     :param aliases: mapping of old choices values that should be accepted but not presented
     :type aliases: dict
     :param tiny: the value of choices can be entered by an user (as they are small)
-    :type choices: (list,dict)
+    :type tiny: bool
+    :param transient: this value is not persistent (asked only if needed)
+    :type transient: bool
     """
 
     def __init__(self, *args, **kwargs):
@@ -80,6 +83,7 @@ class Value(object):
         if isinstance(self.choices, (list, tuple)):
             self.choices = OrderedDict(((v, v) for v in self.choices))
         self.tiny = kwargs.get('tiny', None)
+        self.transient = kwargs.get('transient', None)
         self.masked = kwargs.get('masked', False)
         self.required = kwargs.get('required', self.default is None)
         self._value = kwargs.get('value', None)
@@ -96,10 +100,10 @@ class Value(object):
 
         :raises: ValueError
         """
-        if self.default is not None and v == self.default:
-            return
         if self.required and v is None:
             raise ValueError('Value is required and thus must be set')
+        if v == self.default:
+            return
         if v == '' and self.default != '' and (self.choices is None or v not in self.choices):
             raise ValueError('Value can\'t be empty')
         if self.regexp is not None and not re.match(self.regexp + '$', unicode(v) if v is not None else ''):
@@ -143,6 +147,17 @@ class Value(object):
         Get the value.
         """
         return self._value
+
+
+class ValueTransient(Value):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('transient', True)
+        kwargs.setdefault('default', None)
+        kwargs.setdefault('required', False)
+        super(ValueTransient, self).__init__(*args, **kwargs)
+
+    def dump(self):
+        return ''
 
 
 class ValueBackendPassword(Value):

@@ -19,13 +19,15 @@
 
 from __future__ import unicode_literals
 
+import time
 import re
 import datetime
 from hashlib import sha256
 from uuid import uuid4
 from collections import OrderedDict
-
 from decimal import Decimal
+import sys
+
 from dateutil import parser
 
 from weboob.browser import LoginBrowser, need_login, StatesMixin
@@ -33,7 +35,6 @@ from weboob.browser.switch import SiteSwitch
 from weboob.browser.url import URL
 from weboob.capabilities.bank import (
     Account, AddRecipientStep, Recipient, TransferBankError, Transaction, TransferStep,
-    TransferInvalidOTP, RecipientInvalidOTP,
 )
 from weboob.capabilities.base import NotAvailable, find_object
 from weboob.capabilities.bill import Subscription
@@ -41,7 +42,7 @@ from weboob.capabilities.profile import Profile
 from weboob.browser.exceptions import BrowserHTTPNotFound, ClientError, ServerError
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserUnavailable, BrowserHTTPError, BrowserPasswordExpired,
-    ActionNeeded, AuthMethodNotImplemented,
+    AuthMethodNotImplemented, AppValidation, AppValidationExpired,
 )
 from weboob.tools.capabilities.bank.transactions import (
     sorted_transactions, FrenchTransaction, keep_only_card_transactions,
@@ -57,17 +58,70 @@ from .pages import (
     IndexPage, ErrorPage, MarketPage, LifeInsurance, LifeInsuranceHistory, LifeInsuranceInvestments, GarbagePage, MessagePage, LoginPage,
     TransferPage, ProTransferPage, TransferConfirmPage, TransferSummaryPage, ProTransferConfirmPage,
     ProTransferSummaryPage, ProAddRecipientOtpPage, ProAddRecipientPage,
-    SmsPage, SmsPageOption, SmsRequest, AuthentPage, RecipientPage, CanceledAuth, CaissedepargneKeyboard, CaissedepargneNewKeyboard,
+    SmsPage, ValidationPageOption, AuthentPage, RecipientPage, CanceledAuth, CaissedepargneKeyboard, CaissedepargneNewKeyboard,
     TransactionsDetailsPage, LoadingPage, ConsLoanPage, MeasurePage, NatixisLIHis, NatixisLIInv, NatixisRedirectPage,
     SubscriptionPage, CreditCooperatifMarketPage, UnavailablePage, CardsPage, CardsComingPage, CardsOldWebsitePage, TransactionPopupPage,
-    OldLeviesPage, NewLeviesPage, NewLoginPage, JsFilePage, AuthorizePage, VkInitPage, VkImagePage,
-    LoginValidationPage, LoginTokensPage,
+    OldLeviesPage, NewLeviesPage, NewLoginPage, JsFilePage, AuthorizePage,
+    AuthenticationMethodPage, VkImagePage, AuthenticationStepPage, LoginTokensPage,
+    AppValidationPage,
 )
+from .transfer_pages import CheckingPage, TransferListPage
 
 from .linebourse_browser import LinebourseAPIBrowser
 
 
 __all__ = ['CaisseEpargne']
+
+
+def decode_utf8_cookie(data):
+    # caissedepargne/palatine cookies may contain non-ascii bytes which is ill-defined.
+    # Actually, they use utf-8.
+    # Since it's not standard, requests/urllib interprets it freely... as latin-1
+    # and we can't really blame for that.
+    # Let's decode this shit ourselves.
+    if sys.version_info.major == 2 and isinstance(data, bytes):
+        # on top of that, sometimes the cookie is already unicode
+        # which part does this? urllib? requests?
+        # who knows, in the end we have to avoid puking despite the stench
+        return data.decode('utf-8')
+    else:
+        return data.encode('latin-1').decode('utf-8')
+
+
+def monkeypatch_for_lowercase_percent(session):
+    # In the transfer flow, the main site (something like net123.caisse-epargne.fr)
+    # redirects to the OTP site (something like www.icgauth.caisse-epargne.fr).
+    # %2F is equivalent to %2f, right? It's hexadecimal after all. That's what
+    # RFC3986, RFC2396, RFC1630 say, also normalization of case is possible.
+    # That's what requests and urllib3 implement.
+    # But some dumbasses think otherwise and simply violate the RFCs.
+    # They SHOULD [interpreted as described in RFC2119] step away from the computer
+    # and never touch it again because they are obviously too stupid to use it.
+    # So, we are forced to hack deep in urllib3 to force our custom URL tweaking.
+
+    def patch_attr(obj, attr, func):
+        if hasattr(obj, '_old_%s' % attr):
+            return
+
+        old_func = getattr(obj, attr)
+        setattr(obj, '_old_%s' % attr, old_func)
+        setattr(obj, attr, func)
+
+    pm = session.adapters['https://'].poolmanager
+
+    def connection_from_host(*args, **kwargs):
+        pool = pm._old_connection_from_host(*args, **kwargs)
+
+        def make_request(conn, method, url, *args, **kwargs):
+            if url.startswith('/dacswebssoissuer/AuthnRequestServlet'):
+                # restrict this hazardous change to otp urls
+                url = re.sub(r'%[0-9A-F]{2}', lambda m: m.group(0).lower(), url)
+            return pool._old__make_request(conn, method, url, *args, **kwargs)
+
+        patch_attr(pool, '_make_request', make_request)
+        return pool
+
+    patch_attr(pm, 'connection_from_host', connection_from_host)
 
 
 class CaisseEpargne(LoginBrowser, StatesMixin):
@@ -89,22 +143,34 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
     authorize = URL(r'https://www.as-ex-ath-groupe.caisse-epargne.fr/api/oauth/v2/authorize', AuthorizePage)
     login_tokens = URL(r'https://www.as-ex-ath-groupe.caisse-epargne.fr/api/oauth/v2/consume', LoginTokensPage)
 
-    login_validation = URL(r'https://www.icgauth.caisse-epargne.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step', LoginValidationPage)
-
-    vk_init = URL(
+    # Login and transfer authentication
+    authentication_step = URL(
+        r'https://(?P<domain>www.icgauth.[^/]+)/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step', AuthenticationStepPage
+    )
+    authentication_method_page = URL(
+        r'https://(?P<domain>www.icgauth.[^/]+)/dacsrest/api/v1u0/transaction/(?P<validation_id>)',
         r'https://www.icgauth.caisse-epargne.fr/dacsrest/api/v1u0/transaction/.*',
-        VkInitPage,
+        AuthenticationMethodPage,
     )
     vk_image = URL(
-        r'https://www.icgauth.caisse-epargne.fr/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images',
+        r'https://(?P<domain>www.icgauth.[^/]+)/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images',
         VkImagePage,
     )
+
+    # eg of both possible regexes:
+    # https://www.icgauth.caisse-epargne.fr/dacstemplate-SOL/index.html?transactionID=CtxDACSP[a-f0-9]+
+    # https://www.icgauth.caisse-epargne.fr/dacstemplate-SOL/_12579/index.html?transactionID=CtxDACSP[a-f0-9]+
+    validation_option = URL(r'https://(?P<domain>www.icgauth.[^/]+)/dacstemplate-SOL/(?:[^/]+/)?index.html\?transactionID=.*', ValidationPageOption)
+    sms = URL(r'https://(?P<domain>www.icgauth.[^/]+)/dacswebssoissuer/AuthnRequestServlet', SmsPage)
+    app_validation = URL(r'https://(?P<domain>www.icgauth.[^/]+)/dacsrest/WaitingCallbackHandler', AppValidationPage)
 
     account_login = URL(r'/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)', LoginPage)
     loading = URL(r'https://.*/CreditConso/ReroutageCreditConso.aspx', LoadingPage)
     cons_loan = URL(r'https://www.credit-conso-cr.caisse-epargne.fr/websavcr-web/rest/contrat/getContrat\?datePourIe=(?P<datepourie>)', ConsLoanPage)
     transaction_detail = URL(r'https://.*/Portail.aspx.*', TransactionsDetailsPage)
     recipient = URL(r'https://.*/Portail.aspx.*', RecipientPage)
+    checking = URL(r'https://.*/Portail.aspx.*', CheckingPage)
+    transfer_list = URL(r'https://.*/Portail.aspx.*', TransferListPage)
     transfer = URL(r'https://.*/Portail.aspx.*', TransferPage)
     transfer_summary = URL(r'https://.*/Portail.aspx.*', TransferSummaryPage)
     transfer_confirm = URL(r'https://.*/Portail.aspx.*', TransferConfirmPage)
@@ -161,16 +227,10 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         r'https://.*/particuliers/epargner.*',
         GarbagePage
     )
-    sms = URL(r'https://www.icgauth.caisse-epargne.fr/dacswebssoissuer/AuthnRequestServlet', SmsPage)
-    sms_option = URL(r'https://www.icgauth.caisse-epargne.fr/dacstemplate-SOL/index.html\?transactionID=.*', SmsPageOption)
-    request_sms = URL(
-        r'https://(?P<domain>www.icgauth.[^/]+)/dacsrest/api/v1u0/transaction/(?P<param>)',
-        SmsRequest
-    )
 
     __states__ = (
         'BASEURL', 'multi_type', 'typeAccount', 'is_cenet_website', 'recipient_form',
-        'is_send_sms', 'otp_validation', 'otp_url',
+        'is_send_sms', 'is_app_validation', 'otp_validation',
     )
 
     # Accounts managed in life insurance space (not in linebourse)
@@ -209,7 +269,6 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         self.recipient_form = None
         self.is_send_sms = None
         self.otp_validation = None
-        self.otp_url = None
         self.weboob = kwargs['weboob']
         self.market_url = kwargs.pop(
             'market_url',
@@ -231,6 +290,8 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             proxy=self.PROXIES,
         )
 
+        monkeypatch_for_lowercase_percent(self.session)
+
     def deleteCTX(self):
         # For connection to offrebourse and natixis, we need to delete duplicate of CTX cookie
         if len([k for k in self.session.cookies.keys() if k == 'CTX']) > 1:
@@ -240,7 +301,7 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         if state.get('expire') and parser.parse(state['expire']) < datetime.datetime.now():
             return self.logger.info('State expired, not reloading it from storage')
 
-        transfer_states = ('recipient_form', 'is_send_sms', 'otp_validation', 'otp_url')
+        transfer_states = ('recipient_form', 'is_app_validation', 'is_send_sms', 'otp_validation')
 
         for transfer_state in transfer_states:
             if transfer_state in state and state[transfer_state] is not None:
@@ -384,17 +445,18 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         if not response['action']:
             # the only possible way to log in w/o nuser is on WE. if we're here no need to go further.
             if not self.nuser and self.typeAccount == 'WE':
-                raise BrowserIncorrectPassword(response['error'])
+                raise BrowserIncorrectPassword(self.page.get_wrongpass_message())
 
-            # we tested all, next iteration will throw the assertion
-            if self.inexttype == len(accounts_types) and 'Temporairement votre abonnement est bloqué' in response['error']:
-                raise ActionNeeded(response['error'])
+            # all typeAccount tested and still not logged
+            # next iteration will throw the AssertionError if we don't raise an error here
+            if self.inexttype == len(accounts_types):
+                raise BrowserIncorrectPassword(self.page.get_wrongpass_message())
 
             if self.multi_type:
                 # try to log in with the next connection type's value
                 self.do_login()
                 return
-            raise BrowserIncorrectPassword(response['error'])
+            raise BrowserIncorrectPassword(self.page.get_wrongpass_message())
 
         self.BASEURL = urljoin(data['url'], '/')
 
@@ -402,6 +464,193 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             self.home.go()
         except BrowserHTTPNotFound:
             raise BrowserIncorrectPassword()
+
+    def get_auth_mechanisms_validation_info(self):
+        """ First step of strong authentication validation
+
+        This method retrieve all informations needed for validation form.
+        Warning: need to be on `validation_option` page to get the "transaction ID".
+        """
+        transaction_id = re.search(r'transactionID=(.*)', self.page.url)
+        if transaction_id:
+            transaction_id = transaction_id.group(1)
+        else:
+            assert False, 'Transfer transaction id was not found in url'
+
+        otp_validation_domain = urlparse(self.url).netloc
+
+        self.authentication_method_page.go(
+            domain=otp_validation_domain,
+            validation_id=transaction_id
+        )
+
+        # Can have error at first authentication request.
+        # In that case, it's not an invalid otp error.
+        # So, return a wrongpass.
+        self.page.check_errors(feature='login')
+
+        self.otp_validation = self.page.get_authentication_method_info()
+
+        if self.otp_validation['type'] not in ('SMS', 'CLOUDCARD', 'PASSWORD'):
+            self.logger.warning('Not handled authentication method : "%s"' % self.otp_validation['type'])
+            raise AuthMethodNotImplemented()
+
+        self.otp_validation['validation_unit_id'] = self.page.validation_unit_id
+        self.otp_validation['validation_id'] = transaction_id
+        self.otp_validation['domain'] = otp_validation_domain
+
+    def do_otp_sms_authentication(self, **params):
+        """ Second step of sms authentication validation
+
+        This method validate otp sms.
+        Warning:
+        * need to be used through `do_authentication_validation` method
+        in order to handle authentication response
+        * do not forget to use the first part to have all form information
+        * do not forget to set `otp_sms` params
+
+        Parameters:
+        otp_sms (str): the OTP received by SMS
+        """
+        assert self.otp_validation
+        assert 'otp_sms' in params
+
+        self.authentication_step.go(
+            domain=self.otp_validation['domain'],
+            validation_id=self.otp_validation['validation_id'],
+            json={
+                'validate': {
+                    self.otp_validation['validation_unit_id']: [{
+                        'id': self.otp_validation['id'],
+                        'otp_sms': params['otp_sms'],
+                        'type': 'SMS',
+                    }],
+                },
+            }
+        )
+
+        self.otp_validation = None
+
+    def do_cloudcard_authentication(self, **params):
+        """ Second step of cloudcard authentication validation
+
+        This method check the application validation status.
+        Warning:
+        * need to be used through `do_authentication_validation` method
+        in order to handle authentication response
+        * do not forget to use the first part to have all form information
+        """
+        assert self.otp_validation
+
+        timeout = time.time() + 300.0
+        referer_url = self.authentication_method_page.build(
+            domain=self.otp_validation['domain'],
+            validation_id=self.otp_validation['validation_id'],
+        )
+
+        while time.time() < timeout:
+            self.app_validation.go(
+                domain=self.otp_validation['domain'],
+                headers={'Referer': referer_url},
+            )
+            status = self.page.get_status()
+            # The status is 'valid' even when the user cancels it on
+            # the application. The `authentication_step` will return
+            # AUTHENTICATION_CANCELED in its response status.
+            if status == 'valid':
+                self.authentication_step.go(
+                    domain=self.otp_validation['domain'],
+                    validation_id=self.otp_validation['validation_id'],
+                    json={
+                        'validate': {
+                            self.otp_validation['validation_unit_id']: [{
+                                'id': self.otp_validation['id'],
+                                'type': 'CLOUDCARD',
+                            }],
+                        },
+                    },
+                )
+                break
+
+            assert status == 'progress', 'Unhandled CloudCard status : "%s"' % status
+            time.sleep(2)
+        else:
+            raise AppValidationExpired()
+
+        self.otp_validation = None
+
+    def do_vk_authentication(self, **params):
+        """ Authentication with virtual keyboard
+
+        Warning: need to be used through `do_authentication_validation` method
+        in order to handle authentication response
+        """
+
+        # Can have error at first authentication request.
+        # In that case, it's not a vk error, return a wrongpass.
+        self.page.check_errors(feature='login')
+
+        validation_id = self.page.get_validation_id()
+        validation_unit_id = self.page.validation_unit_id
+
+        vk_info = self.page.get_authentication_method_info()
+        vk_id = vk_info['id']
+        vk_images_url = vk_info['virtualKeyboard']['externalRestMediaApiUrl']
+        otp_validation_domain = urlparse(self.url).netloc
+
+        self.location(vk_images_url)
+        images_url = self.page.get_all_images_data()
+        vk = CaissedepargneNewKeyboard(self, images_url)
+        code = vk.get_string_code(self.password)
+
+        self.authentication_step.go(
+            domain=otp_validation_domain,
+            validation_id=validation_id,
+            json={
+                'validate': {
+                    validation_unit_id: [{
+                        'id': vk_id,
+                        'password': code,
+                        'type': 'PASSWORD',
+                    }],
+                },
+            },
+            headers={
+                'Referer': self.BASEURL,
+                'Accept': 'application/json, text/plain, */*',
+            },
+        )
+
+    def do_authentication_validation(self, authentication_method, feature, **params):
+        """ Handle all sort of authentication with `icgauth`
+
+        This method is used for login or transfer/new recipient authentication.
+
+        Parameters:
+        authentication_method (str): authentication method in ('SMS', 'CLOUDCARD', 'PASSWORD')
+        feature (str): action that need authentication in ('login', 'transfer', 'recipient')
+        """
+        AUTHENTICATION_METHODS = {
+            'SMS': self.do_otp_sms_authentication,
+            'CLOUDCARD': self.do_cloudcard_authentication,
+            'PASSWORD': self.do_vk_authentication,
+        }
+        AUTHENTICATION_METHODS[authentication_method](**params)
+
+        assert self.authentication_step.is_here()
+        self.page.check_errors(feature=feature)
+
+        redirect_data = self.page.get_redirect_data()
+        self.location(
+            redirect_data['action'],
+            data={
+                'SAMLResponse': redirect_data['samlResponse'],
+            },
+            headers={
+                'Referer': self.BASEURL,
+                'Accept': 'application/json, text/plain, */*',
+            },
+        )
 
     def do_new_login(self, data):
         csid = str(uuid4())
@@ -450,50 +699,15 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
                 'bpcesta': '{"csid":"%s","typ_app":"rest","enseigne":"ce","typ_sp":"out-band","typ_act":"auth","snid":"%s","cdetab":"%s","typ_srv":"part"}' % (csid, url_params['snid'][0], url_params['cdetab'][0]),
             },
         )
-
         self.page.send_form()
 
-        images_url = self.page.get_vk_images_url()
-        vk_id = self.page.get_vk_id()
-        vk_validation_id = self.page.get_vk_validation_id()
-        pwd_validation_id = self.page.get_pwd_validation_id()
+        if self.response.headers.get('Page_Erreur', '') == 'INDISPO':
+            raise BrowserUnavailable()
 
-        self.location(images_url)
-
-        images_url = self.page.get_all_images_data()
-        vk = CaissedepargneNewKeyboard(self, images_url)
-
-        code = vk.get_string_code(self.password)
-
-        self.login_validation.go(
-            validation_id=pwd_validation_id,
-            json={
-                'validate': {
-                    vk_validation_id: [{
-                        'id': vk_id,
-                        'password': code,
-                        'type': 'PASSWORD',
-                    }],
-                },
-            },
-            headers={
-                'Referer': self.BASEURL,
-                'Accept': 'application/json, text/plain, */*',
-            },
-        )
-
-        if self.page.is_login_failed():
-            raise BrowserIncorrectPassword()
-
-        redirect_data = self.page.get_redirect_data()
-        self.login_tokens.go(
-            data={
-                'SAMLResponse': redirect_data['samlResponse'],
-            },
-            headers={
-                'Referer': self.BASEURL,
-                'Accept': 'application/json, text/plain, */*',
-            },
+        authentication_method = self.page.get_authentication_method_type()
+        self.do_authentication_validation(
+            authentication_method=authentication_method,
+            feature='login'
         )
 
         access_token = self.page.get_access_token()
@@ -532,30 +746,49 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         self.cons_loan.go(datepourie=d)
         return self.page.get_conso()
 
+    def go_measure_list(self, page_num = 0):
+        self.home.go()
+
+        if not self.measure_page.is_here():
+            assert False, 'Should be on measure_page'
+
+        self.page.go_measure_list()
+        for _ in range(page_num):
+            self.page.goto_next_page()
+
     # On home page there is a list of "measure" links, each one leading to one person accounts list.
     # Iter over each 'measure' and navigate to it to get all accounts
     @need_login
     def get_measure_accounts_list(self):
         self.home.go()
 
-        owner_name = self.get_profile().name.upper().split(' ', 1)[1]
-
+        # Get name from profile to verify who is the owner of accounts.
+        name = self.get_profile().name.upper().split(' ', 1)
+        if len(name) == 2:  # if the name is complete (with first and last name)
+            owner_name = name[1]
+        else:  # if there is only first name
+            owner_name = name[0]
         # Make sure we are on list of measures page
         if self.measure_page.is_here():
             self.page.check_no_accounts()
-            measure_ids = self.page.get_measure_ids()
             self.accounts = []
-            for measure_id in measure_ids:
-                self.page.go_measure_accounts_list(measure_id)
-                if self.page.check_measure_accounts():
-                    for account in list(self.page.get_list(owner_name)):
-                        account._info['measure_id'] = measure_id
-                        self.accounts.append(account)
-                self.page.go_measure_list()
+            for page_num in range(20):
+                for measure_id in self.page.get_measure_ids():
+                    self.page.go_measure_accounts_list(measure_id)
+                    if self.page.check_measure_accounts():
+                        for account in self.page.get_list(owner_name):
+                            account._info['measure_id'] = measure_id
+                            account._info['measure_id_page_num'] = page_num
+                            self.accounts.append(account)
+                    self.go_measure_list(page_num)
+                if not self.page.has_next_page():
+                    break
+                self.page.goto_next_page()
+
 
             for account in self.accounts:
                 if 'acc_type' in account._info and account._info['acc_type'] == Account.TYPE_LIFE_INSURANCE:
-                    self.page.go_measure_list()
+                    self.go_measure_list(account._info['measure_id_page_num'])
                     self.page.go_measure_accounts_list(account._info['measure_id'])
                     self.page.go_history(account._info)
 
@@ -584,7 +817,12 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         if self.accounts is None:
             self.accounts = self.get_measure_accounts_list()
         if self.accounts is None:
-            owner_name = self.get_profile().name.upper().split(' ', 1)[1]
+            # Get name from profile to verify who is the owner of accounts.
+            name = self.get_profile().name.upper().split(' ', 1)
+            if len(name) == 2:  # if the name is complete (with first and last name)
+                owner_name = name[1]
+            else:  # if there is only first name
+                owner_name = name[0]
             if self.home.is_here():
                 self.page.check_no_accounts()
                 self.page.go_list()
@@ -746,7 +984,7 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         if not info['link'].startswith('HISTORIQUE'):
             return
         if 'measure_id' in info:
-            self.page.go_measure_list()
+            self.go_measure_list(info['measure_id_page_num'])
             self.page.go_measure_accounts_list(info['measure_id'])
         elif self.home.is_here():
             self.page.go_list()
@@ -1043,19 +1281,40 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             self.page.come_back()
 
     @need_login
+    def iter_market_orders(self, account):
+        if account.type not in (Account.TYPE_MARKET, Account.TYPE_PEA):
+            return
+        self.home.go()
+        self.deleteCTX()
+        self.page.go_history(account._info)
+        if "Bourse" in self.url:
+            self.page.submit()
+            if 'offrebourse.com' in self.url:
+                # Some users may not have access to this.
+                if self.page.is_error():
+                    return
+                self.linebourse.session.cookies.update(self.session.cookies)
+                self.update_linebourse_token()
+                for order in self.linebourse.iter_market_orders(account.id):
+                    yield order
+
+    @need_login
     def get_advisor(self):
         raise NotImplementedError()
 
     @need_login
     def get_profile(self):
-        from weboob.tools.misc import to_unicode
         profile = Profile()
         if len([k for k in self.session.cookies.keys() if k == 'CTX']) > 1:
             del self.session.cookies['CTX']
-        if 'username=' in self.session.cookies.get('CTX', ''):
-            profile.name = to_unicode(re.search('username=([^&]+)', self.session.cookies['CTX']).group(1))
-        elif 'nomusager=' in self.session.cookies.get('headerdei'):
-            profile.name = to_unicode(re.search('nomusager=(?:[^&]+/ )?([^&]+)', self.session.cookies['headerdei']).group(1))
+
+        ctx = decode_utf8_cookie(self.session.cookies.get('CTX', str()))
+        # str() to make sure a native str is used as expected by decode_utf8_cookie
+        headerdei = decode_utf8_cookie(self.session.cookies.get('headerdei', str()))
+        if 'username=' in ctx:
+            profile.name = re.search('username=([^&]+)', ctx).group(1)
+        elif 'nomusager=' in headerdei:
+            profile.name = re.search('nomusager=(?:[^&]+/ )?([^&]+)', headerdei).group(1)
         return profile
 
     @need_login
@@ -1094,7 +1353,7 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
     def pre_transfer(self, account):
         if self.home.is_here():
             if 'measure_id' in account._info:
-                self.page.go_measure_list()
+                self.go_measure_list(account._info['measure_id_page_num'])
                 self.page.go_measure_accounts_list(account._info['measure_id'])
             else:
                 self.page.go_list()
@@ -1105,13 +1364,17 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
     @need_login
     def init_transfer(self, account, recipient, transfer):
         self.is_send_sms = False
+        self.is_app_validation = False
         self.pre_transfer(account)
+
+        # Warning: this may send a sms or an app validation
         self.page.init_transfer(account, recipient, transfer)
 
-        if self.sms_option.is_here():
-            self.is_send_sms = True
-            self.otp_update_state()
-            self.otp_choose_sms()
+        if self.validation_option.is_here():
+            self.get_auth_mechanisms_validation_info()
+
+            if self.otp_validation['type'] == 'CLOUDCARD':
+                raise AuthMethodNotImplemented()
 
             raise TransferStep(
                 transfer,
@@ -1132,7 +1395,12 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         self.is_send_sms = False
         assert 'otp_sms' in params, 'OTP SMS is missing'
 
-        self.otp_sms_validation(params['otp_sms'], TransferInvalidOTP)
+        self.do_authentication_validation(
+            authentication_method='SMS',
+            feature='transfer',
+            otp_sms=params['otp_sms']
+        )
+
         if self.transfer.is_here():
             self.page.continue_transfer(transfer.account_label, transfer.recipient_label, transfer.label)
             return self.page.update_transfer(transfer)
@@ -1153,48 +1421,6 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         r.currency = u'EUR'
         r.bank_name = NotAvailable
         return r
-
-    def otp_update_state(self):
-        transaction_id = re.search(r'transactionID=(.*)', self.page.url)
-        if transaction_id:
-            transaction_id = transaction_id.group(1)
-        else:
-            assert False, 'Transfer transaction id was not found in url'
-
-        self.request_sms.go(domain=urlparse(self.url).netloc, param=transaction_id)
-        self.otp_validation = self.page.validation_unit()
-
-        self.otp_url = self.url
-        if not self.url.endswith('/step'):
-            self.otp_url += '/step'
-
-    def otp_choose_sms(self):
-        key = next(iter(self.otp_validation))
-        auth_type = self.otp_validation[key][0]['type']
-        if auth_type == 'CLOUDCARD':
-            raise AuthMethodNotImplemented()
-        if auth_type == 'SMS':
-            return
-
-        self.location(self.otp_url, json={'fallback': {}})
-        self.otp_validation = self.page.validation_unit()
-
-    def otp_sms_validation(self, otp_sms, otp_exception):
-        key = next(iter(self.otp_validation))
-        data = {
-            'validate': {
-                key: [{
-                    'id': self.otp_validation[key][0]['id'],
-                    'otp_sms': otp_sms,
-                    'type': 'SMS',
-                }],
-            },
-        }
-        self.location(self.otp_url, json=data)
-
-        saml = self.page.get_saml(otp_exception)
-        action = self.page.get_action()
-        self.location(action, data={'SAMLResponse': saml})
 
     def post_sms_password(self, otp, otp_field_xpath):
         data = {}
@@ -1226,8 +1452,18 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         if 'sms_password' in params:
             return self.end_sms_recipient(recipient, **params)
 
-        if 'otp_sms' in params:
-            self.otp_sms_validation(params['otp_sms'], RecipientInvalidOTP)
+        if 'otp_sms' in params or 'resume' in params:
+            if 'otp_sms' in params:
+                self.do_authentication_validation(
+                    authentication_method='SMS',
+                    otp_sms=params['otp_sms'],
+                    feature='recipient'
+                )
+            else:
+                self.do_authentication_validation(
+                    authentication_method='CLOUDCARD',
+                    feature='recipient'
+                )
 
             if self.authent.is_here():
                 self.page.go_on()
@@ -1244,18 +1480,25 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             self.page.handle_error()
             assert False, 'We should not be on this page.'
 
-        if self.sms_option.is_here():
-            self.is_send_sms = True
-            self.otp_update_state()
-            self.otp_choose_sms()
+        if self.validation_option.is_here():
+            self.get_auth_mechanisms_validation_info()
 
-            raise AddRecipientStep(
-                self.get_recipient_obj(recipient),
-                Value(
-                    'otp_sms',
-                    label='Veuillez renseigner le mot de passe unique qui vous a été envoyé par SMS dans le champ réponse.'
+            recipient_obj = self.get_recipient_obj(recipient)
+            if self.otp_validation['type'] == 'SMS':
+                self.is_send_sms = True
+                raise AddRecipientStep(
+                    recipient_obj,
+                    Value(
+                        'otp_sms',
+                        label='Veuillez renseigner le mot de passe unique qui vous a été envoyé par SMS dans le champ réponse.'
+                    )
                 )
-            )
+            elif self.otp_validation['type'] == 'CLOUDCARD':
+                self.is_app_validation = True
+                raise AppValidation(
+                    resource=recipient_obj,
+                    message="Veuillez valider l'ajout de bénéficiaire sur votre application mobile."
+                )
 
         # pro add recipient.
         elif self.page.need_auth():
@@ -1295,6 +1538,11 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             sub.id = sha256(profile.name.lower().encode('utf-8')).hexdigest()
 
             return [sub]
+
+        # if we are not on checkings page, we don't have documents
+        if not self.checking.is_here():
+            return []
+
         self.page.go_subscription()
         if not self.subscription.is_here():
             # if user is not allowed to have subscription we are redirected to IndexPage
@@ -1340,3 +1588,21 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         # more or less visible number. `X` are visible number, `*` hidden one's.
         # tr.card: XXXX******XXXXXX, account.number: XXXXXX******XXXX
         return (a[:4], a[-4:]) == (b[:4], b[-4:])
+
+    @need_login
+    def iter_transfers(self, account):
+        self.home.go()
+        self.page.go_checkings()
+        self.page.go_transfer_list()
+
+        for transfer in self.page.iter_transfers():
+            self.page.open_transfer(transfer._formarg)
+            self.page.fill_transfer(obj=transfer)
+            yield transfer
+
+    @need_login
+    def iter_emitters(self):
+        self.home.go()
+        if self.page.go_emitters() is False:
+            return []
+        return self.page.iter_emitters()

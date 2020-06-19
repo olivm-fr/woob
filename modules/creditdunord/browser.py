@@ -27,7 +27,7 @@ from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from .pages import (
     LoginPage, ProfilePage, AccountTypePage, AccountsPage, ProAccountsPage,
     TransactionsPage, IbanPage, RedirectPage, EntryPage, AVPage, ProIbanPage,
-    ProTransactionsPage, LabelsPage, RgpdPage,
+    ProTransactionsPage, LabelsPage, RgpdPage, LoginConfirmPage,
 )
 
 
@@ -39,6 +39,8 @@ class CreditDuNordBrowser(LoginBrowser):
                 '/.*\?.*_pageLabel=page_erreur_connexion',
                 '/.*\?.*_pageLabel=reinitialisation_mot_de_passe',
                 LoginPage)
+    login_confirm = URL(r'/sec/vk/authent.json', LoginConfirmPage)
+    labels_page = URL(r'/icd/zco/data/public-menu.json', LabelsPage)
     redirect = URL('/swm/redirectCDN.html', RedirectPage)
     entrypage = URL(r'/icd/zco/$', '/icd/zco/public-index.html#zco', EntryPage)
     multitype_av = URL('/vos-comptes/IPT/appmanager/transac/professionnels\?_nfpb=true&_eventName=onRestart&_pageLabel=synthese_contrats_assurance_vie', AVPage)
@@ -58,9 +60,8 @@ class CreditDuNordBrowser(LoginBrowser):
     profile_page = URL("/icd/zco/data/public-user.json", ProfilePage)
     bypass_rgpd = URL('/icd/zcd/data/gdpr-get-out-zs-client.json', RgpdPage)
 
-    def __init__(self, website, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         self.weboob = kwargs['weboob']
-        self.BASEURL = "https://%s" % website
         super(CreditDuNordBrowser, self).__init__(*args, **kwargs)
 
     @property
@@ -70,25 +71,22 @@ class CreditDuNordBrowser(LoginBrowser):
 
     def do_login(self):
         self.login.go()
+
+        # Some users are still using their old password, that leads to a virtual keyboard crash.
+        if not self.password.isdigit() or len(self.password) != 6:
+            raise BrowserIncorrectPassword('Veuillez utiliser le nouveau code confidentiel fourni par votre banque.')
+
         self.page.login(self.username, self.password)
-        if self.accounts.is_here():
-            expired_error = self.page.get_password_expired()
-            if expired_error:
-                raise BrowserPasswordExpired(expired_error)
 
-        # Force redirection to entry page if the redirect page does not contain an url
-        if self.redirect.is_here():
-            self.entrypage.go()
+        assert self.login_confirm.is_here(), 'Should be on login confirmation page'
 
-        if self.entrypage.is_here() or self.login.is_here():
-            error = self.page.get_error()
-            if error:
-                if 'code confidentiel à la première connexion' in error:
-                    raise BrowserPasswordExpired(error)
-                raise BrowserIncorrectPassword(error)
-
-        if not self.logged:
+        if self.page.get_status() != 'ok':
             raise BrowserIncorrectPassword()
+        elif self.page.get_reason() == 'chgt_mdp_oblig':
+            # There is no message in the json return. There is just the code.
+            raise BrowserPasswordExpired('Changement de mot de passe requis.')
+
+        self.entrypage.go()
 
     def _iter_accounts(self):
         owner_name = self.get_profile().name.upper()

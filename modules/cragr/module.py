@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
-# yapf-compatible
+# flake8: compatible
 
 from __future__ import unicode_literals
 
@@ -29,10 +29,11 @@ from weboob.tools.backend import BackendConfig, Module
 from weboob.capabilities.base import find_object
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.bank import (
-    CapBankWealth, CapBankTransferAddRecipient, Account, AccountNotFound,
+    CapBankTransferAddRecipient, Account, AccountNotFound,
 )
+from weboob.capabilities.wealth import CapBankWealth
 
-from .proxy_browser import ProxyBrowser
+from .browser import CreditAgricoleBrowser
 
 __all__ = ['CreditAgricoleModule']
 
@@ -41,7 +42,7 @@ class CreditAgricoleModule(Module, CapBankWealth, CapBankTransferAddRecipient, C
     NAME = 'cragr'
     MAINTAINER = 'Quentin Defenouillère'
     EMAIL = 'quentin.defenouillere@budget-insight.com'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = 'Crédit Agricole'
     LICENSE = 'LGPLv3+'
 
@@ -132,7 +133,7 @@ class CreditAgricoleModule(Module, CapBankWealth, CapBankTransferAddRecipient, C
         'm.lefil.com': 'www.ca-pyrenees-gascogne.fr',
     }
 
-    BROWSER = ProxyBrowser
+    BROWSER = CreditAgricoleBrowser
 
     CONFIG = BackendConfig(
         Value('website', label='Caisse Régionale', choices=region_choices, aliases=region_aliases),
@@ -180,9 +181,12 @@ class CreditAgricoleModule(Module, CapBankWealth, CapBankTransferAddRecipient, C
             elif coming:
                 break
 
-    # Wealth method
+    # Wealth methods
     def iter_investment(self, account):
         return self.browser.iter_investment(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
 
     # Recipient & Transfer methods
     def iter_transfer_recipients(self, account):
@@ -204,3 +208,6 @@ class CreditAgricoleModule(Module, CapBankWealth, CapBankTransferAddRecipient, C
         if not hasattr(self.browser, 'get_profile'):
             raise NotImplementedError()
         return self.browser.get_profile()
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()

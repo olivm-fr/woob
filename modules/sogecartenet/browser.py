@@ -64,6 +64,7 @@ class SogecarteTitulaireBrowser(SeleniumBrowser):
             IsHereCondition(self.accueil),
             VisibleXPath('//div[@id="labelQuestion"]'),
             VisibleXPath('//div[contains(@class, "Notification-error-message")]'),
+            VisibleXPath('//div[contains(@class, "new-password")]'),
         ))
 
         if not self.accueil.is_here():
@@ -72,6 +73,7 @@ class SogecarteTitulaireBrowser(SeleniumBrowser):
             if any((
                 'Votre compte a été désactivé' in error,
                 'Votre compte est bloqué' in error,
+                'renseigner votre email professionnel' in error,
             )):
                 raise ActionNeeded(error)
             raise BrowserIncorrectPassword(error)
@@ -102,7 +104,7 @@ class SogecarteTitulaireBrowser(SeleniumBrowser):
         self.history.stay_or_go()
         self.wait_until_is_here(self.history)
 
-        self.page.select_first_date_history()
+        self.page.select_first_date_history(coming=coming)
 
         today = date.today()
         # 1 page = 1 month
@@ -121,11 +123,3 @@ class SogecarteTitulaireBrowser(SeleniumBrowser):
                     return
             page_count += 1
             has_next_page = self.page.go_next_page()
-
-    @need_login
-    def iter_history(self, account):
-        return self.iter_transactions(account)
-
-    @need_login
-    def iter_coming(self, account):
-        return self.iter_transactions(account, coming=True)

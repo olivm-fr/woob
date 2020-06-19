@@ -19,9 +19,11 @@
 
 from __future__ import print_function
 
-import subprocess
 import os
 import re
+from shutil import which
+import subprocess
+
 import requests
 
 from weboob.capabilities.radio import CapRadio, Radio
@@ -125,7 +127,7 @@ class PlaylistTrackListInfoFormatter(PrettyFormatter):
 
 class Radioob(ReplApplication):
     APPNAME = 'radioob'
-    VERSION = '1.6'
+    VERSION = '2.1'
     COPYRIGHT = 'Copyright(C) 2010-YEAR Romain Bignon\nCopyright(C) YEAR Pierre Maziere'
     DESCRIPTION = "Console application allowing to search for web radio stations, listen to them and get information " \
                   "like the current song."
@@ -199,11 +201,9 @@ class Radioob(ReplApplication):
         audio.url = _obj.url
 
         def check_exec(executable):
-            with open(os.devnull, 'w') as devnull:
-                process = subprocess.Popen(['which', executable], stdout=devnull)
-                if process.wait() != 0:
-                    print('Please install "%s"' % executable, file=self.stderr)
-                    return False
+            if which(executable) is None:
+                print('Please install "%s"' % executable, file=self.stderr)
+                return False
             return True
 
         def audio_to_file(_audio):
@@ -235,7 +235,7 @@ class Radioob(ReplApplication):
             else:
                 return 1
 
-        os.spawnlp(os.P_WAIT, args[0], *args)
+        subprocess.call(args)
 
     def complete_play(self, text, line, *ignored):
         args = line.split(' ')

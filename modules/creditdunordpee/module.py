@@ -21,7 +21,9 @@
 
 from weboob.tools.backend import AbstractModule, BackendConfig
 from weboob.tools.value import ValueBackendPassword, Value
-from weboob.capabilities.bank import CapBank
+from weboob.capabilities.wealth import CapBankWealth
+from weboob.capabilities.bill import CapDocument
+from weboob.capabilities.profile import CapProfile
 
 from .browser import CreditdunordpeeBrowser
 
@@ -29,13 +31,13 @@ from .browser import CreditdunordpeeBrowser
 __all__ = ['CreditdunordpeeModule']
 
 
-class CreditdunordpeeModule(AbstractModule, CapBank):
+class CreditdunordpeeModule(AbstractModule, CapBankWealth, CapDocument, CapProfile):
     NAME = 'creditdunordpee'
     DESCRIPTION = u'Crédit du Nord Épargne Salariale'
     MAINTAINER = u'Ludovic LANGE'
     EMAIL = 'llange@users.noreply.github.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(
              ValueBackendPassword('login',    label='Identifiant', masked=False),
              ValueBackendPassword('password', label='Code secret', regexp='^(\d{6})$'),

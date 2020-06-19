@@ -46,7 +46,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
 from selenium.webdriver.remote.command import Command
 from weboob.tools.log import getLogger
-from weboob.tools.compat import urljoin
+from weboob.tools.compat import (
+    urljoin, urlparse, urlencode, parse_qsl,
+    urlunparse,
+)
 
 from .pages import HTMLPage as BaseHTMLPage
 from .url import URL
@@ -417,7 +420,7 @@ class SeleniumBrowser(object):
 
     MAX_SAVED_RESPONSES = (1 << 30)  # limit to 1GiB
 
-    def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None, proxy_headers=None):
+    def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None, proxy_headers=None, preferences=None):
         super(SeleniumBrowser, self).__init__()
         self.responses_dirname = responses_dirname
         self.responses_count = 0
@@ -435,7 +438,7 @@ class SeleniumBrowser(object):
         self.implicit_timeout = 0
         self.last_page_hash = None
 
-        self._setup_driver()
+        self._setup_driver(preferences)
 
         self._urls = []
         cls = type(self)
@@ -448,20 +451,33 @@ class SeleniumBrowser(object):
                 self._urls.append(val)
         self._urls.sort(key=lambda u: u._creation_counter)
 
-    def _build_options(self):
-        return OPTIONS_CLASSES[self.DRIVER]()
+    def _build_options(self, preferences):
+        options = OPTIONS_CLASSES[self.DRIVER]()
+        if preferences:
+            if isinstance(options, webdriver.FirefoxOptions):
+                for key, value in preferences.items():
+                    options.set_preference(key, value)
+            elif isinstance(options, webdriver.ChromeOptions):
+                options.add_experimental_option('prefs', preferences)
+        return options
 
     def _build_capabilities(self):
         return CAPA_CLASSES[self.DRIVER].copy()
 
-    def _setup_driver(self):
+    def get_proxy_url(self, url):
+        if self.DRIVER is webdriver.Firefox:
+            proxy_url = urlparse(url)
+            return proxy_url.geturl().replace('%s://' % proxy_url.scheme, '')
+        return url
+
+    def _setup_driver(self, preferences):
         proxy = Proxy()
         if 'http' in self.proxy:
             proxy.proxy_type = ProxyType.MANUAL
-            proxy.http_proxy = self.proxy['http']
+            proxy.http_proxy = self.get_proxy_url(self.proxy['http'])
         if 'https' in self.proxy:
             proxy.proxy_type = ProxyType.MANUAL
-            proxy.ssl_proxy = self.proxy['https']
+            proxy.ssl_proxy = self.get_proxy_url(self.proxy['https'])
 
         if proxy.proxy_type != ProxyType.MANUAL:
             proxy.proxy_type = ProxyType.DIRECT
@@ -469,10 +485,23 @@ class SeleniumBrowser(object):
         capa = self._build_capabilities()
         proxy.add_to_capabilities(capa)
 
-        options = self._build_options()
+        options = self._build_options(preferences)
         # TODO some browsers don't need headless
         # TODO handle different proxy setting?
-        options.set_headless(self.HEADLESS)
+        try:
+            # New Selenium versions
+            options.headless = self.HEADLESS
+        except AttributeError:
+            # Keep compatibility with old Selenium versions
+            options.set_headless(self.HEADLESS)
+
+        driver_kwargs = {}
+        if self.responses_dirname:
+            if not os.path.isdir(self.responses_dirname):
+                os.makedirs(self.responses_dirname)
+            driver_kwargs['service_log_path'] = os.path.join(self.responses_dirname, 'selenium.log')
+        else:
+            driver_kwargs['service_log_path'] = NamedTemporaryFile(prefix='weboob_selenium_', suffix='.log', delete=False).name
 
         if self.DRIVER is webdriver.Firefox:
             if self.responses_dirname and not os.path.isdir(self.responses_dirname):
@@ -481,18 +510,11 @@ class SeleniumBrowser(object):
             options.profile = DirFirefoxProfile(self.responses_dirname)
             if self.responses_dirname:
                 capa['profile'] = self.responses_dirname
-            self.driver = self.DRIVER(options=options, capabilities=capa)
+            self.driver = self.DRIVER(options=options, capabilities=capa, **driver_kwargs)
         elif self.DRIVER is webdriver.Chrome:
-            self.driver = self.DRIVER(options=options, desired_capabilities=capa)
+            self.driver = self.DRIVER(options=options, desired_capabilities=capa, **driver_kwargs)
         elif self.DRIVER is webdriver.PhantomJS:
-            if self.responses_dirname:
-                if not os.path.isdir(self.responses_dirname):
-                    os.makedirs(self.responses_dirname)
-                log_path = os.path.join(self.responses_dirname, 'selenium.log')
-            else:
-                log_path = NamedTemporaryFile(prefix='weboob_selenium_', suffix='.log', delete=False).name
-
-            self.driver = self.DRIVER(desired_capabilities=capa, service_log_path=log_path)
+            self.driver = self.DRIVER(desired_capabilities=capa, **driver_kwargs)
         else:
             raise NotImplementedError()
 
@@ -551,10 +573,27 @@ class SeleniumBrowser(object):
         :any:`wait_until`)
         """
         assert method is None
-        assert params is None
         assert data is None
         assert json is None
         assert not headers
+
+        params = params or {}
+
+        # if it's a list of 2-tuples, it will cast into a dict
+        # otherwise, it will raise a TypeError
+        try:
+            params = dict(params)
+        except TypeError:
+            raise TypeError("'params' keyword argument must be a dict, a list of tuples or None.")
+
+        params = params.items()
+        url_parsed = urlparse(url)
+        original_params = parse_qsl(url_parsed.query)
+        original_params.extend(params)
+        query = urlencode(original_params)
+        url_parsed._replace(query=query)
+        url = urlunparse(url_parsed)
+
         self.logger.debug('opening %r', url)
         self.driver.get(url)
 

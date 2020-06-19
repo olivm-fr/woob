@@ -28,7 +28,8 @@ from weboob.browser.filters.standard import (
     Upper, MapIn, Eval, Title,
 )
 from weboob.browser.filters.html import Link
-from weboob.capabilities.bank import Account, Investment, Pocket, NotAvailable
+from weboob.capabilities.bank import Account, NotAvailable
+from weboob.capabilities.wealth import Investment, Pocket
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.exceptions import ActionNeeded
 
@@ -227,7 +228,7 @@ class InvestmentPage(LoggedPage, HTMLPage):
         return Eval(lambda x: x/100, CleanDecimal.French('//p[contains(@class, "plusvalue--value")]'))(self.doc)
 
     def go_investment_details(self):
-        investment_details_url = Link('//a[@id="C:T1:N"]')(self.doc)
+        investment_details_url = Link('//a[text()="Mes avoirs"]')(self.doc)
         self.browser.location(investment_details_url)
 
 

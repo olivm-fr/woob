@@ -19,7 +19,9 @@
 
 from __future__ import unicode_literals
 
+import json
 import re
+from uuid import uuid4
 
 from datetime import datetime
 from collections import OrderedDict
@@ -32,6 +34,7 @@ from weboob.browser import LoginBrowser, URL, need_login
 from weboob.capabilities.bank import Account, AccountOwnership
 from weboob.capabilities.base import NotAvailable, find_object
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
+from weboob.tools.compat import urlparse, parse_qs
 
 from .pages import (
     LoggedOut,
@@ -41,11 +44,14 @@ from .pages import (
     NatixisPage, EtnaPage, NatixisInvestPage, NatixisHistoryPage, NatixisErrorPage,
     NatixisDetailsPage, NatixisChoicePage, NatixisRedirect,
     LineboursePage, AlreadyLoginPage, InvestmentPage,
+    NewLoginPage, JsFilePage, AuthorizePage, LoginTokensPage, VkImagePage,
+    AuthenticationMethodPage, AuthenticationStepPage, CaissedepargneVirtKeyboard,
+    AccountsNextPage, GenericAccountsPage, InfoTokensPage,
 )
 
 from .document_pages import BasicTokenPage, SubscriberPage, SubscriptionsPage, DocumentsPage
 
-from .linebourse_browser import LinebourseBrowser
+from .linebourse_browser import LinebourseAPIBrowser
 
 
 __all__ = ['BanquePopulaire']
@@ -102,6 +108,23 @@ def no_need_login(func):
 
 class BanquePopulaire(LoginBrowser):
     login_page = URL(r'https://[^/]+/auth/UI/Login.*', LoginPage)
+    new_login = URL(r'https://[^/]+/se-connecter/sso', NewLoginPage)
+    js_file = URL(r'https://[^/]+/se-connecter/main-.*.js$', JsFilePage)
+    authorize = URL(r'https://www.as-ex-ath-groupe.banquepopulaire.fr/api/oauth/v2/authorize', AuthorizePage)
+    login_tokens = URL(r'https://www.as-ex-ath-groupe.banquepopulaire.fr/api/oauth/v2/consume', LoginTokensPage)
+    info_tokens = URL(r'https://www.as-ex-ano-groupe.banquepopulaire.fr/api/oauth/token', InfoTokensPage)
+    user_info = URL(r'https://www.rs-ex-ano-groupe.banquepopulaire.fr/bapi/user/v1/users/identificationRouting', InfoTokensPage)
+    authentication_step = URL(
+        r'https://www.icgauth.banquepopulaire.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step', AuthenticationStepPage
+    )
+    authentication_method_page = URL(
+        r'https://www.icgauth.banquepopulaire.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>)',
+        AuthenticationMethodPage,
+    )
+    vk_image = URL(
+        r'https://www.icgauth.banquepopulaire.fr/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images',
+        VkImagePage,
+    )
     index_page = URL(r'https://[^/]+/cyber/internet/Login.do', IndexPage)
     accounts_page = URL(r'https://[^/]+/cyber/internet/StartTask.do\?taskInfoOID=mesComptes.*',
                         r'https://[^/]+/cyber/internet/StartTask.do\?taskInfoOID=maSyntheseGratuite.*',
@@ -109,6 +132,7 @@ class BanquePopulaire(LoginBrowser):
                         r'https://[^/]+/cyber/internet/StartTask.do\?taskInfoOID=equipementComplet.*',
                         r'https://[^/]+/cyber/internet/ContinueTask.do\?.*dialogActionPerformed=VUE_COMPLETE.*',
                         AccountsPage)
+    accounts_next_page = URL(r'https://[^/]+/cyber/internet/Page.do\?.*', AccountsNextPage)
 
     iban_page = URL(r'https://[^/]+/cyber/internet/StartTask.do\?taskInfoOID=cyberIBAN.*',
                     r'https://[^/]+/cyber/internet/ContinueTask.do\?.*dialogActionPerformed=DETAIL_IBAN_RIB.*',
@@ -152,8 +176,11 @@ class BanquePopulaire(LoginBrowser):
                     r'https://[^/]+/cyber/internet/ShowPortal.do\?token=.*',
                     HomePage)
 
-    already_login_page = URL(r'https://[^/]+/dacswebssoissuer.*',
-                             r'https://[^/]+/WebSSO_BP/_(?P<bankid>\d+)/index.html\?transactionID=(?P<transactionID>.*)', AlreadyLoginPage)
+    already_login_page = URL(
+        r'https://[^/]+/dacswebssoissuer.*',
+        r'https://[^/]+/WebSSO_BP/_(?P<bankid>\d+)/index.html\?transactionID=(?P<transactionID>.*)',
+        AlreadyLoginPage
+    )
     login2_page = URL(r'https://[^/]+/WebSSO_BP/_(?P<bankid>\d+)/index.html\?transactionID=(?P<transactionID>.*)', Login2Page)
 
     # natixis
@@ -181,6 +208,8 @@ class BanquePopulaire(LoginBrowser):
     documents_page = URL(r'/api-bp/wapi/2.0/abonnes/current/documents/recherche-avancee', DocumentsPage)
 
     def __init__(self, website, *args, **kwargs):
+        self.retry_login_without_phase = False
+        self.website = website
         self.BASEURL = 'https://%s' % website
         # this url is required because the creditmaritime abstract uses an other url
         if 'cmgo.creditmaritime' in self.BASEURL:
@@ -194,7 +223,7 @@ class BanquePopulaire(LoginBrowser):
         dirname = self.responses_dirname
         if dirname:
             dirname += '/bourse'
-        self.linebourse = LinebourseBrowser('https://www.linebourse.fr', logger=self.logger, responses_dirname=dirname, weboob=self.weboob, proxy=self.PROXIES)
+        self.linebourse = LinebourseAPIBrowser('https://www.linebourse.fr', logger=self.logger, responses_dirname=dirname, weboob=self.weboob, proxy=self.PROXIES)
 
         self.documents_headers = None
 
@@ -234,6 +263,17 @@ class BanquePopulaire(LoginBrowser):
         if self.home_page.is_here():
             return
 
+        if self.new_login.is_here():
+            if not self.password.isnumeric():
+                # Vk from new login only accepts numeric characters
+                raise BrowserIncorrectPassword('Le mot de passe doit être composé de chiffres uniquement')
+            return self.do_new_login()
+        return self.do_old_login()
+
+    def do_old_login(self):
+        assert self.login2_page.is_here(), 'Should be on login2 page'
+        self.page.set_form_ids()
+
         try:
             self.page.login(self.username, self.password)
         except BrowserUnavailable as ex:
@@ -244,6 +284,8 @@ class BanquePopulaire(LoginBrowser):
             if 'Cette page est indisponible' in ex.message and not self.password.isdigit():
                 raise BrowserIncorrectPassword()
             raise
+        if not self.password.isnumeric():
+            self.logger.warning('Password with non numeric chararacters still works')
 
         if self.login_page.is_here():
             raise BrowserIncorrectPassword()
@@ -252,7 +294,174 @@ class BanquePopulaire(LoginBrowser):
             data = {'integrationMode': 'INTERNET_RESCUE'}
             self.location('/cyber/internet/Login.do', data=data)
 
+    def do_new_login(self):
+        # Same login as caissedepargne
+        url_params = parse_qs(urlparse(self.url).query)
+        cdetab = url_params['cdetab'][0]
+        continue_url = url_params['continue'][0]
+
+        main_js_file = self.page.get_main_js_file_url()
+        self.location(main_js_file)
+
+        client_id = self.page.get_client_id()
+        nonce = self.page.get_nonce()  # Hardcoded in their js...
+
+        data = {
+            'grant_type': 'client_credentials',
+            'client_id': self.page.get_user_info_client_id(),
+            'scope': '',
+        }
+
+        # The 2 followings requests are needed in order to get
+        # user type (part, ent and pro)
+        self.info_tokens.go(data=data)
+
+        headers = {'Authorization': 'Bearer %s' % self.page.get_access_token()}
+        data = {
+            'characteristics': {
+                'iTEntityType': {
+                    'code': '03',  # 03 for BP and 02 for CE
+                    'label': 'BP',
+                },
+                'userCode': self.username.upper(),
+                'bankId': cdetab,
+                'subscribeTypeItems': [],
+            }
+        }
+        self.user_info.go(headers=headers, json=data)
+        self.user_type = self.page.get_user_type()
+
+        # On the website, this sends back json because of the header
+        # 'Accept': 'applcation/json'. If we do not add this header, we
+        # instead have a form that we can directly send to complete
+        # the login.
+        bpcesta = {
+            'csid': str(uuid4()),
+            'typ_app': 'rest',
+            'enseigne': 'bp',
+            'typ_sp': 'out-band',
+            'typ_act': 'auth',
+            'snid': '123456',
+            'cdetab': cdetab,
+            'typ_srv': self.user_type,
+        }
+        claims = {
+            'userinfo': {
+                'cdetab': None,
+                'authMethod': None,
+                'authLevel': None
+            },
+            'id_token': {
+                'auth_time': {
+                    'essential': True,
+                },
+                'last_login': None,
+            },
+        }
+        # We need to avoid to add "phase":"1" for some sub-websites
+        # The phase information seems to be in js file and the value is not hardcode
+        # Consequently we try the login twice with and without phase param
+        # Because the problem occurs during do_redirect
+        if not self.retry_login_without_phase:
+            bpcesta['phase'] = '1'
+
+        params={
+            'nonce': nonce,
+            'scope': '',
+            'response_type': 'id_token token',
+            'response_mode': 'form_post',
+            'cdetab': cdetab,
+            'login_hint': self.username.upper(),
+            'display': 'page',
+            'client_id': client_id,
+            'claims': json.dumps(claims),
+            'bpcesta': json.dumps(bpcesta),
+        }
+
+        self.authorize.go(params=params)
+        self.page.send_form()
+
+        self.page.check_errors(feature='login')
+
+        validation_id = self.page.get_validation_id()
+        validation_unit_id = self.page.validation_unit_id
+
+        vk_info = self.page.get_authentication_method_info()
+        vk_id = vk_info['id']
+
+        if vk_info.get('virtualKeyboard') is None:
+            # no VK, password to submit
+            code = self.password
+        else:
+            vk_images_url = vk_info['virtualKeyboard']['externalRestMediaApiUrl']
+
+            self.location(vk_images_url)
+            images_url = self.page.get_all_images_data()
+            vk = CaissedepargneVirtKeyboard(self, images_url)
+            code = vk.get_string_code(self.password)
+
+        headers = {
+            'Referer': self.BASEURL,
+            'Accept': 'application/json, text/plain, */*',
+        }
+        self.authentication_step.go(
+            validation_id=validation_id,
+            json={
+                'validate': {
+                    validation_unit_id: [{
+                        'id': vk_id,
+                        'password': code,
+                        'type': 'PASSWORD',
+                    }],
+                },
+            },
+            headers=headers,
+        )
+
+        assert self.authentication_step.is_here()
+        self.page.check_errors(feature='login')
+
+        self.do_redirect(headers)
+
+        access_token = self.page.get_access_token()
+        expires_in = self.page.get_expires_in()
+
+        self.location(
+            continue_url,
+            params={
+                'access_token': access_token,
+                'token_type': 'Bearer',
+                'grant_type': 'implicit flow',
+                'NameId': self.username.upper(),
+                'Segment': self.user_type,
+                'scopes': '',
+                'expires_in': expires_in,
+            },
+        )
+
+        url_params = parse_qs(urlparse(self.url).query)
+        validation_id = url_params['transactionID'][0]
+
+        self.authentication_method_page.go(validation_id=validation_id)
+        # Need to do the redirect a second time to finish login
+        self.do_redirect(headers)
+
     ACCOUNT_URLS = ['mesComptes', 'mesComptesPRO', 'maSyntheseGratuite', 'accueilSynthese', 'equipementComplet']
+
+    def do_redirect(self, headers):
+        redirect_data = self.page.get_redirect_data()
+        if not redirect_data and self.page.is_new_login():
+            # assert to avoid infinite loop
+            assert not self.retry_login_without_phase, 'the login failed with and without phase 1 param'
+            self.retry_login_without_phase = True
+            self.session.cookies.clear()
+            return self.do_login()
+
+        self.location(
+            redirect_data['action'],
+            data={'SAMLResponse': redirect_data['samlResponse']},
+            headers=headers,
+        )
 
     @retry(BrokenPageError)
     @need_login
@@ -295,26 +504,33 @@ class BanquePopulaire(LoginBrowser):
         accounts = []
         profile = self.get_profile()
 
-        if profile.name:
-            name = profile.name
-        else:
-            name = profile.company_name
+        if profile:
+            if profile.name:
+                name = profile.name
+            else:
+                name = profile.company_name
 
-        # Handle names/company names without spaces
-        if ' ' in name:
-            owner_name = re.search(r' (.+)', name).group(1).upper()
+            # Handle names/company names without spaces
+            if ' ' in name:
+                owner_name = re.search(r' (.+)', name).group(1).upper()
+            else:
+                owner_name = name.upper()
         else:
-            owner_name = name.upper()
+            # AdvisorPage is not available for all users
+            owner_name = None
 
         self.go_on_accounts_list()
 
         for a in self.page.iter_accounts(next_pages):
-            self.set_account_ownership(a, owner_name)
+            if owner_name:
+                self.set_account_ownership(a, owner_name)
+
             accounts.append(a)
             if not get_iban:
                 yield a
 
         while len(next_pages) > 0:
+            next_with_params = None
             next_page = next_pages.pop()
 
             if not self.accounts_full_page.is_here():
@@ -329,12 +545,26 @@ class BanquePopulaire(LoginBrowser):
             # Go to next_page with params and token
             next_page['token'] = self.page.build_token(self.token)
             self.location('/cyber/internet/ContinueTask.do', data=next_page)
+            secure_iteration = 0
+            while secure_iteration == 0 or (next_with_params and secure_iteration < 10):
+                # The first condition allows to do iter_accounts with less than 20 accounts
+                secure_iteration += 1
+                # If we have more than 20 accounts of a type
+                # The next page is reached by params found in the current page
+                if isinstance(self.page, GenericAccountsPage):
+                    next_with_params = self.page.get_next_params()
+                else:
+                    # Can be ErrorPage
+                    next_with_params = None
 
-            for a in self.page.iter_accounts(next_pages, accounts_parsed=accounts):
-                self.set_account_ownership(a, owner_name)
-                accounts.append(a)
-                if not get_iban:
-                    yield a
+                for a in self.page.iter_accounts(next_pages, accounts_parsed=accounts, next_with_params=next_with_params):
+                    self.set_account_ownership(a, owner_name)
+                    accounts.append(a)
+                    if not get_iban:
+                        yield a
+
+                if next_with_params:
+                    self.location('/cyber/internet/Page.do', params=next_with_params)
 
         if get_iban:
             for a in accounts:
@@ -499,7 +729,7 @@ class BanquePopulaire(LoginBrowser):
 
                 if 'linebourse' in self.url:
                     self.linebourse.session.cookies.update(self.session.cookies)
-                    self.linebourse.invest.go()
+                    self.linebourse.session.headers['X-XSRF-TOKEN'] = self.session.cookies.get('XSRF-TOKEN')
 
                 if self.natixis_error_page.is_here():
                     self.logger.warning('Natixis site does not work.')
@@ -521,14 +751,13 @@ class BanquePopulaire(LoginBrowser):
         if account.type == Account.TYPE_PEA and account.id.startswith('CPT'):
             yield create_french_liquidity(account.balance)
             return
-
         if self.go_investments(account, get_account=True):
             # Redirection URL is https://www.linebourse.fr/ReroutageSJR
             if 'linebourse' in self.url:
                 self.logger.warning('Going to Linebourse space to fetch investments.')
                 # Eliminating the 3 letters prefix to match IDs on Linebourse:
                 linebourse_id = account.id[3:]
-                for inv in self.linebourse.iter_investment(linebourse_id):
+                for inv in self.linebourse.iter_investments(linebourse_id):
                     yield inv
                 return
 
@@ -557,6 +786,24 @@ class BanquePopulaire(LoginBrowser):
                     return
                 for inv in self.page.iter_investments():
                     yield inv
+
+    @need_login
+    def iter_market_orders(self, account):
+        if account.type not in (Account.TYPE_PEA, Account.TYPE_MARKET):
+            return
+
+        if account.type == Account.TYPE_PEA and account.id.startswith('CPT'):
+            # Liquidity PEA have no market orders
+            return
+
+        if self.go_investments(account, get_account=True):
+            # Redirection URL is https://www.linebourse.fr/ReroutageSJR
+            if 'linebourse' in self.url:
+                self.logger.warning('Going to Linebourse space to fetch investments.')
+                # Eliminating the 3 letters prefix to match IDs on Linebourse:
+                linebourse_id = account.id[3:]
+                for order in self.linebourse.iter_market_orders(linebourse_id):
+                    yield order
 
     @need_login
     def get_invest_history(self, account):
@@ -608,7 +855,9 @@ class BanquePopulaire(LoginBrowser):
     @need_login
     def get_profile(self):
         self.location(self.absurl('/cyber/internet/StartTask.do?taskInfoOID=accueil&token=%s' % self.token, base=True))
-        return self.page.get_profile()
+        # For some user this page is not accessible
+        if not self.page.is_profile_unavailable():
+            return self.page.get_profile()
 
     @retry(LoggedOut)
     @need_login
@@ -662,9 +911,10 @@ class BanquePopulaire(LoginBrowser):
                 {'typeDocument': {'code': 'EXTRAIT', 'label': 'Extrait de compte', 'type': 'referenceLogiqueDocument'}}
             ]
         }
-        self.location('/api-bp/wapi/2.0/abonnes/current/documents/recherche-avancee', json=body, headers=self.documents_headers)
+        self.documents_page.go(json=body, headers=self.documents_headers)
         return self.page.iter_documents(subid=subscription.id)
 
+    @retry(ClientError)
     def download_document(self, document):
         return self.open(document.url, headers=self.documents_headers).content
 

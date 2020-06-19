@@ -98,7 +98,7 @@ class URL(object):
         r = self.browser.location(self.build(**kwargs), params=params, data=data, json=json, method=method, headers=headers or {})
         return r.page or r
 
-    def open(self, params=None, data=None, method=None, headers=None, is_async=False, callback=lambda response: response, **kwargs):
+    def open(self, params=None, data=None, json=None, method=None, headers=None, is_async=False, callback=lambda response: response, **kwargs):
         """
         Request to open on this url.
 
@@ -110,7 +110,7 @@ class URL(object):
         >>> url = URL('http://exawple.org/(?P<pagename>).html')
         >>> url.open(pagename='index')
         """
-        r = self.browser.open(self.build(**kwargs), params=params, data=data, method=method, headers=headers or {}, is_async=is_async, callback=callback)
+        r = self.browser.open(self.build(**kwargs), params=params, data=data, json=json, method=method, headers=headers or {}, is_async=is_async, callback=callback)
 
         if hasattr(r, 'page') and r.page:
             return r.page
@@ -250,10 +250,43 @@ def normalize_url(url):
     >>> normalize_url('http://EXAMPLE:80')
     'http://example'
     """
-    def norm_domain(m):
-        port = m.group(3) or ''
-        if (port == ':80' and m.group(1) == 'http://') or (port == ':443' and m.group(1) == 'https://'):
-            port = ''
-        return '%s%s%s' % (m.group(1), m.group(2).lower(), port)
 
-    return re.sub(r'(https?://)([^/]+?)\.?(:\d+)?(?=/|$)', norm_domain, url)
+    def norm_domain(m):
+        # don't use urlparse/urlunparse because it might do too much normalization
+
+        auth, authsep, hostport = m.group(2).rpartition('@')
+        host, portsep, port = hostport.partition(':')
+
+        if (
+            (port == '443' and m.group(1) == 'https://')
+            or (port == '80' and m.group(1) == 'http://')
+        ):
+            portsep = port = ''
+
+        host = host.lower().rstrip('.')
+
+        return ''.join((m.group(1), auth, authsep, host, portsep, port))
+
+    return re.sub(r'^(https?://)([^/#?]+)', norm_domain, url)
+
+
+def test_normalize_url():
+    tests = [
+        ('https://foo/bar/baz', 'https://foo/bar/baz'),
+
+        ('https://FOO/bar', 'https://foo/bar'),
+
+        ('https://foo:1234/bar', 'https://foo:1234/bar'),
+        ('https://foo:443/bar', 'https://foo/bar'),
+        ('http://foo:1234', 'http://foo:1234'),
+        ('http://foo:80', 'http://foo'),
+        ('http://User:Password@foo:80', 'http://User:Password@foo'),
+        ('http://User:Password@foo:80/bar', 'http://User:Password@foo/bar'),
+
+        ('http://foo#BAR', 'http://foo#BAR'),
+        ('https://foo#BAR', 'https://foo#BAR'),
+        ('https://foo:443#BAR', 'https://foo#BAR'),
+    ]
+    for todo, expected in tests:
+        assert normalize_url(todo) == expected
+

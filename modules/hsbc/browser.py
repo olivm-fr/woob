@@ -475,6 +475,9 @@ class HSBC(LoginBrowser):
             history_tabs_urls = self.page.history_tabs_urls()
             guesser = LinearDateGuesser(date_max_bump=timedelta(45))
             history = []
+            if len(history_tabs_urls) == 0:
+                # no operation within the supported historical period
+                return history
             # gather coming anyway
             # in case no new transaction has been recorded since last (past) payement
             self.location(history_tabs_urls[0])  # fetch only first tab coming transactions
@@ -512,7 +515,11 @@ class HSBC(LoginBrowser):
     def get_investments(self, account, retry_li=True):
         if not account.url:
             raise NotImplementedError()
-        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_CAPITALISATION):
+        if account.type in (
+            Account.TYPE_LIFE_INSURANCE,
+            Account.TYPE_CAPITALISATION,
+            Account.TYPE_PERP,
+        ):
             return self.get_life_investments(account, retry_li=retry_li)
         elif account.type == Account.TYPE_PEA:
             return self.get_pea_investments(account)

@@ -21,8 +21,10 @@
 from __future__ import print_function
 
 from contextlib import closing
-import os
 from subprocess import PIPE, Popen
+import subprocess
+import shlex
+from shutil import which
 
 import requests
 
@@ -68,7 +70,7 @@ class MediaPlayer(object):
 
     def guess_player_name(self):
         for player_name in [player[0] for player in PLAYERS]:
-            if self._find_in_path(os.environ['PATH'], player_name):
+            if which(player_name) is not None:
                 return player_name
         return None
 
@@ -101,13 +103,11 @@ class MediaPlayer(object):
             self._play_proxy(media, player_name, args)
             return None
 
-        args = player_name.split(' ')
-
-        player_name = args[0]
+        args = shlex.split(player_name)
         args.append(media.url)
 
         print('Invoking "%s".' % (' '.join(args)))
-        os.spawnlp(os.P_WAIT, player_name, *args)
+        subprocess.call(args)
 
     def _play_proxy(self, media, player_name, args):
         """
@@ -150,7 +150,7 @@ class MediaPlayer(object):
         from the server. The last one is retrieved from the non-standard
         non-API compliant 'swf_player' attribute of the 'media' object.
         """
-        if not self._find_in_path(os.environ['PATH'], 'rtmpdump'):
+        if which('rtmpdump') is None:
             self.logger.warning('"rtmpdump" binary not found')
             return self._play_default(media, player_name)
         media_url = media.url
@@ -174,18 +174,11 @@ class MediaPlayer(object):
 
         assert args is not None
 
-        player_name = player_name.split(' ')
-        args = args.split(' ')
+        player_name = shlex.split(player_name)
+        args = shlex.split(args)
 
         print(':: Streaming from %s' % media_url)
         print(':: to %s %s' % (player_name, args))
         print(':: %s' % rtmp)
-        p1 = Popen(rtmp.split(), stdout=PIPE)
+        p1 = Popen(shlex.split(rtmp), stdout=PIPE)
         Popen(player_name + args, stdin=p1.stdout, stderr=PIPE)
-
-    @classmethod
-    def _find_in_path(cls, path, filename):
-        for i in path.split(':'):
-            if os.path.exists('/'.join([i, filename])):
-                return True
-        return False

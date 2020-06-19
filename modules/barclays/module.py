@@ -20,7 +20,8 @@
 
 from __future__ import unicode_literals
 
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
+from weboob.capabilities.bank import AccountNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
 from weboob.capabilities.base import find_object
@@ -35,7 +36,7 @@ class BarclaysModule(Module, CapBankWealth):
     NAME = 'barclays'
     MAINTAINER = u'Jean Walrave'
     EMAIL = 'jwalrave@budget-insight.com'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = u'Barclays'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(ValueBackendPassword('login',    label=u"N° d'abonné", masked=False),

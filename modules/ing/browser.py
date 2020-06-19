@@ -16,6 +16,9 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import hashlib
@@ -47,7 +50,7 @@ def start_with_main_site(f):
         browser = args[0]
 
         if browser.url and browser.url.startswith('https://bourse.ing.fr/'):
-            for i in range(3):
+            for _ in range(3):
                 try:
                     browser.location('https://bourse.ing.fr/priv/redirectIng.php?pageIng=CC')
                 except ServerError:
@@ -76,12 +79,18 @@ class IngBrowser(LoginBrowser):
 
     # Login and error
     errorpage = URL(r'.*displayCoordonneesCommand.*', StopPage)
-    actioneeded = URL(r'/general\?command=displayTRAlertMessage',
-                      r'/protected/pages/common/eco1/moveMoneyForbidden.jsf', ActionNeededPage)
+    actioneeded = URL(
+        r'/general\?command=displayTRAlertMessage',
+        r'/protected/pages/common/eco1/moveMoneyForbidden.jsf',
+        ActionNeededPage
+    )
 
     # CapBank
-    accountspage = URL(r'/protected/pages/index.jsf',
-                       r'/protected/pages/asv/contract/(?P<asvpage>.*).jsf', AccountsList)
+    accountspage = URL(
+        r'/protected/pages/index.jsf',
+        r'/protected/pages/asv/contract/(?P<asvpage>.*).jsf',
+        AccountsList
+    )
     titredetails = URL(r'/general\?command=display.*', TitreDetails)
     ibanpage = URL(r'/protected/pages/common/rib/initialRib.jsf', IbanPage)
     loantokenpage = URL(r'general\?command=goToConsumerLoanCommand&redirectUrl=account-details', LoanTokenPage)
@@ -93,9 +102,15 @@ class IngBrowser(LoginBrowser):
     titrepage = URL(r'https://bourse.ing.fr/priv/portefeuille-TR.php', TitrePage)
     titrehistory = URL(r'https://bourse.ing.fr/priv/compte.php\?ong=3', TitreHistory)
     titrerealtime = URL(r'https://bourse.ing.fr/streaming/compteTempsReelCK.php', TitrePage)
-    titrevalue = URL(r'https://bourse.ing.fr/priv/fiche-valeur.php\?val=(?P<val>.*)&pl=(?P<pl>.*)&popup=1', TitreValuePage)
-    asv_history = URL(r'https://ingdirectvie.ing.fr/b2b2c/epargne/CoeLisMvt',
-                      r'https://ingdirectvie.ing.fr/b2b2c/epargne/CoeDetMvt', ASVHistory)
+    titrevalue = URL(
+        r'https://bourse.ing.fr/priv/fiche-valeur.php\?val=(?P<val>.*)&pl=(?P<pl>.*)&popup=1',
+        TitreValuePage
+    )
+    asv_history = URL(
+        r'https://ingdirectvie.ing.fr/b2b2c/epargne/CoeLisMvt',
+        r'https://ingdirectvie.ing.fr/b2b2c/epargne/CoeDetMvt',
+        ASVHistory
+    )
     asv_invest = URL(r'https://ingdirectvie.ing.fr/b2b2c/epargne/CoeDetCon', ASVInvest)
     detailfonds = URL(r'https://ingdirectvie.ing.fr/b2b2c/fonds/PerDesFac\?codeFonds=(.*)', DetailFondsPage)
 
@@ -244,6 +259,26 @@ class IngBrowser(LoginBrowser):
 
     @need_login
     @start_with_main_site
+    def iter_basic_accounts(self):
+        """
+        Only retrieve the basic accounts (no loans or investments)
+        """
+        self.accountspage.go()
+        self.set_multispace()
+
+        if self.multispace:
+            for space in self.multispace:
+                self.change_space(space)
+                for acc in self.page.get_list():
+                    acc._space = space
+                    yield acc
+        else:
+            for acc in self.page.get_list():
+                acc._space = None
+                yield acc
+
+    @need_login
+    @start_with_main_site
     def get_accounts_list(self, space=None, fill_account=True):
         self.accountspage.go()
         self.where = 'start'
@@ -279,12 +314,14 @@ class IngBrowser(LoginBrowser):
         self.where = 'start'
 
         for loan in self.page.get_detailed_loans():
-            data = {'AJAXREQUEST': '_viewRoot',
-                    'index': 'index',
-                    'autoScroll': '',
-                    'javax.faces.ViewState': loan._jid,
-                    'accountNumber': loan._id,
-                    'index:goToConsumerLoanUI': 'index:goToConsumerLoanUI'}
+            data = {
+                'AJAXREQUEST': '_viewRoot',
+                'index': 'index',
+                'autoScroll': '',
+                'javax.faces.ViewState': loan._jid,
+                'accountNumber': loan._id,
+                'index:goToConsumerLoanUI': 'index:goToConsumerLoanUI',
+            }
 
             self.accountspage.go(data=data)
             self.loantokenpage.go(data=data)
@@ -302,8 +339,10 @@ class IngBrowser(LoginBrowser):
             self.return_from_loan_site()
 
     def return_from_loan_site(self):
-        params = {'context': '{"originatingApplication":"SECUREUI"}',
-                  'targetSystem': 'INTERNET'}
+        params = {
+            'context': '{"originatingApplication":"SECUREUI"}',
+            'targetSystem': 'INTERNET',
+        }
         data = {'targetSystemName': 'INTERNET'}
         self.location('https://subscribe.ing.fr/consumerloan/consumerloan-v1/sso/exit', params=params, json=data)
         self.location('https://secure.ing.fr/', data={'token': self.response.text})
@@ -312,15 +351,16 @@ class IngBrowser(LoginBrowser):
         return find_object(self.get_accounts_list(fill_account=False, space=space), id=_id, error=AccountNotFound)
 
     def go_account_page(self, account):
-        data = {"AJAX:EVENTS_COUNT": 1,
-                "AJAXREQUEST": "_viewRoot",
-                "ajaxSingle": "index:setAccount",
-                "autoScroll": "",
-                "index": "index",
-                "index:setAccount": "index:setAccount",
-                "javax.faces.ViewState": account._jid,
-                "cptnbr": account._id
-                }
+        data = {
+            "AJAX:EVENTS_COUNT": 1,
+            "AJAXREQUEST": "_viewRoot",
+            "ajaxSingle": "index:setAccount",
+            "autoScroll": "",
+            "index": "index",
+            "index:setAccount": "index:setAccount",
+            "javax.faces.ViewState": account._jid,
+            "cptnbr": account._id,
+        }
         self.accountspage.go(data=data)
         card_list = self.page.get_card_list()
         if card_list:
@@ -384,13 +424,14 @@ class IngBrowser(LoginBrowser):
                 return
             if index >= 0:
                 index = i
-            data = {"AJAX:EVENTS_COUNT": 1,
-                    "AJAXREQUEST": "_viewRoot",
-                    "autoScroll": "",
-                    "index": "index",
-                    "index:%s:moreTransactions" % jid: "index:%s:moreTransactions" % jid,
-                    "javax.faces.ViewState": account._jid
-                    }
+            data = {
+                "AJAX:EVENTS_COUNT": 1,
+                "AJAXREQUEST": "_viewRoot",
+                "autoScroll": "",
+                "index": "index",
+                "index:%s:moreTransactions" % jid: "index:%s:moreTransactions" % jid,
+                "javax.faces.ViewState": account._jid,
+            }
             self.accountspage.go(data=data)
 
     def go_on_asv_detail(self, account, link):
@@ -410,15 +451,16 @@ class IngBrowser(LoginBrowser):
             return False
 
     def get_investments_data(self, account):
-        return {"AJAX:EVENTS_COUNT": 1,
-                "AJAXREQUEST": "_viewRoot",
-                "ajaxSingle": "index:setAccount",
-                "autoScroll": "",
-                "index": "index",
-                "index:setAccount": "index:setAccount",
-                "javax.faces.ViewState": account._jid,
-                "cptnbr": account._id
-                }
+        return {
+            "AJAX:EVENTS_COUNT": 1,
+            "AJAXREQUEST": "_viewRoot",
+            "ajaxSingle": "index:setAccount",
+            "autoScroll": "",
+            "index": "index",
+            "index:setAccount": "index:setAccount",
+            "javax.faces.ViewState": account._jid,
+            "cptnbr": account._id,
+        }
 
     def go_investments(self, account):
         account = self.get_account(account.id, space=account._space)
@@ -497,7 +539,10 @@ class IngBrowser(LoginBrowser):
         self.return_from_titre_page.go()
         if self.asv_history.is_here():
             for tr in transactions:
-                page = tr._detail.result().page if tr._detail else None
+                if tr._detail:
+                    page = tr._detail.result().page
+                else:
+                    page = None
                 if page and 'numMvt' in page.url:
                     investment_list = list()
                     for inv in page.get_investments():
@@ -545,7 +590,7 @@ class IngBrowser(LoginBrowser):
             subscription._formid: subscription._formid,
             "autoScroll": "",
             "javax.faces.ViewState": subscription._javax,
-            "transfer_issuer_radio": subscription.id
+            "transfer_issuer_radio": subscription.id,
         }
         self.billpage.go(data=data)
         self.current_subscription = subscription

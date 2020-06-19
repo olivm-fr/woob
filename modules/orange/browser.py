@@ -21,13 +21,13 @@ from __future__ import unicode_literals
 
 from requests.exceptions import ConnectTimeout
 
-from weboob.browser import LoginBrowser, URL, need_login
+from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
 from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded, BrowserPasswordExpired
 from .pages import LoginPage, BillsPage
-from .pages.login import ManageCGI, HomePage, PasswordPage
+from .pages.login import ManageCGI, HomePage, PasswordPage, PortalPage, CaptchaPage
 from .pages.bills import (
     SubscriptionsPage, SubscriptionsApiPage, BillsApiProPage, BillsApiParPage,
-    ContractsPage,
+    ContractsPage, ContractsApiPage
 )
 from .pages.profile import ProfilePage
 from weboob.browser.exceptions import ClientError, ServerError
@@ -38,20 +38,23 @@ from weboob.tools.decorators import retry
 __all__ = ['OrangeBillBrowser']
 
 
-class OrangeBillBrowser(LoginBrowser):
+class OrangeBillBrowser(LoginBrowser, StatesMixin):
     TIMEOUT = 60
 
     BASEURL = 'https://espaceclientv3.orange.fr'
 
     home_page = URL(r'https://businesslounge.orange.fr/$', HomePage)
+    portal_page = URL(r'https://www.orange.fr/portail', PortalPage)
     loginpage = URL(
         r'https://login.orange.fr/\?service=sosh&return_url=https://www.sosh.fr/',
         r'https://login.orange.fr/front/login',
         LoginPage,
     )
     password_page = URL(r'https://login.orange.fr/front/password', PasswordPage)
+    captcha_page = URL(r'https://login.orange.fr/captcha', CaptchaPage)
 
     contracts = URL(r'https://espaceclientpro.orange.fr/api/contracts\?page=1&nbcontractsbypage=15', ContractsPage)
+    contracts_api = URL(r'https://sso-f.orange.fr/omoi_erb/portfoliomanager/contracts/users/current\?filter=telco,security', ContractsApiPage)
 
     subscriptions = URL(r'https://espaceclientv3.orange.fr/js/necfe.php\?zonetype=bandeau&idPage=gt-home-page', SubscriptionsPage)
     subscriptions_api = URL(r'https://sso-f.orange.fr/omoi_erb/portfoliomanager/v2.0/contractSelector/users/current', SubscriptionsApiPage)
@@ -67,6 +70,7 @@ class OrangeBillBrowser(LoginBrowser):
         r'https://espaceclientv3.orange.fr/maf.php',
         r'https://espaceclientv3.orange.fr/\?idContrat=(?P<subid>.*)&page=factures-historique',
         r'https://espaceclientv3.orange.fr/\?page=factures-historique&idContrat=(?P<subid>.*)',
+        r'https://espace-client.orange.fr/factures-paiement/(?P<subid>\d+?)',
         BillsPage,
     )
 
@@ -78,18 +82,33 @@ class OrangeBillBrowser(LoginBrowser):
     bills_api_par = URL(r'https://sso-f.orange.fr/omoi_erb/facture/v2.0/billsAndPaymentInfos/users/current/contracts/(?P<subid>\d+)', BillsApiParPage)
     doc_api_par = URL(r'https://sso-f.orange.fr/omoi_erb/facture/v1.0/pdf')
 
-    doc_api_pro = URL('https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bill/(?P<dir>.*)/(?P<fact_type>.*)/\?(?P<billparams>)')
-    profile = URL('/\?page=profil-infosPerso', ProfilePage)
+    doc_api_pro = URL(r'https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bill/(?P<dir>.*)/(?P<fact_type>.*)/\?(?P<billparams>)')
+    profile = URL(r'/\?page=profil-infosPerso', ProfilePage)
+
+    def locate_browser(self, state):
+        try:
+            self.portal_page.go()
+        except ClientError as e:
+            if e.response.status_code == 401:
+                self.do_login()
+                return
+            raise
 
     def do_login(self):
         assert isinstance(self.username, basestring)
         assert isinstance(self.password, basestring)
-
         try:
-            self.loginpage.stay_or_go().login(self.username, self.password)
+            self.loginpage.go()
+            if self.captcha_page.is_here():
+                raise BrowserUnavailable()
+
+            data = self.page.do_login_and_get_token(self.username, self.password)
+            self.password_page.go(json=data)
+            self.portal_page.go()
+
         except ClientError as error:
             if error.response.status_code == 401:
-                raise BrowserIncorrectPassword()
+                raise BrowserIncorrectPassword(error.response.json().get('message', ''))
             if error.response.status_code == 403:
                 # occur when user try several times with a bad password, orange block his account for a short time
                 raise BrowserIncorrectPassword(error.response.json())
@@ -119,7 +138,10 @@ class OrangeBillBrowser(LoginBrowser):
         try:
             self.profile.go()
 
-            assert self.profile.is_here() or self.manage_cgi.is_here()
+            if not (self.profile.is_here() or self.manage_cgi.is_here()):
+                self.session.cookies.clear()
+                self.do_login()
+                self.profile.go()
 
             # we land on manage_cgi page when there is cgu to validate
             if self.manage_cgi.is_here():
@@ -145,6 +167,22 @@ class OrangeBillBrowser(LoginBrowser):
             assert nb_sub < 15
         except ServerError:
             pass
+
+        try:
+            headers = {
+                "Accept": "application/json;version=1",
+                "X-Orange-Caller-Id": "ECQ",
+                "X-Orange-Origin-ID": "ECQ",
+            }
+            for sub in self.contracts_api.go(headers=headers).iter_subscriptions():
+                nb_sub += 1
+                yield sub
+        except (ServerError, ClientError) as e:
+            # The orange website will return odd status codes when there are no subscriptions to return
+            # I've seen the 404, 500 and 503 response codes
+            # In a well designed website, it should be just a 204.
+            if e.response.status_code not in (404, 500, 503):
+                raise
 
         if nb_sub > 0:
             return
@@ -177,7 +215,14 @@ class OrangeBillBrowser(LoginBrowser):
             assert len(documents) != 72
         else:
             headers = {'x-orange-caller-id': 'ECQ'}
-            self.bills_api_par.go(subid=subscription.id, headers=headers)
+            try:
+                self.bills_api_par.go(subid=subscription.id, headers=headers)
+            except ServerError as e:
+                if e.response.status_code in (503, ):
+                    self.logger.info("Server Error : %d" % e.response.status_code)
+                    return []
+                raise
+
             for b in self.page.get_bills(subid=subscription.id):
                 documents.append(b)
         return iter(documents)

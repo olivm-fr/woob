@@ -19,7 +19,7 @@
 
 from __future__ import unicode_literals
 
-from weboob.capabilities.bank import CapBankPockets
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
 
@@ -29,13 +29,13 @@ from .browser import GroupamaesBrowser
 __all__ = ['GroupamaesModule']
 
 
-class GroupamaesModule(Module, CapBankPockets):
+class GroupamaesModule(Module, CapBankWealth):
     NAME = 'groupamaes'
     DESCRIPTION = 'Groupama Épargne Salariale'
     MAINTAINER = 'Bezleputh'
     EMAIL = 'carton_ben@yahoo.fr'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
 
     BROWSER = GroupamaesBrowser
 

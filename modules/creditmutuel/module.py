@@ -19,13 +19,17 @@
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from __future__ import unicode_literals
+
+import re
 from decimal import Decimal
 
 from weboob.capabilities.base import find_object, NotAvailable
 from weboob.capabilities.bank import (
-    CapBankWealth, CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound,
-    Account,
+    CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound,
+    Account, TransferInvalidLabel,
 )
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.bill import (
@@ -33,7 +37,7 @@ from weboob.capabilities.bill import (
     Document, DocumentNotFound, DocumentTypes,
 )
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, Value
+from weboob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import CreditMutuelBrowser
 
@@ -49,15 +53,15 @@ class CreditMutuelModule(
     NAME = 'creditmutuel'
     MAINTAINER = u'Julien Veyssier'
     EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = u'Crédit Mutuel'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant', masked=False),
         ValueBackendPassword('password', label='Mot de passe'),
-        Value('resume', label='resume', default=None, required=False, noprompt=True),
-        Value('request_information', label='request_information', default=None, required=False, noprompt=True),
-        Value('code', label='code de confirmation', required=False, default='', noprompt=True, regexp=r'^\d{6}$'),
+        ValueTransient('resume'),
+        ValueTransient('request_information'),
+        ValueTransient('code', regexp=r'^\d{6}$'),
     )
     BROWSER = CreditMutuelBrowser
 
@@ -104,7 +108,7 @@ class CreditMutuelModule(
     def new_recipient(self, recipient, **params):
         # second step of the new_recipient
         # there should be a parameter
-        if any(p in params for p in ('Bic', 'code', 'Clé')):
+        if any(p in params for p in ('Bic', 'code', 'Clé', 'resume')):
             return self.browser.set_new_recipient(recipient, **params)
 
         return self.browser.new_recipient(recipient, **params)
@@ -113,6 +117,13 @@ class CreditMutuelModule(
         # There is a check on the website, transfer can't be done with too long reason.
         if transfer.label:
             transfer.label = transfer.label[:27]
+            # Doing a full match with (?:<regex>)\Z, re.fullmatch works only
+            # for python >=3.4.
+            # re.UNICODE is needed to match letters with accents in python 2 only.
+            regex = r"[-\w'/=:€?!.,() ]+"
+            if not re.match(r"(?:%s)\Z" % regex, transfer.label, re.UNICODE):
+                invalid_chars = re.sub(regex, '', transfer.label, flags=re.UNICODE)
+                raise TransferInvalidLabel("Le libellé de votre transfert contient des caractères non autorisés : %s" % invalid_chars)
 
         self.logger.info('Going to do a new transfer')
         if transfer.account_iban:
@@ -178,3 +189,6 @@ class CreditMutuelModule(
         if Subscription in objs:
             self._restrict_level(split_path)
             return self.iter_subscription()
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()

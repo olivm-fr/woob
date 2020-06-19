@@ -23,7 +23,7 @@ import re
 from decimal import Decimal
 
 from weboob.browser.elements import ItemElement, ListElement, TableElement, method
-from weboob.browser.filters.html import AbsoluteLink, Attr, TableCell
+from weboob.browser.filters.html import AbsoluteLink, Attr, TableCell, XPath
 from weboob.browser.filters.javascript import JSVar
 from weboob.browser.filters.standard import (
     CleanDecimal, CleanText, Currency, Date, DateGuesser, Env, Field, Filter, Format, MapIn, Regexp,
@@ -43,7 +43,7 @@ class Transaction(FrenchTransaction):
         (re.compile(r'^VIR(EMENT)? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
         (re.compile(r'^TRANSFERT? (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
         (re.compile(r'^(PRLV|OPERATION|(TVA )?FACT ABONNEMENTS) (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(r'^CB (?P<text>.*?)\s+(?P<dd>\d+)/(?P<mm>[01]\d)'), FrenchTransaction.TYPE_CARD),
+        (re.compile(r'^CB (?P<text>.*?)\s+(?P<dd>\d{2})/(?P<mm>[01]\d)'), FrenchTransaction.TYPE_CARD),
         (re.compile(r'^DAB (?P<dd>\d{2})/(?P<mm>\d{2}) ((?P<HH>\d{2})H(?P<MM>\d{2}) )?(?P<text>.*?)( CB N°.*)?$'), FrenchTransaction.TYPE_WITHDRAWAL),
         (re.compile(r'^(IMPAYE REMISE )?CHEQUE( \d+)?'), FrenchTransaction.TYPE_CHECK),
         (re.compile(r'^IMPAYE REMISE CHEQUE'), FrenchTransaction.TYPE_CHECK),
@@ -98,6 +98,7 @@ class AccountsType(Filter):
         (r'livjeu', Account.TYPE_SAVINGS),
         (r'csljun', Account.TYPE_SAVINGS),
         (r'ldds', Account.TYPE_SAVINGS),
+        (r'\blep\b', Account.TYPE_SAVINGS),
         (r'compte', Account.TYPE_CHECKING),
         (r'cpte', Account.TYPE_CHECKING),
         (r'scpi', Account.TYPE_MARKET),
@@ -159,17 +160,12 @@ class AccountsPage(GenericLandingPage):
 
     def go_history_page(self, account):
         if self.browser.web_space == 'new_space':
-            # Must iterate through forms and find a match between account number and the input 'value' attribute to know which form to submit
-            # ids for card accounts are like '123400XXXXXX5678'
-            # ids for checking accounts are like '01234567891EUR'
-            for form in self.doc.xpath('//form[@id]'):
-                value = Attr('.//input[@name="CPT_IdPrestation" or @name="CB_IdPrestation"]', 'value')(form)
-                # * if needed, all the card numbers could be fetched at that point to replace 'XXXX' as they appear in 'value'
-                pattern = ".*{}.*".format(account.id.replace('XXXXXX', '\\d{6}'))
-                if re.match(pattern, value):
-                    # certain forms have the same id atribute, we must submit the one with the same input 'value' attribute
-                    self.get_form(xpath='//form[@id][input[@value="%s"]]' % value).submit()
-                    return
+            self.get_form(
+                xpath='//form[@id][input[(@name="CPT_IdPrestation" or @name="CB_IdPrestation") and @value="%s"]]' % (
+                    account._ref
+                )
+            ).submit()
+            return
         # TODO get rid of old space code if clients are no longer using it
         else:
             for acc in self.doc.xpath('//div[@onclick]'):
@@ -239,6 +235,10 @@ class AccountsPage(GenericLandingPage):
                     _id = Regexp(pattern=r'(.*)-Carte').filter(_id)
                 return _id
 
+            def obj__ref(self):
+                # internal account reference ID
+                return Attr('.//input[@name="CPT_IdPrestation" or @name="CB_IdPrestation"]', 'value')(self)
+
     @method
     class iter_accounts(ListElement):
         item_xpath = '//tr'
@@ -271,7 +271,7 @@ class AccountsPage(GenericLandingPage):
             @property
             def obj_balance(self):
                 if self.el.xpath('./parent::*/tr/th') and self.el.xpath('./parent::*/tr/th')[0].text in ['Credits', 'Crédits']:
-                    return CleanDecimal(replace_dots=True, sign=lambda x: -1).filter(self.el.xpath('./td[3]'))
+                    return CleanDecimal(replace_dots=True, sign='-').filter(self.el.xpath('./td[3]'))
                 return CleanDecimal(replace_dots=True).filter(self.el.xpath('./td[3]'))
 
             @property
@@ -387,11 +387,30 @@ class CBOperationPage(GenericLandingPage):
     def is_here(self):
         return (
             CleanText('//h1[text()="Historique des opérations"]')(self.doc)
-            and CleanText('//a[contains(text(), "Opérations débitées le")]')(self.doc)
+            and not CleanText('//p[contains(text(), "Solde au")]')(self.doc)
+            and (
+                CleanText('//a[contains(text(), "Opérations débitées le")]')(self.doc)
+                or self.doc.xpath('//form[@name="FORM_LIB_CARTE"]')
+            )
         )
 
     def history_tabs_urls(self):
-        return [Attr('.', 'href')(tab) for tab in self.doc.xpath('//ul//a[contains(text(), "Débit le")]')]
+        # Around the debit day, the first 2 tab links lead to transactions list,
+        # containing both the same transactions (for current and next month).
+        # Both tabs have class 'uk-active' to use to filter one out.
+        urls = []
+        duplicated_first_tab = False
+
+        for tab in self.doc.xpath('//ul//a[contains(text(), "Débit le")]'):
+            xpath = XPath('./ancestor::li[has-class("uk-active")]')(tab)
+            if xpath:
+                if not duplicated_first_tab:
+                    duplicated_first_tab = True
+                    urls.append(Attr('.', 'href')(tab))
+            else:
+                urls.append(Attr('.', 'href')(tab))
+
+        return urls
 
     @pagination
     @method
@@ -425,7 +444,7 @@ class CBOperationPage(GenericLandingPage):
         for card in self.doc.xpath('//div/img[contains(@src, "produits/cartes")]'):  # deferred cards are displayed with an image contrary to other accounts
             card_id = CleanText('./following-sibling::span[1]')(card)
             # fetch the closest /li sibling (with 'COMPTE'), it is the one that corresponds the parent acount
-            parent_id = CleanText('./ancestor::li/preceding-sibling::li[.//span[contains(text(), "COMPTE")]][1]/@data-num-compte')(card)
+            parent_id = CleanText('./ancestor::li/preceding-sibling::li[.//span[contains(text(), "COMPTE")]][1]//span[contains(@class, "hsbc-select-account-number")]')(card)
             all_parent_id.append((card_id, parent_id))
         return all_parent_id
 
@@ -438,6 +457,7 @@ class CPTOperationPage(GenericLandingPage):
                 or CleanText('//label[text()="Rechercher"]')(self.doc)  # new space
             ) and not
             CleanText('//a[contains(text(), "Opérations débitées le")]')(self.doc)  # to differ from CBOperationPage
+            and not self.doc.xpath('//form[@name="FORM_LIB_CARTE"]')
         )
 
     def get_history(self):
@@ -577,4 +597,4 @@ class ScpiHisPage(LoggedPage, HTMLPage):
 
             obj_label = Format('%s - %s', CleanText(TableCell('operation')), CleanText(TableCell('nature')))
             obj_rdate = Date(CleanText(TableCell('date')), dayfirst=True)
-            obj_amount = CleanDecimal(TableCell('amount'), sign=lambda x: -1, replace_dots=True)
+            obj_amount = CleanDecimal(TableCell('amount'), sign='-', replace_dots=True)

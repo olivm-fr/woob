@@ -29,7 +29,8 @@ from weboob.browser.filters.standard import (
 from weboob.browser.filters.json import Dict
 from weboob.capabilities.base import Currency, empty
 from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account, Investment
+from weboob.capabilities.bank import Account
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.exceptions import (
     BrowserUnavailable, NoAccountsException, BrowserPasswordExpired,
@@ -184,8 +185,8 @@ class HistoryJsonPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Transaction
 
-            obj_rdate = Date(Dict('date', default=None), dayfirst=True, default=NotAvailable)
-            obj_date = Date(Dict('dVl', default=None), dayfirst=True, default=NotAvailable)
+            obj_rdate = Env('rdate')
+            obj_date = Env('date')
             obj__coming = False
 
             # Label is split into l1, l2, l3, l4, l5.
@@ -215,7 +216,7 @@ class HistoryJsonPage(LoggedPage, JsonPage):
             def obj_commission(self):
                 if Regexp(Field('label'), r' ([\d{1,3}\s?]*\d{1,3},\d{2}E COM [\d{1,3}\s?]*\d{1,3},\d{2}E)', default='')(self):
                     # commission can be scraped from labels like 'REMISE CB /14/08 XXXXXX YYYYYYYYYYY ZZ 105,00E COM 0,84E'
-                    return CleanDecimal.French(Regexp(Field('label'), r'COM ([\d{1,3}\s?]*\d{1,3},\d{2})E', default=''), sign=lambda x: -1, default=NotAvailable)(self)
+                    return CleanDecimal.French(Regexp(Field('label'), r'COM ([\d{1,3}\s?]*\d{1,3},\d{2})E', default=''), sign='-', default=NotAvailable)(self)
                 return NotAvailable
 
             def obj_gross_amount(self):
@@ -230,6 +231,17 @@ class HistoryJsonPage(LoggedPage, JsonPage):
 
             def obj_deleted(self):
                 return self.obj.type == FrenchTransaction.TYPE_CARD_SUMMARY
+
+            def parse(self, el):
+                self.env['rdate'] = Date(Dict('date', default=None), dayfirst=True, default=NotAvailable)(self)
+                self.env['date'] = Date(Dict('dVl', default=None), dayfirst=True, default=NotAvailable)(self)
+
+                if 'REGULARISATION DE COMMISSION' in Dict('l1')(self) and self.env['date'] < self.env['rdate']:
+                    # transaction corresponding a bank reimbursement were date and rdate are inverted
+                    # ex: 24/07 in Dict('dVl'), but 24/09 is in Dict('date');
+                    # so for this particular transaction the order should be 24/07 (rdate)
+                    # while the effective date of credit on the account should be 27/09 (date)
+                    self.env['rdate'], self.env['date'] = self.env['date'], self.env['rdate']
 
 
 class BankStatementPage(LoggedPage, JsonPage):

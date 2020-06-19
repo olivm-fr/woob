@@ -20,11 +20,9 @@
 from __future__ import unicode_literals
 
 from decimal import Decimal
+import re
 
-from dateutil.parser import parse as parse_date
-from selenium.webdriver.common.keys import Keys
-
-from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage
+from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage, RawPage
 from weboob.browser.elements import ItemElement, DictElement, method
 from weboob.browser.filters.standard import (
     Date, Eval, Env, CleanText, Field, CleanDecimal, Format,
@@ -34,9 +32,7 @@ from weboob.browser.filters.json import Dict
 from weboob.capabilities.bank import Account, Transaction
 from weboob.capabilities.base import NotAvailable
 from weboob.exceptions import ActionNeeded, BrowserUnavailable
-from weboob.browser.selenium import (
-    SeleniumPage, VisibleXPath, AllCondition, NotCondition,
-)
+from dateutil.parser import parse as parse_date
 
 
 def float_to_decimal(f):
@@ -64,32 +60,33 @@ class NotFoundPage(HTMLPage):
         raise BrowserUnavailable(alert_header, alert_content)
 
 
-class LoginErrorPage(SeleniumPage):
-    is_here = VisibleXPath('//div[@role="alert"]/div')
-
-    def get_error(self):
-        return CleanText('//div[@role="alert"]/div')(self.doc)
-
-
-class LoginPage(SeleniumPage):
-    is_here = AllCondition(
-        VisibleXPath('//input[contains(@id, "UserID")]'),
-        VisibleXPath('//input[contains(@id, "Password")]'),
-        VisibleXPath('//button[@id="loginSubmit"]'),
-        NotCondition(VisibleXPath('//div[@role="alert"]/div')),
-    )
-
-    def login(self, username, password):
-        el = self.driver.find_element_by_xpath('//input[contains(@id, "UserID")]')
-        el.send_keys(username)
-
-        el = self.driver.find_element_by_xpath('//input[contains(@id, "Password")]')
-        el.send_keys(password)
-        el.send_keys(Keys.RETURN)
-
-
-class DashboardPage(LoggedPage, SeleniumPage):
+class HomeLoginPage(HTMLPage):
     pass
+
+
+class LoginPage(JsonPage):
+    def get_status_code(self):
+        # - 0 = OK
+        # - 1 = Error
+        return CleanDecimal(Dict('statusCode'))(self.doc)
+
+    def get_error_code(self):
+        # - LGON001 = Incorrect password
+        # - LGON003 = Incorrect password: 'Le code utilisateur ou le mot de passe est erroné. Veuillez essayer de nouveau.' on website
+        # - LGON004 = Action needed
+        # - LGON005 = Account blocked
+        # - LGON008 = ?
+        # - LGON010 = Browser unavailable
+        return CleanText(Dict('errorCode'))(self.doc)
+
+    def get_error_message(self):
+        return (
+            CleanText(Dict('errorMessage'))(self.doc) or
+            CleanText(Dict('debugInfo', default=''))(self.doc)
+        )
+
+    def get_redirect_url(self):
+        return CleanText(Dict('redirectUrl'))(self.doc)
 
 
 class AccountsPage(LoggedPage, JsonPage):
@@ -134,16 +131,16 @@ class JsonBalances(LoggedPage, JsonPage):
     @method
     class fill_balances(ItemElement):
         # coming is what should be refunded at a future deadline
-        obj_coming = CleanDecimal.US(Dict('0/total_debits_balance_amount'), sign=lambda x: -1)
+        obj_coming = CleanDecimal.US(Dict('0/total_debits_balance_amount'), sign='-')
         # balance is what is currently due
-        obj_balance = CleanDecimal.US(Dict('0/remaining_statement_balance_amount'), sign=lambda x: -1)
+        obj_balance = CleanDecimal.US(Dict('0/remaining_statement_balance_amount'), sign='-')
 
 
 class JsonBalances2(LoggedPage, JsonPage):
     @method
     class fill_balances(ItemElement):
-        obj_coming = CleanDecimal.US(Dict('0/total/debits_total_amount'), sign=lambda x: -1)
-        obj_balance = CleanDecimal.US(Dict('0/total/payments_credits_total_amount'), sign=lambda x: -1)
+        obj_coming = CleanDecimal.US(Dict('0/total/debits_total_amount'), sign='-')
+        obj_balance = CleanDecimal.US(Dict('0/total/payments_credits_total_amount'), sign='-')
         # warning: payments_credits_total_amount is not the coming value here
 
 
@@ -195,7 +192,7 @@ class JsonHistory(LoggedPage, JsonPage):
             obj_vdate = obj_bdate = Date(Dict('post_date', default=None), default=NotAvailable)
             obj_amount = Eval(lambda x: -float_to_decimal(x), Dict('amount'))
             obj_original_currency = Dict('foreign_details/iso_alpha_currency_code', default=NotAvailable)
-            obj_commission = CleanDecimal(Dict('foreign_details/commission_amount', default=NotAvailable), sign=lambda x: -1, default=NotAvailable)
+            obj_commission = CleanDecimal(Dict('foreign_details/commission_amount', default=NotAvailable), sign='-', default=NotAvailable)
             obj__owner = CleanText(Dict('embossed_name'))
             obj_id = Dict('reference_id', default=NotAvailable)
 
@@ -216,3 +213,10 @@ class JsonHistory(LoggedPage, JsonPage):
                     return original_amount
 
             obj__ref = Dict('identifier')
+
+
+class JsDataPage(RawPage):
+    def get_version(self):
+        version = re.search(r'"(\d\.[\d\._]+)"', self.text)
+        assert version, 'Could not match version number in javascript'
+        return version.group(1)

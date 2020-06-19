@@ -20,7 +20,8 @@
 from __future__ import unicode_literals
 
 
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
+from weboob.capabilities.bank import AccountNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.base import find_object
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
@@ -37,7 +38,7 @@ class GmfModule(Module, CapBankWealth):
     MAINTAINER = 'Tony Malto'
     EMAIL = 'tmalto.bi@gmail.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(ValueBackendPassword('login',    label='Numéro de sociétaire', masked=False),
                            ValueBackendPassword('password', label='Code personnel'))
 

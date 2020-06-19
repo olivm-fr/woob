@@ -87,8 +87,7 @@ class SocieteGenerale(TwoFactorBrowser):
                          r'/sec/oob_polling.json', SignRecipientPage)
     # Transfer
     json_transfer = URL(r'/icd/vupri/data/vupri-liste-comptes.json\?an200_isBack=false',
-                        r'/icd/vupri/data/vupri-check.json',
-                        r'/lgn/url.html', TransferJson)
+                        r'/icd/vupri/data/vupri-check.json', TransferJson)
     sign_transfer = URL(r'/icd/vupri/data/vupri-generate-token.json', SignTransferPage)
     confirm_transfer = URL(r'/icd/vupri/data/vupri-save.json', TransferJson)
 
@@ -551,8 +550,10 @@ class SocieteGenerale(TwoFactorBrowser):
         # execute transfer
         headers = {'Referer': self.absurl('/com/icd-web/vupri/virement.html')}
         self.confirm_transfer.go(data=data, headers=headers)
-
         assert self.page.is_transfer_validated(), 'Something went wrong, transfer is not executed'
+
+        # return on main page to avoid reload on transfer confirmation page
+        self.accounts_main_page.go()
         return transfer
 
     def end_sms_recipient(self, recipient, **params):
@@ -718,3 +719,12 @@ class SocieteGenerale(TwoFactorBrowser):
 
         for doc in self._iter_statements(subscription):
             yield doc
+
+    @need_login
+    def iter_emitters(self):
+        try:
+            self.json_transfer.go()
+        except (TransferBankError, ClientError):
+            # some user can't access this page
+            return []
+        return self.page.iter_emitters()

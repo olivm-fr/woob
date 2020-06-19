@@ -19,7 +19,8 @@
 
 from __future__ import unicode_literals
 
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound, Account
+from weboob.capabilities.bank import AccountNotFound, Account
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.base import find_object
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
@@ -36,7 +37,7 @@ class BredModule(Module, CapBankWealth, CapProfile):
     NAME = 'bred'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = u'Bred'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(
@@ -55,9 +56,12 @@ class BredModule(Module, CapBankWealth, CapProfile):
     def create_default_browser(self):
         self.BROWSER = self.BROWSERS[self.config['website'].get()]
 
-        return self.create_browser(self.config['accnum'].get().replace(' ', '').zfill(11),
-                                   self.config['login'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(
+            self.config['accnum'].get().replace(' ', '').zfill(11),
+            self.config['login'].get(),
+            self.config['password'].get(),
+            weboob=self.weboob,
+        )
 
     def iter_accounts(self):
         return self.browser.get_accounts_list()
@@ -72,7 +76,10 @@ class BredModule(Module, CapBankWealth, CapProfile):
         return self.browser.get_history(account, coming=True)
 
     def iter_investment(self, account):
-        return self.browser.get_investment(account)
+        return self.browser.iter_investments(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
 
     def get_profile(self):
         return self.browser.get_profile()

@@ -18,7 +18,6 @@
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-#from weboob.capabilities.bank import CapBankWealth, AccountNotFound
 from weboob.capabilities.bank import CapBank, AccountNotFound
 from weboob.capabilities.base import find_object
 from weboob.tools.backend import Module, BackendConfig
@@ -33,7 +32,7 @@ class HSBCHKModule(Module, CapBank):
     NAME = 'hsbchk'
     MAINTAINER = u'sinopsysHK'
     EMAIL = 'sinofwd@gmail.com'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'HSBC Hong Kong'
     CONFIG = BackendConfig(ValueBackendPassword('login',      label='User identifier', masked=False),
@@ -63,5 +62,5 @@ class HSBCHKModule(Module, CapBank):
         raise NotImplementedError
 
     def iter_coming(self, account):
-        # No coming entries on HSBC HK
-        return []
+        for tr in self.browser.get_history(account, coming=True):
+            yield tr

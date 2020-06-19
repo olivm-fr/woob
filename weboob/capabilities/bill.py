@@ -18,7 +18,10 @@
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import BaseObject, StringField, DecimalField, BoolField, UserError, Currency, Field
+from .base import (
+    BaseObject, StringField, DecimalField, BoolField, UserError, Currency, Field,
+    empty,
+)
 from .date import DateField
 from .collection import CapCollection
 
@@ -80,23 +83,73 @@ class Document(BaseObject):
     type =          StringField('type of document')
     transactions =  Field('List of transaction ID related to the document', list, default=[])
     has_file =      BoolField('Boolean to set if file is available', default=True)
+    number =        StringField('Number of the document (if present and meaningful for user)')
+
+    def __repr__(self):
+        return '<%s id=%r label=%r date=%r>' % (type(self).__name__, self.id, self.label, self.date)
 
 
 class Bill(Document, Currency):
     """
     Bill.
     """
-    price =         DecimalField('Price to pay')
+    total_price =   DecimalField('Price to pay')
     currency =      StringField('Currency', default=None)
     vat =           DecimalField('VAT included in the price')
+    pre_tax_price = DecimalField('Price without the VAT or other taxes')
     duedate =       DateField('The day the bill must be paid')
     startdate =     DateField('The first day the bill applies to')
     finishdate =    DateField('The last day the bill applies to')
-    income =        BoolField('Boolean to set if bill is income or invoice', default=False)
+
+    def __repr__(self):
+        return '<%s id=%r label=%r date=%r total_price=%r>' % (
+            type(self).__name__, self.id, self.label, self.date, self.total_price
+        )
+
+    # compatibility properties
+    @property
+    def price(self):
+        if empty(self.total_price):
+            return self.total_price
+        return abs(self.total_price)
+
+    @price.setter
+    def price(self, value):
+        if empty(value):
+            self.total_price = value
+            self._income = None
+            return
+
+        value = abs(value)
+        if not self.income:
+            self.total_price = value
+        else:
+            self.total_price = -value
+        self._income = None
+
+    @property
+    def income(self):
+        if empty(self.total_price):
+            return self._income or False
+        return self.total_price <= 0
+
+    @income.setter
+    def income(self, value):
+        if empty(self.total_price):
+            self._income = value
+        else:
+            # the price was set before income
+            # we can avoid handling the obnoxious _income field
+            income_sign = {True: -1, False: 1}
+            self.total_price = abs(self.total_price) * income_sign[value]
+            self._income = None
 
     def __init__(self, *args, **kwargs):
         super(Bill, self).__init__(*args, **kwargs)
         self.type = DocumentTypes.BILL
+        self._income = None
+        # _income shall be set to True or False only if income is set *before* price property
+        # in all other cases, we can map income property depending on total_price
 
 
 class Subscription(BaseObject):
@@ -107,6 +160,9 @@ class Subscription(BaseObject):
     subscriber =    StringField('Subscriber name or identifier (for companies)')
     validity =      DateField('End validity date of the subscription (if any)')
     renewdate =     DateField('Reset date of consumption, for time based suscription (monthly, yearly, etc)')
+
+    def __repr__(self):
+        return '<%s id=%r label=%r>' % (type(self).__name__, self.id, self.label)
 
 
 class CapDocument(CapCollection):

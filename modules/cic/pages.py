@@ -17,27 +17,14 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
-from weboob.browser.pages import AbstractPage, PartialHTMLPage
-
-
-class LoginPage(PartialHTMLPage):
-    REFRESH_MAX = 10.0
-
-    def login(self, login, passwd, redirect=False):
-        form = self.get_form(xpath='//form[contains(@name, "ident")]')
-        form['_cm_user'] = login
-        form['_cm_pwd'] = passwd
-        form.submit(allow_redirects=redirect)
-
-    @property
-    def logged(self):
-        return self.doc.xpath('//div[@id="e_identification_ok"]')
+from weboob.browser.pages import AbstractPage
 
 
-class PorPage(AbstractPage):
+class LoginPage(AbstractPage):
     PARENT = 'creditmutuel'
-    PARENT_URL = 'por'
+    PARENT_URL = 'login'
 
 
 class DecoupledStatePage(AbstractPage):

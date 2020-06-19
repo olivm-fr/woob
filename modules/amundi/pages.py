@@ -30,7 +30,8 @@ from weboob.browser.filters.standard import (
 from weboob.browser.filters.html import Attr
 from weboob.browser.filters.json import Dict
 from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage
-from weboob.capabilities.bank import Account, Investment, Transaction, Pocket
+from weboob.capabilities.bank import Account, Transaction
+from weboob.capabilities.wealth import Investment, Pocket
 from weboob.capabilities.base import NotAvailable, empty
 from weboob.exceptions import NoAccountsException
 from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
@@ -51,8 +52,9 @@ ACCOUNT_TYPES = {
     'PEE': Account.TYPE_PEE,
     'PEG': Account.TYPE_PEE,
     'PEI': Account.TYPE_PEE,
-    'PERCO': Account.TYPE_PER,
-    'PERCOI': Account.TYPE_PER,
+    'HES': Account.TYPE_PEE,
+    'PERCO': Account.TYPE_PERCO,
+    'PERCOI': Account.TYPE_PERCO,
     'PER': Account.TYPE_PER,
     'RSP': Account.TYPE_RSP,
     'ART 83': Account.TYPE_ARTICLE_83,
@@ -120,7 +122,19 @@ class AccountsPage(LoggedPage, JsonPage):
             obj__details_url = Dict('urlFicheFonds', default=None)
             obj_code = IsinCode(Dict('codeIsin', default=NotAvailable), default=NotAvailable)
             obj_code_type = IsinType(Dict('codeIsin', default=NotAvailable))
-            obj_diff = CleanDecimal.SI(Dict('mtPMV', default=None), default=NotAvailable)
+
+            def obj_diff(self):
+                diff = CleanDecimal.SI(Dict('mtPMV', default=None), default=NotAvailable)(self)
+                # Some invests have no diff value but the website fills the json field with the valuation.
+                if diff == Field('valuation')(self):
+                    return NotAvailable
+                return diff
+
+            def obj_portfolio_share(self):
+                portfolio_share_percent = CleanDecimal.SI(Dict('pourcentageSupport', default=None), default=None)(self)
+                if portfolio_share_percent is None:
+                    return NotAvailable
+                return portfolio_share_percent / 100
 
             def obj_srri(self):
                 srri = Dict('SRRI')(self)
@@ -225,22 +239,33 @@ class EEInvestmentPage(LoggedPage, HTMLPage):
 
 
 class InvestmentPerformancePage(LoggedPage, HTMLPage):
+    '''
+    Note: this class is used to parse a pop-up that contains
+    investment details for the regular Amundi website,
+    as well as the SG Gestion and the CPR spaces.
+    '''
     def get_performance_history(self):
         # The positions of the columns depend on the age of the investment fund.
         # For example, if the fund is younger than 5 years, there will be not '5 ans' column.
-        durations = [CleanText('.')(el) for el in self.doc.xpath('//div[h2[contains(text(), "Performances glissantes")]]//th')]
-        values = [CleanText('.')(el) for el in self.doc.xpath('//div[h2[contains(text(), "Performances glissantes")]]//tr[td[text()="Fonds"]]//td')]
+        durations = [CleanText('.')(el) for el in self.doc.xpath('//div[contains(@class, "fpPerfglissanteclassique")]//th')]
+        values = [CleanText('.')(el) for el in self.doc.xpath('//div[contains(@class, "fpPerfglissanteclassique")]//tr[td[text()="Fonds"]]//td')]
         matches = dict(zip(durations, values))
         # We do not fill the performance dictionary if no performance is available,
         # otherwise it will overwrite the data obtained from the JSON with empty values.
         perfs = {}
-        if matches.get('1 an'):
-            perfs[1] = percent_to_ratio(CleanDecimal.French(default=NotAvailable).filter(matches['1 an']))
-        if matches.get('3 ans'):
-            perfs[3] = percent_to_ratio(CleanDecimal.French(default=NotAvailable).filter(matches['3 ans']))
-        if matches.get('5 ans'):
-            perfs[5] = percent_to_ratio(CleanDecimal.French(default=NotAvailable).filter(matches['5 ans']))
+        for k, v in {1: '1 an', 3: '3 ans', 5: '5 ans'}.items():
+            if matches.get(v):
+                perfs[k] = percent_to_ratio(CleanDecimal.French(default=NotAvailable).filter(matches[v]))
+
         return perfs
+
+
+class SGGestionPerformancePage(InvestmentPerformancePage):
+    pass
+
+
+class CprPerformancePage(InvestmentPerformancePage):
+    pass
 
 
 class InvestmentDetailPage(LoggedPage, HTMLPage):
@@ -248,7 +273,7 @@ class InvestmentDetailPage(LoggedPage, HTMLPage):
         return Title(CleanText('//label[contains(text(), "Durée minimum de placement")]/following-sibling::span', default=NotAvailable))(self.doc)
 
     def get_asset_category(self):
-        return CleanText('//label[contains(text(), "Classe d\'actifs")]/following-sibling::span', default=NotAvailable)(self.doc)
+        return CleanText('(//label[contains(text(), "Classe d\'actifs")])[1]/following-sibling::span', default=NotAvailable)(self.doc)
 
 
 class EEProductInvestmentPage(LoggedPage, HTMLPage):
@@ -293,6 +318,13 @@ class CprInvestmentPage(LoggedPage, HTMLPage):
         # Text headers can be in French or in English
         obj_asset_category = Title('//div[contains(text(), "Classe d\'actifs") or contains(text(), "Asset class")]//strong', default=NotAvailable)
         obj_recommended_period = Title('//div[contains(text(), "Durée recommandée") or contains(text(), "Recommended duration")]//strong', default=NotAvailable)
+
+    def get_performance_url(self):
+        js_script = CleanText('//script[@language="javascript"]')(self.doc)  # beurk
+        # Extract performance URL from a string such as 'Product.init(false,"/particuliers..."'
+        m = re.search(r'(/particuliers[^\"]+)', js_script)
+        if m:
+            return 'https://www.cpr-am.fr' + m.group(1)
 
 
 class BNPInvestmentPage(LoggedPage, HTMLPage):
@@ -343,7 +375,3 @@ class SGGestionInvestmentPage(LoggedPage, HTMLPage):
 
     def get_performance_url(self):
         return Attr('(//li[@role="presentation"])[1]//a', 'data-href', default=None)(self.doc)
-
-
-class SGGestionPerformancePage(InvestmentPerformancePage):
-    pass

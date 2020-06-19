@@ -20,7 +20,8 @@
 
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
+from weboob.capabilities.bank import AccountNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.base import find_object
 
 from .browser import DegiroBrowser
@@ -35,7 +36,7 @@ class DegiroModule(Module, CapBankWealth):
     MAINTAINER = u'Jean Walrave'
     EMAIL = 'jwalrave@budget-insight.com'
     LICENSE = 'AGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(ValueBackendPassword('login',    label='Nom d\'utilisateur', masked=False),
                            ValueBackendPassword('password', label='Mot de passe'))
 

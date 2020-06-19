@@ -35,7 +35,7 @@ class SogecartenetModule(Module, CapBank):
     MAINTAINER = 'Guillaume Risbourg'
     EMAIL = 'guillaume.risbourg@budget-insight.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant', masked=False),
         ValueBackendPassword('password', label='Mot de passe'),
@@ -57,7 +57,7 @@ class SogecartenetModule(Module, CapBank):
         return self.browser.iter_accounts()
 
     def iter_history(self, account):
-        return self.browser.iter_history(account)
+        return self.browser.iter_transactions(account)
 
     def iter_coming(self, account):
-        return self.browser.iter_coming(account)
+        return self.browser.iter_transactions(account, True)

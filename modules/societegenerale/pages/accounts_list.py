@@ -25,12 +25,13 @@ import re
 
 from dateutil.relativedelta import relativedelta
 from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Investment, Loan, AccountOwnership
+from weboob.capabilities.bank import Account, Loan, AccountOwnership
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.bill import Subscription
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.capabilities.bank.investments import is_isin_valid, create_french_liquidity
+from weboob.tools.capabilities.bank.investments import create_french_liquidity, IsinCode, IsinType
 from weboob.tools.compat import urlsplit, urlunsplit, urlencode
 from weboob.browser.elements import DictElement, ItemElement, TableElement, method, ListElement
 from weboob.browser.filters.json import Dict
@@ -285,6 +286,31 @@ class LoansPage(JsonBasePage):
         if not empty(account_parent):
             loan._parent_id = account_parent.replace(' ', '')
 
+    def guess_loan_monthly_repayment(self, loan):
+        # We only know the next payment day (without the month or the year).
+        # But since we know that's a monthly repayment, we can guess it.
+
+        periodicity = CleanText(Dict('periodicite'))(loan)
+        if periodicity != 'MENSUELLE':
+            self.logger.warning('Not handled periodicity: %s', periodicity)
+
+        repayment_day = CleanDecimal(Dict('jourEcheanceMensuelle'))(loan)
+        if not repayment_day:
+            return NotAvailable
+
+        now = datetime.date.today()
+        try:
+            next_payment_date = now.replace(day=repayment_day)
+        except ValueError:
+            # When the repayment day is 30, there is a value error
+            # because February 30th will never exist.
+            # It's also the 30 on the website ...
+            return NotAvailable
+
+        if repayment_day < now.day:
+            next_payment_date += relativedelta(months=1)
+        return next_payment_date
+
     def get_loan_account(self, account):
         assert account._prestation_id in Dict('donnees/tabIdAllPrestations')(self.doc), \
             'Loan with prestation id %s should be on this page ...' % account._prestation_id
@@ -303,24 +329,10 @@ class LoansPage(JsonBasePage):
 
                 loan.total_amount = Eval(lambda x: x / 100, CleanDecimal(Dict('montantPret/valeur')))(acc)
                 loan.next_payment_amount = Eval(lambda x: x / 100, CleanDecimal(Dict('montantEcheance/valeur')))(acc)
+                loan.next_payment_date = self.guess_loan_monthly_repayment(acc)
 
                 loan.duration = Dict('dureeNbMois')(acc)
                 loan.maturity_date = datetime.datetime.strptime(Dict('dateFin')(acc), '%Y%m%d')
-
-                # We only know the next payment day (without the month or the year). But since we know that's
-                # a monthly repayment, we can guess it.
-                if CleanText(Dict('periodicite'))(acc) == 'MENSUELLE':
-                    repayment_day = CleanDecimal(Dict('jourEcheanceMensuelle'))(acc)
-                    if not repayment_day:
-                        loan.next_payment_date = NotAvailable
-                    else:
-                        now = datetime.datetime.now().date()
-                        next_payment_date = now.replace(day=repayment_day)
-                        if repayment_day < now.day:
-                            next_payment_date += relativedelta(months=1)
-                        loan.next_payment_date = next_payment_date
-                else:
-                    self.logger.warning('Not handled periodicity: %s', CleanText(Dict('periodicite'))(acc))
 
                 self.set_parent_account_id(loan, acc)
 
@@ -730,9 +742,9 @@ class LifeInsuranceInvest(LifeInsurance):
         head_xpath = '//table/thead/tr/td'
 
         col_label = re.compile('Support')
-        col_quantity = re.compile("Nombre")
-        col_unitvalue = re.compile("Valeur")
-        col_valuation = re.compile("Capital")
+        col_quantity = re.compile('Nombre')
+        col_unitvalue = re.compile('Valeur')
+        col_valuation = re.compile('Capital|Epargne')
 
         class item(ItemElement):
             klass = Investment
@@ -740,8 +752,7 @@ class LifeInsuranceInvest(LifeInsurance):
             obj_code = Regexp(CleanText(TableCell('label')), r'Code ISIN : (\w+) ', default=NotAvailable)
             obj_quantity = MyDecimal(TableCell('quantity'), default=NotAvailable)
             obj_unitvalue = MyDecimal(TableCell('unitvalue'), default=NotAvailable)
-
-            # Some PERP invests don't have valuation
+            # Valuation column for PERP invests may be "Capital" or "Epargne"
             obj_valuation = MyDecimal(TableCell('valuation', default=NotAvailable), default=NotAvailable)
 
             def obj_label(self):
@@ -814,11 +825,9 @@ class LifeInsuranceHistory(LifeInsurance):
 
 
 class MarketPage(LoggedPage, HTMLPage):
-    def get_dropdown_menu(self, account_id):
+    def get_dropdown_menu(self):
         # Get the 'idCptSelect' in a drop-down menu that corresponds the current account
-        for cpt in self.doc.xpath('//select[@id="idCptSelect"]//option[@value]'):
-            if account_id in CleanText('.', replace=[(' ', '')])(cpt):
-                return Attr('.', 'value')(cpt)
+        return Attr('//select[@id="idCptSelect"]//option[@value and @selected="selected"]', 'value')(self.doc)
 
     def get_pages(self):
         several_pages = CleanText('//tr[td[contains(@class,"TabTit1l")]][count(td)=3]')(self.doc)
@@ -826,7 +835,7 @@ class MarketPage(LoggedPage, HTMLPage):
             # "several_pages" value is "1/5" for example
             return re.search(r'(\d+)/(\d+)', several_pages).group(1, 2)
 
-    def market_pagination(self, account_id):
+    def market_pagination(self):
         # Next page is handled by js. Need to build the right url by changing params in current url
         several_pages = self.get_pages()
         if several_pages:
@@ -834,7 +843,7 @@ class MarketPage(LoggedPage, HTMLPage):
             if current_page < total_pages:
                 params = {
                     'action': 11,
-                    'idCptSelect': self.get_dropdown_menu(account_id),
+                    'idCptSelect': self.get_dropdown_menu(),
                     'numPage': current_page + 1,
                 }
                 url_to_keep = urlsplit(self.browser.url)[:3]
@@ -846,12 +855,13 @@ class MarketPage(LoggedPage, HTMLPage):
     @method
     class iter_investments(TableElement):
         def next_page(self):
-            return self.page.market_pagination(Env('account')(self).id)
+            return self.page.market_pagination()
 
         table_xpath = '//tr[td[contains(@class,"TabTit1l")]]/following-sibling::tr//table'
         head_xpath = table_xpath + '//tr[1]/td'
         item_xpath = table_xpath + '//tr[position()>1]'
 
+        col_label = 'Valeur'
         col_quantity = 'Quantité'
         col_valuation = 'Evaluation'
         col_vdate = 'Date'
@@ -867,16 +877,28 @@ class MarketPage(LoggedPage, HTMLPage):
 
             klass = Investment
 
-            obj_code = Regexp(CleanText('./td[1]//@title'), '- (\w+) -')
-            obj_label = CleanText('./td[1]//text()')
+            def obj_label(self):
+                return CleanText(TableCell('label')(self)[0].xpath('.//text()'))(self)
+
             obj_quantity = MyDecimal(TableCell('quantity'))
             obj_valuation = MyDecimal(TableCell('valuation'))
             obj_vdate = Date(Regexp(CleanText(TableCell('vdate')), r'(\d{2}/\d{2}/\d{4})'))
             obj_unitvalue = MyDecimal(TableCell('unitvalue'))
 
+            def obj_code(self):
+                matches = re.findall(r'\w+', CleanText(TableCell('label')(self)[0].xpath('.//@title'))(self))
+                for match in matches:
+                    code = IsinCode(default=None).filter(match)
+                    if code:
+                        return code
+                return NotAvailable
+
             def obj_code_type(self):
-                if is_isin_valid(Field('code')(self)):
-                    return Investment.CODE_TYPE_ISIN
+                matches = re.findall(r'\w+', CleanText(TableCell('label')(self)[0].xpath('.//@title'))(self))
+                for match in matches:
+                    code_type = IsinType(default=None).filter(match)
+                    if code_type:
+                        return code_type
                 return NotAvailable
 
 
@@ -907,7 +929,7 @@ class HTMLProfilePage(LoggedPage, HTMLPage):
     def on_load(self):
         msg = CleanText('//div[@id="connecteur_partenaire"]', default='')(self.doc) or \
               CleanText('//body', default='')(self.doc)
-        service_unavailable_msg = CleanText('//div[@class="message-error" and contains(text(), "indisponible")]')(self.doc)
+        service_unavailable_msg = CleanText('//div[contains(@class, "error")]//span[contains(text(), "indisponible")]')(self.doc)
 
         if 'Erreur' in msg:
             raise BrowserUnavailable(msg)

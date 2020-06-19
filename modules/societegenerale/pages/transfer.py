@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
 from datetime import datetime
 import re
 
@@ -24,6 +26,7 @@ from weboob.browser.pages import LoggedPage, JsonPage, FormNotFound
 from weboob.browser.elements import method, ItemElement, DictElement
 from weboob.capabilities.bank import (
     Recipient, Transfer, TransferBankError, AddRecipientBankError, AddRecipientTimeout,
+    Emitter, EmitterNumberType,
 )
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.capabilities.base import NotAvailable
@@ -37,6 +40,7 @@ from weboob.exceptions import BrowserUnavailable, ActionNeeded
 
 from .base import BasePage
 from .login import MainPage
+from .accounts_list import eval_decimal_amount
 
 
 class TransferJson(LoggedPage, JsonPage):
@@ -152,6 +156,23 @@ class TransferJson(LoggedPage, JsonPage):
     def is_transfer_validated(self):
         return Dict('commun/statut')(self.doc).upper() == 'OK'
 
+    @method
+    class iter_emitters(DictElement):
+        item_xpath = 'donnees/listeEmetteursBeneficiaires/listeDetailEmetteurs'
+
+        class Item(ItemElement):
+            klass = Emitter
+
+            obj_id = Dict('numeroCompte')
+            obj_label = Dict('libelleToDisplay')
+            obj_currency = Dict('montantSoldeVeille/codeDevise')
+            obj_balance = eval_decimal_amount(
+                'montantSoldeVeille/valeurMontant',
+                'montantSoldeVeille/codeDecimalisation'
+            )
+            obj_number_type = EmitterNumberType.IBAN
+            obj_number = Dict('iban')
+
 
 class SignTransferPage(LoggedPage, MainPage):
     def get_token(self):
@@ -204,15 +225,23 @@ class SignRecipientPage(LoggedPage, JsonPage):
 
 class AddRecipientPage(LoggedPage, BasePage):
     def on_load(self):
-        error_msg = CleanText(u'//span[@class="error_msg"]')(self.doc)
+        error_msg = CleanText('//span[@class="error_msg"]')(self.doc)
         if error_msg:
+            if 'Le service est momentanément indisponible' in error_msg:
+                # This has been seen on multiple connections. Whenever they tried
+                # to add a recipient it failed with this message, but it worked
+                # when they tried to do it the next day.
+                raise BrowserUnavailable(error_msg)
             raise AddRecipientBankError(message=error_msg)
 
     def is_here(self):
-        return bool(CleanText(u'//h3[contains(text(), "Ajouter un compte bénéficiaire de virement")]')(self.doc)) or \
-                bool(CleanText(u'//h1[contains(text(), "Ajouter un compte bénéficiaire de virement")]')(self.doc)) or \
-                bool(CleanText(u'//h3[contains(text(), "Veuillez vérifier les informations du compte à ajouter")]')(self.doc)) or \
-                bool(Link('//a[contains(@href, "per_cptBen_ajouter")]', default=NotAvailable)(self.doc))
+        return (
+            bool(CleanText('//h3[contains(text(), "Ajouter un compte bénéficiaire de virement")]')(self.doc))
+            or bool(CleanText('//h1[contains(text(), "Ajouter un compte bénéficiaire de virement")]')(self.doc))
+            or bool(CleanText('//h3[contains(text(), "Veuillez vérifier les informations du compte à ajouter")]')(self.doc))
+            or bool(CleanText('//span[contains(text(), "Le service est momentanément indisponible")]')(self.doc))
+            or bool(Link('//a[contains(@href, "per_cptBen_ajouter")]', default=NotAvailable)(self.doc))
+        )
 
     def post_iban(self, recipient):
         form = self.get_form(name='persoAjoutCompteBeneficiaire')

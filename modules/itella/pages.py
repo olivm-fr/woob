@@ -35,7 +35,7 @@ class SearchPage(JsonPage):
         if not shipments:
             raise ParcelNotFound("No such ID: %s" % _id)
         shipment = shipments[0]
-        result_id = shipment["trackingCode"]
+        result_id = shipment["items"][0]["trackingNumbers"][0]
         if result_id != _id:
             raise ParcelNotFound("ID mismatch: expecting %s, got %s" % (_id, result_id))
 
@@ -51,7 +51,8 @@ class SearchPage(JsonPage):
 
     def build_event(self, index, data):
         event = Event(index)
-        event.activity = data["description"]["en"]
+        if data["description"]:
+            event.activity = data["description"]["en"]
         event.date = parse_date(data["timestamp"], ignoretz=True)
         event.location = data["locationName"]
         return event

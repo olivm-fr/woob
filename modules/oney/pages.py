@@ -79,10 +79,22 @@ class LoginPage(HTMLPage):
 
 
 class ChoicePage(LoggedPage, HTMLPage):
+    def get_redirect_other_space(self):
+        # On some accounts, there is multiple spaces, it seems that the previous way to handle
+        # the second space is not working for all the different spaces. the link we get here is supposed
+        # to redirect us to the good space.
+        return re.search(r'"action", "(.*?)"', CleanText('//div[@class="conteneur"]/script')(self.doc)).group(1)
+
     def get_pages(self):
         for page_attrib in self.doc.xpath('//a[@data-site]/@data-site'):
             yield self.browser.open('/site/s/login/loginidentifiant.html',
                                     data={'selectedSite': page_attrib}).page
+
+
+class ClientSpacePage(LoggedPage, HTMLPage):
+    # skip consumer credit, there is not enough information.
+    # If an other type of page appear handle it here
+    pass
 
 
 class DetailPage(LoggedPage, HTMLPage):
@@ -214,7 +226,7 @@ class CreditAccountPage(LoggedPage, HTMLPage):
         obj__site = 'other'
         obj_balance = 0
         obj_number = obj_id = CleanText('//tr[td[text()="Mon numéro de compte"]]/td[@class="droite"]', replace=[(' ', '')])
-        obj_coming = CleanDecimal('//div[@id="mod-paiementcomptant"]//tr[td[contains(text(),"débité le")]]/td[@class="droite"]', sign=lambda _: -1, default=0)
+        obj_coming = CleanDecimal('//div[@id="mod-paiementcomptant"]//tr[td[contains(text(),"débité le")]]/td[@class="droite"]', sign='-', default=0)
         obj_currency = Currency('//div[@id="mod-paiementcomptant"]//tr[td[starts-with(normalize-space(text()),"Montant disponible")]]/td[@class="droite"]')
 
 

@@ -23,7 +23,8 @@ import datetime
 import re
 
 from weboob.capabilities.base import NotAvailable, empty
-from weboob.capabilities.bank import Investment, Transaction as BaseTransaction, Account
+from weboob.capabilities.bank import Account, Transaction as BaseTransaction
+from weboob.capabilities.wealth import Investment
 from weboob.exceptions import BrowserUnavailable
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.browser.pages import LoggedPage
@@ -273,6 +274,10 @@ class InvestItem(ItemElement):
     obj_portfolio_share = Eval(lambda x: x / 100 if x else NotAvailable, CleanDecimal(TableCell('share', support_th=True), replace_dots=True, default=NotAvailable))
     obj_quantity = CleanDecimal(TableCell('quantity', support_th=True), replace_dots=True, default=NotAvailable)
     obj_valuation = CleanDecimal(TableCell('valuation', support_th=True), replace_dots=True, default=NotAvailable)
+
+    def validate(self, obj):
+        # Skip investments with empty valuation
+        return not empty(obj.valuation)
 
 
 class CachemireCatalogPage(LoggedPage, MyHTMLPage):

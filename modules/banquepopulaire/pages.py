@@ -28,14 +28,21 @@ from io import BytesIO
 from PIL import Image, ImageFilter
 
 from weboob.browser.elements import method, DictElement, ItemElement
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Regexp, Eval, Date, Field
+from weboob.browser.filters.standard import (
+    CleanText, CleanDecimal, Regexp, Eval,
+    Date, Field, MapIn,
+)
 from weboob.browser.filters.html import Attr, Link, AttributeNotFound
 from weboob.browser.filters.json import Dict
 from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword, ActionNeeded
 
-from weboob.browser.pages import HTMLPage, LoggedPage, FormNotFound, JsonPage, RawPage, XMLPage
+from weboob.browser.pages import (
+    HTMLPage, LoggedPage, FormNotFound, JsonPage, RawPage, XMLPage,
+    AbstractPage,
+)
 
-from weboob.capabilities.bank import Account, Investment
+from weboob.capabilities.bank import Account
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.profile import Person
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities import NotAvailable
@@ -306,6 +313,76 @@ class UnavailablePage(LoggedPage, MyHTMLPage):
         self.browser.location(a)
 
 
+class NewLoginPage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'new_login'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+
+class JsFilePage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'js_file'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+    def get_user_info_client_id(self):
+        return Regexp(pattern=r'anonymous:{clientId:"([^"]+)"').filter(self.text)
+
+
+class AuthorizePage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'authorize'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+
+class LoginTokensPage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'login_tokens'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+    def get_expires_in(self):
+        return Dict('parameters/expires_in')(self.doc)
+
+
+class InfoTokensPage(JsonPage):
+    def get_access_token(self):
+        return Dict('access_token')(self.doc)
+
+    def get_user_type(self):
+        user_subscription = Dict('characteristics/subscribeTypeItems/0/label')(self.doc)
+        user_types = {
+            'Particulier': 'part',
+            'Personne Protégé': 'part',
+            'Personne Morale': 'ent',
+            'EI': 'pro',
+        }
+        return MapIn(self.doc, user_types).filter(user_subscription)
+
+
+class VkImagePage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'vk_image'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+
+class AuthenticationMethodPage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'authentication_method_page'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+    def get_redirect_data(self):
+        return Dict('response/saml2_post', default=NotAvailable)(self.doc)
+
+    def is_new_login(self):
+        # We check here if we are doing a new login
+        return bool(Dict('step/phase/state', default=NotAvailable)(self.doc))
+
+
+class AuthenticationStepPage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'authentication_step'
+    BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+
 class LoginPage(MyHTMLPage):
     def on_load(self):
         h1 = CleanText('//h1[1]')(self.doc)
@@ -322,6 +399,39 @@ class LoginPage(MyHTMLPage):
         form['IDToken1'] = login.encode(self.ENCODING)
         form['IDToken2'] = passwd.encode(self.ENCODING)
         form.submit()
+
+
+class CaissedepargneVirtKeyboard(SplitKeyboard):
+    char_to_hash = {
+        '0': '66ec79b200706e7f9c14f2b6d35dbb05',
+        '1': ('529819241cce382b429b4624cb019b56', '0ea8c08e52d992a28aa26043ffc7c044'),
+        '2': 'fab68678204198b794ce580015c8637f',
+        '3': '3fc5280d17cf057d1c4b58e4f442ceb8',
+        '4': ('dea8800bdd5fcaee1903a2b097fbdef0', 'e413098a4d69a92d08ccae226cea9267', '61f720966ccac6c0f4035fec55f61fe6', '2cbd19a4b01c54b82483f0a7a61c88a1'),
+        '5': 'ff1909c3b256e7ab9ed0d4805bdbc450',
+        '6': '7b014507ffb92a80f7f0534a3af39eaa',
+        '7': '7d598ff47a5607022cab932c6ad7bc5b',
+        '8': ('4ed28045e63fa30550f7889a18cdbd81', '88944bdbef2e0a49be9e0c918dd4be64'),
+        '9': 'dd6317eadb5a0c68f1938cec21b05ebe',
+    }
+    codesep = ' '
+
+    def __init__(self, browser, images):
+        code_to_filedata = {}
+        for img_item in images:
+            img_content = browser.location(img_item['uri']).content
+            img = Image.open(BytesIO(img_content))
+            img = img.filter(ImageFilter.UnsharpMask(
+                radius=2,
+                percent=150,
+                threshold=3,
+            ))
+            img = img.convert('L', dither=None)
+            img = Image.eval(img, lambda x: 0 if x < 20 else 255)
+            b = BytesIO()
+            img.save(b, format='PNG')
+            code_to_filedata[img_item['value']] = b.getvalue()
+        super(CaissedepargneVirtKeyboard, self).__init__(code_to_filedata)
 
 
 class MyVirtKeyboard(SplitKeyboard):
@@ -364,6 +474,7 @@ class Login2Page(LoginPage):
         if not self.browser.no_login:
             raise LoggedOut()
 
+    def set_form_ids(self):
         r = self.browser.open(self.request_url)
         doc = r.json()
 
@@ -496,7 +607,7 @@ class HomePage(LoggedPage, MyHTMLPage):
         headers = {'Referer': self.url}
 
         # Sometime, the page is a 302 and redirect to a page where there are no information that we need,
-        # so we try with 2 others url to further fetch token when empty page
+        # so we try with 3 others url to further fetch token when empty page
         r = self.browser.open(url, data='taskId=aUniversMesComptes', params={'vary': vary}, headers=headers)
 
         if not int(r.headers.get('Content-Length', 0)):
@@ -504,6 +615,9 @@ class HomePage(LoggedPage, MyHTMLPage):
 
         if not int(r.headers.get('Content-Length', 0)):
             r = self.browser.open(url, data={'taskId': 'equipementDom'}, params={'vary': vary}, headers=headers)
+
+        if not int(r.headers.get('Content-Length', 0)):
+            r = self.browser.open(url)
 
         doc = r.page.doc
         date = None
@@ -525,7 +639,7 @@ class HomePage(LoggedPage, MyHTMLPage):
         return args['token']
 
 
-class AccountsPage(LoggedPage, MyHTMLPage):
+class GenericAccountsPage(LoggedPage, MyHTMLPage):
     ACCOUNT_TYPES = {
         'Mes comptes d\'épargne': Account.TYPE_SAVINGS,
         'Mon épargne': Account.TYPE_SAVINGS,
@@ -551,13 +665,15 @@ class AccountsPage(LoggedPage, MyHTMLPage):
         (re.compile(r'.*Plan Epargne Retraite.*'), Account.TYPE_PERP),
         (re.compile(r'.*Titres.*'), Account.TYPE_MARKET),
         (re.compile(r'.*Selection Vie.*'), Account.TYPE_LIFE_INSURANCE),
-        (re.compile(r'^Fructi Pulse.*'), Account.TYPE_MARKET),
+        (re.compile(r'^Fructi Pulse.*'), Account.TYPE_LIFE_INSURANCE),
+        (re.compile(r'^Fructi Neo.*'), Account.TYPE_LIFE_INSURANCE),
         (re.compile(r'^(Quintessa|Solevia|Irriga|Delfea).*'), Account.TYPE_LIFE_INSURANCE),
         (re.compile(r'^Plan Epargne Enfant Mul.*'), Account.TYPE_MARKET),
         (re.compile(r'^Alc Premium'), Account.TYPE_MARKET),
         (re.compile(r'^Plan Epargne Enfant Msu.*'), Account.TYPE_LIFE_INSURANCE),
         (re.compile(r'^Parts Sociales.*'), Account.TYPE_MARKET),
         (re.compile(r'^Contrat Generali.*'), Account.TYPE_LIFE_INSURANCE),
+        (re.compile(r'^Reserve Facelia.*'), Account.TYPE_REVOLVING_CREDIT),
     ]
 
     def pop_up(self):
@@ -574,7 +690,23 @@ class AccountsPage(LoggedPage, MyHTMLPage):
     COL_BALANCE = 3
     COL_COMING = 4
 
-    def iter_accounts(self, next_pages, accounts_parsed=None):
+    def get_next_params(self):
+        # Same mechanism than get_next_params in TransactionsPage
+        nxt = self.doc.xpath('//li[contains(@id, "_nxt")]')
+        if len(nxt) == 0 or nxt[0].attrib.get('class', '') == 'nxt-dis':
+            return None
+
+        params = {}
+        for field in self.doc.xpath('//input'):
+            params[field.attrib['name']] = field.attrib.get('value', '')
+
+        params['validationStrategy'] = 'NV'
+        params['pagingDirection'] = 'NEXT'
+        params['pagerName'] = nxt[0].attrib['id'].split('_', 1)[0]
+
+        return params
+
+    def iter_accounts(self, next_pages, accounts_parsed=None, next_with_params=None):
         account_type = Account.TYPE_UNKNOWN
 
         params = self.get_params()
@@ -666,11 +798,27 @@ class AccountsPage(LoggedPage, MyHTMLPage):
 
                 yield account
 
-        # Needed to preserve navigation.
-        self.browser.follow_back_button_if_any(params=params.copy(), actions=actions)
+        if not next_with_params:
+            # Needed to preserve navigation.
+            # But if we have a next_with_params we don't want to come back
+            # to main accounts page (the next page would be not reachable)
+            self.browser.follow_back_button_if_any(params=params.copy(), actions=actions)
 
 
-class AccountsFullPage(AccountsPage):
+class AccountsPage(GenericAccountsPage):
+    pass
+
+
+class AccountsNextPage(GenericAccountsPage):
+    def is_here(self):
+        # The url can be exactly the same than in TransactionsPage
+        # we can differentiate them here
+        return bool(self.doc.xpath(
+            '''//span[@class="pmsg" and contains(text(), "Pour accéder au détail d'un contrat")]'''
+        ))
+
+
+class AccountsFullPage(GenericAccountsPage):
     pass
 
 
@@ -681,7 +829,7 @@ class CardsPage(LoggedPage, MyHTMLPage):
     COL_DATE = 4
     COL_AMOUNT = 5
 
-    def iter_accounts(self, next_pages, accounts_parsed=None):
+    def iter_accounts(self, next_pages, accounts_parsed=None, next_with_params=None):
         params = self.get_params()
 
         account = None
@@ -771,8 +919,11 @@ class CardsPage(LoggedPage, MyHTMLPage):
         if account is not None:
             yield account
 
-        # Needed to preserve navigation.
-        self.browser.follow_back_button_if_any(params=params.copy())
+        if not next_with_params:
+            # Needed to preserve navigation
+            # But if we have a next_with_params we don't want to come back
+            # to main accounts page (the next page would be not reachable)
+            self.browser.follow_back_button_if_any(params=params.copy())
 
 
 class Transaction(FrenchTransaction):
@@ -1212,6 +1363,11 @@ class NatixisDetailsPage(LoggedPage, RawPage):
 
 
 class AdvisorPage(LoggedPage, MyHTMLPage):
+    def is_profile_unavailable(self):
+        return bool(self.doc.xpath(
+            """//script[contains(text(), "Votre abonnement ne vous permet pas d'accéder")]"""
+        ))
+
     @method
     class get_advisor(ItemElement):
         klass = Advisor

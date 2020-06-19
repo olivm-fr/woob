@@ -20,7 +20,8 @@
 
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
-from weboob.capabilities.bank import CapBankPockets, AccountNotFound
+from weboob.capabilities.bank import AccountNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.base import find_object
 
 from .browser import CmesBrowser
@@ -29,13 +30,13 @@ from .browser import CmesBrowser
 __all__ = ['CmesModule']
 
 
-class CmesModule(Module, CapBankPockets):
+class CmesModule(Module, CapBankWealth):
     NAME = 'cmes'
     DESCRIPTION = u'Crédit Mutuel Épargne Salariale'
     MAINTAINER = u'Edouard Lambert'
     EMAIL = 'elambert@budget-insight.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(
             ValueBackendPassword('login',    label='Identifiant', masked=False),
             ValueBackendPassword('password', label='Mot de passe'))

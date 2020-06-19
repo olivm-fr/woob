@@ -20,7 +20,8 @@
 from datetime import date
 
 from weboob.capabilities.base import empty, NotLoaded
-from weboob.capabilities.bank import CapBankTransfer, CapBankWealth, CapBankPockets
+from weboob.capabilities.bank import CapTransfer
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.exceptions import NoAccountsException
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.tools.capabilities.bank.investments import is_isin_valid
@@ -48,6 +49,8 @@ class BankStandardTest(object):
     allow_notimplemented_coming = False
     allow_notimplemented_investments = False
     allow_notimplemented_pockets = False
+    allow_notimplemented_market_orders = False
+    allow_notimplemented_emitters = False
     allow_notimplemented_recipients = False
 
     def test_basic(self):
@@ -82,9 +85,19 @@ class BankStandardTest(object):
                 self.assertTrue(self.allow_notimplemented_pockets, 'iter_pocket should not raise NotImplementedError')
 
             try:
+                self.check_market_orders(account)
+            except NotImplementedError:
+                self.assertTrue(self.allow_notimplemented_market_orders, 'iter_market_orders should not raise NotImplementedError')
+
+            try:
                 self.check_recipients(account)
             except NotImplementedError:
                 self.assertTrue(self.allow_notimplemented_recipients, 'iter_transfer_recipients should not raise NotImplementedError')
+
+        try:
+            self.check_emitters()
+        except NotImplementedError:
+            self.assertTrue(self.allow_notimplemented_emitters, 'iter_emitters should not raise NotImplementedError')
 
     def check_account(self, account):
         self.assertTrue(account.id, 'account %r has no id' % account)
@@ -162,7 +175,7 @@ class BankStandardTest(object):
             self.assertTrue(0 < inv.portfolio_share <= 1, 'investment %r has invalid portfolio_share' % inv)
 
     def check_pockets(self, account):
-        if not isinstance(self.backend, CapBankPockets):
+        if not isinstance(self.backend, CapBankWealth):
             return
         for pocket in self.backend.iter_pocket(account):
             self.check_pocket(account, pocket)
@@ -171,8 +184,21 @@ class BankStandardTest(object):
         self.assertTrue(pocket.amount, 'pocket %r has no amount' % pocket)
         self.assertTrue(pocket.label, 'pocket %r has no label' % pocket)
 
+    def check_market_orders(self, account):
+        if not isinstance(self.backend, CapBankWealth):
+            return
+        for market_order in self.backend.iter_market_orders(account):
+            self.check_market_order(account, market_order)
+
+    def check_market_order(self, account, market_order):
+        self.assertTrue(market_order.label, 'Market order %r has no label' % market_order)
+        self.assertFalse(
+            empty(market_order.quantity) and empty(market_order.amount),
+            'Market order %r has no quantity and no amount' % market_order
+        )
+
     def check_recipients(self, account):
-        if not isinstance(self.backend, CapBankTransfer):
+        if not isinstance(self.backend, CapTransfer):
             return
         for rcpt in self.backend.iter_transfer_recipients(account):
             self.check_recipient(account, rcpt)
@@ -182,3 +208,13 @@ class BankStandardTest(object):
         self.assertTrue(rcpt.label, 'recipient %r has no label' % rcpt)
         self.assertTrue(rcpt.category, 'recipient %r has no category' % rcpt)
         self.assertTrue(rcpt.enabled_at, 'recipient %r has no enabled_at' % rcpt)
+
+    def check_emitters(self):
+        if not isinstance(self.backend, CapTransfer):
+            return
+        for emitter in self.backend.iter_emitters():
+            self.check_emitter(emitter)
+
+    def check_emitter(self, emitter):
+        self.assertTrue(emitter.id, 'emitter %r has no id' % emitter)
+        # TODO

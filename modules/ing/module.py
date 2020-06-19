@@ -16,19 +16,23 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from decimal import Decimal
 from datetime import timedelta
 import re
 
-from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
+from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.bill import (
     CapDocument, Bill, Subscription,
     SubscriptionNotFound, DocumentNotFound, DocumentTypes,
 )
 from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.base import find_object, strict_find_object
+from weboob.capabilities.base import find_object, strict_find_object, empty
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword, ValueDate
 
@@ -41,28 +45,24 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
     NAME = 'ing'
     MAINTAINER = 'Florent Fourcot'
     EMAIL = 'weboob@flo.fourcot.fr'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'ING France'
-    CONFIG = BackendConfig(ValueBackendPassword('login',
-                                                label='Numéro client',
-                                                masked=False,
-                                                regexp='^(\d{1,10})$'),
-                           ValueBackendPassword('password',
-                                                label='Code secret',
-                                                regexp='^(\d{6})$'),
-                           ValueDate('birthday',
-                                     label='Date de naissance',
-                                     formats=('%d%m%Y', '%d/%m/%Y', '%d-%m-%Y'))
-                           )
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Numéro client', masked=False, regexp=r'^(\d{1,10})$'),
+        ValueBackendPassword('password', label='Code secret', regexp=r'^(\d{6})$'),
+        ValueDate('birthday', required=False, label='Date de naissance', formats=('%d%m%Y', '%d/%m/%Y', '%d-%m-%Y'))
+    )
     BROWSER = IngAPIBrowser
 
     accepted_document_types = (DocumentTypes.STATEMENT,)
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(),
-                                   self.config['password'].get(),
-                                   birthday=self.config['birthday'].get())
+        return self.create_browser(
+            self.config['login'].get(),
+            self.config['password'].get(),
+            birthday=self.config['birthday'].get()
+        )
 
     def iter_resources(self, objs, split_path):
         if Account in objs:
@@ -97,12 +97,21 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
 
     ############# CapTransferAddRecipient #############
     def iter_transfer_recipients(self, account):
+        emitter_account = None
         if not isinstance(account, Account):
-            account = self.get_account(account)
-        return self.browser.iter_recipients(account)
+            emitter_account = self.get_account(account)
+        elif empty(account.iban):
+            # Some accounts do not have IBAN like life insurance
+            emitter_account = account
+
+        if not emitter_account and isinstance(account, Account):
+            # In PSD2 case we did not found the account with id
+            # We are looking for the account with IBAN
+            emitter_account = find_object(self.iter_accounts(), iban=account.iban, error=AccountNotFound)
+        return self.browser.iter_recipients(emitter_account)
 
     def new_recipient(self, recipient, **params):
-        cleaned_label = re.sub("[^0-9a-zA-Z:/\-\?\(\)\.,\+ ']", '', recipient.label)
+        cleaned_label = re.sub(r"[^0-9a-zA-Z:/\-\?\(\)\.,\+ ']", '', recipient.label)
         cleaned_label = re.sub(r'\s{2,}', ' ', cleaned_label)
         recipient.label = cleaned_label.strip()
 
@@ -111,9 +120,16 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
     def init_transfer(self, transfer, **params):
         self.logger.info('Going to do a new transfer')
 
-        account = strict_find_object(self.iter_accounts(), id=transfer.account_id, error=AccountNotFound)
+        if transfer.account_iban:
+            account = find_object(self.iter_accounts(), iban=transfer.account_iban, error=AccountNotFound)
+        else:
+            account = find_object(self.iter_accounts(), id=transfer.account_id, error=AccountNotFound)
 
-        recipient = strict_find_object(self.iter_transfer_recipients(account), id=transfer.recipient_id, error=RecipientNotFound)
+        recipient = strict_find_object(
+            self.iter_transfer_recipients(account),
+            id=transfer.recipient_id,
+            error=RecipientNotFound
+        )
 
         transfer.amount = Decimal(transfer.amount).quantize(Decimal('.01'))
 
@@ -125,6 +141,13 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
     def transfer_check_exec_date(self, old_exec_date, new_exec_date):
         # week-end + 1 holiday
         return old_exec_date <= new_exec_date <= old_exec_date + timedelta(days=3)
+
+    def transfer_check_account_id(self, old, new):
+        # don't check account id for PSD2 case, account_id is different
+        return True
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()
 
     ############# CapDocument #############
     def iter_subscription(self):

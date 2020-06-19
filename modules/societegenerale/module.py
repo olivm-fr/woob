@@ -23,18 +23,19 @@ from decimal import Decimal
 from datetime import timedelta
 
 from weboob.capabilities.bank import (
-    CapBankWealth, CapBankTransferAddRecipient, AccountNotFound,
+    CapBankTransferAddRecipient, AccountNotFound,
     Account, RecipientNotFound,
 )
 from weboob.capabilities.bill import (
     CapDocument, Subscription, SubscriptionNotFound,
     Document, DocumentNotFound, DocumentTypes,
 )
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
+from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
 from weboob.capabilities.base import find_object, NotAvailable, strict_find_object
 
 from .browser import SocieteGenerale
@@ -48,7 +49,7 @@ class SocieteGeneraleModule(Module, CapBankWealth, CapBankTransferAddRecipient, 
     NAME = 'societegenerale'
     MAINTAINER = u'Jocelyn Jaubert'
     EMAIL = 'jocelyn.jaubert@gmail.com'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'Société Générale'
     CONFIG = BackendConfig(
@@ -57,9 +58,9 @@ class SocieteGeneraleModule(Module, CapBankWealth, CapBankTransferAddRecipient, 
         Value('website', label='Type de compte', default='par',
               choices={'par': 'Particuliers', 'pro': 'Professionnels', 'ent': 'Entreprises'}),
         # SCA
-        Value('code', label='Code SMS', required=False, default='', noprompt=True),
-        Value('resume', noprompt=True, default=''),
-        Value('request_information', default=None, noprompt=True, required=False),
+        ValueTransient('code'),
+        ValueTransient('resume'),
+        ValueTransient('request_information'),
     )
 
     accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.RIB)
@@ -193,3 +194,8 @@ class SocieteGeneraleModule(Module, CapBankWealth, CapBankTransferAddRecipient, 
             return
 
         return self.browser.open(document.url).content
+
+    def iter_emitters(self):
+        if self.config['website'].get() not in ('par', 'pro'):
+            raise NotImplementedError()
+        return self.browser.iter_emitters()

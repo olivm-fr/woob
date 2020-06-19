@@ -23,7 +23,11 @@ from __future__ import unicode_literals
 from weboob.browser import LoginBrowser, need_login
 from weboob.browser.url import BrowserParamURL
 from weboob.capabilities.base import empty, NotAvailable
-from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired, ActionNeeded, BrowserHTTPError
+from weboob.capabilities.bank import Account
+from weboob.exceptions import (
+    BrowserIncorrectPassword, BrowserPasswordExpired,
+    ActionNeeded, BrowserHTTPError, BrowserUnavailable,
+)
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 
 from .pages.detail_pages import (
@@ -35,6 +39,7 @@ from .pages.account_page import AccountsPage
 
 
 class AvivaBrowser(LoginBrowser):
+    TIMEOUT = 120
     BASEURL = 'https://www.aviva.fr'
 
     validation = BrowserParamURL(r'/conventions/acceptation\?backurl=/(?P<browser_subsite>[^/]+)/Accueil', ValidationPage)
@@ -80,7 +85,21 @@ class AvivaBrowser(LoginBrowser):
                     # We don't scrape insurances, guarantees, health contracts
                     # and accounts with unavailable balances
                     continue
+
+                if not self.page.is_valuation_available():
+                    # Sometimes the valuation does not appear correctly.
+                    # When it happens, we try the request again; if the balance
+                    # still does not appear we raise BrowserUnavailable
+                    # to yield a consistant list of accounts everytime.
+                    self.logger.warning('Account %s has no balance, try the request again.', account.label)
+                    self.accounts.go()
+                    self.location(account.url)
+                    if not self.page.is_valuation_available():
+                        raise BrowserUnavailable()
+
                 self.page.fill_account(obj=account)
+                if account.type == Account.TYPE_UNKNOWN:
+                    self.logger.warning('Account "%s" is untyped, please check the related type in account details.', account.label)
                 yield account
             except BrowserHTTPError:
                 self.logger.warning('Could not get the account details: account %s will be skipped', account.id)

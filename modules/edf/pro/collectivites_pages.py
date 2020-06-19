@@ -31,12 +31,21 @@ class CnicePage(HTMLPage):
         return Regexp(Attr('//head/meta[@http-equiv="Refresh"]', 'content'), r'URL=(.*)')(self.doc)
 
 
+class AuthenticationErrorPage(HTMLPage):
+    def is_here(self):
+        return CleanText('//h2[@id="header"]')(self.doc) == "Problem Logging In"
+
+    def get_error_message(self):
+        return CleanText('//div[@id="content"]/form/p')(self.doc)
+
+
 class AuraPage(LoggedPage, JsonPage):
     # useful tip, when request is malformed this page contains a malformed json (yes i know)
     # and it crash on build_doc, hope that can help you to debug
     def build_doc(self, text):
         doc = super(AuraPage, self).build_doc(text)
-        if doc['actions'][0]['id'] == '655;a':  # this is the code when we get documents
+
+        if doc['actions'][0]['id'] == '685;a':  # this is the code when we get documents
             # they are also encoded in json
             value = doc['actions'][1]['returnValue']
             if value is None:
@@ -46,7 +55,11 @@ class AuraPage(LoggedPage, JsonPage):
         return doc
 
     def get_subscriber(self):
-        return self.doc['actions'][0]['returnValue']['userDisplayName']
+        return Format(
+            "%s %s",
+            Dict('actions/0/returnValue/FirstName'),
+            Dict('actions/0/returnValue/LastName')
+        )(self.doc)
 
     @method
     class iter_subscriptions(DictElement):
@@ -58,7 +71,7 @@ class AuraPage(LoggedPage, JsonPage):
             obj_id = CleanText(Dict('contractReference'))
             obj_label = CleanText(Dict('siteName'))
             obj_subscriber = Env('subscriber')
-            obj__moe_idpe = CleanText(Dict('moeIdPE'))
+            obj__moe_idpe = CleanText(Dict('ids/epMoeId'))
 
     @method
     class iter_documents(DictElement):

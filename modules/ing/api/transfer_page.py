@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import random
@@ -29,8 +31,8 @@ from weboob.tools.captcha.virtkeyboard import SimpleVirtualKeyboard
 from weboob.browser.pages import LoggedPage, JsonPage
 from weboob.browser.elements import method, DictElement, ItemElement
 from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import Env, Field, Date
-from weboob.capabilities.bank import Recipient
+from weboob.browser.filters.standard import Env, Field, Date, CleanText
+from weboob.capabilities.bank import Recipient, Emitter
 
 
 class TransferINGVirtKeyboard(SimpleVirtualKeyboard):
@@ -43,7 +45,7 @@ class TransferINGVirtKeyboard(SimpleVirtualKeyboard):
         'radius': 2,
         'percent': 150,
         'threshold': 3,
-        'limit_pixel': 125
+        'limit_pixel': 125,
     }
 
     symbols = {
@@ -56,7 +58,7 @@ class TransferINGVirtKeyboard(SimpleVirtualKeyboard):
         '6': 'b50f7e4a375153b9f6b029dc9b0a7e64',
         '7': 'd52320c62c6157d0cadbb7a186153628',
         '8': 'dd3fb25fc7f0765610b0ffe47da85330',
-        '9': 'ca55399a5b36da3fedcd1dbb73d72a2f'
+        '9': 'ca55399a5b36da3fedcd1dbb73d72a2f',
     }
 
     # Clean image
@@ -70,9 +72,15 @@ class TransferINGVirtKeyboard(SimpleVirtualKeyboard):
         self.image = self.image.filter(ImageFilter.UnsharpMask(
             radius=self.alter_img_params['radius'],
             percent=self.alter_img_params['percent'],
-            threshold=self.alter_img_params['threshold'])
-        )
-        self.image = Image.eval(self.image, lambda px: 0 if px <= self.alter_img_params['limit_pixel'] else 255)
+            threshold=self.alter_img_params['threshold']
+        ))
+
+        def image_filter(px):
+            if px <= self.alter_img_params['limit_pixel']:
+                return 0
+            return 255
+
+        self.image = Image.eval(self.image, image_filter)
 
     def password_tiles_coord(self, password):
         # get image original size to get password coord
@@ -112,6 +120,17 @@ class DebitAccountsPage(LoggedPage, JsonPage):
     def get_debit_accounts_uid(self):
         return [Dict('uid')(recipient) for recipient in self.doc]
 
+    @method
+    class iter_emitters(DictElement):
+
+        class item(ItemElement):
+
+            klass = Emitter
+
+            obj_id = Dict('uid')  # temporary ID, will be replaced by account ID from old website
+            obj__partial_id = CleanText(Dict('label'), replace=[(' ', '')])
+            obj_label = Dict('type/label')
+
 
 class CreditAccountsPage(LoggedPage, JsonPage):
     @method
@@ -150,7 +169,14 @@ class TransferPage(LoggedPage, JsonPage):
         pin_position = Dict('pinValidateResponse/pinPositions')(self.doc)
 
         image_url = '/secure/api-v1%s' % Dict('pinValidateResponse/keyPadUrl')(self.doc)
-        image = BytesIO(self.browser.open(image_url, headers={'Referer': self.browser.absurl('/secure/transfers/new')}).content)
+        image = BytesIO(
+            self.browser.open(
+                image_url,
+                headers={
+                    'Referer': self.browser.absurl('/secure/transfers/new'),
+                }
+            ).content
+        )
 
         vk = TransferINGVirtKeyboard(image, cols=5, rows=2, browser=self.browser)
         password_random_coords = vk.password_tiles_coord(password)
@@ -160,6 +186,9 @@ class TransferPage(LoggedPage, JsonPage):
     @property
     def transfer_is_validated(self):
         return Dict('acknowledged')(self.doc)
+
+    def is_otp_authentication(self):
+        return 'otpValidateResponse' in self.doc
 
 
 class AddRecipientPage(LoggedPage, JsonPage):
@@ -174,7 +203,7 @@ class OtpChannelsPage(LoggedPage, JsonPage):
         for element in self.doc:
             if element['type'] == 'SMS_MOBILE':
                 return element
-        assert False, 'No sms info found'
+        raise AssertionError('No sms info found')
 
 
 class ConfirmOtpPage(LoggedPage, JsonPage):

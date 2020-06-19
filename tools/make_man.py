@@ -26,7 +26,6 @@ import optparse
 import os
 import re
 import sys
-import tempfile
 import time
 from datetime import datetime
 from textwrap import dedent
@@ -106,39 +105,26 @@ class ManpageHelpFormatter(optparse.HelpFormatter):
 
 
 def main():
-    scripts_path = os.path.join(BASE_PATH, "scripts")
+    scripts_path = os.path.join(BASE_PATH, 'weboob', 'applications')
     files = os.listdir(scripts_path)
     completions = dict()
 
-    # Create a fake "scripts" modules to import the scripts into
-    sys.modules["scripts"] = imp.new_module("scripts")
-
     for fname in files:
         fpath = os.path.join(scripts_path, fname)
-        if os.path.isfile(fpath) and os.access(fpath, os.X_OK):
-            with open(fpath) as f:
-                # Python will likely want create a compiled file, we provide a place
-                tmpdir = os.path.join(tempfile.gettempdir(), "weboob", "make_man")
-                if not os.path.isdir(tmpdir):
-                    os.makedirs(tmpdir)
-                tmpfile = os.path.join(tmpdir, fname)
+        if os.path.isdir(fpath) and not fname.startswith('_'):
+            try:
+                fp, pathname, description = imp.find_module(fname, [scripts_path])
+                module = imp.load_module(fname, fp, pathname, description)
+            except OSError as e:
+                print("Unable to load the %s application (%s)"
+                      % (fname, e), file=sys.stderr)
+            else:
+                print("Loaded %s" % fname)
+                # Find the applications we can handle
+                for klass in module.__dict__.values():
+                    if inspect.isclass(klass) and issubclass(klass, Application) and klass.VERSION:
+                        completions[klass.APPNAME] = analyze_application(klass, klass.APPNAME)
 
-                desc = ("", "U", imp.PY_SOURCE)
-                try:
-                    script = imp.load_module("scripts.%s" % fname, f, tmpfile, desc)
-                except ImportError as e:
-                    print("Unable to load the %s script (%s)"
-                          % (fname, e), file=sys.stderr)
-                else:
-                    print("Loaded %s" % fname)
-                    # Find the applications we can handle
-                    for klass in script.__dict__.values():
-                        if inspect.isclass(klass) and issubclass(klass, Application) and klass.VERSION:
-                            completions[fname] = analyze_application(klass, fname)
-                finally:
-                    # Cleanup compiled files if needed
-                    if (os.path.isfile(tmpfile + "c")):
-                        os.unlink(tmpfile + "c")
     write_completions(completions)
 
 
@@ -241,7 +227,7 @@ For full copyright information see the COPYING file in the weboob package.
     mantext = u"%s\n%s\n%s\n%s\n%s\n%s\n%s" % (coding, comment, header, name, helptext, condition, footer)
     with open(os.path.join(BASE_PATH, DEST_DIR, "%s.1" % script_name), 'w+') as manfile:
         for line in mantext.split('\n'):
-            manfile.write('%s\n' % line.lstrip().encode('utf-8'))
+            manfile.write('%s\n' % line.lstrip())
     print("wrote %s/%s.1" % (DEST_DIR, script_name))
 
     return application._shell_completion_items()

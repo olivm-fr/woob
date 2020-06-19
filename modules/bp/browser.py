@@ -27,7 +27,7 @@ from requests.exceptions import HTTPError
 
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.browser.browsers import StatesMixin
-from weboob.browser.exceptions import ServerError
+from weboob.browser.exceptions import ServerError, BrowserHTTPNotFound
 from weboob.capabilities.base import NotAvailable
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserBanned, NoAccountsException,
@@ -36,13 +36,18 @@ from weboob.exceptions import (
 )
 from weboob.tools.compat import urlsplit, urlunsplit, parse_qsl
 from weboob.tools.decorators import retry
+from weboob.capabilities.bank import (
+    Account, Recipient, AddRecipientStep, TransferStep,
+    TransferInvalidEmitter,
+)
+from weboob.tools.value import Value, ValueBool
 
 from .pages import (
     LoginPage, Initident, CheckPassword, repositionnerCheminCourant, BadLoginPage, AccountDesactivate,
     AccountList, AccountHistory, CardsList, UnavailablePage, AccountRIB, Advisor,
     TransferChooseAccounts, CompleteTransfer, TransferConfirm, TransferSummary, CreateRecipient, ValidateRecipient,
     ValidateCountry, ConfirmPage, RcptSummary, SubscriptionPage, DownloadPage, ProSubscriptionPage, RevolvingAttributesPage,
-    TwoFAPage, Validated2FAPage, SmsPage, DecoupledPage
+    TwoFAPage, Validated2FAPage, SmsPage, DecoupledPage, HonorTransferPage,
 )
 from .pages.accounthistory import (
     LifeInsuranceInvest, LifeInsuranceHistory, LifeInsuranceHistoryInv, RetirementHistory,
@@ -53,10 +58,8 @@ from .pages.accountlist import (
 )
 from .pages.pro import RedirectPage, ProAccountsList, ProAccountHistory, DownloadRib, RibPage
 from .pages.mandate import MandateAccountsList, PreMandate, PreMandateBis, MandateLife, MandateMarket
-from .linebourse_browser import LinebourseBrowser
+from .linebourse_browser import LinebourseAPIBrowser
 
-from weboob.capabilities.bank import Account, Recipient, AddRecipientStep
-from weboob.tools.value import Value
 
 __all__ = ['BPBrowser', 'BProBrowser']
 
@@ -101,7 +104,6 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
     revolving_start = URL(r'/voscomptes/canalXHTML/sso/lbpf/souscriptionCristalFormAutoPost.jsp', AccountList)
     par_accounts_revolving = URL(r'https://espaceclientcreditconso.labanquepostale.fr/sav/loginlbpcrypt.do', RevolvingAttributesPage)
-
 
     accounts_rib = URL(r'.*voscomptes/canalXHTML/comptesCommun/imprimerRIB/init-imprimer_rib.ea.*',
                        '/voscomptes/canalXHTML/comptesCommun/imprimerRIB/init-selection_rib.ea', AccountRIB)
@@ -160,6 +162,11 @@ class BPBrowser(LoginBrowser, StatesMixin):
                             r'/voscomptes/canalXHTML/virement/mpiaiguillage/\.\./virementSafran_sepa/init-creerVirementSepa.ea',
                             r'/voscomptes/canalXHTML/virement/virementSafran_sepa/init-creerVirementSepa.ea',
                             CompleteTransfer)
+    honor_transfer = URL(r'/voscomptes/canalXHTML/virement/popinEligibiliteLoi6902/popinEligibiliteLoi6902_debiteur.jsp', HonorTransferPage)
+
+    validate_honor_transfer = URL(r'/voscomptes/canalXHTML/virement/mpiaiguillage/validerPopinEligibilite-saisieComptes.ea', HonorTransferPage)
+    validated_honor_transfer = URL(r'/voscomptes/canalXHTML/virement/mpiaiguillage/retourPopinEligibilite-saisieComptes.ea', HonorTransferPage)
+
     transfer_confirm = URL(r'/voscomptes/canalXHTML/virement/virementSafran_pea/validerVirementPea-virementPea.ea',
                            r'/voscomptes/canalXHTML/virement/virementSafran_sepa/valider-creerVirementSepa.ea',
                            r'/voscomptes/canalXHTML/virement/virementSafran_sepa/valider-virementSepa.ea',
@@ -219,6 +226,8 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
     accounts = None
 
+    __states__ = ('need_reload_state', )
+
     def __init__(self, config, *args, **kwargs):
         self.weboob = kwargs.pop('weboob')
         self.config = config
@@ -230,14 +239,25 @@ class BPBrowser(LoginBrowser, StatesMixin):
         dirname = self.responses_dirname
         if dirname:
             dirname += '/bourse'
-        self.linebourse = LinebourseBrowser('https://labanquepostale.offrebourse.com/', logger=self.logger, responses_dirname=dirname, weboob=self.weboob, proxy=self.PROXIES)
+        self.linebourse = LinebourseAPIBrowser(
+            'https://labanquepostale.offrebourse.com/',
+            logger=self.logger,
+            responses_dirname=dirname,
+            weboob=self.weboob,
+            proxy=self.PROXIES
+        )
+
         self.recipient_form = None
+        self.need_reload_state = None
 
     def load_state(self, state):
         if state.get('url'):
             # We don't want to come back to last URL during SCA
             state.pop('url')
-        super(BPBrowser, self).load_state(state)
+
+        if state.get('need_reload_state'):
+            super(BPBrowser, self).load_state(state)
+            self.need_reload_state = None
 
         if 'recipient_form' in state and state['recipient_form'] is not None:
             self.logged = True
@@ -263,7 +283,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
         self.location(self.login_url)
         self.page.login(self.username, self.password)
 
-        if self.redirect_page.is_here():
+        if self.redirect_page.is_here() and not self.page.is_logged():
             if self.page.check_for_perso():
                 raise BrowserIncorrectPassword("L'identifiant utilisé est celui d'un compte de Particuliers.")
             error = self.page.get_error()
@@ -283,7 +303,12 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         self.login_without_2fa()
 
-        self.auth_page.go()
+        try:
+            self.auth_page.go()
+        except BrowserHTTPNotFound:
+            # Instability of the website. We can try do_login again without 2fa request
+            self.login_without_2fa()
+
         if self.auth_page.is_here():
             # Handle 2FA
             # 2FA seem to be handled by LBP. Indeed logins after 2FA will redirect to the LBP main page
@@ -473,7 +498,6 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
             return []
 
-
     @need_login
     def go_linebourse(self, account):
         # Sometimes the redirection done from MarketLoginPage
@@ -490,6 +514,8 @@ class BPBrowser(LoginBrowser, StatesMixin):
             go()
 
         self.linebourse.session.cookies.update(self.session.cookies)
+        self.linebourse.session.headers['X-XSRF-TOKEN'] = self.session.cookies.get('XSRF-TOKEN')
+
         self.par_accounts_checking.go()
 
     def _get_coming_transactions(self, account):
@@ -551,15 +577,10 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         if account.type in (account.TYPE_PEA, account.TYPE_MARKET):
             self.go_linebourse(account)
-            investments = list(self.linebourse.iter_investment(account.id))
-            liquidity = self.linebourse.get_liquidity(account.id)
-            if liquidity:
-                # avoid to append None
-                investments.append(liquidity)
-            return investments
+            return self.linebourse.iter_investments(account.id)
 
         if account.type != Account.TYPE_LIFE_INSURANCE:
-            return iter([])
+            return []
 
         investments = []
 
@@ -582,6 +603,14 @@ class BPBrowser(LoginBrowser, StatesMixin):
         return investments
 
     @need_login
+    def iter_market_orders(self, account):
+        if account.type not in (account.TYPE_PEA, account.TYPE_MARKET):
+            return []
+
+        self.go_linebourse(account)
+        return self.linebourse.iter_market_orders(account.id)
+
+    @need_login
     def iter_recipients(self, account_id):
         return self.transfer_choose.stay_or_go().iter_recipients(account_id=account_id)
 
@@ -591,9 +620,42 @@ class BPBrowser(LoginBrowser, StatesMixin):
         self.page.init_transfer(account.id, recipient._value, amount)
 
         assert self.transfer_complete.is_here(), 'An error occured while validating the first part of the transfer.'
+
+        # Happens when making a transfer from a savings account
+        # to an external account.
+        if self.page.has_popin_eligibility():
+            self.honor_transfer.go()
+
+            msg = self.page.get_honor_message()
+            self.need_reload_state = True
+            raise TransferStep(
+                transfer,
+                ValueBool(
+                    'transfer_honor_savings',
+                    label=msg,
+                    default=False,
+                ),
+            )
+
         self.page.complete_transfer(transfer)
 
-        return self.page.handle_response(account, recipient, amount, transfer.label)
+        return self.page.handle_response(transfer)
+
+    @need_login
+    def validate_transfer_eligibility(self, transfer, **params):
+        # Using ValueBool to be sure to handle any kind of response.
+        # If it is not the accepted strings/bools, it crashes.
+        value = ValueBool()
+        value.set(params['transfer_honor_savings'])
+        if value.get():
+            self.honor_transfer.go()
+            self.validate_honor_transfer.go()
+            # 302 that redirect us to transfer_complete
+            self.validated_honor_transfer.go()
+
+            self.page.complete_transfer(transfer)
+            return self.page.handle_response(transfer)
+        raise TransferInvalidEmitter("Impossible d'effectuer un virement sans attestation sur l'honneur que vous êtes bien le titulaire, représentant légal ou mandataire du compte à vue ou CCP.")
 
     @need_login
     def execute_transfer(self, transfer, code=None):
@@ -688,6 +750,11 @@ class BPBrowser(LoginBrowser, StatesMixin):
         download_page = self.open(document.url).page
         # may have an iframe
         return download_page.get_content()
+
+    @need_login
+    def iter_emitters(self):
+        self.transfer_choose.go()
+        return self.page.iter_emitters()
 
 
 class BProBrowser(BPBrowser):

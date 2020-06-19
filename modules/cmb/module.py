@@ -21,7 +21,10 @@
 from weboob.tools.backend import AbstractModule, BackendConfig
 from weboob.capabilities.bank import CapBankTransfer
 from weboob.capabilities.contact import CapContact
-from weboob.tools.value import Value, ValueBackendPassword
+from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
+
+from .par.browser import CmbParBrowser
+from .pro.browser import CmbProBrowser
 
 
 __all__ = ['CmbModule']
@@ -31,12 +34,14 @@ class CmbModule(AbstractModule, CapBankTransfer, CapContact):
     NAME = 'cmb'
     MAINTAINER = u'Edouard Lambert'
     EMAIL = 'elambert@budget-insight.com'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = u'Crédit Mutuel de Bretagne'
     LICENSE = 'LGPLv3+'
     PARENT = 'cmso'
+    AVAILABLE_BROWSERS = {'par': CmbParBrowser, 'pro': CmbProBrowser}
 
     CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
                            ValueBackendPassword('password', label='Mot de passe'),
+                           ValueTransient('code'),
                            Value('website', label='Type de compte', default='par',
                                  choices={'par': 'Particuliers', 'pro': 'Professionnels'}))

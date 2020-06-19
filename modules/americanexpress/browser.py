@@ -20,74 +20,31 @@
 from __future__ import unicode_literals
 
 import datetime
+from uuid import uuid4
 from dateutil.parser import parse as parse_date
+from collections import OrderedDict
 
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
-from weboob.browser.browsers import PagesBrowser, need_login
+from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable
+from weboob.browser.browsers import LoginBrowser, need_login
 from weboob.browser.exceptions import HTTPNotFound, ServerError
-from weboob.browser.selenium import (
-    SeleniumBrowser, webdriver, IsHereCondition, AnyCondition,
-    SubSeleniumMixin,
-)
 from weboob.browser.url import URL
+from weboob.tools.compat import urlencode
 
 from .pages import (
     AccountsPage, JsonBalances, JsonPeriods, JsonHistory,
     JsonBalances2, CurrencyPage, LoginPage, NoCardPage,
-    NotFoundPage, LoginErrorPage, DashboardPage,
+    NotFoundPage, JsDataPage, HomeLoginPage,
 )
 
 
 __all__ = ['AmericanExpressBrowser']
 
 
-class AmericanExpressLoginBrowser(SeleniumBrowser):
+class AmericanExpressBrowser(LoginBrowser):
     BASEURL = 'https://global.americanexpress.com'
 
-    DRIVER = webdriver.Chrome
-
-    # True for Production / False for debug
-    HEADLESS = True
-
-    login = URL(r'/login', LoginPage)
-    login_error = URL(
-        r'/login',
-        r'/authentication/recovery/password',
-        LoginErrorPage
-    )
-    dashboard = URL(r'/dashboard', DashboardPage)
-
-    def __init__(self, config, *args, **kwargs):
-        super(AmericanExpressLoginBrowser, self).__init__(*args, **kwargs)
-        self.username = config['login'].get()
-        self.password = config['password'].get()
-
-    def do_login(self):
-        self.login.go()
-        self.wait_until_is_here(self.login)
-
-        self.page.login(self.username, self.password)
-
-        self.wait_until(AnyCondition(
-            IsHereCondition(self.login_error),
-            IsHereCondition(self.dashboard),
-        ))
-
-        if self.login_error.is_here():
-            error = self.page.get_error()
-            if any((
-                'The User ID or Password is incorrect' in error,
-                'Both the User ID and Password are required' in error,
-            )):
-                raise BrowserIncorrectPassword(error)
-            if 'Your account has been locked' in error:
-                raise ActionNeeded(error)
-
-            assert False, 'Unhandled error : "%s"' % error
-
-
-class AmericanExpressBrowser(PagesBrowser, SubSeleniumMixin):
-    BASEURL = 'https://global.americanexpress.com'
+    home_login = URL(r'/login\?inav=fr_utility_logout', HomeLoginPage)
+    login = URL(r'/myca/logon/emea/action/login', LoginPage)
 
     accounts = URL(r'/api/servicing/v1/member', AccountsPage)
     json_balances = URL(r'/account-data/v1/financials/balances', JsonBalances)
@@ -103,6 +60,8 @@ class AmericanExpressBrowser(PagesBrowser, SubSeleniumMixin):
     json_periods = URL(r'/account-data/v1/financials/statement_periods', JsonPeriods)
     currency_page = URL(r'https://www.aexp-static.com/cdaas/axp-app/modules/axp-balance-summary/4.7.0/(?P<locale>\w\w-\w\w)/axp-balance-summary.json', CurrencyPage)
 
+    js_data = URL(r'/myca/logon/us/docs/javascript/gatekeeper/gtkp_aa.js', JsDataPage)
+
     no_card = URL(r'https://www.americanexpress.com/us/content/no-card/',
                   r'https://www.americanexpress.com/us/no-card/', NoCardPage)
 
@@ -113,13 +72,79 @@ class AmericanExpressBrowser(PagesBrowser, SubSeleniumMixin):
         'PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI',
     ]
 
-    SELENIUM_BROWSER = AmericanExpressLoginBrowser
-
-    def __init__(self, config, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super(AmericanExpressBrowser, self).__init__(*args, **kwargs)
-        self.config = config
-        self.username = config['login'].get()
-        self.password = config['password'].get()
+
+    def get_version(self):
+        self.js_data.go()
+        return self.page.get_version()
+
+    def do_login(self):
+        self.home_login.go()
+
+        data = {
+            'request_type': 'login',
+            'UserID': self.username,
+            'Password': self.password,
+            'Logon': 'Logon',
+            'REMEMBERME': 'on',
+            'Face': 'fr_FR',
+            'DestPage': self.BASEURL + '/dashboard',
+            'inauth_profile_transaction_id': 'USLOGON-%s' % str(uuid4()),
+        }
+
+        # we have to overwrite `Content-Length` and `Cookie` to get all
+        # headers in alphabetical order or they will be added at the end
+        # when doing request, also we add every headers needed on website
+        # to try to exactly match what's done or we could get a LGON011 error
+        self.session.headers.update({
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip: deflate: br',
+            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+            'Content-Length': str(len(urlencode(data))),
+            'Cookie': '; '.join('%s=%s' % (k, v) for k, v in self.session.cookies.get_dict().items()),
+            'Origin': self.BASEURL,
+            'Referer': self.BASEURL + '/login?inav=fr_utility_logout',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+        })
+
+        self.session.headers = OrderedDict(sorted(self.session.headers.items()))
+        del self.session.headers['Upgrade-Insecure-Requests']
+
+        self.login.go(data=data)
+
+        # set back headers
+        self.set_profile(self.PROFILE)
+
+        if self.page.get_status_code() != 0:
+            error_code = self.page.get_error_code()
+            message = self.page.get_error_message()
+            if any(code in error_code for code in ('LGON001', 'LGON003')):
+                raise BrowserIncorrectPassword(message)
+            elif error_code == 'LGON004':
+                # This error happens when the website needs the user to
+                # enter his card information and reset his password.
+                # There is no message returned when this error happens.
+                raise ActionNeeded()
+            elif error_code == 'LGON008':
+                # Don't know what this error means, but if we follow the redirect
+                # url it allows us to be correctly logged.
+                self.location(self.page.get_redirect_url())
+            elif error_code == 'LGON010':
+                raise BrowserUnavailable(message)
+            elif error_code == 'LGON011':
+                # this kind of error is for mystical reasons,
+                # but until now it was headers related, it could be :
+                # - headers not in the right order
+                # - headers with value that doesn't match the one from website
+                # - headers missing
+                # what's next ?
+                assert False, 'Error code "LGON011" (msg:"%s")' % message
+            else:
+                assert False, 'Error code "%s" (msg:"%s") not handled' % (error_code, message)
 
     @need_login
     def iter_accounts(self):

@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import json
@@ -25,10 +27,10 @@ from functools import wraps
 import re
 
 from weboob.browser import LoginBrowser, URL, StatesMixin
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
+from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, AuthMethodNotImplemented
 from weboob.browser.exceptions import ClientError
 from weboob.capabilities.bank import (
-    TransferBankError, TransferInvalidAmount,
+    Account, TransferBankError, TransferInvalidAmount,
     AddRecipientStep, RecipientInvalidOTP,
     AddRecipientTimeout, AddRecipientBankError, RecipientInvalidIban,
 )
@@ -38,7 +40,7 @@ from weboob.tools.value import Value
 from .api import (
     LoginPage, AccountsPage, HistoryPage, ComingPage,
     DebitAccountsPage, CreditAccountsPage, TransferPage,
-    ProfilePage,
+    ProfilePage, LifeInsurancePage, InvestTokenPage,
     AddRecipientPage, OtpChannelsPage, ConfirmOtpPage,
 )
 from .web import StopPage, ActionNeededPage
@@ -51,11 +53,11 @@ def need_login(func):
     def inner(self, *args, **kwargs):
         browser_conditions = (
             getattr(self, 'logged', False),
-            getattr(self.old_browser, 'logged', False)
+            getattr(self.old_browser, 'logged', False),
         )
         page_conditions = (
             (getattr(self, 'page', False) and self.page.logged),
-            (getattr(self.old_browser, 'page', False) and self.old_browser.page.logged)
+            (getattr(self.old_browser, 'page', False) and self.old_browser.page.logged),
         )
         if not any(browser_conditions) and not any(page_conditions):
             self.do_login()
@@ -103,16 +105,29 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
 
     # Error on old website
     errorpage = URL(r'https://secure.ing.fr/.*displayCoordonneesCommand.*', StopPage)
-    actioneeded = URL(r'https://secure.ing.fr/general\?command=displayTRAlertMessage',
-                      r'https://secure.ing.fr/protected/pages/common/eco1/moveMoneyForbidden.jsf', ActionNeededPage)
+    actioneeded = URL(
+        r'https://secure.ing.fr/general\?command=displayTRAlertMessage',
+        r'https://secure.ing.fr/protected/pages/common/eco1/moveMoneyForbidden.jsf',
+        ActionNeededPage
+    )
 
     # bank
-    history = URL(r'/secure/api-v1/accounts/(?P<account_uid>.*)/transactions/after/(?P<tr_id>\d+)/limit/50', HistoryPage)
+    history = URL(
+        r'/secure/api-v1/accounts/(?P<account_uid>.*)/transactions/after/(?P<tr_id>\d+)/limit/50',
+        HistoryPage
+    )
     coming = URL(r'/secure/api-v1/accounts/(?P<account_uid>.*)/futureOperations', ComingPage)
     accounts = URL(r'/secure/api-v1/accounts', AccountsPage)
 
+    # wealth
+    invest_token_page = URL(r'/secure/api-v1/saveInvest/token/generate', InvestTokenPage)
+    life_insurance = URL(r'/saveinvestapi/v1/lifeinsurance/contract/(?P<account_uid>)', LifeInsurancePage)
+
     # transfer
-    credit_accounts = URL(r'/secure/api-v1/transfers/debitAccounts/(?P<account_uid>.*)/creditAccounts', CreditAccountsPage)
+    credit_accounts = URL(
+        r'/secure/api-v1/transfers/debitAccounts/(?P<account_uid>.*)/creditAccounts',
+        CreditAccountsPage
+    )
     debit_accounts = URL(r'/secure/api-v1/transfers/debitAccounts', DebitAccountsPage)
     init_transfer_page = URL(r'/secure/api-v1/transfers/v2/new/validate', TransferPage)
     exec_transfer_page = URL(r'/secure/api-v1/transfers/v2/new/execute/pin', TransferPage)
@@ -135,6 +150,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         self.transfer_data = None
         self.need_reload_state = None
         self.add_recipient_info = None
+        self.invest_token = None
 
     def load_state(self, state):
         # reload state only for new recipient
@@ -148,12 +164,15 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         'AUTHENTICATION.INVALID_CIF_AND_BIRTHDATE_COMBINATION',
         'AUTHENTICATION.FIRST_WRONG_PIN_ATTEMPT',
         'AUTHENTICATION.SECOND_WRONG_PIN_ATTEMPT',
+        'AUTHENTICATION.CUSTOMER_DECEASED',
+        'SCA.WRONG_AUTHENTICATION',
     )
 
     ACTIONNEEDED_CODES = (
         'AUTHENTICATION.ACCOUNT_INACTIVE',
         'AUTHENTICATION.ACCOUNT_LOCKED',
         'AUTHENTICATION.NO_COMPLETE_ACCOUNT_FOUND',
+        'SCA.ACCOUNT_LOCKED',
     )
 
     def handle_login_error(self, r):
@@ -192,7 +211,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         keypad_url = self.page.get_keypad_url()
         img = self.open('/secure/api-v1%s' % keypad_url).content
         data = {
-            'clickPositions': self.page.get_password_coord(img, self.password)
+            'clickPositions': self.page.get_password_coord(img, self.password),
         }
 
         try:
@@ -200,9 +219,12 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         except ClientError as e:
             self.handle_login_error(e)
 
-        self.auth_token = self.page.response.headers['Ingdf-Auth-Token']
-        self.session.headers['Ingdf-Auth-Token'] = self.auth_token
-        self.session.cookies['ingdfAuthToken'] = self.auth_token
+        if not self.page.has_strong_authentication():
+            self.auth_token = self.page.response.headers['Ingdf-Auth-Token']
+            self.session.headers['Ingdf-Auth-Token'] = self.auth_token
+            self.session.cookies['ingdfAuthToken'] = self.auth_token
+        else:
+            raise ActionNeeded("Vous devez réaliser la double authentification sur le portail internet")
 
         # to be on logged page, to avoid relogin
         self.accounts.go()
@@ -222,10 +244,17 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
             'next': 'protected/pages/index.jsf',
             'redirectUrl': 'protected/pages/index.jsf',
             'targetApplication': 'INTERNET',
-            'accountNumber': 'undefined'
+            'accountNumber': 'undefined',
         }
         self.session.cookies['produitsoffres'] = 'comptes'
-        self.location('https://secure.ing.fr', data=data, headers={'Referer': 'https://secure.ing.fr'})
+
+        # This request can take a long time (more than the default 30 seconds)
+        self.location(
+            'https://secure.ing.fr',
+            data=data,
+            headers={'Referer': 'https://secure.ing.fr'},
+            timeout=120,
+        )
         self.old_browser.session.cookies.update(self.session.cookies)
 
     def redirect_to_api_browser(self):
@@ -244,20 +273,49 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         """iter accounts on old website"""
         return self.old_browser.get_accounts_list()
 
+    @need_to_be_on_website('web')
+    def get_basic_web_accounts(self):
+        """iter basic accounts on old website"""
+        return self.old_browser.iter_basic_accounts()
+
+    @need_to_be_on_website('api')
+    def get_invest_token(self):
+        if not self.invest_token:
+            self.invest_token_page.go()
+            self.invest_token = self.page.get_invest_token()
+        return self.invest_token
+
     @need_to_be_on_website('api')
     def get_api_accounts(self):
         """iter accounts on new website"""
         self.accounts.stay_or_go()
         for account in self.page.iter_accounts():
             self.coming.go(account_uid=account.id)
-            yield self.page.get_account_coming(obj=account)
+            account = self.page.get_account_coming(obj=account)
+
+            # We get life insurance details from the API, not the old website
+            # If the balance is 0, the details page throws an error 500
+            if account.type == Account.TYPE_LIFE_INSURANCE:
+                if account.balance != 0:
+                    self.life_insurance.go(
+                        account_uid=account._uid,
+                        headers={
+                            'Authorization': 'Bearer %s' % self.get_invest_token(),
+                        }
+                    )
+                    self.page.fill_account(obj=account)
+            yield account
+
+        # The life insurance page is on a different space,
+        # sometimes we get an error 500 if we don't go back to this page
+        self.context.go()
 
     @need_login
     def iter_matching_accounts(self):
         """Do accounts matching for old and new website"""
 
         api_accounts = [acc for acc in self.get_api_accounts()]
-
+        matched_accounts = []
         # go on old website because new website have only cheking and card account information
         for web_acc in self.get_web_accounts():
             for api_acc in api_accounts:
@@ -265,11 +323,19 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
                     web_acc._uid = api_acc.id
                     web_acc.coming = api_acc.coming
                     web_acc.ownership = api_acc.ownership
+                    matched_accounts.append(api_acc)
                     yield web_acc
                     break
             else:
-                assert False, 'There should be same account in web and api website'
+                raise AssertionError('There should be same account in web and api website')
 
+        for acc in api_accounts:
+            # Life insurances are only on the API
+            if acc not in matched_accounts:
+                if acc.type == Account.TYPE_LIFE_INSURANCE:
+                    yield acc
+                else:
+                    self.logger.warning('Account found on API but not on old website: %s', acc.id)
         # can use this to use export session on old browser
         # new website is an API, export session is not relevant
         if self.logger.settings.get('export_session'):
@@ -312,9 +378,12 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
     def iter_history(self, account):
         """History switch"""
 
-        if account.type not in (account.TYPE_CHECKING, ):
+        if account.type not in (account.TYPE_CHECKING, account.TYPE_LIFE_INSURANCE):
             return self.get_web_history(account)
         else:
+            if account.type == account.TYPE_LIFE_INSURANCE and account.balance == 0:
+                # Details page throws an error 500
+                return []
             return self.get_api_history(account)
 
     @need_to_be_on_website('web')
@@ -335,7 +404,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
     def iter_coming(self, account):
         """Incoming switch"""
 
-        if account.type not in (account.TYPE_CHECKING, ):
+        if account.type not in (account.TYPE_CHECKING, account.TYPE_LIFE_INSURANCE):
             return self.get_web_coming(account)
         else:
             return self.get_api_coming(account)
@@ -349,6 +418,21 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         # can't use `need_to_be_on_website`
         # because if return without iter invest on old website,
         # previous page is not handled by new website
+
+        if account.type == account.TYPE_LIFE_INSURANCE:
+            if account.balance == 0:
+                # Details page throws an error 500
+                return []
+
+            if not self.is_on_new_website:
+                self.redirect_to_api_browser()
+            self.life_insurance.go(
+                account_uid=account._uid, headers={
+                    'Authorization': 'Bearer %s' % self.get_invest_token(),
+                }
+            )
+            return self.page.iter_investments()
+
         if self.is_on_new_website:
             self.redirect_to_old_browser()
         return self.old_browser.get_investments(account)
@@ -389,12 +473,15 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
             'keyPadSize': {'width': 3800, 'height': 1520},
             'label': transfer.label,
             'fromAccount': account._uid,
-            'toAccount': recipient.id
+            'toAccount': recipient.id,
         }
         try:
             self.init_transfer_page.go(json=data, headers={'Referer': self.absurl('/secure/transfers/new')})
         except ClientError as e:
             self.handle_transfer_errors(e)
+
+        if self.page.is_otp_authentication():
+            raise AuthMethodNotImplemented()
 
         suggested_date = self.page.suggested_date
         if transfer.exec_date and transfer.exec_date < suggested_date:
@@ -412,7 +499,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
     def execute_transfer(self, transfer):
         headers = {
             'Referer': self.absurl('/secure/transfers/new'),
-            'Accept': 'application/json, text/plain, */*'
+            'Accept': 'application/json, text/plain, */*',
         }
         self.exec_transfer_page.go(json=self.transfer_data, headers=headers)
 
@@ -468,7 +555,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
                 else:
                     raise error_exception[0](message=error_exception[1])
 
-            assert False, 'Recipient error "%s" not handled' % error['code']
+            raise AssertionError('Recipient error "%s" not handled' % error['code'])
 
     @need_login
     def end_sms_recipient(self, recipient, code):
@@ -515,7 +602,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         try:
             self.add_recipient.go(json={
                 'accountHolderName': recipient.label,
-                'iban': recipient.iban
+                'iban': recipient.iban,
             })
         except ClientError as e:
             self.handle_recipient_error(e)
@@ -526,6 +613,28 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
 
         # WARNING: this send validation request to user
         self.send_sms_to_user(recipient, sms_info)
+
+    @need_to_be_on_website('api')
+    def get_api_emitters(self):
+        self.debit_accounts.go()
+        return self.page.iter_emitters()
+
+    @need_login
+    def iter_emitters(self):
+        """
+        We can get the emitter accounts from the transfer page but we're missing
+        critical data such as account ID. To retrieve that we need to retrieve
+        accounts on the old website and match the accounts with the emitters.
+        """
+        emitters = [emitter for emitter in self.get_api_emitters()]
+        web_accounts = [acc for acc in self.get_basic_web_accounts()]
+        for web_acc in web_accounts:
+            for emitter in emitters:
+                if web_acc.id[-4:] == emitter._partial_id[-4:]:
+                    emitter.id = web_acc.id
+                    emitter.currency = web_acc.currency
+                    emitter.balance = web_acc.balance
+                    yield emitter
 
     ############# CapDocument #############
     @need_login

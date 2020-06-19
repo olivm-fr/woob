@@ -19,16 +19,19 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
 
 from __future__ import unicode_literals
 
 import re
 
-from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, Account, AccountNotFound, CapCurrencyRate
+from weboob.capabilities.base import find_object
+from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, CapCurrencyRate
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.contact import CapContact
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, ValueBool, Value
+from weboob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import BoursoramaBrowser
 
@@ -40,15 +43,15 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
     NAME = 'boursorama'
     MAINTAINER = u'Gabriel Kerneis'
     EMAIL = 'gabriel@kerneis.info'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'Boursorama'
-    CONFIG = BackendConfig(ValueBackendPassword('login',      label='Identifiant', masked=False),
-                           ValueBackendPassword('password',   label='Mot de passe'),
-                           ValueBool('enable_twofactors',     label='Send validation sms', default=False),
-                           Value('device',                    label='Device name', regexp='\w*', default='weboob'),
-                           Value('pin_code',                  label='Sms code', required=False, default=''),
-                          )
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Identifiant', masked=False, regexp=r'^[0-9]+$'),
+        ValueBackendPassword('password', label='Mot de passe', regexp=r'[a-zA-Z0-9]+'),
+        ValueTransient('pin_code'),
+        ValueTransient('request_information'),
+    )
     BROWSER = BoursoramaBrowser
 
     def create_default_browser(self):
@@ -75,7 +78,10 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
                 yield tr
 
     def iter_investment(self, account):
-        return self.browser.get_investment(account)
+        return self.browser.iter_investment(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
 
     def get_profile(self):
         return self.browser.get_profile()
@@ -97,6 +103,15 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
     def execute_transfer(self, transfer, **kwargs):
         return self.browser.execute_transfer(transfer, **kwargs)
 
+    def iter_transfers(self, account):
+        return self.browser.iter_transfers(account)
+
+    def get_transfer(self, id):
+        # we build the id of the transfer by prefixing the account id (in pages.py)
+        # precisely for this use case, because we want to only query on the right account
+        account_id, _, transfer_id = id.partition('.')
+        return find_object(self.browser.iter_transfers_for_account(account_id), id=id)
+
     def transfer_check_label(self, old, new):
         # In the confirm page the '<' is interpeted like a html tag
         # If no '>' is present the following chars are deleted
@@ -113,3 +128,6 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
 
     def get_rate(self, currency_from, currency_to):
         return self.browser.get_rate(currency_from, currency_to)
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()

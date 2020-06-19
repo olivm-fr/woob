@@ -20,14 +20,15 @@
 
 from weboob.capabilities.base import find_object
 from weboob.capabilities.bank import (
-    CapBankWealth, CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound,
+    CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound,
     TransferInvalidLabel, Account,
 )
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from weboob.tools.value import ValueBackendPassword, ValueTransient
 
-from .browser import Fortuneo
+from .browser import FortuneoBrowser
 
 
 __all__ = ['FortuneoModule']
@@ -37,36 +38,41 @@ class FortuneoModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapProf
     NAME = 'fortuneo'
     MAINTAINER = u'Gilles-Alexandre Quenot'
     EMAIL = 'gilles.quenot@gmail.com'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'Fortuneo'
     CONFIG = BackendConfig(
-                ValueBackendPassword('login',     label='Identifiant', masked=False, required=True),
-                ValueBackendPassword('password',  label='Mot de passe', required=True))
-    BROWSER = Fortuneo
+        ValueBackendPassword('login', label='Identifiant', masked=False, required=True),
+        ValueBackendPassword('password', label='Mot de passe', required=True),
+        ValueTransient('code'),
+        ValueTransient('request_information')
+    )
+    BROWSER = FortuneoBrowser
 
     def create_default_browser(self):
         return self.create_browser(
-                self.config['login'].get(),
-                self.config['password'].get()
+            self.config,
+            self.config['login'].get(),
+            self.config['password'].get(),
+            weboob=self.weboob
         )
 
     def iter_accounts(self):
-        """Iter accounts"""
-        return self.browser.get_accounts_list()
-
-    def get_account(self, _id):
-        return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
+        for account in self.browser.iter_accounts():
+            yield account
 
     def iter_history(self, account):
         """Iter history of transactions on a specific account"""
-        return self.browser.get_history(account)
+        return self.browser.iter_history(account)
 
     def iter_coming(self, account):
-        return self.browser.get_coming(account)
+        return self.browser.iter_coming(account)
 
     def iter_investment(self, account):
-        return self.browser.get_investments(account)
+        return self.browser.iter_investments(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
 
     def get_profile(self):
         return self.browser.get_profile()
@@ -96,5 +102,8 @@ class FortuneoModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapProf
 
     def execute_transfer(self, transfer, **params):
         return self.browser.execute_transfer(transfer)
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()
 
 # vim:ts=4:sw=4

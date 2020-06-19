@@ -128,6 +128,10 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
                 assert False, 'Unexpected error at login: "%s"' % error
             assert False, 'Unexpected error at login'
 
+        if self.login.is_here():
+            # Check if the website asks for strong authentication with OTP
+            self.page.check_action_needed()
+
     @need_login
     def get_account_list(self):
         self.home.stay_or_go()

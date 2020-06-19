@@ -17,15 +17,17 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import re
 
 from weboob.browser.elements import DictElement, ItemElement, method
 from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import Format, Date, Env
-from weboob.browser.pages import JsonPage, LoggedPage
-from weboob.capabilities.bill import Document, DocumentTypes
+from weboob.browser.filters.standard import Format, Date, Env, Field
+from weboob.browser.pages import JsonPage, LoggedPage, RawPage
+from weboob.capabilities.bill import Document, Bill, DocumentTypes
 from weboob.tools.compat import urlencode
 
 patterns = {
@@ -56,7 +58,10 @@ class TitulairePage(LoggedPage, JsonPage):
 
 
 class ItemDocument(ItemElement):
-    klass = Document
+    def build_object(self):
+        if Field('type')(self) == DocumentTypes.BILL:
+            return Bill()
+        return Document()
 
     def condition(self):
         # There is two type of json, the one with the ibancrypte in it
@@ -65,7 +70,7 @@ class ItemDocument(ItemElement):
         if 'ibanCrypte' in self.el:
             return Env('sub_id')(self) in Dict('ibanCrypte')(self)
         else:
-            return Env('sub_number')(self) in Dict('idContrat')(self)
+            return Env('sub_number')(self) in Dict('idContrat', default='')(self)
 
     obj_date = Date(Dict('dateDoc'), dayfirst=True)
     obj_format = 'pdf'
@@ -73,13 +78,17 @@ class ItemDocument(ItemElement):
 
     def obj_label(self):
         if 'ibanCrypte' in self.el:
-            return '%s %s N° %s' % (Dict('dateDoc')(self), Dict('libelleSousFamille')(self), Dict('numeroCompteAnonymise')(self))
+            return '%s %s N° %s' % (
+                Dict('dateDoc')(self),
+                Dict('libelleSousFamille')(self),
+                Dict('numeroCompteAnonymise')(self),
+            )
         else:
             return '%s %s N° %s' % (Dict('dateDoc')(self), Dict('libelleSousFamille')(self), Dict('idContrat')(self))
 
     def obj_url(self):
         keys_to_copy = {
-            'idDocument' :'idDoc',
+            'idDocument': 'idDoc',
             'dateDocument': 'dateDoc',
             'idLocalisation': 'idLocalisation',
             'viDocDocument': 'viDocDocument',
@@ -144,3 +153,9 @@ class DocumentsResearchPage(LoggedPage, JsonPage):
 
         class item(ItemDocument):
             pass
+
+
+class RIBPage(LoggedPage, RawPage):
+    def is_rib_available(self):
+        # If the page has no content, it means no RIB can be found
+        return bool(self.content)

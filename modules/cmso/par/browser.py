@@ -19,24 +19,25 @@
 
 from __future__ import unicode_literals
 
-import re
-import json
-
+import time
 from datetime import date
 from functools import wraps
 
-from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
+from weboob.browser.browsers import TwoFactorBrowser, URL, need_login
 from weboob.browser.exceptions import ClientError, ServerError
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion
 from weboob.capabilities.bank import Account, Transaction, AccountNotFound
 from weboob.capabilities.base import find_object
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
+from weboob.tools.compat import urlparse, parse_qsl
+from weboob.tools.value import Value
+from weboob.tools.json import json
 
 from .pages import (
     LogoutPage, AccountsPage, HistoryPage, LifeinsurancePage, MarketPage,
     AdvisorPage, LoginPage, ProfilePage, RedirectInsurancePage,
 )
-from .transfer_pages import TransferInfoPage, RecipientsListPage, TransferPage
+from .transfer_pages import TransferInfoPage, RecipientsListPage, TransferPage, AllowedRecipientsPage
 
 
 def retry(exc_check, tries=4):
@@ -74,16 +75,24 @@ def retry(exc_check, tries=4):
     return decorator
 
 
-class CmsoParBrowser(LoginBrowser, StatesMixin):
+class CmsoParBrowser(TwoFactorBrowser):
     __states__ = ('headers',)
     STATE_DURATION = 1
     headers = None
+    HAS_CREDENTIALS_ONLY = True
 
-    login = URL(r'/securityapi/tokens',
-                r'/auth/checkuser', LoginPage)
-    logout = URL(r'/securityapi/revoke',
-                 r'/auth/errorauthn',
-                 r'/\/auth/errorauthn', LogoutPage)
+    BASEURL = 'https://api.cmso.com'
+
+    login = URL(
+        r'/oauth-implicit/token',
+        r'/auth/checkuser',
+        LoginPage
+    )
+    logout = URL(
+        r'/securityapi/revoke',
+        r'https://.*/auth/errorauthn',
+        LogoutPage
+    )
     accounts = URL(r'/domiapi/oauth/json/accounts/synthese(?P<type>.*)', AccountsPage)
     history = URL(r'/domiapi/oauth/json/accounts/(?P<page>.*)', HistoryPage)
     loans = URL(r'/creditapi/rest/oauth/v1/synthese', AccountsPage)
@@ -98,34 +107,45 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
                  r'https://www.*/domiweb/prive/particulier', MarketPage)
     advisor = URL(r'/edrapi/v(?P<version>\w+)/oauth/(?P<page>\w+)', AdvisorPage)
 
-    # transfer
     transfer_info = URL(r'/domiapi/oauth/json/transfer/transferinfos', TransferInfoPage)
-    recipients_list = URL(r'/domiapi/oauth/json/transfer/beneficiariesListTransfer', RecipientsListPage)
-    init_transfer_page = URL(r'/domiapi/oauth/json/transfer/controlTransferOperation', TransferPage)
-    execute_transfer_page = URL(r'/domiapi/oauth/json/transfer/transferregister', TransferPage)
+
+    # recipients
+    ext_recipients_list = URL(r'/transfersfedesapi/api/beneficiaries', RecipientsListPage)
+    int_recipients_list = URL(r'/transfersfedesapi/api/accounts', RecipientsListPage)
+    available_int_recipients = URL(r'/transfersfedesapi/api/credited-accounts/(?P<ciphered_contract_number>.*)', AllowedRecipientsPage)
+
+    # transfers
+    init_transfer_page = URL(r'/transfersfedesapi/api/transfers/control', TransferPage)
+    execute_transfer_page = URL(r'/transfersfedesapi/api/transfers', TransferPage)
 
     profile = URL(r'/domiapi/oauth/json/edr/infosPerson', ProfilePage)
 
     json_headers = {'Content-Type': 'application/json'}
-    ARKEA = {'cmso.com': '03', 'cmb.fr': '01', 'cmmc.fr': '02', 'bpe.fr' : '08', 'arkeabanqueprivee.fr': '70',}
 
-    def __init__(self, website, *args, **kwargs):
-        super(CmsoParBrowser, self).__init__(*args, **kwargs)
+    # Values needed for login which are specific for each arkea child
+    name = 'cmso'
+    arkea = '03'
+    arkea_si = '003'
+    arkea_client_id = 'RGY7rjEcGXkHe3NufA93HTUDkjnMUqrm'
 
-        # Arkea Banque Privee uses specific URL prefix and name
-        if website == 'arkeabanqueprivee.fr':
-            self.BASEURL = "https://m.%s" % website
-            self.name = 'abp'
-        else:
-            self.BASEURL = "https://mon.%s" % website
-            self.name = website.split('.')[0]
+    # Need for redirect_uri
+    original_site = 'https://mon.cmso.com'
+
+    def __init__(self, website, config, *args, **kwargs):
+        super(CmsoParBrowser, self).__init__(config, *args, **kwargs)
+
+        self.config = config
 
         self.website = website
-        self.arkea = self.ARKEA[website]
         self.accounts_list = []
         self.logged = False
 
-    def do_login(self):
+        self.AUTHENTICATION_METHODS = {
+            'code': self.handle_sms,
+        }
+
+    def init_login(self):
+        self.location(self.original_site)
         if self.headers:
             self.session.headers = self.headers
         else:
@@ -133,29 +153,74 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
             self.session.cookies.clear()
             self.accounts_list = []
 
-            data = {
-                'accessCode': self.username,
-                'password': self.password,
-                'clientId': 'com.arkea.%s.siteaccessible' % self.name,
-                'redirectUri': '%s/auth/checkuser' % self.BASEURL,
-                'errorUri': '%s/auth/errorauthn' % self.BASEURL
-            }
-
+            data = self.get_login_data()
             self.login.go(data=data)
 
             if self.logout.is_here():
                 raise BrowserIncorrectPassword()
 
-            m = re.search('access_token=([^&]+).*id_token=(.*)', self.url)
+            self.update_authentication_headers()
 
-            self.session.headers.update({
-                'Authentication': "Bearer %s" % m.group(2),
-                'Authorization': "Bearer %s" % m.group(1),
-                'X-ARKEA-EFS': self.arkea,
-                'X-Csrf-Token': m.group(1)
-            })
+    def send_sms(self):
+        contact_information = self.location('/securityapi/person/coordonnees', method='POST').json()
+        data = {
+            'template': '',
+            'typeMedia': 'SMS',  # can be SVI for interactive voice server
+            'valueMedia': contact_information['portable']['numeroCrypte']
+        }
+        self.location('/securityapi/otp/generate', json=data)
 
-            self.headers = self.session.headers
+        raise BrowserQuestion(Value('code', label='Enter the SMS code'))
+
+    def handle_sms(self):
+        self.session.headers = self.headers
+        data = self.get_sms_data()
+        otp_validation = self.location('/securityapi/otp/authenticate', json=data).json()
+        self.session.headers['Authorization'] = 'Bearer %s' % otp_validation['access_token']
+        self.headers = self.session.headers
+
+    def get_sms_data(self):
+        return {
+            'otpValue': self.code,
+            'typeMedia': 'WEB',
+            'userAgent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
+            'redirectUri': '%s/auth/checkuser' % self.redirect_url,
+            'errorUri': '%s/auth/errorauthn' % self.redirect_url,
+            'clientId': 'com.arkea.%s.siteaccessible' % self.name,
+            'redirect': 'true',
+            'client_id': self.arkea_client_id,
+            'accessInfos': {
+                'efs': self.arkea,
+                'si': self.arkea_si,
+            }
+        }
+
+    def get_login_data(self):
+        return {
+            'client_id': self.arkea_client_id,
+            'responseType': 'token',
+            'accessCode': self.username,
+            'password': self.password,
+            'clientId': 'com.arkea.%s.siteaccessible' % self.name,
+            'redirectUri': '%s/auth/checkuser' % self.original_site,
+            'errorUri': '%s/auth/errorauthn' % self.original_site,
+            'fingerprint': 'b61a924d1245beb7469fef44db132e96',
+        }
+
+    def update_authentication_headers(self):
+        hidden_params = dict(parse_qsl(urlparse(self.url).fragment))
+
+        self.session.headers.update({
+            'Authorization': "Bearer %s" % hidden_params['access_token'],
+            'X-ARKEA-EFS': self.arkea,
+            'X-Csrf-Token': hidden_params['access_token'],
+            'X-REFERER-TOKEN': 'RWDPART',
+        })
+        self.headers = self.session.headers
+
+        if hidden_params.get('scope') == 'consent':
+            self.check_interactive()
+            self.send_sms()
 
     def get_account(self, _id):
         return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
@@ -188,7 +253,7 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
 
         # Next, get saving accounts
         numbers.update(self.page.get_numbers())
-        page = self.accounts.go(data=json.dumps({}), type='epargne', headers=self.json_headers)
+        page = self.accounts.go(json={}, type='epargne')
         for key in page.get_keys():
             for a in page.iter_savings(key=key, numbers=numbers, name=owner_name):
                 seen_savings[a.id] = a
@@ -212,6 +277,10 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
                 a._index = acc._index
                 self.accounts_list.remove(acc)
                 self.logger.warning('replace %s because it seems to be a duplicate of %s', seen_savings[a.id], a)
+            url = a.url or self.redirect_insurance.go(accid=a._index).get_url()
+            self.location(url)
+            if self.lifeinsurance.is_here():
+                self.page.fill_account(obj=a)
             self.accounts_list.append(a)
 
         # Then, get loans
@@ -239,7 +308,7 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
         return self.accounts_list
 
     def _go_market_history(self):
-        content = self.market.go(data=json.dumps({'place': 'SITUATION_PORTEFEUILLE'}), headers=self.json_headers).text
+        content = self.market.go(json={'place': 'SITUATION_PORTEFEUILLE'}).text
         self.location(json.loads(content)['urlSSO'])
 
         return self.market.go(website=self.website, action='historique')
@@ -274,29 +343,36 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
             return sorted_transactions(self.page.iter_history())
 
         # Getting a year of history
-        nbs = ["UN", "DEUX", "TROIS", "QUATRE", "CINQ", "SIX", "SEPT", "HUIT", "NEUF", "DIX", "ONZE", "DOUZE"]
+        # We have to finish by "SIX_DERNIERES_SEMAINES" to get in priority the transactions with ids.
+        # In "SIX_DERNIERES_SEMAINES" you can have duplicates transactions without ids of the previous two months.
+        nbs = ["DEUX", "TROIS", "QUATRE", "CINQ", "SIX", "SEPT", "HUIT", "NEUF", "DIX", "ONZE", "DOUZE", "SIX_DERNIERES_SEMAINES"]
         trs = []
 
-        self.history.go(data=json.dumps({"index": account._index}), page="pendingListOperations", headers=self.json_headers)
+        self.history.go(json={"index": account._index}, page="pendingListOperations")
 
         has_deferred_cards = self.page.has_deferred_cards()
 
-        self.history.go(data=json.dumps({'index': account._index}), page="detailcompte", headers=self.json_headers)
-
+        self.history.go(
+            json={
+                'index': account._index,
+                'filtreOperationsComptabilisees': "MOIS_MOINS_UN"
+            },
+            page="detailcompte"
+        )
         self.trs = set()
 
         for tr in self.page.iter_history(index=account._index, nbs=nbs):
             # Check for duplicates
-            if tr.id in self.trs:
+            if tr._operationid in self.trs:
                 continue
-            self.trs.add(tr.id)
+            self.trs.add(tr._operationid)
             if has_deferred_cards and tr.type == Transaction.TYPE_CARD:
                 tr.type = Transaction.TYPE_DEFERRED_CARD
                 tr.bdate = tr.rdate
 
             trs.append(tr)
 
-        return trs
+        return sorted_transactions(trs)
 
     @retry((ClientError, ServerError))
     @need_login
@@ -311,7 +387,7 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
         if not hasattr(account, '_index'):
             # No _index, we can't get coming
             return []
-        self.history.go(data=json.dumps({"index": account._index}), page="pendingListOperations", headers=self.json_headers)
+        self.history.go(json={"index": account._index}, page="pendingListOperations")
         # There is no ids for comings, so no check for duplicates
         for key in self.page.get_keys():
             for c in self.page.iter_history(key=key):
@@ -341,7 +417,7 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
             return self.location(url).page.iter_investment()
         elif account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
             data = {"place": "SITUATION_PORTEFEUILLE"}
-            response = self.market.go(data=json.dumps(data), headers=self.json_headers)
+            response = self.market.go(json=data)
             self.location(json.loads(response.text)['urlSSO'])
             self.market.go(website=self.website, action="situation")
             if self.page.go_account(account.label, account._owner):
@@ -349,58 +425,128 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
             return []
         raise NotImplementedError()
 
-    @retry((ClientError, ServerError))
+    def iter_internal_recipients(self, account):
+        self.int_recipients_list.go()
+        all_int_recipients = list(self.page.iter_int_recipients())
+
+        ciphered_contract_number = None
+        all_int_rcpt_contract_numbers = []
+        # Retrieves all the ciphered contract numbers
+        # of all internal recipients and find the contract
+        # number of the current account we want the recipients
+        # of.
+        for rcpt in all_int_recipients:
+            if rcpt.id == account._recipient_id:
+                account._type = rcpt._type
+                ciphered_contract_number = rcpt._ciphered_contract_number
+            all_int_rcpt_contract_numbers.append(rcpt._ciphered_contract_number)
+
+        assert ciphered_contract_number, 'Could not make a link between internal recipients and account (due to custom label ?)'
+
+        # Retrieve the list of ciphered contract numbers
+        # the current account can make transfer too.
+        self.available_int_recipients.go(
+            ciphered_contract_number=ciphered_contract_number,
+            json=all_int_rcpt_contract_numbers,
+            headers={'Accept': 'application/json, text/plain, */*'},
+        )
+        allowed_rcpt_contract_numbers = json.loads(self.page.get_allowed_contract_numbers())
+
+        for rcpt in all_int_recipients:
+            if rcpt._ciphered_contract_number in allowed_rcpt_contract_numbers:
+                yield rcpt
+
+    def iter_external_recipients(self, account):
+        self.ext_recipients_list.go()
+        seen_ciphered_iban = set()
+        for rcpt in self.page.iter_ext_recipients():
+            if rcpt._ciphered_iban not in seen_ciphered_iban:
+                seen_ciphered_iban.add(rcpt._ciphered_iban)
+                yield rcpt
+
     @need_login
     def iter_recipients(self, account):
-        if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE, ):
-            return
-        if not account._eligible_debit:
+        if account.type not in (Account.TYPE_CHECKING, Account.TYPE_SAVINGS, Account.TYPE_DEPOSIT):
             return
 
-        self.transfer_info.go(json={"beneficiaryType":"INTERNATIONAL"})
+        # Internal recipients
+        for rcpt in self.iter_internal_recipients(account):
+            yield rcpt
 
-        # internal recipient
-        for rcpt in self.page.iter_titu_accounts():
-            if rcpt.id != account.id:
-                yield rcpt
-        for rcpt in self.page.iter_manda_accounts():
-            if rcpt.id != account.id:
-                yield rcpt
-        for rcpt in self.page.iter_legal_rep_accounts():
-            if rcpt.id != account.id:
-                yield rcpt
-        # external recipient
-        for rcpt in self.page.iter_external_recipients():
+        # _type is found in iter_internal_recipients
+        # and is more accurate than checking the
+        # account.type since we could not be up to
+        # date on the account types we handle.
+        if account._type == 'SAVING':
+            # Can only do transfer from savings accounts
+            # to internal checking accounts.
+            return
+
+        for rcpt in self.iter_external_recipients(account):
             yield rcpt
 
     @need_login
     def init_transfer(self, account, recipient, amount, reason, exec_date):
-        self.recipients_list.go(json={"beneficiaryType":"INTERNATIONAL"})
+        assert account.currency == 'EUR', 'Unhandled transfer to another currency'
+
+        self.int_recipients_list.go()
+        for rcpt in self.page.iter_int_recipients(availableFor='Debit'):
+            if rcpt.id == account._recipient_id:
+                account._ciphered_iban = rcpt._ciphered_iban
+                account._ciphered_contract_number = rcpt._ciphered_contract_number
+                account._bic = rcpt._bic
+                break
 
         transfer_data = {
-            'beneficiaryIndex': self.page.get_rcpt_index(recipient),
-            'debitAccountIndex': account._index,
-            'devise': account.currency,
-            'deviseReglement': account.currency,
-            'montant': amount,
-            'nature': 'externesepa',
-            'transferToBeneficiary': True,
+            'amount': {
+                'value': amount,
+                'currencyCode': account.currency,
+                'paymentCurrencyCode': account.currency,
+                'exchangeValue': 1,
+                'paymentValue': amount,
+            },
+            'creditAccount': {
+                'bic': recipient._bic,
+                'cipheredBban': None,
+                'cipheredIban': recipient._ciphered_iban,
+                'name': recipient._owner_name,
+                'currencyCode': 'EUR',
+            },
+            'debitAccount': {
+                'currencyCode': 'EUR',
+                'cipheredIban': account._ciphered_iban,
+                'cipheredContractNumber': account._ciphered_contract_number,
+                'bic': account._bic,
+                'name': account._owner_name,
+            },
+            'internalTransfer': recipient.category == 'Interne',
+            'periodicity': None,
+            'libelleComplementaire': reason,
+            'chargesType': 'SHA',
+            'ignoreWarning': False,
+            'debitLabel': 'de %s' % account._owner_name,
+            'creditLabel': 'vers %s' % recipient._owner_name,
         }
 
-        if exec_date and exec_date > date.today():
-            transfer_data['date'] = int(exec_date.strftime('%s')) * 1000
-        else:
-            transfer_data['immediate'] =  True
+        if recipient.category == 'Externe':
+            transfer_data['creditAccount']['country'] = recipient._country
 
-        # check if recipient is internal or external
-        if recipient.id != recipient.iban:
-            transfer_data['nature'] = 'interne'
-            transfer_data['transferToBeneficiary'] = False
-            transfer_data['creditAccountIndex'] = transfer_data['beneficiaryIndex']
-            transfer_data.pop('beneficiaryIndex')
+        # Found in the javascript :
+        # transferTypes: {
+        #    instant: 'IP',
+        #    oneShotToday: 'I',
+        #    recurrent: 'P',
+        #    delayed: 'D'
+        # },
+        if exec_date and exec_date > date.today():
+            transfer_data['transferType'] = 'D'
+            transfer_data['executionDate'] = int(exec_date.strftime('%s')) * 1000
+        else:
+            transfer_data['transferType'] = 'I'
+            transfer_data['executionDate'] = int(time.time() * 1000)
 
         self.init_transfer_page.go(json=transfer_data)
-        transfer = self.page.handle_transfer(account, recipient, amount, reason, exec_date)
+        transfer = self.page.get_transfer_with_response(account, recipient, amount, reason, exec_date)
         # transfer_data is used in execute_transfer
         transfer._transfer_data = transfer_data
         return transfer
@@ -409,14 +555,8 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
     def execute_transfer(self, transfer, **params):
         assert transfer._transfer_data
 
-        transfer._transfer_data.update({
-            'enregistrerNouveauBeneficiaire': False,
-            'creditLabel': 'de %s' % transfer.account_label if not transfer.label else transfer.label,
-            'debitLabel': 'vers %s' % transfer.recipient_label,
-            'typeFrais': 'SHA'
-        })
         self.execute_transfer_page.go(json=transfer._transfer_data)
-        transfer.id = self.page.get_transfer_confirm_id()
+        transfer.id = self.page.get_transfer_id()
         return transfer
 
     @retry((ClientError, ServerError))
@@ -428,7 +568,18 @@ class CmsoParBrowser(LoginBrowser, StatesMixin):
     @retry((ClientError, ServerError))
     @need_login
     def get_profile(self):
-        return self.profile.go(data=json.dumps({})).get_profile()
+        return self.profile.go(json={}).get_profile()
+
+    @retry((ClientError, ServerError))
+    @need_login
+    def iter_emitters(self):
+        self.transfer_info.go(json={"beneficiaryType": "INTERNATIONAL"})
+        if not self.page.check_response():
+            return
+        emitter_keys = ['listCompteTitulaireCotitulaire', 'listCompteMandataire', 'listCompteLegalRep']
+        for key in emitter_keys:
+            for em in self.page.iter_emitters(key=key):
+                yield em
 
 
 class iter_retry(object):

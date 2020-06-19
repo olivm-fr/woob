@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2017      Vincent Ardisson
+# Copyright(C) 2018      Fong Ngo
 #
 # This file is part of a weboob module.
 #
@@ -19,141 +19,207 @@
 
 from __future__ import unicode_literals
 
-import re
-
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import method, TableElement, ItemElement
+from weboob.browser.elements import method, DictElement, ItemElement
+from weboob.browser.filters.json import Dict
 from weboob.browser.filters.standard import (
-    CleanText, Date, CleanDecimal, Regexp, Eval, Field
+    Date, CleanDecimal, CleanText, Currency, Map, Eval,
+    Env, Regexp, Format, FromTimestamp, Title,
 )
-from weboob.browser.filters.html import TableCell
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Investment
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction as Transaction
-from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.tools.compat import quote_plus
-from weboob.exceptions import ActionNeeded
+from weboob.browser.pages import JsonPage, HTMLPage, LoggedPage
+from weboob.capabilities.bank import Transaction
+from weboob.capabilities.wealth import Investment, MarketOrder, MarketOrderDirection, MarketOrderType
+from weboob.capabilities.base import NotAvailable, empty
+from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
 
 
-def MyDecimal(*args, **kwargs):
-    kwargs['replace_dots'] = True
-    return CleanDecimal(*args, **kwargs)
+class AccountPage(LoggedPage, JsonPage):
+    def get_ncontrat(self):
+        return self.doc['identifiantContratCrypte']
 
 
-class MainPage(LoggedPage, HTMLPage):
-    pass
+class PortfolioPage(LoggedPage, JsonPage):
+    def get_valuation_diff(self):
+        return CleanDecimal(Dict('totalPlv'))(self.doc)  # Plv = plus-value
 
-
-class FirstConnectionPage(LoggedPage, HTMLPage):
-    def on_load(self):
-        raise ActionNeeded(CleanText('//p[contains(text(), "prendre connaissance")]')(self.doc))
-
-
-class AccountPage(LoggedPage, HTMLPage):
-    def is_on_right_portfolio(self, account_id):
-        return len(self.doc.xpath('//form[@class="choixCompte"]//option[@selected and contains(text(), $id)]', id=account_id))
-
-    def get_compte(self, account_id):
-        values = self.doc.xpath('//option[contains(text(), $id)]/@value', id=account_id)
-        assert len(values) == 1, 'could not find account %r' % account_id
-
-        return quote_plus(values[0])
-
-
-class HistoryPage(AccountPage):
-    def get_periods(self):
-        return list(self.doc.xpath('//select[@id="ListeDate"]/option/@value'))
+    def get_date(self):
+        return Date(Regexp(Dict('dateValo'), r'(\d{2})(\d{2})(\d{2})', '\\3\\2\\1'), dayfirst=True)(self.doc)
 
     @method
-    class iter_history(TableElement):
-        col_date = 'Date'
-        col_name = 'Valeur'
-        col_quantity = u'Quantité'
-        col_amount = u'Montant net EUR'
-        col_label = u'Opération'
-
-        head_xpath = u'//table[@summary="Historique operations"]//tr[th]/th'
-        item_xpath = u'//table[@summary="Historique operations"]//tr[not(th)]'
-
-        def parse(self, el):
-            self.labels = {}
-
-        class item(ItemElement):
-            def condition(self):
-                text = CleanText('td')(self)
-                return not text.startswith('Aucune information disponible')
-
-            klass = Transaction
-
-            obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
-            obj_amount = MyDecimal(TableCell('amount'))
-            obj_raw = CleanText(TableCell('label'))
-
-            def obj_investments(self):
-                inv = Investment()
-                inv.quantity = CleanDecimal(TableCell('quantity'), replace_dots=True)(self)
-                inv.code_type = Investment.CODE_TYPE_ISIN
-
-                txt = CleanText(TableCell('name'))(self)
-                match = re.match('(?:(.*) )?- ([^-]+)$', txt)
-                inv.label = match.group(1) or NotAvailable
-                inv.code = match.group(2)
-
-                if inv.code in self.parent.labels:
-                    inv.label = inv.label or self.parent.labels[inv.code]
-                elif inv.label:
-                    self.parent.labels[inv.code] = inv.label
-                else:
-                    inv.label = inv.code
-
-                return [inv]
-
-
-class InvestmentPage(AccountPage):
-    @method
-    class iter_investments(TableElement):
-        col_label = 'Valeur'
-        col_quantity = u'Quantité'
-        col_valuation = u'Valorisation EUR'
-        col_unitvalue = 'Cours/VL'
-        col_unitprice = 'Prix moyen EUR'
-        col_portfolio_share = '% Actif'
-        col_diff = u'+/- value latente EUR'
-
-        head_xpath = u'//table[starts-with(@summary,"Contenu du portefeuille")]/thead//th'
-        item_xpath = u'//table[starts-with(@summary,"Contenu du portefeuille")]/tbody/tr[2]'
+    class iter_investments(DictElement):
+        item_xpath = 'listeSegmentation/*'  # all categories are fetched: obligations, actions, OPC
 
         class item(ItemElement):
             klass = Investment
 
             def condition(self):
-                return Field('quantity')(self) != NotAvailable and Field('quantity')(self) > 0
+                # Some rows do not contain an expected item format,
+                # There is no valuation (mnt) because some buy/sell orders are not yet finished.
+                # We want invalid values to fail in the CleanDecimal filter so we catch only when mnt is missing
+                return Dict('mnt', default=NotAvailable)(self) is not NotAvailable
 
-            obj_quantity = MyDecimal(TableCell('quantity'), default=NotAvailable)
-            obj_unitvalue = MyDecimal(TableCell('unitvalue'), default=NotAvailable)
-            obj_unitprice = MyDecimal(TableCell('unitprice'), default=NotAvailable)
-            obj_valuation = MyDecimal(TableCell('valuation'), default=NotAvailable)
-            obj_portfolio_share = Eval(lambda x: x / 100 if x else NotAvailable, MyDecimal(TableCell('portfolio_share'), default=NotAvailable))
-            obj_diff = MyDecimal(TableCell('diff', default=NotAvailable), default=NotAvailable)
-            obj_code_type = Investment.CODE_TYPE_ISIN
+            obj_label = Dict('libval')
+            obj_code = IsinCode(CleanText(Dict('codval')), default=NotAvailable)
+            obj_code_type = IsinType(CleanText(Dict('codval')), default=NotAvailable)
+            obj_quantity = CleanDecimal(Dict('qttit'))
+            obj_unitvalue = CleanDecimal(Dict('crs'))
+            obj_valuation = CleanDecimal(Dict('mnt'))
+            obj_vdate = Env('date')
 
-            obj_label = CleanText(Regexp(CleanText('./preceding-sibling::tr/td[1]'), '(.*)- .*'))
-            obj_code = Regexp(CleanText('./preceding-sibling::tr/td[1]'), '- (.*)')
+            def parse(self, el):
+                symbols = {
+                    '+': 1,
+                    '-': -1,
+                    '\u0000': None,  # "NULL" character
+                }
+                self.env['sign'] = symbols.get(Dict('signePlv')(self), None)
 
-    # Only used by bp modules since others quality websites provide another account with the liquidities
-    def get_liquidity(self):
-        liquidity = CleanDecimal('//table//tr[@class="titreAvant"]/td[contains(text(), "Liquidit")]/following-sibling::td', replace_dots=True)(self.doc)
-        if liquidity:
-            return create_french_liquidity(liquidity)
+            def obj_diff(self):
+                if Dict('plv', default=None)(self) and Env('sign')(self):
+                    return CleanDecimal(Dict('plv'), sign=lambda x: Env('sign')(self))(self)
+                return NotAvailable
+
+            def obj_unitprice(self):
+                if Dict('pam', default=None)(self):
+                    return CleanDecimal(Dict('pam'))(self)
+                return NotAvailable
+
+            def obj_diff_ratio(self):
+                if not Env('sign')(self):
+                    return NotAvailable
+                # obj_diff_ratio key can have several names:
+                if Dict('plvPourcentage', default=None)(self):
+                    return CleanDecimal.SI(Dict('plvPourcentage'))(self) / 100
+                elif Dict('pourcentagePlv', default=None)(self):
+                    return CleanDecimal.SI(Dict('pourcentagePlv'))(self) / 100
+
+            def obj_portfolio_share(self):
+                active_percent = Dict('pourcentageActif', default=NotAvailable)(self)
+                if empty(active_percent):
+                    return NotAvailable
+                return Eval(lambda x: x / 100, CleanDecimal(active_percent))(self)
 
 
-class MessagePage(LoggedPage, HTMLPage):
-    def submit(self):
-        # taken from linebourse implementation in caissedepargne module
-        form = self.get_form(name='leForm')
-        form['signatur1'] = 'on'
-        form.submit()
+class AccountCodesPage(LoggedPage, JsonPage):
+    def get_contract_number(self, account_id):
+        for acc in self.doc['data']:
+            if account_id in acc['affichage']:
+                return acc['identifiantContratCrypte']
+        assert False, 'the account code was not found in the linebourse API'
+
+    def get_accounts_list(self):
+        return [acc['affichage'] for acc in self.doc['data']]
 
 
-class BrokenPage(LoggedPage, HTMLPage):
-    pass
+class NewWebsiteFirstConnectionPage(LoggedPage, JsonPage):
+    def build_doc(self, content):
+        content = JsonPage.build_doc(self, content)
+        if 'data' in content:
+            # The value contains HTML
+            # Must be encoded into str because HTMLPage.build_doc() uses BytesIO
+            # which expects bytes
+            html_page = HTMLPage(self.browser, self.response)
+            return html_page.build_doc(content['data'].encode(self.encoding))
+        return content
+
+
+class HistoryAPIPage(LoggedPage, JsonPage):
+    @method
+    class iter_history(DictElement):
+        item_xpath = 'data/lstOperations'
+
+        class item(ItemElement):
+            klass = Transaction
+
+            obj_label = Format(
+                '%s %s (%s)',
+                CleanText(Dict('libNatureOperation')),
+                CleanText(Dict('libValeur')),
+                CleanText(Dict('codeValeur'))
+            )
+            obj_amount = CleanDecimal.SI(Dict('mntNet'))
+            obj_date = Date(CleanText(Dict('dtOperation')), dayfirst=True)
+            obj_rdate = Date(CleanText(Dict('dtOperation')), dayfirst=True)
+            obj_type = Transaction.TYPE_BANK
+
+
+MARKET_ORDER_DIRECTIONS = {
+    'Achat': MarketOrderDirection.BUY,
+    'Vente': MarketOrderDirection.SALE,
+}
+
+MARKET_ORDER_TYPES = {
+    'MO': MarketOrderType.MARKET,  # 'Au marché'
+    'LIM': MarketOrderType.LIMIT,  # 'A cours limité'
+    'ASD': MarketOrderType.TRIGGER,  # 'A seuil de déclenchement'
+    'APD': MarketOrderType.TRIGGER,  # 'A plage de déclenchement'
+}
+
+STOCK_MARKET_CODES = {
+    '44': 'XETRA',
+    '54': 'MADRID',
+    '65': 'NYSE',
+    '67': 'NASDAQ',
+    '361': 'LONDON',
+}
+
+
+class MarketOrderPage(LoggedPage, JsonPage):
+    @method
+    class iter_market_orders(DictElement):
+        # Fetch all 'listeSegmentee' categories: DIVERS, INTRODUCTIONS, OPC, ACTIONSOBLIGATIONS.
+        item_xpath = 'listeSegmentee/*'
+
+        class item(ItemElement):
+            klass = MarketOrder
+
+            obj_id = Dict('referenceOrdre')
+            obj_label = Format(
+                '%s %s',
+                CleanText(Dict('nature')),
+                Title(Dict('libelleValeur')),
+            )
+            # For some reason, only the 'quantity' uses the French format in the JSON...
+            obj_quantity = CleanDecimal.French(Dict('quantite'))
+            obj_unitprice = CleanDecimal.SI(Dict('limiteSeuilCours', default=NotAvailable), default=NotAvailable)
+            obj_currency = Currency(Dict('deviseOrdre'))
+            obj_state = CleanText(Dict('etat'))
+            obj_code = IsinCode(CleanText(Dict('codeValeur')), default=NotAvailable)
+            obj_direction = Map(Dict('nature'), MARKET_ORDER_DIRECTIONS, MarketOrderDirection.UNKNOWN)
+            # Note: the 'modalite' key can also be an empty string (unknown order type)
+            obj_order_type = Map(Dict('modalite'), MARKET_ORDER_TYPES, MarketOrderType.UNKNOWN)
+
+            obj_date = FromTimestamp(
+                Eval(lambda t: t/1000, Dict('dateOrdre'))
+            )
+
+            def obj_validity_date(self):
+                if not Dict('dateValidite', default=None)(self):
+                    # validity_date is not always available
+                    return NotAvailable
+                return FromTimestamp(
+                    Eval(lambda t: t/1000, Dict('dateValidite'))
+                )(self)
+
+            def obj_amount(self):
+                if CleanDecimal.SI(Dict('net'))(self) == 0:
+                    # Order amount is probably not available yet
+                    return NotAvailable
+                # For executed orders, the net amount is equal to quantity * unitprice (minus taxes)
+                return CleanDecimal.SI(Dict('net'))(self)
+
+            def obj_ordervalue(self):
+                if Dict('modalite')(self) == 'MO':
+                    return NotAvailable
+                if Dict('modalite')(self) == 'LIM':
+                    return CleanDecimal.SI(Dict('limite'))(self)
+                if Dict('modalite')(self) in ('ASD', 'APD'):
+                    return CleanDecimal.SI(Dict('seuil'))(self)
+
+            def obj_stock_market(self):
+                raw_market = Dict('idPlace', default=None)(self)
+                if not raw_market:
+                    return NotAvailable
+                stock_market = Map(CleanText(Dict('idPlace')), STOCK_MARKET_CODES, NotAvailable)(self)
+                if empty(stock_market):
+                    self.logger.warning('A new stock exchange code was identified: %s', raw_market)
+                return stock_market

@@ -19,20 +19,28 @@
 
 from __future__ import unicode_literals
 
+import xlrd
 import time
-import re
+import datetime
 
+from dateutil.relativedelta import relativedelta
+from selenium.common.exceptions import ElementClickInterceptedException
 from selenium.webdriver.common.keys import Keys
 
+
 from weboob.capabilities.bank import Account, Transaction
-from weboob.browser.pages import LoggedPage
+from weboob.capabilities.base import NotAvailable
+from weboob.browser.pages import LoggedPage, Page
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Date, Format,
-    Env,
+    Field, Currency,
 )
-from weboob.browser.filters.html import TableCell
-from weboob.browser.elements import TableElement, ItemElement, method
-from weboob.browser.selenium import SeleniumPage, VisibleXPath, AllCondition, AnyCondition
+from weboob.browser.filters.json import Dict
+from weboob.browser.elements import ItemElement, DictElement, method
+from weboob.tools.decorators import retry
+from weboob.browser.selenium import (
+    SeleniumPage, VisibleXPath, AnyCondition, AllCondition,
+)
 
 
 class LoginPage(SeleniumPage):
@@ -54,11 +62,17 @@ class LoginPage(SeleniumPage):
         el.send_keys(Keys.RETURN)
 
     def get_error(self):
-        return CleanText('//h1[contains(@class, "Notification-caption")]')(self.doc)
+        return (
+            CleanText('//h1[contains(@class, "Notification-caption")]')(self.doc) or
+            CleanText('//div[@class="popupContent"]//div[contains(text(), "mot de passe a expiré")]')(self.doc)
+        )
 
 
 class AccueilPage(LoggedPage, SeleniumPage):
-    is_here = VisibleXPath('//div[@id="Menu-responsive"]')
+    is_here = AllCondition(
+        VisibleXPath('//div[@id="Menu-responsive"]'),
+        VisibleXPath('//div[contains(@class, "page-title")][contains(text(), "Accueil")]'),
+    )
 
 
 class AccountsPage(LoggedPage, SeleniumPage):
@@ -68,44 +82,74 @@ class AccountsPage(LoggedPage, SeleniumPage):
         VisibleXPath('//tbody[contains(@class, "v-grid-body")]'),
     )
 
-    def go_history(self):
-        el = self.driver.find_element_by_xpath('//span[contains(text(), "Dépenses entreprise")]')
+    def download_accounts(self):
+        el = self.driver.find_element_by_xpath('//div[contains(@class, "link-margin-donwload-btn")]')
         el.click()
 
-    def select_account(self, account_label):
-        el = self.driver.find_element_by_xpath('//td[contains(text(), "%s")]/preceding-sibling::td[div[div]]//div[contains(@class, "v-button")]' % account_label)
-        el.click()
 
+class XLSPage(Page):
+    HEADER = 1
+    SHEET_INDEX = 0
+
+    def __init__(self, browser, file_path, response):
+        self.file_path = file_path
+        super(XLSPage, self).__init__(browser, response)
+
+    def build_doc(self, content):
+        wb = xlrd.open_workbook(self.file_path)
+        sh = wb.sheet_by_index(self.SHEET_INDEX)
+
+        header = None
+        drows = []
+        rows = []
+        for i in range(sh.nrows):
+            if self.HEADER and i + 1 < self.HEADER:
+                continue
+            row = sh.row_values(i)
+            if header is None and self.HEADER:
+                header = [s.replace('/', '') for s in row]
+            else:
+                rows.append(row)
+                if header:
+                    drow = {}
+                    for i, cell in enumerate(sh.row_values(i)):
+                        drow[header[i]] = cell
+                    drows.append(drow)
+        return drows if header is not None else rows
+
+
+class AccountsXlsPage(LoggedPage, XLSPage):
     @method
-    class iter_accounts(TableElement):
-        head_xpath = '//table[@role="grid"]/thead[contains(@class, "v-grid-header")]/tr/th/div[1]'
-        item_xpath = '//table[@role="grid"]/tbody[contains(@class, "v-grid-body")]/tr'
-
-        col_label = 'Titulaire'
-        col_card_number = 'Numéro de carte'
-        col_service_number = 'Numéro de prestation'
-
+    class iter_accounts(DictElement):
         class item(ItemElement):
             klass = Account
 
-            # TableCell('service_number') alone is not enough because a person with the
+            # 'service_number' alone is not enough because a person with the
             # same service_number might have multiple cards.
             # And a card number can be associated to multiple persons.
             obj_id = obj_number = Format(
                 '%s_%s',
-                CleanText(TableCell('service_number')),
-                CleanText(TableCell('card_number')),
+                Field('_service_number'),
+                Field('_card_number'),
             )
-            obj_label = CleanText(TableCell('label'))
+
+            def obj_label(self):
+                card_number = Field('_card_number')(self)
+                last_card_digits = card_number[card_number.rfind('X') + 1:]
+                return '%s %s %s' % (
+                    Dict('nom titulaire')(self),
+                    Dict('prénom titulaire')(self),
+                    last_card_digits,
+                )
+
             obj_currency = 'EUR'
             obj_type = Account.TYPE_CARD
+            obj__card_number = CleanText(Dict('numero carte'))
+            obj__service_number = CleanText(Dict('Numéro de prestation'))
 
 
 class HistoryPage(LoggedPage, SeleniumPage):
-    is_here = AllCondition(
-        VisibleXPath('//div[contains(text(), "Recherche opérations")]'),
-        VisibleXPath('//div[contains(text(), "Synthèse entreprise")]'),
-    )
+    is_here = VisibleXPath('//div[contains(text(), "Recherche opérations")]')
 
     def go_transactions_list_tab(self):
         el = self.driver.find_element_by_xpath('//div[contains(text(), "Recherche opérations")]')
@@ -113,136 +157,114 @@ class HistoryPage(LoggedPage, SeleniumPage):
 
         self.browser.wait_xpath_clickable('//div[contains(@class, "v-widget")][div[div[@id="BTN_SEARCH"]]]')
 
-    def fetch_date_list(self):
-        self.go_transactions_list_tab()
-
-        # Both date inputs have the same date list
-        el = self.driver.find_element_by_xpath('//input[contains(@placeholder, "À la date d\'arrêté")]')
-        el.click()
-
-        self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
-
-        # The 'select' input has multiple pages. To be able to see the older
-        # dates, the website requires you to scroll/click because
-        # the dates are added/removed dynamically in the input.
-        # On the first page we have 1 year worth of transactions, which
-        # is enough. So we retrieve the deferred dates only for the last year.
-        # Dates are ordered from newest to oldest in the xpath
-        date_list = list(map(
-            Date(dayfirst=True).filter,
-            CleanText('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//span')(self.doc).split()
-        ))
-
-        # Click on the element again to restore the status of input
-        el.click()
-        self.browser.wait_xpath_invisible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
-        return date_list
-
-    # Only used for getting the sum of all comings for an account
-    # (currently not used, see browser.py/iter_accounts)
-    def get_transactions_amount_sum(self):
-        return sum(map(
-            CleanDecimal.SI().filter,
-            self.doc.xpath('//tbody[@role="rowgroup"]/tr/td[last()]')
-        ))
-
-    # Only used for getting the sum of all comings for an account
-    # (currently not used, see browser.py/iter_accounts)
-    def display_all_comings(self, date_list, today):
-        self.go_transactions_list_tab()
-
-        # Click the 'from date' select input
+    def download_transactions(self):
+        # We suppose we already selected an account.
         el = self.driver.find_element_by_xpath('//input[contains(@placeholder, "De la date d\'arrêté")]')
         el.click()
-        self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
+        self.browser.wait_xpath_invisible('//p[contains(@class, "Notification-description")][contains(text(), "a bien été sélectionnée")]')
 
-        # Search for the first date that is right after today's date and click it.
-        for date_choice in reversed(date_list):
-            if date_choice > today:
-                el = self.driver.find_element_by_xpath('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//span[text()="%s"]' % date_choice.strftime('%d/%m/%Y'))
-                el.click()
+        # Read dates from dropdown menu, choose 1 year ago max
+        self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
+        dates_list = self.doc.xpath('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//tr')
+        today = datetime.date.today()
+        last_date_index = 0
+        for date in dates_list:
+            displayed_date = Date(CleanText('.'))(date)
+            if (
+                relativedelta(today, displayed_date).years >= 1 and
+                relativedelta(today, displayed_date).months > 0
+            ):
                 break
+            last_date_index += 1
 
+        # Select chosen date
+        el = self.driver.find_element_by_xpath(
+            '//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//tr[%d]/td' % last_date_index
+        )
+        el.click()
         self.browser.wait_xpath_invisible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
 
-        # Click the 'to date' select input
-        el = self.driver.find_element_by_xpath('//input[contains(@placeholder, "À la date d\'arrêté")]')
-        el.click()
-        self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
-
-        # Select the first date (which is the newest one)
-        el = self.driver.find_element_by_xpath('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//tr[1]')
-        el.click()
-
-        self.browser.wait_xpath_invisible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
-
+        # Submit search for this date
         self.driver.execute_script("document.getElementById('BTN_SEARCH').click()")
 
+        # Get data
         self.browser.wait_until(AnyCondition(
-            VisibleXPath('//table[@role="grid"]'),  # the normal grid with the data
-            VisibleXPath('//p[contains(text(), "Aucune opération")]'),  # no grid because no data
+            VisibleXPath('//div/a/img'),
+            VisibleXPath('//p[contains(@class, "Notification-description")][contains(text(), "Aucune opération")]'),
         ))
+        if self.doc.xpath('//div/a/img'):
+            el = self.driver.find_element_by_xpath('//div/a/img')
+            el.click()
+            return True
+        return False
 
-        if not CleanText('//p[contains(text(), "Aucune opération")]')(self.doc):
-            # Data might not be refreshed immediately if we already selected
-            # an account earlier. The xpath is available but the data
-            # inside the table might be from a previous account we selected
-            # previously.
+    def get_error(self):
+        return CleanText('//div[@id="labelQuestion"]')(self.doc)
+
+    def click_retry_intercepted(self, el):
+        # This error can happens when we click too fast, error messages can
+        # stack up and hide the button.
+        click_retry = retry(ElementClickInterceptedException, delay=1)(el.click)
+        click_retry()
+
+    def select_account(self, account):
+        if self.doc.xpath('//div[span[span[text()="Annuler la sélection"]]]'):
+            # If this is present that means a card has already been selected,
+            # so just click it to remove the selected card.
+            el = self.driver.find_element_by_xpath('//div[span[span[contains(text(), "Annuler la sélection")]]]')
+            self.click_retry_intercepted(el)
             time.sleep(1)
 
-    def display_transactions(self, date_choice):
-        self.go_transactions_list_tab()
+        if self.doc.xpath('//div[span[span[text()="Sélectionner une carte"]]]'):
+            # If this is present (usually present the first time we come to that page
+            # or after we clicked the 'Annuler la sélection' button), we need to
+            # click it to display the inputs we want
+            el = self.driver.find_element_by_xpath('//div[span[span[text()="Sélectionner une carte"]]]')
+            self.click_retry_intercepted(el)
 
-        # Click the 'from date' select input
-        el = self.driver.find_element_by_xpath('//input[contains(@placeholder, "De la date d\'arrêté")]')
-        el.click()
-        self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
+        self.browser.wait_xpath_visible('//div[span[text()="Numéro de prestation"]]/following-sibling::input')
 
-        # Click the date element in the list
-        el = self.driver.find_element_by_xpath('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//span[text()="%s"]' % date_choice.strftime('%d/%m/%Y'))
-        el.click()
+        # Fill the input
+        el = self.driver.find_element_by_xpath('//div[span[text()="Numéro de prestation"]]/following-sibling::input')
+        el.send_keys(account._service_number)
 
-        self.browser.wait_xpath_invisible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
+        # Click the search button
+        self.browser.wait_xpath_clickable('//div[not(contains(@class, "v-disabled")) and span[span[contains(text(), "Rechercher")]]]')
 
-        # Click the 'to date' select input
-        el = self.driver.find_element_by_xpath('//input[contains(@placeholder, "À la date d\'arrêté")]')
-        el.click()
-        self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
+        el = self.driver.find_element_by_xpath('//div[span[span[text()="Rechercher"]]]')
+        self.click_retry_intercepted(el)
 
-        # Click the date element in the list
-        el = self.driver.find_element_by_xpath('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]//span[text()="%s"]' % date_choice.strftime('%d/%m/%Y'))
-        el.click()
+        self.browser.wait_xpath_visible('//table[@role="grid"]/tbody')
 
-        self.browser.wait_xpath_invisible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
+        # Get the button of the right card (there might be multiple
+        # card with the same service number) and click it
+        el = self.driver.find_element_by_xpath('//tbody/tr/td[1][following-sibling::td[contains(text(), "%s")]]' % account._card_number)
+        self.click_retry_intercepted(el)
 
-        self.driver.execute_script("document.getElementById('BTN_SEARCH').click()")
 
-        self.browser.wait_until(AnyCondition(
-            VisibleXPath('//table[@role="grid"]'),  # the normal grid with the data
-            VisibleXPath('//p[contains(text(), "Aucune opération")]'),  # no grid because no data
-        ))
-
-        if not CleanText('//p[contains(text(), "Aucune opération")]')(self.doc):
-            # Data might not be refreshed immediately if we already selected
-            # an account earlier. The xpath is available but the data
-            # inside the table might be from a previous account we selected
-            # previously.
-            time.sleep(1)
+class HistoryXlsPage(LoggedPage, XLSPage):
+    HEADER = 4
 
     @method
-    class iter_history(TableElement):
-        head_xpath = '//table[@role="grid"]/thead/tr/th/div[1]'
-        item_xpath = '//table[@role="grid"]/tbody/tr'
-
-        col_label = 'Raison sociale'
-        col_amount = re.compile('Montant')
-        col_date = 'Date opération'
-
+    class iter_history(DictElement):
         class item(ItemElement):
             klass = Transaction
 
-            obj_label = CleanText(TableCell('label'))
-            obj_amount = CleanDecimal.SI(TableCell('amount'))
-            obj_date = Env('date')
-            obj_rdate = Date(CleanText(TableCell('date')), dayfirst=True)
-            obj_type = Transaction.TYPE_CARD
+            obj_label = CleanText(Dict('raison sociale'))
+
+            def obj_original_currency(self):
+                currency = Currency(Dict('code devise origine'))(self)
+                if currency == 'EUR':
+                    return NotAvailable
+                return currency
+
+            def obj_original_amount(self):
+                if Field('original_currency')(self):
+                    return CleanDecimal.French(Dict('montant brut devise origine'), sign='-')(self)
+                return NotAvailable
+
+            obj_amount = CleanDecimal.French(Dict('montant imputé'), sign='-')
+
+            obj_date = Date(Dict("date d'arrêté"), dayfirst=True)
+            obj_rdate = Date(Dict('date de vente'), dayfirst=True)
+            obj_type = Transaction.TYPE_DEFERRED_CARD

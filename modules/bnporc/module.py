@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import re
@@ -24,9 +26,10 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 
 from weboob.capabilities.bank import (
-    CapBankWealth, CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound,
+    CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound,
     TransferInvalidLabel,
 )
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.messages import CapMessages, Thread
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
@@ -42,33 +45,42 @@ from .enterprise.browser import BNPEnterprise
 from .company.browser import BNPCompany
 from .pp.browser import BNPPartPro, HelloBank
 
-
 __all__ = ['BNPorcModule']
 
 
-class BNPorcModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapMessages, CapContact, CapProfile, CapDocument):
+class BNPorcModule(
+    Module, CapBankWealth, CapBankTransferAddRecipient, CapMessages, CapContact, CapProfile, CapDocument
+):
     NAME = 'bnporc'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'BNP Paribas'
     CONFIG = BackendConfig(
-        ValueBackendPassword('login',      label=u'Numéro client', masked=False),
-        ValueBackendPassword('password',   label=u'Code secret', regexp='^(\d{6})$'),
-        ValueBool('rotating_password',     label=u'Automatically renew password every 100 connections', default=False),
-        ValueBool('digital_key',           label=u'User with digital key have to add recipient with digital key', default=False),
-        Value('website', label='Type de compte', default='pp',
-              choices={'pp': 'Particuliers/Professionnels',
-                       'hbank': 'HelloBank',
-                       'ent': 'Entreprises',
-                       'ent2': 'Entreprises et PME (nouveau site)'}))
+        ValueBackendPassword('login', label=u'Numéro client', masked=False),
+        ValueBackendPassword('password', label=u'Code secret', regexp=r'^(\d{6})$'),
+        ValueBool('rotating_password', label=u'Automatically renew password every 100 connections', default=False),
+        ValueBool('digital_key', label=u'User with digital key have to add recipient with digital key', default=False),
+        Value(
+            'website',
+            label='Type de compte',
+            default='pp',
+            choices={
+                'pp': 'Particuliers/Professionnels',
+                'hbank': 'HelloBank',
+                'ent': 'Entreprises',
+                'ent2': 'Entreprises et PME (nouveau site)',
+            }
+        )
+    )
     STORAGE = {'seen': []}
 
     accepted_document_types = (
         DocumentTypes.STATEMENT,
         DocumentTypes.REPORT,
         DocumentTypes.BILL,
+        DocumentTypes.RIB,
         DocumentTypes.OTHER,
     )
 
@@ -115,15 +127,22 @@ class BNPorcModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapMessag
     def iter_transfer_recipients(self, origin_account):
         if self.config['website'].get() != 'pp':
             raise NotImplementedError()
+
         if isinstance(origin_account, Account):
-            origin_account = origin_account.id
+            emitter_account = find_object(self.iter_accounts(), id=origin_account.id)
+            if not emitter_account:
+                # account_id is different in PSD2 case
+                # search for the account with iban first to get the account_id
+                assert origin_account.iban, 'Cannot do iter_transfer_recipient, the origin account was not found'
+                emitter_account = find_object(self.iter_accounts(), iban=origin_account.iban, error=AccountNotFound)
+            origin_account = emitter_account.id
         return self.browser.iter_recipients(origin_account)
 
     def new_recipient(self, recipient, **params):
         if self.config['website'].get() != 'pp':
             raise NotImplementedError()
         # Recipient label has max 70 chars.
-        recipient.label = ' '.join(w for w in re.sub('[^0-9a-zA-Z-,\.: ]+', '', recipient.label).split())[:70]
+        recipient.label = ' '.join(w for w in re.sub(r'[^0-9a-zA-Z-,\.: ]+', '', recipient.label).split())[:70]
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
@@ -141,7 +160,9 @@ class BNPorcModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapMessag
 
         recipient = strict_find_object(self.iter_transfer_recipients(account.id), iban=transfer.recipient_iban)
         if not recipient:
-            recipient = strict_find_object(self.iter_transfer_recipients(account.id), id=transfer.recipient_id, error=RecipientNotFound)
+            recipient = strict_find_object(
+                self.iter_transfer_recipients(account.id), id=transfer.recipient_id, error=RecipientNotFound
+            )
 
         assert account.id.isdigit()
         # quantize to show 2 decimals.
@@ -162,6 +183,13 @@ class BNPorcModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapMessag
         else:
             # iternal recipients id
             return old == new
+
+    def transfer_check_account_id(self, old, new):
+        # don't check account id because in PSD2 case, account_id is different
+        return True
+
+    def iter_transfers(self, account=None):
+        return self.browser.iter_transfers(account)
 
     def iter_contacts(self):
         if not hasattr(self.browser, 'get_advisor'):
@@ -246,5 +274,10 @@ class BNPorcModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapMessag
             document = self.get_document(document)
 
         return self.browser.open(document.url).content
+
+    def iter_emitters(self):
+        if self.config['website'].get() not in ('pp', 'hbank'):
+            raise NotImplementedError()
+        return self.browser.iter_emitters()
 
     OBJECTS = {Thread: fill_thread}

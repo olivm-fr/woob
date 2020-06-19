@@ -19,12 +19,13 @@
 
 from __future__ import unicode_literals
 
-from weboob.capabilities.bank import CapBankTransfer, CapBankWealth, Account, AccountNotFound, RecipientNotFound
+from weboob.capabilities.bank import CapBankTransfer, Account, AccountNotFound, RecipientNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.contact import CapContact
 from weboob.capabilities.base import find_object, strict_find_object
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
+from weboob.tools.value import Value, ValueTransient, ValueBackendPassword
 
 from .par.browser import CmsoParBrowser
 from .pro.browser import CmsoProBrowser
@@ -37,22 +38,26 @@ class CmsoModule(Module, CapBankTransfer, CapBankWealth, CapContact, CapProfile)
     NAME = 'cmso'
     MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = 'Crédit Mutuel Sud-Ouest'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
                            ValueBackendPassword('password', label='Mot de passe'),
+                           ValueTransient('code'),
+                           ValueTransient('request_information'),
                            Value('website', label='Type de compte', default='par',
                                  choices={'par': 'Particuliers', 'pro': 'Professionnels'}))
 
     BROWSER = CmsoParBrowser
+    AVAILABLE_BROWSERS = {'par': CmsoParBrowser, 'pro': CmsoProBrowser}
 
     def create_default_browser(self):
-        b = {'par': CmsoParBrowser, 'pro': CmsoProBrowser}
-        self.BROWSER = b[self.config['website'].get()]
+        self.BROWSER = self.AVAILABLE_BROWSERS[self.config['website'].get()]
         return self.create_browser("%s.%s" % (self.NAME, 'com' if self.NAME == 'cmso' else 'fr'),
+                                   self.config,
                                    self.config['login'].get(),
-                                   self.config['password'].get())
+                                   self.config['password'].get(),
+                                   weboob=self.weboob)
 
     def get_account(self, _id):
         return find_object(self.browser.iter_accounts(), id=_id, error=AccountNotFound)
@@ -110,3 +115,8 @@ class CmsoModule(Module, CapBankTransfer, CapBankWealth, CapContact, CapProfile)
 
     def get_profile(self):
         return self.browser.get_profile()
+
+    def iter_emitters(self):
+        if self.config['website'].get() != "par":
+            raise NotImplementedError()
+        return self.browser.iter_emitters()

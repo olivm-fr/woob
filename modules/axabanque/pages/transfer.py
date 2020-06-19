@@ -26,13 +26,13 @@ from PIL import Image, ImageFilter
 from datetime import date
 
 from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import method, TableElement, ItemElement
+from weboob.browser.elements import method, TableElement, ItemElement, ListElement
 from weboob.browser.filters.html import TableCell
 from weboob.browser.filters.standard import (
     CleanText, Date, Regexp, CleanDecimal, Currency, Format, Field,
 )
 from weboob.capabilities.bank import (
-    Recipient, Transfer, TransferBankError, AddRecipientBankError, RecipientNotFound,
+    Recipient, Transfer, TransferBankError, AddRecipientBankError, RecipientNotFound, Emitter,
 )
 from weboob.tools.captcha.virtkeyboard import SimpleVirtualKeyboard
 from weboob.capabilities.base import find_object, NotAvailable
@@ -126,6 +126,13 @@ class RecipientConfirmationPage(LoggedPage, HTMLPage):
         for error_msg in errors_msg:
             if error_msg:
                 raise AddRecipientBankError(message=error_msg)
+
+        # To display some errors, the website use javascript to modify the style of error blocks.
+        # So we need to check the javascript for modification on the error div style.
+        text_js = CleanText('//script[contains(text(), "codeErrorFormat")]')(self.doc)
+        if re.search('codeErrorFormat["\']\)\.style\.display = ["\']block["\']', text_js):
+            error_msg = CleanText('//div[@id="codeErrorFormat"]')(self.doc)
+            raise AddRecipientBankError(message=error_msg)
 
     def continue_new_recipient(self):
         continue_new_recipient_btn_id = CleanText('//input[@class="btn_continuer"]/@id')(self.doc)
@@ -306,6 +313,28 @@ class RegisterTransferPage(LoggedPage, HTMLPage):
         form.pop('effetVirementDiffere')
 
         form.submit()
+
+    @method
+    class iter_emitters(ListElement):
+        item_xpath = '//select[@id="compteEmetteurSelectionne"]//option[not(contains(@value,"vide0"))]'
+
+        class item(ItemElement):
+            klass = Emitter
+
+            obj_id = CleanText('./@value')
+            obj_currency = Currency(CleanText('//td[@class="vrtMontant"]'))
+
+            def obj_label(self):
+                """
+                Label looks like: 'Compte Ogoon - 12XXX27 - M. OU MME JEAN CHARLES DUPONT'
+                We change it to: 'Compte Ogoon - M. OU MME JEAN CHARLES DUPONT'
+                If the label is not the one we expect, just return it as is.
+                """
+                raw_label = CleanText('.')(self)
+                if raw_label.count('-') != 2:
+                    return raw_label
+                label = raw_label.split('-')
+                return '%s - %s' % (label[0].strip(), label[2].strip())
 
 
 class ValidateTransferPage(LoggedPage, HTMLPage):

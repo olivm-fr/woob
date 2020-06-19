@@ -20,7 +20,8 @@
 
 from weboob.tools.backend import AbstractModule, BackendConfig
 from weboob.tools.value import ValueBackendPassword, Value
-from weboob.capabilities.bank import CapBankWealth
+from weboob.capabilities.wealth import CapBankWealth
+from weboob.capabilities.bill import CapDocument
 from weboob.capabilities.profile import CapProfile
 from .browser import BnppereBrowser, VisiogoBrowser
 
@@ -28,24 +29,36 @@ from .browser import BnppereBrowser, VisiogoBrowser
 __all__ = ['BnppereModule']
 
 
-class BnppereModule(AbstractModule, CapBankWealth, CapProfile):
+class BnppereModule(AbstractModule, CapBankWealth, CapDocument, CapProfile):
     NAME = 'bnppere'
     DESCRIPTION = u'BNP Épargne Salariale'
     MAINTAINER = u'Edouard Lambert'
     EMAIL = 'elambert@budget-insight.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(
-             ValueBackendPassword('login',    label='Identifiant', masked=False),
-             ValueBackendPassword('password', label='Code secret'),
-             Value('otp', label=u'Code de sécurité', default='', regexp='^(\d{6})$'),
-             Value('website', label='Espace Client', default='personeo',
-                   choices={'personeo': 'PEE, PERCO (Personeo)', 'visiogo': 'PER Entreprises (Visiogo)'}))
+        ValueBackendPassword('login', label='Identifiant', masked=False),
+        ValueBackendPassword('password', label='Code secret'),
+        Value('otp', label=u'Code de sécurité', default='', regexp=r'^(\d{6})$'),
+        Value(
+            'website',
+            label='Espace Client',
+            default='personeo',
+            choices={
+                'personeo': 'PEE, PERCO (Personeo)',
+                'visiogo': 'PER Entreprises (Visiogo)'
+            }
+        )
+    )
+
     PARENT = 's2e'
 
     def create_default_browser(self):
-        b = {'personeo': BnppereBrowser, 'visiogo': VisiogoBrowser}
-        self.BROWSER = b[self.config['website'].get()]
+        websites = {
+            'personeo': BnppereBrowser,
+            'visiogo': VisiogoBrowser
+        }
+        self.BROWSER = websites[self.config['website'].get()]
         return self.create_browser(self.config, weboob=self.weboob)
 
     def iter_accounts(self):
@@ -56,3 +69,9 @@ class BnppereModule(AbstractModule, CapBankWealth, CapProfile):
 
     def get_profile(self):
         return self.browser.get_profile()
+
+    def iter_subscription(self):
+        website = self.config['website'].get()
+        if website == 'visiogo':
+            raise NotImplementedError()
+        return super(BnppereModule, self).iter_subscription()

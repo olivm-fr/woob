@@ -19,7 +19,9 @@
 
 from __future__ import unicode_literals
 
+import ast
 import re
+import sys
 
 from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage, RawPage
 from weboob.browser.elements import ItemElement, method, DictElement
@@ -61,15 +63,8 @@ class JsUserPage(RawPage):
         # key in it (code_challenge). This JSON is available only one time in the
         # file, so there is no risk of duplicates.
         json_data = re.search(r'({[^{}]+code_challenge:[^{}]+})', self.text).group(1)
-        # Delete values that are variables concatenation (like `r + "/connect"`),
-        # we do not need them.
-        json_data = re.sub(r':([^{\",]+\+)', ':', json_data)
-        # There are values without quotes in the json, so we add quotes for the
-        # json.loads to work.
-        json_data = re.sub(r':([^\",+]+)', r':"\1"', json_data)
-        # Keys do not have quotes, adding them for the json.loads to work
-        json_data = re.sub(r'([^{\",+]+):', r'"\1":', json_data)
-        return json.loads(json_data)
+
+        return parse_js_obj(json_data)
 
 
 class JsAppPage(RawPage):
@@ -109,13 +104,27 @@ class AccountsPage(LoggedPage, JsonPage):
 
             obj_type = Account.TYPE_CARD
             obj_label = obj_id = obj_number = CleanText(Dict('card_ref'))
-            # The amount has no `.` or `,` in it. In order to get the amount we have
-            # to divide the amount we retrieve by 100 (like the website does).
-            obj_balance = Eval(lambda x: x / 100, CleanDecimal(Dict('balances/0/remaining_amount')))
             obj_currency = Currency(Dict('balances/0/currency'))
-            obj_cardlimit = Eval(lambda x: x / 100, CleanDecimal(Dict('balances/0/daily_remaining_amount')))
             obj__card_class = CleanText(Dict('class'))
             obj__account_ref = CleanText(Dict('account_ref'))
+            # The amount has no `.` or `,` in it. In order to get the amount we have
+            # to divide the amount we retrieve by 100 (like the website does).
+            obj_balance = Eval(
+                lambda x: x / 100,
+                CleanDecimal.SI(
+                    Dict('balances/0/remaining_amount')
+                )
+            )
+            obj_cardlimit = Eval(
+                lambda x: x and x / 100,
+                CleanDecimal.SI(
+                    Dict(
+                        'balances/0/daily_remaining_amount',
+                        default=NotAvailable
+                    ),
+                    default=NotAvailable
+                )
+            )
 
 
 class TransactionsPage(LoggedPage, JsonPage):
@@ -160,3 +169,26 @@ class TransactionsPage(LoggedPage, JsonPage):
                 elif 'Annulation' in Field('label')(self):
                     return Transaction.TYPE_PAYBACK
                 return Transaction.TYPE_TRANSFER
+
+
+# If node, an AST node, contains a string or a number, return
+# that. Otherwise, return the node itself.
+def get_ast_val(node):
+    if sys.version_info > (3, 5) and isinstance(node, ast.Constant):
+        return node.value
+    elif isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Str):
+        return node.s
+    elif isinstance(node, ast.Num):
+        return node.n
+
+    return node
+
+
+# Return a dictionary containing values associated with keys found in
+# `input`, a string. `input` looks like a JS literal object.
+def parse_js_obj(input):
+    node = ast.parse(input).body[0].value
+    result = {get_ast_val(k): get_ast_val(v) for k, v in zip(node.keys, node.values)}
+    return result

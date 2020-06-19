@@ -20,7 +20,9 @@
 
 from weboob.tools.backend import AbstractModule, BackendConfig
 from weboob.tools.value import ValueBackendPassword, Value
-from weboob.capabilities.bank import CapBank
+from weboob.capabilities.wealth import CapBankWealth
+from weboob.capabilities.bill import CapDocument
+from weboob.capabilities.profile import CapProfile
 
 from .browser import ErehsbcBrowser
 
@@ -28,13 +30,13 @@ from .browser import ErehsbcBrowser
 __all__ = ['ErehsbcModule']
 
 
-class ErehsbcModule(AbstractModule, CapBank):
+class ErehsbcModule(AbstractModule, CapBankWealth, CapDocument, CapProfile):
     NAME = 'erehsbc'
     DESCRIPTION = u'HSBC Épargne Salariale'
     MAINTAINER = u'Edouard Lambert'
     EMAIL = 'elambert@budget-insight.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(
              ValueBackendPassword('login',    label='Identifiant', masked=False),
              ValueBackendPassword('password', label='Code secret', regexp='^(\d{6})$'),

@@ -29,7 +29,9 @@ from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
 from weboob.capabilities.bill import Subscription
 from weboob.browser.elements import DictElement, ListElement, ItemElement, method, TableElement
 from weboob.browser.filters.standard import (
-    CleanDecimal, CleanText, Env, Field, Regexp, Date, Currency, BrowserURL, Format, Eval
+    CleanDecimal, CleanText, Env, Field,
+    Regexp, Date, Currency, BrowserURL,
+    Format, Eval, Lower,
 )
 from weboob.browser.filters.html import Link, TableCell
 from weboob.browser.filters.javascript import JSValue
@@ -74,6 +76,12 @@ class BillsApiParPage(LoggedPage, JsonPage):
     @method
     class get_bills(DictElement):
         item_xpath = 'billsHistory/billList'
+
+        def condition(self):
+            return (
+                Dict('billsHistory', default=None)(self) and
+                Dict('billsHistory/billList', default=None)(self)
+            )
 
         class item(ItemElement):
             klass = Bill
@@ -216,9 +224,38 @@ class ContractsPage(LoggedPage, JsonPage):
 
             obj_id = Dict('id')
             obj_label = Format('%s %s', Dict('name'), Dict('mainLine'))
+            obj__from_api = False
 
             def condition(self):
                 return Dict('status')(self) == 'OK'
 
             def obj__is_pro(self):
                 return Dict('offerNature')(self) == 'PROFESSIONAL'
+
+
+class ContractsApiPage(LoggedPage, JsonPage):
+    @method
+    class iter_subscriptions(DictElement):
+        item_xpath = 'contracts'
+
+        class item(ItemElement):
+            klass = Subscription
+
+            obj_id = CleanText(Dict('cid'))
+            obj_label = Dict('offerName')
+
+            def obj_subscriber(self):
+                names = (
+                    CleanText(Dict('holder/firstName', default=""))(self),
+                    CleanText(Dict('holder/lastName', default=""))(self),
+                )
+                assert any(names), "At least one name field should be populated. Has the page changed?"
+                return ' '.join([n for n in names if n])
+
+            def obj__is_pro(self):
+                return Dict('telco/marketType', default='PAR')(self) == 'PRO'
+
+            obj__from_api = True
+
+            def condition(self):
+                return Lower(Dict('status'))(self) == 'actif'

@@ -19,98 +19,14 @@
 
 from __future__ import unicode_literals
 
-import time
-
 from weboob.browser import LoginBrowser, URL
-from weboob.exceptions import BrowserUnavailable
+from weboob.browser.exceptions import ClientError
+from weboob.tools.capabilities.bank.transactions import sorted_transactions
 
 from .pages import (
-    MessagePage, InvestmentPage, HistoryPage, BrokenPage,
-    MainPage, FirstConnectionPage,
+    PortfolioPage, NewWebsiteFirstConnectionPage, AccountCodesPage,
+    HistoryAPIPage, MarketOrderPage,
 )
-
-from .api.pages import (
-    PortfolioPage, NewWebsiteFirstConnectionPage,
-    AccountCodesPage, HistoryAPIPage,
-)
-
-
-def get_timestamp():
-    return '{}'.format(int(time.time() * 1000))  # in milliseconds
-
-
-class LinebourseBrowser(LoginBrowser):
-    BASEURL = 'https://www.linebourse.fr'
-
-    main = URL(r'/Main$', MainPage)
-    first = URL(r'/GuidesPremiereConnexion$', FirstConnectionPage)
-    invest = URL(r'/Portefeuille$', r'/Portefeuille\?compte=(?P<id>[^&]+)', InvestmentPage)
-    message = URL(r'/DetailMessage.*', MessagePage)
-    history = URL(r'/HistoriqueOperations',
-                  r'/HistoriqueOperations\?compte=(?P<id>[^&]+)&devise=EUR&modeTri=7&sensTri=-1&periode=(?P<period>\d+)', HistoryPage)
-    useless = URL(r'/ReroutageSJR', MessagePage)
-    broken = URL(r'.*/timeout.html$', BrokenPage)
-
-    def __init__(self, baseurl, *args, **kwargs):
-        super(LinebourseBrowser, self).__init__('', '', *args, **kwargs)
-        self.BASEURL = baseurl
-
-    def do_login(self):
-        raise BrowserUnavailable()
-
-    def iter_investment(self, account_id):
-        self.main.go()
-        self.invest.go()
-        if self.message.is_here():
-            self.page.submit()
-            self.invest.go()
-
-        if self.broken.is_here():
-            return iter([])
-
-        assert self.invest.is_here()
-        if not self.page.is_on_right_portfolio(account_id):
-            self.invest.go(id=self.page.get_compte(account_id))
-        return self.page.iter_investments()
-
-    # Method used only by bp module
-    def get_liquidity(self, account_id):
-        self.main.go()
-        self.invest.go()
-        if self.message.is_here():
-            self.page.submit()
-            self.invest.go()
-
-        if self.broken.is_here():
-            return iter([])
-
-        assert self.invest.is_here()
-        if not self.page.is_on_right_portfolio(account_id):
-            self.invest.go(id=self.page.get_compte(account_id))
-
-        return self.page.get_liquidity()
-
-    def iter_history(self, account_id):
-        self.main.go()
-        self.history.go()
-        if self.message.is_here():
-            self.page.submit()
-            self.history.go()
-
-        if self.broken.is_here():
-            return
-
-        assert self.history.is_here()
-
-        if not self.page.is_on_right_portfolio(account_id):
-            self.history.go(id=self.page.get_compte(account_id), period=0)
-
-        periods = self.page.get_periods()
-
-        for period in periods:
-            self.history.go(id=self.page.get_compte(account_id), period=period)
-            for tr in self.page.iter_history():
-                yield tr
 
 
 class LinebourseAPIBrowser(LoginBrowser):
@@ -121,7 +37,8 @@ class LinebourseAPIBrowser(LoginBrowser):
 
     # The API works with an encrypted account_code that starts with 'CRY'
     portfolio = URL(r'/rest/portefeuille/(?P<account_code>CRY[\w\d]+)/vide/true/false', PortfolioPage)
-    history = URL(r'/rest/historiqueOperations/(?P<account_code>CRY[\w\d]+)/0/7/1', HistoryAPIPage)  # TODO: not sure if last 3 path levels can be hardcoded
+    history = URL(r'/rest/historiqueOperations/(?P<account_code>CRY[\w\d]+)/(?P<month_idx>\d+)/7/1', HistoryAPIPage)
+    market_order = URL(r'/rest/carnetOrdre/(?P<account_code>CRY[\w\d]+)/segmentation/(?P<index>\d+)/2/1', MarketOrderPage)
 
     def __init__(self, baseurl, *args, **kwargs):
         self.BASEURL = baseurl
@@ -130,9 +47,7 @@ class LinebourseAPIBrowser(LoginBrowser):
     def get_account_code(self, account_id):
         # 'account_codes' is a JSON containing the id_contracts
         # of all the accounts present on the Linebourse space.
-        params = {'_': get_timestamp()}
-        self.account_codes.go(params=params)
-        assert self.account_codes.is_here()
+        self.account_codes.go()
         return self.page.get_contract_number(account_id)
 
     def go_portfolio(self, account_id):
@@ -141,16 +56,45 @@ class LinebourseAPIBrowser(LoginBrowser):
 
     def iter_investments(self, account_id):
         self.go_portfolio(account_id)
-        assert self.portfolio.is_here()
         date = self.page.get_date()
         return self.page.iter_investments(date=date)
 
     def iter_history(self, account_id):
         account_code = self.get_account_code(account_id)
-        self.history.go(
-            account_code=account_code,
-            params={'_': get_timestamp()},  # timestamp is necessary
-        )
-        assert self.history.is_here()
-        for tr in self.page.iter_history():
-            yield tr
+        # History available is up to 3 months.
+        # For each month we have to pass the month index.
+        for month_idx in range(3):
+            self.history.go(
+                account_code=account_code,
+                month_idx=month_idx,
+            )
+            # Transactions are not correctly ordered in each JSON
+            for tr in sorted_transactions(self.page.iter_history()):
+                yield tr
+
+    def iter_market_orders(self, account_id):
+        account_code = self.get_account_code(account_id)
+        market_orders = []
+
+        # Each index from 0 to 4 corresponds to various order books types.
+        # For some connections, the request with index 4 (foreign orders)
+        # returns a 400 error so we must handle it accordingly.
+        for index in range(4):
+            self.market_order.go(
+                account_code=account_code,
+                index=index,
+            )
+            market_orders.extend(self.page.iter_market_orders())
+
+        # Try to fetch market orders on 'Carnet d'ordres Bourse étrangère'
+        try:
+            self.market_order.go(
+                account_code=account_code,
+                index=4,
+            )
+        except ClientError:
+            self.logger.warning('Foreign orders book is not accessible for this account.')
+        else:
+            market_orders.extend(self.page.iter_market_orders())
+
+        return sorted(market_orders, reverse=True, key=lambda order: order.date)

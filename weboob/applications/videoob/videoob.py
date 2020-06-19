@@ -18,11 +18,13 @@
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import print_function
+
 from io import BytesIO
+import os
+from shutil import which
+import subprocess
 
 import requests
-import subprocess
-import os
 
 from weboob.capabilities.video import CapVideo, BaseVideo
 from weboob.capabilities.base import empty
@@ -61,7 +63,7 @@ class VideoListFormatter(PrettyFormatter):
 
 class Videoob(ReplApplication):
     APPNAME = 'videoob'
-    VERSION = '1.6'
+    VERSION = '2.1'
     COPYRIGHT = 'Copyright(C) 2010-YEAR Christophe Benz, Romain Bignon, John Obbele'
     DESCRIPTION = "Console application allowing to search for videos on various websites, " \
                   "play and download them and get information."
@@ -89,11 +91,9 @@ class Videoob(ReplApplication):
             return 4
 
         def check_exec(executable):
-            with open(os.devnull, 'w') as devnull:
-                process = subprocess.Popen(['which', executable], stdout=devnull)
-                if process.wait() != 0:
-                    print('Please install "%s"' % executable, file=self.stderr)
-                    return False
+            if which(executable) is None:
+                print('Please install "%s"' % executable, file=self.stderr)
+                return False
             return True
 
         dest = self.obj_to_filename(video, dest, default)
@@ -129,7 +129,7 @@ class Videoob(ReplApplication):
                 return 1
 
         self.logger.debug(' '.join(args))
-        os.spawnlp(os.P_WAIT, args[0], *args)
+        subprocess.call(args)
 
     def read_url(self, url):
         r = requests.get(url, stream=True)

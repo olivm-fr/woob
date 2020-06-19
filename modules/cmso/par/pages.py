@@ -23,6 +23,7 @@ import re
 import requests
 import json
 import datetime as dt
+from hashlib import md5
 
 from collections import OrderedDict
 
@@ -36,19 +37,15 @@ from weboob.browser.filters.standard import (
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.html import Attr, Link, TableCell, AbsoluteLink
 from weboob.browser.exceptions import ServerError
-from weboob.capabilities.bank import Account, Investment, Loan, AccountOwnership
+from weboob.capabilities.bank import Account, Loan, AccountOwnership
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.profile import Profile
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.exceptions import ParseError
-from weboob.tools.capabilities.bank.investments import is_isin_valid
+from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
 from weboob.tools.compat import unicode
-
-
-def MyDecimal(*args, **kwargs):
-    kwargs.update(replace_dots=True, default=NotAvailable)
-    return CleanDecimal(*args, **kwargs)
 
 
 class LoginPage(HTMLPage):
@@ -136,6 +133,40 @@ class AccountsPage(LoggedPage, JsonPage):
             # Iban is available without last 5 numbers, or by sms
             obj_iban = NotAvailable
             obj__index = Dict('index')
+            # Need this to match with internal recipients
+            # and to do transfer
+            obj__bic = Dict('bic', default=NotAvailable)
+
+            def obj__owner_name(self):
+                co_owner_name = CleanText(Dict('nomCotitulaire', default=''))(self)
+                if co_owner_name:
+                    co_owner_firstname = CleanText(Dict('prenomCotitulaire', default=''))(self)
+                    # The `nomCotitulaire` sometimes contains both last name and
+                    # first name, sometimes just the last name.
+                    if co_owner_firstname:
+                        co_owner_name = '%s %s' % (co_owner_name, co_owner_firstname)
+
+                    return '%s %s / %s' % (
+                        Upper(Dict('nomClient'))(self),
+                        Upper(Dict('prenomClient'))(self),
+                        co_owner_name.upper(),
+                    )
+                return Format(
+                    '%s %s',
+                    Upper(Dict('nomClient')),
+                    Upper(Dict('prenomClient')),
+                )(self)
+
+            def obj__recipient_id(self):
+                # The owner name is swapped (firstname lastname -> lastname firstname)
+                # between the request in iter_accounts and the requests
+                # listing recipients. Sorting the owner name is a way to
+                # have the same md5 hash in both of those cases.
+                to_hash = '%s %s' % (
+                    Upper(Field('label'))(self),
+                    ''.join(sorted(Field('_owner_name')(self))),
+                )
+                return md5(to_hash.encode('utf-8')).hexdigest()
 
             def obj_balance(self):
                 balance = CleanDecimal(Dict('soldeEuro', default="0"))(self)
@@ -250,6 +281,36 @@ class AccountsPage(LoggedPage, JsonPage):
                     page = self.page.browser.open(url).page
                     return page.get_account_id()
 
+                # Need those to match with internal recipients
+                # and to do transfer
+                obj__bic = Dict('bic', default=NotAvailable)
+
+                def obj__owner_name(self):
+                    co_owner_name = CleanText(Dict('nomCotitulaire', default=''))(self)
+                    if co_owner_name:
+                        co_owner_firstname = CleanText(Dict('prenomCotitulaire', default=''))(self)
+                        # The `nomCotitulaire` sometimes contains both last name
+                        # and first name, sometimes just the last name.
+                        if co_owner_firstname:
+                            co_owner_name = '%s %s' % (co_owner_name, co_owner_firstname)
+
+                        return '%s / %s' % (
+                            Upper(Field('_owner'))(self),
+                            co_owner_name.upper(),
+                        )
+                    return Upper(Field('_owner'))(self)
+
+                def obj__recipient_id(self):
+                    # The owner name is swapped (firstname lastname -> lastname firstname)
+                    # between the request in iter_accounts and the requests
+                    # listing recipients. Sorting the owner name is a way to
+                    # have the same md5 hash in both of those cases.
+                    to_hash =  '%s %s' % (
+                        Upper(Field('label'))(self),
+                        ''.join(sorted(Field('_owner_name')(self))),
+                    )
+                    return md5(to_hash.encode('utf-8')).hexdigest()
+
     @method
     class iter_loans(DictElement):
         def parse(self, el):
@@ -331,11 +392,11 @@ class HistoryPage(LoggedPage, JsonPage):
     class iter_history(DictElement):
         def next_page(self):
             if len(Env('nbs', default=[])(self)):
-                data = {'index': Env('index')(self),
-                        'filtreOperationsComptabilisees': "MOIS_MOINS_%s" % Env('nbs')(self)[0]
-                       }
+                data = {'index': Env('index')(self)}
+                if Env('nbs')(self)[0] != "SIX_DERNIERES_SEMAINES":
+                    data.update({'filtreOperationsComptabilisees': "MOIS_MOINS_%s" % Env('nbs')(self)[0]})
                 Env('nbs')(self).pop(0)
-                return requests.Request('POST', data=json.dumps(data), headers={'Content-Type': 'application/json'})
+                return requests.Request('POST', data=json.dumps(data))
 
         def parse(self, el):
             exception = Dict('exception', default=None)(self)
@@ -371,9 +432,10 @@ class HistoryPage(LoggedPage, JsonPage):
             obj_raw = Transaction.Raw(Dict('libelleCourt'))
             obj_vdate = Date(Dict('dateValeur', NotAvailable), dayfirst=True, default=NotAvailable)
             obj_amount = CleanDecimal(Dict('montantEnEuro'), default=NotAvailable)
-            # DO NOT USE `OperationID` the ids aren't constant after 1 month. `clefDomirama` seems
-            # to be constant forever. Must be kept under watch though
             obj_id = Dict('clefDomirama', default='')
+            # 'operationId' is different between each session, we use it to avoid duplicates on a unique
+            # session
+            obj__operationid = Dict('operationId', default='')
 
             def parse(self, el):
                 key = Env('key', default=None)(self)
@@ -420,6 +482,14 @@ class LifeinsurancePage(LoggedPage, HTMLPage):
             def obj_url(self):
                 return AbsoluteLink(TableCell('id')(self)[0].xpath('.//a'), default=NotAvailable)(self)
 
+    @method
+    class fill_account(ItemElement):
+        def obj_valuation_diff_ratio(self):
+            valuation_diff_percent = CleanDecimal.French('//div[@class="perfContrat"]/span[@class="value"]', default=None)(self)
+            if valuation_diff_percent:
+                return valuation_diff_percent / 100
+            return NotAvailable
+
     @pagination
     @method
     class iter_history(TableElement):
@@ -437,33 +507,38 @@ class LifeinsurancePage(LoggedPage, HTMLPage):
 
             obj_raw = Transaction.Raw(TableCell('label'))
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
-            obj_amount = MyDecimal(TableCell('amount'))
+            obj_amount = CleanDecimal.French(TableCell('amount'), default=NotAvailable)
 
     @method
     class iter_investment(TableElement):
         item_xpath = '//table/tbody/tr[contains(@class, "results")]'
         head_xpath = '//table/thead/tr/th'
 
-        col_label = re.compile('Libellé')
-        col_quantity = re.compile('Nb parts')
-        col_vdate = re.compile('Date VL')
-        col_unitvalue = re.compile('VL')
-        col_unitprice = re.compile('Prix de revient')
-        col_valuation = re.compile('Solde')
+        col_label = re.compile(r'Libellé')
+        col_quantity = re.compile(r'Nb parts')
+        col_vdate = re.compile(r'Date VL')
+        col_unitvalue = re.compile(r'VL')
+        col_unitprice = re.compile(r'Prix de revient')
+        col_diff_ratio = re.compile(r'Perf\.')
+        col_valuation = re.compile(r'Solde')
 
         class item(ItemElement):
             klass = Investment
 
             obj_label = CleanText(TableCell('label'))
-            obj_code = Regexp(Link('./td/a'), r'Isin%253D([^%]+)')
-            obj_quantity = MyDecimal(TableCell('quantity'))
-            obj_unitprice = MyDecimal(TableCell('unitprice'))
-            obj_unitvalue = MyDecimal(TableCell('unitvalue'))
-            obj_valuation = MyDecimal(TableCell('valuation'))
+            obj_code = IsinCode(Regexp(Link('./td/a'), r'Isin%253D([^%]+)'), default=NotAvailable)
+            obj_code_type = IsinType(Regexp(Link('./td/a'), r'Isin%253D([^%]+)'), default=NotAvailable)
+            obj_quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)
+            obj_unitprice = CleanDecimal.French(TableCell('unitprice'), default=NotAvailable)
+            obj_unitvalue = CleanDecimal.French(TableCell('unitvalue'), default=NotAvailable)
+            obj_valuation = CleanDecimal.French(TableCell('valuation'))
             obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True, default=NotAvailable)
 
-            def obj_code_type(self):
-                return Investment.CODE_TYPE_ISIN if is_isin_valid(Field('code')(self)) else NotAvailable
+            def obj_diff_ratio(self):
+                diff_ratio_percent = CleanDecimal.French(TableCell('diff_ratio'), default=None)(self)
+                if diff_ratio_percent:
+                    return diff_ratio_percent / 100
+                return NotAvailable
 
 
 class MarketPage(LoggedPage, HTMLPage):
@@ -535,14 +610,14 @@ class MarketPage(LoggedPage, HTMLPage):
             obj_label = CleanText(TableCell('label'))
             obj_type = Transaction.TYPE_BANK
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
-            obj_amount = CleanDecimal(TableCell('amount'))
+            obj_amount = CleanDecimal.SI(TableCell('amount'))
             obj_investments = Env('investments')
 
             def parse(self, el):
                 i = Investment()
                 i.label = Field('label')(self)
                 i.code = CleanText(TableCell('code'))(self)
-                i.quantity = MyDecimal(TableCell('quantity'))(self)
+                i.quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)(self)
                 i.valuation = Field('amount')(self)
                 i.vdate = Field('date')(self)
                 self.env['investments'] = [i]
@@ -566,20 +641,18 @@ class MarketPage(LoggedPage, HTMLPage):
             condition = lambda self: not CleanText('//div[has-class("errorConteneur")]', default=None)(self.el)
 
             obj_label = Upper(TableCell('label'))
-            obj_quantity = MyDecimal(TableCell('quantity'))
-            obj_unitprice = MyDecimal(TableCell('unitprice'))
-            obj_unitvalue = MyDecimal(TableCell('unitvalue'))
-            obj_valuation = CleanDecimal(TableCell('valuation'), replace_dots=True)
+            obj_quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)
+            obj_unitprice = CleanDecimal.French(TableCell('unitprice'), default=NotAvailable)
+            obj_unitvalue = CleanDecimal.French(TableCell('unitvalue'), default=NotAvailable)
+            obj_valuation = CleanDecimal.French(TableCell('valuation'))
             obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True, default=NotAvailable)
 
             def obj_code(self):
                 if Field('label')(self) == "LIQUIDITES":
                     return 'XX-liquidity'
-                code = CleanText(TableCell('code'))(self)
-                return code if is_isin_valid(code) else NotAvailable
+                return IsinCode(CleanText(TableCell('code')), default=NotAvailable)(self)
 
-            def obj_code_type(self):
-                return Investment.CODE_TYPE_ISIN if is_isin_valid(Field('code')(self)) else NotAvailable
+            obj_code_type = IsinType(CleanText(TableCell('code')), default=NotAvailable)
 
 
 class AdvisorPage(LoggedPage, JsonPage):
@@ -613,3 +686,6 @@ class ProfilePage(LoggedPage, JsonPage):
 
         obj_name = Format('%s %s', Dict('firstName'), Dict('lastName'))
         obj_email = Dict('email', default=NotAvailable) # can be unavailable on pro website for example
+
+    def get_token(self):
+        return Dict('loginEncrypted')(self.doc)

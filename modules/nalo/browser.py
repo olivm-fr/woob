@@ -20,7 +20,7 @@
 from __future__ import unicode_literals
 
 from weboob.browser import LoginBrowser, need_login, URL
-from weboob.capabilities.bank import Investment
+from weboob.capabilities.wealth import Investment
 
 from .pages import LoginPage, AccountsPage, AccountPage, InvestPage
 
@@ -74,4 +74,5 @@ class NaloBrowser(LoginBrowser):
             inv.label = item['name']
             inv.portfolio_share = item['share']
             inv.valuation = account.balance * inv.portfolio_share
+            inv.asset_category = item['asset_type']
             yield inv

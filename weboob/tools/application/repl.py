@@ -34,6 +34,7 @@ from optparse import IndentedHelpFormatter, OptionGroup, OptionParser
 from weboob.capabilities.base import BaseObject, FieldNotFound, UserError, empty
 from weboob.capabilities.collection import BaseCollection, CapCollection, Collection, CollectionNotFound
 from weboob.core import CallErrors
+from weboob.exceptions import BrowserQuestion, BrowserRedirect, DecoupledValidation
 from weboob.tools.application.formatters.iformatter import MandatoryFieldsNotFound
 from weboob.tools.compat import basestring, range, unicode
 from weboob.tools.misc import to_unicode
@@ -388,6 +389,82 @@ class ReplApplication(ConsoleApplication, MyCmd):
                 self.formatter = self.formatters_loader.build_formatter(ReplApplication.DEFAULT_FORMATTER)
 
         return self.weboob.do(self._do_complete, self.options.count, fields, function, *args, **kwargs)
+
+    def _do_and_retry(self, *args, **kwargs):
+        """
+        This method is a wrapper around Weboob.do(), and handle interactive
+        errors which allow to retry.
+
+        List of handled errors:
+        - BrowserQuestion
+        - BrowserRedirect
+        - DecoupledValidation
+        """
+
+        if self.stdout.isatty():
+            # Set a non-None value to all backends's request_information
+            #
+            # - None indicates non-interactive: do not trigger 2FA challenges,
+            #   raise NeedInteractive* exceptions before doing so
+            # - non-None indicates interactive: ok to trigger 2FA challenges,
+            #   raise BrowserQuestion/AppValidation when facing one
+            # It should be a dict because when non-empty, it will contain HTTP
+            # headers for legal PSD2 AIS/PIS authentication.
+            for backend in self.enabled_backends:
+                key = 'request_information'
+                if key in backend.config and backend.config[key].get() is None:
+                    backend.config[key].set({})
+
+        try:
+            for obj in self.do(*args, **kwargs):
+                yield obj
+        except CallErrors as errors:
+            # Errors which are not handled here and which will be re-raised.
+            remaining_errors = []
+            # Backends on which we will retry.
+            backends = set()
+
+            for backend, error, backtrace in errors.errors:
+                if isinstance(error, BrowserQuestion):
+                    for field in error.fields:
+                        v = self.ask(field)
+                        backend.config[field.id].set(v)
+                elif isinstance(error, BrowserRedirect):
+                    print(u'Open this URL in a browser:')
+                    print(error.url)
+                    print()
+                    value = self.ask('Please enter the final URL')
+                    backend.config['auth_uri'].set(value)
+                elif isinstance(error, DecoupledValidation):
+                    print(error.message)
+                    # FIXME we should reset this value, in case another DecoupledValidation occurs
+                    key = 'resume'
+                    if key in backend.config:
+                        backend.config[key].set(True)
+                else:
+                    # Not handled error.
+                    remaining_errors.append((backend, error, backtrace))
+                    continue
+
+                backends.add(backend)
+
+            if backends:
+                # There is at least one backend on which we can retry, do it
+                # only on this ones.
+                kwargs['backends'] = backends
+                try:
+                    for obj in self._do_and_retry(*args, **kwargs):
+                        yield obj
+                except CallErrors as sub_errors:
+                    # As we called _do_and_retry, these sub errors are not
+                    # interactive ones, so we can add them to the remaining
+                    # errors.
+                    remaining_errors += sub_errors.errors
+
+            errors.errors = remaining_errors
+            if errors.errors:
+                # If there are remaining errors, raise them.
+                raise errors
 
     # -- command tools ------------
     def parse_command_args(self, line, nb, req_n=None):
@@ -1121,9 +1198,12 @@ class ReplApplication(ConsoleApplication, MyCmd):
         split_path = self.working_path.get()
 
         try:
-            for res in self.do('iter_resources', objs=objs,
-                                                 split_path=split_path,
-                                                 caps=CapCollection):
+            for res in self._do_and_retry(
+                'iter_resources',
+                objs=objs,
+                split_path=split_path,
+                caps=CapCollection
+            ):
                 yield res
         except CallErrors as errors:
             self.bcall_errors_handler(errors, CollectionNotFound)
@@ -1266,6 +1346,10 @@ class ReplApplication(ConsoleApplication, MyCmd):
 
         app = weboobdebug.WeboobDebug()
         locs = dict(application=self, weboob=self.weboob)
+        if len(self.weboob.backend_instances):
+            locs['backend'] = next(iter(self.weboob.backend_instances.values()))
+            locs['browser'] = locs['backend'].browser
+
         banner = ('Weboob debug shell\n\nAvailable variables:\n'
          + '\n'.join(['  %s: %s' % (k, v) for k, v in locs.items()]))
 

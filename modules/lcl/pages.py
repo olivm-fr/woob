@@ -29,15 +29,16 @@ from datetime import datetime, timedelta
 
 from weboob.capabilities.base import empty, find_object, NotAvailable
 from weboob.capabilities.bank import (
-    Account, Investment, Recipient, TransferError, TransferBankError, Transfer,
-    AccountOwnership,
+    Account, Recipient, TransferError, TransferBankError, Transfer,
+    AccountOwnership, AddRecipientBankError,
 )
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.capabilities.profile import Person, ProfileMissing
 from weboob.capabilities.contact import Advisor
 from weboob.browser.elements import method, ListElement, TableElement, ItemElement, DictElement
 from weboob.browser.exceptions import ServerError
-from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage, FormNotFound, pagination
+from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage, FormNotFound, pagination, PartialHTMLPage
 from weboob.browser.filters.html import Attr, Link, TableCell, AttributeNotFound, AbsoluteLink
 from weboob.browser.filters.standard import (
     CleanText, Field, Regexp, Format, Date, CleanDecimal, Map, AsyncLoad, Async, Env, Slugify,
@@ -45,7 +46,7 @@ from weboob.browser.filters.standard import (
 )
 from weboob.browser.filters.json import Dict
 from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword, ActionNeeded, ParseError
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
+from weboob.tools.capabilities.bank.transactions import FrenchTransaction, parse_with_patterns
 from weboob.tools.captcha.virtkeyboard import MappedVirtKeyboard, VirtKeyboardError
 from weboob.tools.compat import unicode, urlparse, parse_qs, urljoin
 from weboob.tools.html import html2text
@@ -176,12 +177,7 @@ class LoginPage(HTMLPage):
         except AttributeError:
             pass
 
-        try:
-            form.submit()
-        except BrowserUnavailable:
-            # Login is not valid
-            return False
-        return True
+        form.submit(allow_redirects=False)
 
     def check_error(self):
         errors = self.doc.xpath(u'//*[@class="erreur" or @class="messError"]')
@@ -197,7 +193,15 @@ class LoginPage(HTMLPage):
         raise BrowserIncorrectPassword()
 
 
-class ContractsPage(LoginPage):
+class RedirectPage(LoginPage, PartialHTMLPage):
+    def is_here(self):
+        # During login a form submit with an allow_redirects=False is done
+        # The submit request can be done on contract urls following by a redirection
+        # So if we get a 302 this new class avoids misleading on_load
+        return self.response.status_code == 302
+
+
+class ContractsPage(LoginPage, PartialHTMLPage):
     def on_load(self):
         # after login we are redirect in ContractsPage even if there is an error at login
         # I let the error check code here to simplify
@@ -301,11 +305,20 @@ class AccountsPage(LoggedPage, HTMLPage):
             obj_id = Format('%s%s', Field('_agence'), Field('_compte'))
             obj__transfer_id = Format('%s0000%s', Field('_agence'), Field('_compte'))
             obj_label = CleanText('.//div[@class="libelleCompte"]')
-            obj_balance = MyDecimal('.//td[has-class("right")]', replace_dots=True)
             obj_currency = FrenchTransaction.Currency('.//td[has-class("right")]')
             obj_type = Map(Regexp(Field('_link_id'), r'.*nature=(\w+)'), NATURE2TYPE, default=Account.TYPE_UNKNOWN)
             obj__market_link = None
             obj_number = Field('id')
+
+            def obj_balance(self):
+                balance = None
+                if 'professionnels' in self.page.browser.url and Field('type')(self) == Account.TYPE_CHECKING:
+                    # for pro accounts with comings, balance without comings must be fetched on details page
+                    async_page = Async('details').loaded_page(self)
+                    balance = async_page.get_balance_without_comings()
+                if not empty(balance):
+                    return balance
+                return CleanDecimal.French('.//td[has-class("right")]')(self)
 
             def obj_ownership(self):
                 async_page = Async('details').loaded_page(self)
@@ -351,7 +364,7 @@ class LoansPage(LoggedPage, HTMLPage):
         class account(ItemElement):
             klass = Account
 
-            obj_balance = CleanDecimal(TableCell('balance'), replace_dots=True, sign=lambda x: -1)
+            obj_balance = CleanDecimal(TableCell('balance'), replace_dots=True, sign='-')
             obj_currency = FrenchTransaction.Currency(TableCell('balance'))
             obj_type = Account.TYPE_LOAN
             obj_id = Env('id')
@@ -389,7 +402,7 @@ class LoansProPage(LoggedPage, HTMLPage):
         class account(ItemElement):
             klass = Account
 
-            obj_balance = CleanDecimal(TableCell('balance'), replace_dots=True, sign=lambda x: -1)
+            obj_balance = CleanDecimal(TableCell('balance'), replace_dots=True, sign='-')
             obj_currency = FrenchTransaction.Currency(TableCell('balance'))
             obj_type = Account.TYPE_LOAN
             obj_id = Env('id')
@@ -458,6 +471,11 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
         col_raw = [u'Vos opérations', u'Libellé']
 
         class item(Transaction.TransactionElement):
+            def fill_env(self, page, parent=None):
+                # This *Element's parent has only the dateguesser in its env and we want to
+                # use the same object, not copy it.
+                self.env = parent.env
+
             def load_details(self):
                 # Those are summary for deferred card transactions,
                 # they do not have details.
@@ -477,6 +495,14 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
                     '/outil/UWLM/ListeMouvementsParticulier/accesDetailsMouvement?element=%s' % row,
                     method='POST',
                 )
+
+            def obj_rdate(self):
+                rdate = self.obj.rdate
+                date = Field('date')(self)
+                if rdate > date:
+                    date_guesser = Env('date_guesser')(self)
+                    return date_guesser.guess_date(rdate.day, rdate.month)
+                return rdate
 
             def obj_type(self):
                 type = Async('details', CleanText(u'//td[contains(text(), "Nature de l\'opération")]/following-sibling::*[1]'))(self)
@@ -512,6 +538,10 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
                 elif not obj.raw:
                     # Empty transaction label
                     obj.raw = obj.label = Async('details', CleanText(u'//td[contains(text(), "Nature de l\'opération")]/following-sibling::*[1]'))(self)
+                # Some transactions have no details, but we can find the type of the transaction,
+                # the label and the category from the raw label.
+                if obj.type == Transaction.TYPE_UNKNOWN:
+                    parse_with_patterns(obj.raw, obj, self.klass.PATTERNS)
                 if not obj.date:
                     obj.date = Async('details', Date(CleanText(u'//td[contains(text(), "Date de l\'opération")]/following-sibling::*[1]', default=u''), dayfirst=True, default=NotAvailable))(self)
                     obj.rdate = obj.date
@@ -524,9 +554,14 @@ class AccountHistoryPage(LoggedPage, HTMLPage):
                 return True
 
     @pagination
-    def get_operations(self):
-        return self._get_operations(self)()
+    def get_operations(self, date_guesser):
+        return self._get_operations(self)(date_guesser=date_guesser)
 
+    def get_balance_without_comings(self):
+        return CleanDecimal.French(
+            '//span[contains(text(), "Opérations effectuées")]//ancestor::div[1]/following-sibling::div',
+            default=NotAvailable
+        )(self.doc)
 
 class CardsPage(LoggedPage, HTMLPage):
 
@@ -1354,6 +1389,11 @@ class TransferPage(LoggedPage, HTMLPage):
 
 
 class AddRecipientPage(LoggedPage, HTMLPage):
+    def get_error(self):
+        error = CleanText('//div[@id="attTxt"]', children=False)(self.doc)
+        if error and 'nécessaire afin de vous envoyer un code de connexion' in error:
+            return error
+
     def validate(self, iban, label):
         form = self.get_form(id='mainform')
         form['PAYS_IBAN'] = iban[:2]
@@ -1363,10 +1403,28 @@ class AddRecipientPage(LoggedPage, HTMLPage):
 
 
 class CheckValuesPage(LoggedPage, HTMLPage):
+    def get_error(self):
+        return CleanText('//div[@id="attTxt"]/p')(self.doc)
+
     def check_values(self, iban, label):
-        values = CleanText('//form[contains(@action, "/outil")]')(self.doc)
-        assert iban in values, 'Iban (%s) not found in values: %s' % (iban, values)
-        assert label in values, 'Recipient label (%s) not found in values: %s' % (label, values)
+        # This method is also used in `RecipConfirmPage`.
+        # In `CheckValuesPage`, xpath can be like `//strong[@id="iban"]`
+        # but not in `RecipConfirmPage`.
+        # So, use more generic xpaths which work for the two pages.
+        iban_xpath = '//div[label[contains(text(), "IBAN")]]//strong'
+        scraped_iban = CleanText(iban_xpath, replace=[(' ', '')])(self.doc)
+
+        label_xpath = '//div[label[contains(text(), "Libellé")]]//strong'
+        scraped_label = CleanText(label_xpath)(self.doc)
+
+        assert iban == scraped_iban, 'Recipient Iban changed from (%s) to (%s)' % (iban, scraped_iban)
+        assert label == scraped_label, 'Recipient label changed from (%s) to (%s)' % (label, scraped_label)
+
+    def get_authent_mechanism(self):
+        if self.doc.xpath('//div[@id="envoiMobile" and @class="selectTel"]'):
+            return 'otp_sms'
+        elif self.doc.xpath('//script[contains(text(), "AuthentForteDesktop")]'):
+            return 'app_validation'
 
 
 class DocumentsPage(LoggedPage, HTMLPage):
@@ -1433,7 +1491,13 @@ class RecipientPage(LoggedPage, HTMLPage):
 
 
 class SmsPage(LoggedPage, HTMLPage):
-    pass
+    def check_error(self, otp_sent=False):
+        # This page contains only 'true' or 'false'
+        result = CleanText('.')(self.doc) == 'true'
+
+        if not result and otp_sent:
+            raise AddRecipientBankError(message='Mauvais code sms.')
+        assert result, 'Something went wrong during add new recipient sent otp sms'
 
 
 class RecipRecapPage(CheckValuesPage):

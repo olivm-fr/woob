@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from collections import Counter
@@ -26,6 +28,7 @@ from random import randint
 from decimal import Decimal
 from datetime import datetime, timedelta
 import lxml.html as html
+from requests.exceptions import ConnectionError
 
 from weboob.browser.elements import DictElement, ListElement, TableElement, ItemElement, method
 from weboob.browser.filters.json import Dict
@@ -34,16 +37,23 @@ from weboob.browser.filters.standard import (
     Currency,
 )
 from weboob.browser.filters.html import TableCell
-from weboob.browser.pages import JsonPage, LoggedPage, HTMLPage
+from weboob.browser.pages import JsonPage, LoggedPage, HTMLPage, PartialHTMLPage
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import (
-    Account, Investment, Recipient, Transfer, TransferBankError,
-    AddRecipientBankError, AddRecipientTimeout, AccountOwnership,
+    Account, Recipient, Transfer, TransferBankError,
+    AddRecipientBankError, AccountOwnership,
+    Emitter, EmitterNumberType, TransferStatus,
+    TransferDateType,
 )
+from weboob.capabilities.wealth import Investment
 from weboob.capabilities.base import empty
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserPasswordExpired, ActionNeeded
+from weboob.exceptions import (
+    BrowserIncorrectPassword, BrowserUnavailable,
+    BrowserPasswordExpired, ActionNeeded,
+    AppValidationCancelled, AppValidationExpired,
+)
 from weboob.tools.capabilities.bank.iban import rib2iban, rebuild_rib, is_iban_valid
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction, parse_with_patterns
 from weboob.tools.captcha.virtkeyboard import GridVirtKeyboard
@@ -60,7 +70,6 @@ class TransferAssertionError(Exception):
 class ConnectionThresholdPage(HTMLPage):
     NOT_REUSABLE_PASSWORDS_COUNT = 3
     """BNP disallows to reuse one of the three last used passwords."""
-
     def make_date(self, yy, m, d):
         current = datetime.now().year
         if yy > current - 2000:
@@ -109,8 +118,10 @@ class ConnectionThresholdPage(HTMLPage):
 
     def on_load(self):
         msg = (
-            CleanText('//div[@class="confirmation"]//span[span]')(self.doc) or
-            CleanText('//p[contains(text(), "Vous avez atteint la date de fin de vie de votre code secret")]')(self.doc)
+            CleanText('//div[@class="confirmation"]//span[span]')(self.doc)
+            or CleanText('//p[contains(text(), "Vous avez atteint la date de fin de vie de votre code secret")]')(
+                self.doc
+            )
         )
 
         self.logger.warning('Password expired.')
@@ -154,16 +165,18 @@ def cast(x, typ, default=None):
 class BNPKeyboard(GridVirtKeyboard):
     color = (0x1f, 0x27, 0x28)
     margin = 3, 3
-    symbols = {'0': '43b2227b92e0546d742a1f087015e487',
-               '1': '2914e8cc694de26756096d0d0d4c6e0f',
-               '2': 'aac54304a7bb850805d29f54557be366',
-               '3': '0376d9f8419efee42e253d195a152547',
-               '4': '3719595f15b1ac1c5a73d84aa290b5f6',
-               '5': '617597f07a6530479927536671485439',
-               '6': '4f5dce7bd0d9213fdae54b79bb8dd33a',
-               '7': '49e07fa52b9bcee798f3a663f86e6cc1',
-               '8': 'c60b723b3d95a46416b34c2cbefba3ed',
-               '9': 'a13b8c3617a7bf854590833ddfb97f1f'}
+    symbols = {
+        '0': '43b2227b92e0546d742a1f087015e487',
+        '1': '2914e8cc694de26756096d0d0d4c6e0f',
+        '2': 'aac54304a7bb850805d29f54557be366',
+        '3': '0376d9f8419efee42e253d195a152547',
+        '4': '3719595f15b1ac1c5a73d84aa290b5f6',
+        '5': '617597f07a6530479927536671485439',
+        '6': '4f5dce7bd0d9213fdae54b79bb8dd33a',
+        '7': '49e07fa52b9bcee798f3a663f86e6cc1',
+        '8': 'c60b723b3d95a46416b34c2cbefba3ed',
+        '9': 'a13b8c3617a7bf854590833ddfb97f1f',
+    }
 
     def __init__(self, browser, image):
         symbols = list('%02d' % x for x in range(1, 11))
@@ -191,7 +204,7 @@ class LoginPage(JsonPage):
     @staticmethod
     def generate_token(length=11):
         chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXTZabcdefghiklmnopqrstuvwxyz'
-        return ''.join((chars[randint(0, len(chars)-1)] for _ in range(length)))
+        return ''.join((chars[randint(0, len(chars) - 1)] for _ in range(length)))
 
     def build_doc(self, text):
         try:
@@ -209,27 +222,32 @@ class LoginPage(JsonPage):
         if self.get('errorCode') == 'INTO_FACADE ERROR: JDF_GENERIC_EXCEPTION':
             raise BrowserIncorrectPassword()
 
-        error = cast(self.get('errorCode'), int, 0)
+        error = cast(self.get('errorCode', self.get('codeRetour')), int, 0)
         # you can find api documentation on errors here : https://mabanque.bnpparibas/rsc/contrib/document/properties/identification-fr-part-V1.json
         if error:
-            error_page = self.browser.list_error_page.open()
-            msg = error_page.get_error_message(error)
-            if not msg:
+            try:
+                # this page can be unreachable
+                error_page = self.browser.list_error_page.open()
+                msg = error_page.get_error_message(error) or self.get('message')
+            except ConnectionError:
                 msg = self.get('message')
 
             wrongpass_codes = [201, 21510, 203, 202, 7]
             actionNeeded_codes = [21501, 3, 4, 50]
-            websiteUnavailable_codes = [207, 1000, 1001]
+            # 'codeRetour' list
+            # -1 : Erreur technique lors de l'accès à l'application
+            # -99 : Service actuellement indisponible
+            websiteUnavailable_codes = [207, 1000, 1001, -99, -1]
             if error in wrongpass_codes:
                 raise BrowserIncorrectPassword(msg)
-            elif error == 21: # "Ce service est momentanément indisponible. Veuillez renouveler votre demande ultérieurement." -> In reality, account is blocked because of too much wrongpass
+            elif error == 21:  # "Ce service est momentanément indisponible. Veuillez renouveler votre demande ultérieurement." -> In reality, account is blocked because of too much wrongpass
                 raise ActionNeeded(u"Compte bloqué")
             elif error in actionNeeded_codes:
                 raise ActionNeeded(msg)
             elif error in websiteUnavailable_codes:
                 raise BrowserUnavailable(msg)
             else:
-                assert False, 'Unexpected error at login: "%s" (code=%s)' % (msg, error)
+                raise AssertionError('Unexpected error at login: "%s" (code=%s)' % (msg, error))
 
         parser = html.HTMLParser(encoding=self.encoding)
         doc = html.parse(BytesIO(self.content), parser)
@@ -244,10 +262,12 @@ class LoginPage(JsonPage):
 
         target = self.browser.BASEURL + 'SEEA-pa01/devServer/seeaserver'
         user_agent = self.browser.session.headers.get('User-Agent') or ''
-        auth = self.render_template(self.get('data.authTemplate'),
-                                    idTelematique=username,
-                                    password=vk.get_string_code(password),
-                                    clientele=user_agent)
+        auth = self.render_template(
+            self.get('data.authTemplate'),
+            idTelematique=username,
+            password=vk.get_string_code(password),
+            clientele=user_agent
+        )
         # XXX useless?
         csrf = self.generate_token()
 
@@ -292,8 +312,12 @@ class ProfilePage(LoggedPage, JsonPage):
         klass = Person
 
         def parse(self, el):
-            if not Dict(self.item_path + 'etatCivil/prenom')(el).strip() and not Dict(self.item_path + 'etatCivil/nom')(el).strip():
+            if (
+                not Dict(self.item_path + 'etatCivil/prenom')(el).strip()
+                and not Dict(self.item_path + 'etatCivil/nom')(el).strip()
+            ):
                 raise ProfileMissing()
+
         obj_name = Format('%s %s', Dict(item_path + 'etatCivil/prenom'), Dict(item_path + 'etatCivil/nom'))
         obj_spouse_name = Dict(item_path + 'etatCivil/nomMarital', default=NotAvailable)
         obj_birth_date = Date(Dict(item_path + 'etatCivil/dateNaissance'), dayfirst=True)
@@ -446,17 +470,23 @@ class TransferInitPage(BNPPage):
             raise TransferAssertionError('%s, code=%s' % (message_code[0], message_code[1]))
 
     def get_ibans_dict(self, account_type):
-        return dict([(a['ibanCrypte'], a['iban']) for a in self.path('data.infoVirement.listeComptes%s.*' % account_type)])
+        return dict([(a['ibanCrypte'], a['iban'])
+                     for a in self.path('data.infoVirement.listeComptes%s.*' % account_type)])
 
     def can_transfer_to_recipients(self, origin_account_id):
-        return next(a['eligibleVersBenef'] for a in self.path('data.infoVirement.listeComptesDebiteur.*') if a['ibanCrypte'] == origin_account_id) == '1'
+        return next(
+            a['eligibleVersBenef']
+            for a in self.path('data.infoVirement.listeComptesDebiteur.*')
+            if a['ibanCrypte'] == origin_account_id
+        ) == '1'
 
     @method
     class transferable_on(DictElement):
         item_xpath = 'data/infoVirement/listeComptesCrediteur'
 
         class item(MyRecipient):
-            condition = lambda self: Dict('ibanCrypte')(self.el) != self.env['origin_account_ibancrypte']
+            def condition(self):
+                return Dict('ibanCrypte')(self.el) != self.env['origin_account_ibancrypte']
 
             obj_id = Dict('ibanCrypte')
             obj_label = Dict('libelleCompte')
@@ -470,6 +500,20 @@ class TransferInitPage(BNPPage):
             def obj_enabled_at(self):
                 return datetime.now().replace(microsecond=0)
 
+    @method
+    class iter_emitters(DictElement):
+        item_xpath = 'data/infoVirement/listeComptesDebiteur'
+
+        class item(ItemElement):
+            klass = Emitter
+
+            obj_id = Dict('ibanCrypte')
+            obj_label = Dict('libelleCompte')
+            obj_currency = Dict('devise')
+            obj_number_type = EmitterNumberType.IBAN
+            obj_number = Dict('iban')
+            obj_balance = Dict('solde')
+
 
 class RecipientsPage(BNPPage):
     @method
@@ -480,7 +524,8 @@ class RecipientsPage(BNPPage):
 
         class item(MyRecipient):
             # For the moment, only yield ready to transfer on recipients.
-            condition = lambda self: Dict('libelleStatut')(self.el) in [u'Activé', u'Temporisé', u'En attente']
+            def condition(self):
+                return Dict('libelleStatut')(self.el) in [u'Activé', u'Temporisé', u'En attente']
 
             obj_id = obj_iban = Dict('ibanNumCompte')
             obj__transfer_id = Dict('idBeneficiaire')
@@ -492,15 +537,20 @@ class RecipientsPage(BNPPage):
                 return Dict('nomBanque')(self) or NotAvailable
 
             def obj_enabled_at(self):
-                return datetime.now().replace(microsecond=0) if Dict('libelleStatut')(self) == u'Activé' else (datetime.now() + timedelta(days=5)).replace(microsecond=0)
+                if Dict('libelleStatut')(self) == u'Activé':
+                    return datetime.now().replace(microsecond=0)
+                return (datetime.now() + timedelta(days=5)).replace(microsecond=0)
 
     def has_digital_key(self):
-        return Dict('data/infoBeneficiaire/authentForte')(self.doc) and Dict('data/infoBeneficiaire/nomDeviceAF', default=False)(self.doc)
+        return (
+            Dict('data/infoBeneficiaire/authentForte')(self.doc)
+            and Dict('data/infoBeneficiaire/nomDeviceAF', default=False)(self.doc)
+        )
 
 
 class ValidateTransferPage(BNPPage):
     def check_errors(self):
-        if not 'data' in self.doc:
+        if 'data' not in self.doc:
             raise TransferBankError(message=self.doc['message'])
 
     def abort_if_unknown(self, transfer_data):
@@ -566,54 +616,78 @@ class RegisterTransferPage(ValidateTransferPage):
 
 
 class Transaction(FrenchTransaction):
-    PATTERNS = [(re.compile(u'^(?P<category>CHEQUE)(?P<text>.*)'),        FrenchTransaction.TYPE_CHECK),
-                (re.compile('^(?P<category>FACTURE CARTE) DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*?)( CA?R?T?E? ?\d*X*\d*)?$'),
-                                                            FrenchTransaction.TYPE_CARD),
-                (re.compile('^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP)) (?P<text>.*)'),
-                                                            FrenchTransaction.TYPE_ORDER),
-                (re.compile('^(?P<category>PRLV( EUROPEEN)? SEPA) (?P<text>.*?)( MDT/.*?)?( ECH/\d+)?( ID .*)?$'),
-                                                            FrenchTransaction.TYPE_ORDER),
-                (re.compile('^(?P<category>ECHEANCEPRET)(?P<text>.*)'),   FrenchTransaction.TYPE_LOAN_PAYMENT),
-                (re.compile('^(?P<category>RETRAIT DAB) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})( (?P<HH>\d+)H(?P<MM>\d+))?( \d+)? (?P<text>.*)'),
-                                                            FrenchTransaction.TYPE_WITHDRAWAL),
-                (re.compile('^(?P<category>VIR(EMEN)?T? (RECU |FAVEUR )?(TIERS )?)\w+ \d+/\d+ \d+H\d+ \w+ (?P<text>.*)$'),
-                                                            FrenchTransaction.TYPE_TRANSFER),
-                (re.compile('^(?P<category>VIR(EMEN)?T? (EUROPEEN )?(SEPA )?(RECU |FAVEUR |EMIS )?(TIERS )?)(/FRM |/DE |/MOTIF |/BEN )?(?P<text>.*?)(/.+)?$'),
-                                                            FrenchTransaction.TYPE_TRANSFER),
-                (re.compile('^(?P<category>REMBOURST) CB DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*)'),
-                                                            FrenchTransaction.TYPE_PAYBACK),
-                (re.compile('^(?P<category>REMBOURST)(?P<text>.*)'),     FrenchTransaction.TYPE_PAYBACK),
-                (re.compile('^(?P<category>COMMISSIONS)(?P<text>.*)'),   FrenchTransaction.TYPE_BANK),
-                (re.compile('^(?P<text>(?P<category>REMUNERATION).*)'),   FrenchTransaction.TYPE_BANK),
-                (re.compile('^(?P<category>REMISE CHEQUES)(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
-               ]
+    PATTERNS = [
+        (re.compile(u'^(?P<category>CHEQUE)(?P<text>.*)'), FrenchTransaction.TYPE_CHECK),
+        (
+            re.compile(
+                r'^(?P<category>FACTURE CARTE) DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*?)( CA?R?T?E? ?\d*X*\d*)?$'
+            ),
+            FrenchTransaction.TYPE_CARD,
+        ),
+        (re.compile('^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP)) (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
+        (
+            re.compile(r'^(?P<category>PRLV( EUROPEEN)? SEPA) (?P<text>.*?)( MDT/.*?)?( ECH/\d+)?( ID .*)?$'),
+            FrenchTransaction.TYPE_ORDER,
+        ),
+        (re.compile('^(?P<category>ECHEANCEPRET)(?P<text>.*)'), FrenchTransaction.TYPE_LOAN_PAYMENT),
+        (
+            re.compile(
+                r'^(?P<category>RETRAIT DAB) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})( (?P<HH>\d+)H(?P<MM>\d+))?( \d+)? (?P<text>.*)'
+            ),
+            FrenchTransaction.TYPE_WITHDRAWAL,
+        ),
+        (
+            re.compile(r'^(?P<category>VIR(EMEN)?T? (RECU |FAVEUR )?(TIERS )?)\w+ \d+/\d+ \d+H\d+ \w+ (?P<text>.*)$'),
+            FrenchTransaction.TYPE_TRANSFER,
+        ),
+        (
+            re.compile(
+                '^(?P<category>VIR(EMEN)?T? (EUROPEEN )?(SEPA )?(RECU |FAVEUR |EMIS )?(TIERS )?)(/FRM |/DE |/MOTIF |/BEN )?(?P<text>.*?)(/.+)?$'
+            ),
+            FrenchTransaction.TYPE_TRANSFER,
+        ),
+        (
+            re.compile(r'^(?P<category>REMBOURST) CB DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*)'),
+            FrenchTransaction.TYPE_PAYBACK,
+        ),
+        (
+            re.compile(
+                r'^(?P<category>(((1ER|(2|3)EME) TIERS)|INTERETS) SUR FACTURE) DE \d+,\d{2} EUR DU (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) (?P<text>.*)'
+            ),
+            FrenchTransaction.TYPE_CARD,
+        ),
+        (re.compile('^(?P<category>REMBOURST)(?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK),
+        (re.compile('^(?P<category>COMMISSIONS)(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<text>(?P<category>REMUNERATION).*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile('^(?P<category>REMISE CHEQUES)(?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+    ]
 
 
 class HistoryPage(BNPPage):
     CODE_TO_TYPE = {
-        1:  Transaction.TYPE_CHECK, # Chèque émis
-        2:  Transaction.TYPE_CHECK, # Chèque reçu
-        3:  Transaction.TYPE_CASH_DEPOSIT, # Versement espèces
-        4:  Transaction.TYPE_ORDER, # Virements reçus
-        5:  Transaction.TYPE_ORDER, # Virements émis
-        6:  Transaction.TYPE_LOAN_PAYMENT, # Prélèvements / amortissements prêts
-        7:  Transaction.TYPE_CARD, # Paiements carte,
-        8:  Transaction.TYPE_CARD, # Carte / Formule BNP Net,
-        9:  Transaction.TYPE_UNKNOWN,  # Opérations Titres
+        1: Transaction.TYPE_CHECK,  # Chèque émis
+        2: Transaction.TYPE_CHECK,  # Chèque reçu
+        3: Transaction.TYPE_CASH_DEPOSIT,  # Versement espèces
+        4: Transaction.TYPE_ORDER,  # Virements reçus
+        5: Transaction.TYPE_ORDER,  # Virements émis
+        6: Transaction.TYPE_LOAN_PAYMENT,  # Prélèvements / amortissements prêts
+        7: Transaction.TYPE_CARD,  # Paiements carte,
+        8: Transaction.TYPE_CARD,  # Carte / Formule BNP Net,
+        9: Transaction.TYPE_UNKNOWN,  # Opérations Titres
         10: Transaction.TYPE_UNKNOWN,  # Effets de Commerce
-        11: Transaction.TYPE_WITHDRAWAL, # Retraits d'espèces carte
-        12: Transaction.TYPE_UNKNOWN, # Opérations avec l'étranger
-        13: Transaction.TYPE_CARD, # Remises Carte
-        14: Transaction.TYPE_WITHDRAWAL, # Retraits guichets
-        15: Transaction.TYPE_BANK, # Intérêts/frais et commissions
-        16: Transaction.TYPE_UNKNOWN, # Tercéo
-        30: Transaction.TYPE_UNKNOWN, # Divers
+        11: Transaction.TYPE_WITHDRAWAL,  # Retraits d'espèces carte
+        12: Transaction.TYPE_UNKNOWN,  # Opérations avec l'étranger
+        13: Transaction.TYPE_CARD,  # Remises Carte
+        14: Transaction.TYPE_WITHDRAWAL,  # Retraits guichets
+        15: Transaction.TYPE_BANK,  # Intérêts/frais et commissions
+        16: Transaction.TYPE_UNKNOWN,  # Tercéo
+        30: Transaction.TYPE_UNKNOWN,  # Divers
     }
 
     COMING_TYPE_TO_TYPE = {
-        2: Transaction.TYPE_ORDER, # Prélèvement
-        3: Transaction.TYPE_CHECK, # Chèque
-        4: Transaction.TYPE_CARD, # Opération carte
+        2: Transaction.TYPE_ORDER,  # Prélèvement
+        3: Transaction.TYPE_CHECK,  # Chèque
+        4: Transaction.TYPE_CARD,  # Opération carte
     }
 
     def one(self, path, context=None):
@@ -631,11 +705,15 @@ class HistoryPage(BNPPage):
                 'category': op.get('categorie'),
                 'amount': self.one('montant.montant', op),
             })
-            tr.parse(raw=CleanText().filter(op.get('libelleOperation')),
-                     date=parse_french_date(op.get('dateOperation')),
-                     vdate=parse_french_date(self.one('montant.valueDate', op)))
+            tr.parse(
+                raw=CleanText().filter(op.get('libelleOperation')),
+                date=parse_french_date(op.get('dateOperation')),
+                vdate=parse_french_date(self.one('montant.valueDate', op))
+            )
 
-            raw_is_summary = re.match(r'FACTURE CARTE SELON RELEVE DU\b|FACTURE CARTE CARTE AFFAIRES \d{4}X{8}\d{4} SUIVANT\b', tr.raw)
+            raw_is_summary = re.match(
+                r'FACTURE CARTE SELON RELEVE DU\b|FACTURE CARTE CARTE AFFAIRES \d{4}X{8}\d{4} SUIVANT\b', tr.raw
+            )
             if tr.type == Transaction.TYPE_CARD and raw_is_summary:
                 tr.type = Transaction.TYPE_CARD_SUMMARY
                 tr.deleted = True
@@ -658,8 +736,7 @@ class HistoryPage(BNPPage):
             parse_with_patterns(tr.raw, tr, Transaction.PATTERNS)
 
             if tr.type == Transaction.TYPE_CARD:
-                tr.type = self.browser.card_to_transaction_type.get(op.get('keyCarte'),
-                                                                    Transaction.TYPE_DEFERRED_CARD)
+                tr.type = self.browser.card_to_transaction_type.get(op.get('keyCarte'), Transaction.TYPE_DEFERRED_CARD)
             yield tr
 
 
@@ -700,7 +777,7 @@ class LifeInsurancesHistoryPage(BNPPage):
 
     def iter_history(self, coming):
         for op in self.get('data.listerMouvements.listeMouvements') or []:
-            #We have not date for this statut so we just skit it
+            # We have not date for this statut so we just skit it
             if op.get('statut') in self.IGNORED_STATUSES:
                 continue
 
@@ -708,11 +785,17 @@ class LifeInsurancesHistoryPage(BNPPage):
                 'type': Transaction.TYPE_BANK,
                 '_state': op.get('statut'),
                 'amount': op.get('montantNet'),
-                })
+            })
 
-            tr.parse(date=parse_french_date(op.get('dateSaisie')),
-                     vdate = parse_french_date(op.get('dateEffet')) if op.get('dateEffet') else None,
-                     raw='%s %s' % (op.get('libelleMouvement'), op.get('canalSaisie') or ''))
+            vdate = None
+            if op.get('dateEffet'):
+                vdate = parse_french_date(op.get('dateEffet'))
+
+            tr.parse(
+                date=parse_french_date(op.get('dateSaisie')),
+                vdate=vdate,
+                raw='%s %s' % (op.get('libelleMouvement'), op.get('canalSaisie') or '')
+            )
             tr._op = op
 
             if not tr.amount:
@@ -732,10 +815,10 @@ class NatioVieProPage(BNPPage):
     # This form is required to go to the capitalisation contracts page.
     def get_params(self):
         params = {
-            'app':         'BNPNET',
-            'hageGroup':   'consultationBnpnet',
-            'init':        'true',
-            'multiInit':   'false',
+            'app': 'BNPNET',
+            'hageGroup': 'consultationBnpnet',
+            'init': 'true',
+            'multiInit': 'false',
         }
         params['a0'] = self.doc['data']['nationVieProInfos']['a0']
         # The number of "p" keys may vary (p0, p1, p2 ... up to p13 or more)
@@ -747,20 +830,20 @@ class NatioVieProPage(BNPPage):
         return params
 
 
-class CapitalisationPage(LoggedPage, HTMLPage):
+class CapitalisationPage(LoggedPage, PartialHTMLPage):
     def has_contracts(self):
         # This message will appear if the page "Assurance Vie" contains no contract.
         return not CleanText('//td[@class="message"]/text()[starts-with(., "Pour toute information")]')(self.doc)
 
     # To be completed with other account labels and types seen on the "Assurance Vie" space:
     ACCOUNT_TYPES = {
-        'BNP Paribas Multiplacements':                  Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Multihorizons':                    Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Libertéa Privilège':               Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Avenir Retraite':                  Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Multiciel Privilège':              Account.TYPE_CAPITALISATION,
-        'Plan Epargne Retraite Particulier':            Account.TYPE_PERP,
-        "Plan d'Épargne Retraite des Particuliers":     Account.TYPE_PERP,
+        'BNP Paribas Multiplacements': Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Multihorizons': Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Libertéa Privilège': Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Avenir Retraite': Account.TYPE_LIFE_INSURANCE,
+        'BNP Paribas Multiciel Privilège': Account.TYPE_CAPITALISATION,
+        'Plan Epargne Retraite Particulier': Account.TYPE_PERP,
+        "Plan d'Épargne Retraite des Particuliers": Account.TYPE_PERP,
     }
 
     @method
@@ -812,7 +895,9 @@ class CapitalisationPage(LoggedPage, HTMLPage):
 
     # The investments vdate is out of the investments table and is the same for all investments:
     def get_vdate(self):
-        return parse_french_date(CleanText('//table[tr[th[text()[contains(., "Date de valorisation")]]]]/tr[2]/td[2]')(self.doc))
+        return parse_french_date(
+            CleanText('//table[tr[th[text()[contains(., "Date de valorisation")]]]]/tr[2]/td[2]')(self.doc)
+        )
 
     @method
     class iter_investments(TableElement):
@@ -831,7 +916,11 @@ class CapitalisationPage(LoggedPage, HTMLPage):
 
             obj_label = CleanText(TableCell('label'))
             obj_valuation = CleanDecimal(TableCell('valuation'), replace_dots=True)
-            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal(TableCell('portfolio_share'), replace_dots=True))
+            obj_portfolio_share = Eval(
+                lambda x: x / 100,
+                CleanDecimal(TableCell('portfolio_share'), replace_dots=True)
+            )
+
             # There is no "unitvalue" information available on the "Assurances Vie" space.
 
             def obj_quantity(self):
@@ -889,7 +978,7 @@ class MarketHistoryPage(BNPPage):
                 'amount': op.get('movementAmount'),
                 'date': datetime.fromtimestamp(op.get('movementDate') / 1000),
                 'label': op.get('operationName'),
-                })
+            })
 
             tr.investments = []
             inv = Investment()
@@ -911,12 +1000,14 @@ class AdvisorPage(BNPPage):
             klass = Advisor
 
             obj_name = Format('%s %s %s', Dict('data/civilite'), Dict('data/prenom'), Dict('data/nom'))
-            obj_email = Regexp(Dict('data/mail'), '(?=\w)(.*)', default=NotAvailable)
+            obj_email = Regexp(Dict('data/mail'), r'(?=\w)(.*)', default=NotAvailable)
             obj_phone = CleanText(Dict('data/telephone'), replace=[(' ', '')])
             obj_mobile = CleanText(Dict('data/mobile'), replace=[(' ', '')])
             obj_fax = CleanText(Dict('data/fax'), replace=[(' ', '')])
             obj_agency = Dict('data/agence')
-            obj_address = Format('%s %s %s', Dict('data/adresseAgence'), Dict('data/codePostalAgence'), Dict('data/villeAgence'))
+            obj_address = Format(
+                '%s %s %s', Dict('data/adresseAgence'), Dict('data/codePostalAgence'), Dict('data/villeAgence')
+            )
 
 
 class AddRecipPage(BNPPage):
@@ -932,7 +1023,7 @@ class AddRecipPage(BNPPage):
         r.id = self.get('data.gestionBeneficiaire.identifiantBeneficiaire')
         r.label = recipient.label
         r.category = u'Externe'
-        r.enabled_at = datetime.now().replace(microsecond=0) + timedelta(days=5)
+        r.enabled_at = datetime.now().replace(microsecond=0)
         r.currency = u'EUR'
         r.bank_name = NotAvailable
         r._id_transaction = self.get('data.gestionBeneficiaire.idTransactionAF') or NotAvailable
@@ -943,11 +1034,15 @@ class AddRecipPage(BNPPage):
 class ActivateRecipPage(AddRecipPage):
     def is_recipient_validated(self):
         authent_state = self.doc['data']['verifAuthentForte']['authentForteDone']
+        # 0: recipient is in validating state, continue polling
+        # 1: recipient is validated
+        # 2: user has cancelled
+        # 3: operation timeout
         assert authent_state in (0, 1, 2, 3), 'State of authent is %s' % authent_state
         if authent_state == 2:
-            raise ActionNeeded("La demande d'ajout de bénéficiaire a été annulée.")
+            raise AppValidationCancelled(message="La demande d'ajout de bénéficiaire a été annulée.")
         elif authent_state == 3:
-            raise AddRecipientTimeout()
+            raise AppValidationExpired()
         return authent_state
 
     def get_recipient(self, recipient):
@@ -964,3 +1059,50 @@ class ActivateRecipPage(AddRecipPage):
 
 class UselessPage(LoggedPage, HTMLPage):
     pass
+
+
+class TransfersPage(BNPPage):
+    @method
+    class iter_transfers(DictElement):
+        item_xpath = 'data/historiqueVirement/virements'
+
+        class item(ItemElement):
+            # TODO handle periodic transfer, it was not working during the development of this part...
+            klass = Transfer
+
+            obj_id = Dict('idVirement')
+
+            # when a transfer is canceled, dateStatut seems to be set to the cancel date
+            obj_exec_date = Date(
+                Dict('dateStatut'),
+                dayfirst=True,
+            )
+            obj_creation_date = Date(
+                Dict('dateSaisie'),
+                dayfirst=True,
+            )
+            obj_label = Dict('motif')
+            obj_recipient_iban = Dict('compteCredite')
+            obj_account_iban = Dict('compteDebite')
+            obj_recipient_label = Dict('libelleCompteCredite')
+            # already saw the case when this field did was not here. may be the emitter account did not exist anymore?
+            obj_account_label = Dict('libelleCompteDebite', default=NotAvailable)
+
+            STATUSES = {
+                '4': TransferStatus.DONE,
+                '3': TransferStatus.SCHEDULED,
+                '1': TransferStatus.CANCELLED,
+            }
+            obj_status = Map(Dict('statut'), STATUSES)
+            obj_amount = CleanDecimal.US(Dict('montant'))
+            obj_currency = Dict('devise')
+
+            def obj_date_type(self):
+                # since periodic transfer does not work (tried on the app and the website)
+                # this type is not handled yet
+                # TODO handle periodic, for now it will be defaulted to FIRST_OPEN_DAY
+                if Dict('ip')(self):
+                    return TransferDateType.INSTANT
+                if not Dict('immediat')(self):
+                    return TransferDateType.DEFERRED
+                return TransferDateType.FIRST_OPEN_DAY

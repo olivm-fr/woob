@@ -23,7 +23,8 @@ import re
 from decimal import Decimal
 from collections import OrderedDict
 
-from weboob.capabilities.bank import CapBankWealth, CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound
+from weboob.capabilities.bank import CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound
+from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.bill import (
     CapDocument, Subscription, SubscriptionNotFound,
     Document, DocumentNotFound, DocumentTypes,
@@ -44,7 +45,7 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
     NAME = 'caissedepargne'
     MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '1.6'
+    VERSION = '2.1'
     DESCRIPTION = 'Caisse d\'Épargne'
     LICENSE = 'LGPLv3+'
     BROWSER = ProxyBrowser
@@ -59,7 +60,7 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
         Value('nuser', label='User ID (optional)', default='', regexp='[A-Z\d]{0,8}'),
     )
 
-    accepted_document_types = (DocumentTypes.OTHER,)
+    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.OTHER,)
 
     def create_default_browser(self):
         return self.create_browser(nuser=self.config['nuser'].get(),
@@ -85,6 +86,9 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
 
     def iter_investment(self, account):
         return self.browser.get_investment(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
 
     def iter_contacts(self):
         return self.browser.get_advisor()
@@ -149,6 +153,12 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
 
         return self.browser.iter_documents(subscription)
 
+    def iter_transfers(self, account):
+        for tr in self.browser.iter_transfers(account):
+            if account and account.id != tr.account_id:
+                continue
+            yield tr
+
     def download_document(self, document):
         if not isinstance(document, Document):
             document = self.get_document(document)
@@ -157,3 +167,6 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
             return
 
         return self.browser.download_document(document)
+
+    def iter_emitters(self):
+        return self.browser.iter_emitters()

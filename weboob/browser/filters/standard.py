@@ -119,6 +119,9 @@ class Base(Filter):
 
     def __call__(self, item):
         base = self.select(self.base, item)
+        if isinstance(base, list):
+            assert len(base) == 1, 'If using a list, there must be one element only'
+            base = base[0]
         return self.select(self.selector, base)
 
     def __init__(self, base, selector=None, default=_NO_DEFAULT):
@@ -318,7 +321,9 @@ class CleanText(Filter):
 
     @debug()
     def filter(self, txt):
-        if isinstance(txt, (tuple, list)):
+        if isinstance(txt, int):
+            txt = str(txt)
+        elif isinstance(txt, (tuple, list)):
             txt = u' '.join([self.clean(item, children=self.children) for item in txt])
 
         txt = self.clean(txt, self.children, self.newlines, self.normalize, self.transliterate)
@@ -444,6 +449,8 @@ class CleanDecimal(CleanText):
 
         original_text = text = super(CleanDecimal, self).filter(text)
 
+        text = text.replace(u'\u2212', '-')
+
         if self.legacy:
             if self.replace_dots:
                 if type(self.replace_dots) is tuple:
@@ -471,11 +478,19 @@ class CleanDecimal(CleanText):
 
         try:
             v = Decimal(text)
-            if self.sign:
-                v *= self.sign(original_text)
-            return v
         except InvalidOperation as e:
             return self.default_or_raise(NumberFormatError(e))
+        else:
+            if self.sign is not None:
+                if callable(self.sign):
+                    v *= self.sign(original_text)
+                elif self.sign == '+':
+                    return abs(v)
+                elif self.sign == '-':
+                    return -abs(v)
+                else:
+                    raise TypeError("'sign' should be a callable or a sign string")
+            return v
 
     @classmethod
     def US(cls, *args, **kwargs):
@@ -493,6 +508,12 @@ class CleanDecimal(CleanText):
     def SI(cls, *args, **kwargs):
         kwargs['legacy'] = False
         kwargs['replace_dots'] = (' ', '.')
+        return cls(*args, **kwargs)
+
+    @classmethod
+    def Italian(cls, *args, **kwargs):
+        kwargs['legacy'] = False
+        kwargs['replace_dots'] = ('.', ',')
         return cls(*args, **kwargs)
 
 
@@ -1072,6 +1093,17 @@ def assert_raises(exc_class, func, *args, **kwargs):
         pass
     else:
         assert False, 'did not raise %s' % exc_class
+
+
+def test_CleanDecimal_unicode():
+    assert CleanDecimal().filter(u'\u22123000') == Decimal('-3000')
+
+
+def test_CleanDecimal_sign():
+    assert CleanDecimal(sign='-').filter('42') == Decimal('-42')
+    assert CleanDecimal(sign='-').filter('-42') == Decimal('-42')
+    assert CleanDecimal(sign='+').filter('42') == Decimal('42')
+    assert CleanDecimal(sign='+').filter('-42') == Decimal('42')
 
 
 def test_CleanDecimal_strict():

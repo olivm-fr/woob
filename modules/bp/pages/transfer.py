@@ -23,11 +23,11 @@ from datetime import datetime
 
 from weboob.capabilities.bank import (
     TransferBankError, Transfer, TransferStep, NotAvailable, Recipient,
-    AccountNotFound, AddRecipientBankError
+    AccountNotFound, AddRecipientBankError, Emitter,
 )
 from weboob.capabilities.base import find_object, empty
 from weboob.browser.pages import LoggedPage
-from weboob.browser.filters.standard import CleanText, Env, Regexp, Date, CleanDecimal
+from weboob.browser.filters.standard import CleanText, Env, Regexp, Date, CleanDecimal, Currency
 from weboob.browser.filters.html import Attr, Link
 from weboob.browser.elements import ListElement, ItemElement, method, SkipItem
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
@@ -84,7 +84,10 @@ class TransferChooseAccounts(LoggedPage, MyHTMLPage):
                 return datetime.now().replace(microsecond=0)
 
             def parse(self, el):
-                if any(s in CleanText('.')(el) for s in ['Avoir disponible', 'Solde']) or self.page.is_inner(CleanText('.')(el)):
+                if (
+                    any(s in CleanText('.')(el) for s in ['Avoir disponible', 'Solde']) or self.page.is_inner(CleanText('.')(el))
+                    or not is_iban_valid(CleanText(Attr('.', 'value'))(el))  # if the id is not an iban, it is an internal id (for internal accounts)
+                ):
                     self.env['category'] = 'Interne'
                 else:
                     self.env['category'] = 'Externe'
@@ -98,13 +101,19 @@ class TransferChooseAccounts(LoggedPage, MyHTMLPage):
                         self.env['label'] = account.label
                         self.env['iban'] = account.iban
                     except AccountNotFound:
-                        self.env['id'] = Regexp(CleanText('.'), '- (.*?) -')(el).replace(' ', '')
+                        # Some internal recipients cannot be parsed on the website and so, do not
+                        # appear in the iter_accounts. We can still do transfer to those accounts
+                        # because they have an internal id (internal id = id that is not an iban).
+                        self.env['id'] = _id
                         self.env['iban'] = NotAvailable
-                        label = CleanText('.')(el).split('-')
-                        holder = label[-1] if not any(string in label[-1] for string in ['Avoir disponible', 'Solde']) else label[-2]
-                        self.env['label'] = '%s %s' % (label[0].strip(), holder.strip())
+                        raw_label = CleanText('.')(el)
+                        if '-' in raw_label:
+                            label = raw_label.split('-')
+                            holder = label[-1] if not any(string in label[-1] for string in ['Avoir disponible', 'Solde']) else label[-2]
+                            self.env['label'] = '%s %s' % (label[0].strip(), holder.strip())
+                        else:
+                            self.env['label'] = raw_label
                     self.env['bank_name'] = 'La Banque Postale'
-
                 else:
                     self.env['id'] = self.env['iban'] = Regexp(CleanText('.'), '- (.*?) -')(el).replace(' ', '')
                     self.env['label'] = Regexp(CleanText('.'), '- (.*?) - (.*)', template='\\2')(el).strip()
@@ -124,6 +133,37 @@ class TransferChooseAccounts(LoggedPage, MyHTMLPage):
         form['donneesSaisie.montant'] = amount
         form.submit()
 
+    @method
+    class iter_emitters(ListElement):
+        item_xpath = '//select[@id="donneesSaisie.idxCompteEmetteur"]/option[@value!="-1"]'
+
+        class item(ItemElement):
+            klass = Emitter
+
+            obj_id = CleanText('./@value')
+            obj_currency = Currency('.')
+
+            def obj_balance(self):
+                # Split item data and get the balance part
+                item_string = CleanText('.')(self)
+                if 'Solde' not in item_string:
+                    return NotAvailable
+
+                return CleanDecimal.French().filter(item_string.split('Solde')[-1])
+
+            def obj_label(self):
+                """
+                Label info is found at the start and the middle of the item data:
+                'CCP - 12XXXX99 - MR JEAN DUPONT - Solde : 9 270,89 €' becomes 'CCP - MR JEAN DUPONT'.
+                Sometimes the owner name and account number is not present so the label looks like this:
+                'CCP - Solde : 9 270,89 €'
+                """
+                item_parts = list(map(str.strip, CleanText('.')(self).split('-')))
+                if len(item_parts) > 2:
+                    return '%s - %s' % (item_parts[0], item_parts[2])
+                else:
+                    return item_parts[0]
+
 
 class CompleteTransfer(LoggedPage, CheckTransferError):
     def complete_transfer(self, transfer):
@@ -134,6 +174,17 @@ class CompleteTransfer(LoggedPage, CheckTransferError):
             form['commentaire'] = transfer.label
         form['dateVirement'] = transfer.exec_date.strftime('%d/%m/%Y')
         form.submit()
+
+    def has_popin_eligibility(self):
+        return bool(
+            self.doc.xpath("""//script[contains(text(), 'doAfficherPopinEligibite = "debiteur"')]""")
+            or self.doc.xpath('//p[@id="informationVirementEpargneLoi6902"]')
+        )
+
+
+class HonorTransferPage(LoggedPage, MyHTMLPage):
+    def get_honor_message(self):
+        return CleanText('//div[@id="pop_up_virement_epargne_loi_6902_debiteur_coche"]//p')(self.doc)
 
 
 class TransferConfirm(LoggedPage, CheckTransferError):
@@ -164,7 +215,7 @@ class TransferConfirm(LoggedPage, CheckTransferError):
         form = self.get_form(id='formID')
         form.submit()
 
-    def handle_response(self, account, recipient, amount, reason):
+    def handle_response(self, transfer):
         # handle error
         error_msg = CleanText('//div[@id="blocErreur"]')(self.doc)
         if error_msg:
@@ -173,27 +224,22 @@ class TransferConfirm(LoggedPage, CheckTransferError):
         account_txt = CleanText('//form//h3[contains(text(), "débiter")]//following::span[1]', replace=[(' ', '')])(self.doc)
         recipient_txt = CleanText('//form//h3[contains(text(), "créditer")]//following::span[1]', replace=[(' ', '')])(self.doc)
 
-        assert account.id in account_txt or ''.join(account.label.split()) == account_txt, 'Something went wrong'
-        assert recipient.id in recipient_txt or ''.join(recipient.label.split()) == recipient_txt, 'Something went wrong'
+        assert transfer.account_id in account_txt or ''.join(transfer.account_label.split()) == account_txt, 'Something went wrong'
+        assert transfer.recipient_id in recipient_txt or ''.join(transfer.recipient_label.split()) == recipient_txt, 'Something went wrong'
 
         amount_element = self.doc.xpath('//h3[contains(text(), "Montant du virement")]//following::span[@class="price"]')[0]
         r_amount = CleanDecimal.French('.')(amount_element)
         exec_date = Date(CleanText('//h3[contains(text(), "virement")]//following::span[@class="date"]'), dayfirst=True)(self.doc)
         currency = FrenchTransaction.Currency('.')(amount_element)
 
-        transfer = Transfer()
-        transfer.currency = currency
-        transfer.amount = r_amount
-        transfer.account_iban = account.iban
-        transfer.recipient_iban = recipient.iban
-        transfer.account_id = account.id
-        transfer.recipient_id = recipient.id
-        transfer.exec_date = exec_date
-        transfer.label = reason
-        transfer.account_label = account.label
-        transfer.recipient_label = recipient.label
-        transfer.account_balance = account.balance
-        return transfer
+        tr = Transfer()
+        for key, value in transfer.iter_fields():
+            setattr(tr, key, value)
+        tr.currency = currency
+        tr.amount = r_amount
+        tr.exec_date = exec_date
+
+        return tr
 
 
 class TransferSummary(LoggedPage, CheckTransferError):

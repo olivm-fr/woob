@@ -28,21 +28,24 @@ from weboob.exceptions import BrowserQuestion
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.tools.compat import unicode
 
-from .base import BaseObject, Field, StringField, DecimalField, IntField, \
-                  UserError, Currency, NotAvailable, EnumField, Enum
+from .base import (
+    BaseObject, Field, StringField, DecimalField, IntField,
+    UserError, Currency, NotAvailable, EnumField, Enum,
+    Capability,
+)
 from .date import DateField
 from .collection import CapCollection
 
 
 __all__ = [
-    'CapBank', 'BaseAccount', 'Account', 'Loan', 'Transaction', 'AccountNotFound',
-    'AccountType', 'AccountOwnership',
-    'CapBankWealth', 'Investment', 'CapBankPockets', 'Pocket',
+    'CapBank', 'BaseAccount', 'Account', 'Loan', 'Per', 'Transaction', 'AccountNotFound',
+    'AccountType', 'AccountOwnership', 'Emitter', 'EmitterNumberType',
+    'CapBankWealth', 'Investment', 'Pocket',
     'CapBankTransfer', 'Transfer', 'Recipient',
     'TransferError', 'TransferBankError', 'TransferInvalidAmount', 'TransferInsufficientFunds',
     'TransferInvalidCurrency', 'TransferInvalidLabel',
     'TransferInvalidEmitter', 'TransferInvalidOTP', 'TransferInvalidRecipient',
-    'TransferStep',
+    'TransferCancelledByUser', 'TransferStep',
     'CapBankTransferAddRecipient',
     'RecipientNotFound', 'AddRecipientError', 'AddRecipientBankError', 'AddRecipientTimeout',
     'AddRecipientStep', 'RecipientInvalidIban', 'RecipientInvalidLabel', 'RecipientInvalidOTP',
@@ -50,7 +53,11 @@ __all__ = [
 ]
 
 
-class AccountNotFound(UserError):
+class ObjectNotFound(UserError):
+    pass
+
+
+class AccountNotFound(ObjectNotFound):
     """
     Raised when an account is not found.
     """
@@ -59,13 +66,18 @@ class AccountNotFound(UserError):
         super(AccountNotFound, self).__init__(msg)
 
 
-class RecipientNotFound(UserError):
+class RecipientNotFound(ObjectNotFound):
     """
     Raised when a recipient is not found.
     """
 
     def __init__(self, msg='Recipient not found'):
         super(RecipientNotFound, self).__init__(msg)
+
+
+class TransferNotFound(ObjectNotFound):
+    def __init__(self, msg='Transfer not found'):
+        super(TransferNotFound, self).__init__(msg)
 
 
 class TransferError(UserError):
@@ -135,6 +147,12 @@ class TransferInvalidDate(TransferError):
 
 class TransferInvalidOTP(TransferError):
     code = 'invalidOTP'
+
+
+class TransferCancelledByUser(TransferError):
+    """The transfer is cancelled by the emitter or an authorized user"""
+
+    code = 'cancelledByUser'
 
 
 class AddRecipientError(UserError):
@@ -382,6 +400,26 @@ class Loan(Account):
     next_payment_date = DateField('Date of the next payment')
 
 
+class PerVersion(Enum):
+    PERIN = 'perin'  # "PER individuel", subscribed by the account holder
+    PERCOL = 'percol'  # "PER collectif", subscribed by the employer for all employees
+    PERCAT = 'percat'  # "PER catégoriel", subscribed by the employer for a category of employees (for example managers)
+
+
+class PerProviderType(Enum):
+    BANK = 'bank'
+    INSURER = 'insurer'
+
+
+class Per(Account):
+    """
+    Account type dedicated to PER retirement savings plans.
+    """
+
+    version = EnumField('Version of PER', PerVersion)
+    provider_type = EnumField('Type of account provider', PerProviderType)
+
+
 class TransactionType(Enum):
     UNKNOWN       = 0
     TRANSFER      = 1
@@ -571,6 +609,49 @@ class Pocket(BaseObject):
     investment =        Field('Reference to the investment of the pocket', Investment)
 
 
+class MarketOrderType(Enum):
+    UNKNOWN = 0
+    MARKET = 1
+    """Order executed at the current market price"""
+    LIMIT = 2
+    """Order executed with a maximum or minimum price limit"""
+    TRIGGER = 3
+    """Order executed when the price reaches a specific value"""
+
+
+class MarketOrderDirection(Enum):
+    UNKNOWN = 0
+    BUY = 1
+    SALE = 2
+
+
+class MarketOrder(BaseObject):
+    """
+    Market order
+    """
+
+    # Important: a Market Order always corresponds to one (and only one) investment
+    label = StringField('Label of the market order')
+
+    # MarketOrder values
+    unitprice = DecimalField('Value of the stock at the moment of the market order')
+    unitvalue = DecimalField('Current value of the stock associated with the market order')
+    ordervalue = DecimalField('Limit value or trigger value, only relevant if the order type is LIMIT or TRIGGER')
+    currency = StringField('Currency of the market order - not always the same as account currency')
+    quantity = DecimalField('Quantity of stocks in the market order')
+    amount = DecimalField('Total amount that has been bought or sold')
+
+    # MarketOrder additional information
+    order_type = EnumField('Type of market order', MarketOrderType, default=MarketOrderType.UNKNOWN)
+    direction = EnumField('Direction of the market order (buy or sale)', MarketOrderDirection, default=MarketOrderDirection.UNKNOWN)
+    date = DateField('Creation date of the market order')
+    validity_date = DateField('Validity date of the market order')
+    execution_date = DateField('Execution date of the market order (only for market orders that are completed)')
+    state = StringField('Current state of the market order (e.g. executed)')
+    code = StringField('Identifier of the stock related to the order')
+    stock_market = StringField('Stock market on which the order was executed')
+
+
 class TransferStep(BrowserQuestion):
     def __init__(self, transfer, *values):
         super(TransferStep, self).__init__(*values)
@@ -587,6 +668,43 @@ class BeneficiaryType(object):
     RECIPIENT =          'recipient'
     IBAN =               'iban'
     PHONE_NUMBER =       'phone_number'
+
+
+class TransferStatus(Enum):
+    UNKNOWN = 'unknown'
+
+    SCHEDULED = 'scheduled'
+    """Transfer to be executed later"""
+
+    DONE = 'done'
+    """Transfer was executed"""
+
+    CANCELLED = 'cancelled'
+    """Transfer was cancelled by the bank or by the user"""
+
+
+class TransferFrequency(Enum):
+    UNKNOWN = 'unknown'
+    WEEKLY = 'weekly'
+    MONTHLY = 'monthly'
+    BIMONTHLY = 'bimonthly'
+    QUARTERLY = 'quarterly'
+    BIANNUAL = 'biannual'
+    YEARLY = 'yearly'
+
+
+class TransferDateType(Enum):
+    FIRST_OPEN_DAY = 'first_open_day'
+    """Transfer to execute when possible (accounting opening days)"""
+
+    INSTANT = 'instant'
+    """Transfer to execute immediately (not accounting opening days)"""
+
+    DEFERRED = 'deferred'
+    """Transfer to execute on a chosen date"""
+
+    PERIODIC = 'periodic'
+    """Transfer to execute periodically"""
 
 
 class Transfer(BaseObject, Currency):
@@ -615,6 +733,32 @@ class Transfer(BaseObject, Currency):
     beneficiary_type =    StringField('Transfer creditor number type', default=BeneficiaryType.RECIPIENT)
     beneficiary_number =  StringField('Transfer creditor number')
     beneficiary_label =  StringField('Transfer creditor label')
+
+    date_type = EnumField('Transfer execution date type', TransferDateType)
+
+    frequency = EnumField('Frequency of periodic transfer', TransferFrequency)
+    first_due_date = DateField('Date of first transfer of periodic transfer')
+    last_due_date = DateField('Date of last transfer of periodic transfer')
+
+    creation_date = DateField('Creation date of transfer')
+    status = EnumField('Transfer status', TransferStatus)
+
+    cancelled_exception = Field('Transfer cancelled reason', TransferError)
+
+
+class EmitterNumberType(Enum):
+    UNKNOWN = 'unknown'
+    IBAN = 'iban'
+    BBAN = 'bban'
+
+
+class Emitter(BaseAccount):
+    """
+    Transfer emitter account.
+    """
+    number_type = EnumField('Account number type', EmitterNumberType, default=EmitterNumberType.UNKNOWN)
+    number = StringField('Account number value')
+    balance = DecimalField('Balance of emitter account')
 
 
 class CapBank(CapCollection):
@@ -682,15 +826,9 @@ class CapBank(CapCollection):
         raise NotImplementedError()
 
 
-class CapCgp(CapBank):
-    """
-    Capability of cgp website to see accounts and transactions.
-    """
-
-
 class CapBankWealth(CapBank):
     """
-    Capability of bank websites to see investment.
+    Capability of bank websites to see investments and pockets.
     """
 
     def iter_investment(self, account):
@@ -704,12 +842,6 @@ class CapBankWealth(CapBank):
         """
         raise NotImplementedError()
 
-
-class CapBankPockets(CapBankWealth):
-    """
-    Capability of bank websites to see pockets.
-    """
-
     def iter_pocket(self, account):
         """
         Iter pocket
@@ -721,9 +853,22 @@ class CapBankPockets(CapBankWealth):
         """
         raise NotImplementedError()
 
+    def iter_market_orders(self, account):
+        """
+        Iter market orders
 
-class CapBankTransfer(CapBank):
+        :param account: account to get market orders
+        :type account: :class:`Account`
+        :rtype: iter[:class:`MarketOrder`]
+        :raises: :class:`AccountNotFound`
+        """
+        raise NotImplementedError()
+
+
+class CapTransfer(Capability):
     accepted_beneficiary_types = (BeneficiaryType.RECIPIENT, )
+
+    accepted_execution_date_types = (TransferDateType.FIRST_OPEN_DAY, TransferDateType.DEFERRED)
 
     def iter_transfer_recipients(self, account):
         """
@@ -755,6 +900,18 @@ class CapBankTransfer(CapBank):
         :raises: :class:`TransferError`
         """
         raise NotImplementedError()
+
+    def confirm_transfer(self, transfer, **params):
+        """
+        Transfer confirmation after multiple SCA from the Emitter.
+        This method is only used for PSD2 purpose.
+        Return the transfer with the new status.
+
+        :param :class:`Transfer`
+        :rtype: :class:`Transfer`
+        :raises: :class:`TransferError`
+        """
+        return self.get_transfer(transfer.id)
 
     def transfer(self, transfer, **params):
         """
@@ -791,6 +948,43 @@ class CapBankTransfer(CapBank):
         old = re.sub(r'\s+', ' ', old).strip()
         new = re.sub(r'\s+', ' ', new).strip()
         return unidecode(old) == unidecode(new)
+
+    def iter_transfers(self, account=None):
+        """
+        Iter transfer transactions.
+
+        :param account: account to get transfer history (or None for all accounts)
+        :type account: :class:`Account`
+        :rtype: iter[:class:`Transfer`]
+        :raises: :class:`AccountNotFound`
+        """
+        raise NotImplementedError()
+
+    def get_transfer(self, id):
+        """
+        Get a transfer from its id.
+
+        :param id: ID of the Transfer
+        :type id: :class:`str`
+        :rtype: :class:`Transfer`
+        """
+        return find_object(self.iter_transfers(), id=id, error=TransferNotFound)
+
+    def iter_emitters(self):
+        """
+        Iter transfer emitter accounts.
+
+        :rtype: iter[:class:`Emitter`]
+        """
+        raise NotImplementedError()
+
+
+class CapBankTransfer(CapBank, CapTransfer):
+    def account_to_emitter(self, account):
+        if isinstance(account, Account):
+            account = account.id
+
+        return find_object(self.iter_emitters, id=account, error=ObjectNotFound)
 
 
 class CapBankTransferAddRecipient(CapBankTransfer):
