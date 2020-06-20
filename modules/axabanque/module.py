@@ -47,6 +47,12 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
     BROWSER = AXABanque
 
     def create_default_browser(self):
+
+        # Bugfix the [SSL: WRONG_SIGNATURE_TYPE] wrong signature type (_ssl.c:1108)  error
+        # It's an ugly workaround, to be removed as soon as Axa fixes their servers !
+        import requests
+        requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS = 'DEFAULT@SECLEVEL=1'
+
         login = self.config['login'].get()
         self.BROWSER = AXABanque if login.isdigit() else AXAAssurance
         return self.create_browser(
