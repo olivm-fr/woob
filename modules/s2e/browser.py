@@ -17,12 +17,14 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
 
 from __future__ import unicode_literals
 
 import re
 
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
+from weboob.browser.exceptions import ServerError
 from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, NoAccountsException
 from weboob.capabilities.wealth import Investment
 from weboob.tools.capabilities.bank.investments import is_isin_valid
@@ -31,16 +33,19 @@ from .pages import (
     LoginPage, AccountsPage, AMFHSBCPage, AMFAmundiPage, AMFSGPage, HistoryPage, ErrorPage,
     LyxorfcpePage, EcofiPage, EcofiDummyPage, LandingPage, SwissLifePage, LoginErrorPage,
     EtoileGestionPage, EtoileGestionCharacteristicsPage, EtoileGestionDetailsPage,
-    APIInvestmentDetailsPage, LyxorFundsPage, EsaliaDetailsPage, EsaliaPerformancePage,
-    AmundiDetailsPage, AmundiPerformancePage, ProfilePage,
-    EServicePage,
+    BNPInvestmentsPage, BNPInvestmentDetailsPage, LyxorFundsPage, EsaliaDetailsPage,
+    EsaliaPerformancePage, AmundiDetailsPage, AmundiPerformancePage, ProfilePage,
+    HsbcVideoPage, CprInvestmentPage, CprPerformancePage, CmCicInvestmentPage,
+    HsbcInvestmentPage, EServicePage,
 )
 
 
 class S2eBrowser(LoginBrowser, StatesMixin):
-    login = URL(r'/portal/salarie-(?P<slug>\w+)/authentification',
-                r'(.*)portal/salarie-(?P<slug>\w+)/authentification',
-                r'/portal/j_security_check', LoginPage)
+    login = URL(
+        r'/portal/salarie-(?P<slug>\w+)/authentification',
+        r'(.*)portal/salarie-(?P<slug>\w+)/authentification',
+        r'/portal/j_security_check', LoginPage
+    )
     login_error = URL(r'/portal/login', LoginErrorPage)
     landing = URL(r'(.*)portal/salarie-bnp/accueil', LandingPage)
     accounts = URL(
@@ -51,7 +56,6 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     history = URL(r'/portal/salarie-(?P<slug>\w+)/operations/consulteroperations', HistoryPage)
     error = URL(r'/maintenance/.+/', ErrorPage)
     profile = URL(r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP', ProfilePage)
-    amfcode_hsbc = URL(r'https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
     # Amundi pages
     amfcode_amundi = URL(r'https://www.amundi-ee.com/entr/product', AMFAmundiPage)
     performance_details = URL(r'https://www.amundi-ee.com/entr/ezjscore/call(.*)_tab_2', AmundiPerformancePage)
@@ -67,15 +71,37 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     # Swisslife pages
     swisslife = URL(r'http://fr.swisslife-am.com/fr/produits/.*', SwissLifePage)
     # Etoile Gestion pages
-    etoile_gestion = URL(r'http://www.etoile-gestion.com/index.php/etg_fr_fr/productsheet/view/.*', EtoileGestionPage)
-    etoile_gestion_characteristics = URL(r'http://www.etoile-gestion.com/etg_fr_fr/ezjscore/.*', EtoileGestionCharacteristicsPage)
-    etoile_gestion_details = URL(r'http://www.etoile-gestion.com/productsheet/.*', EtoileGestionDetailsPage)
+    etoile_gestion = URL(r'https?://www.etoile-gestion.com/index.php/etg_fr_fr/productsheet/view/.*', EtoileGestionPage)
+    etoile_gestion_characteristics = URL(
+        r'https?://www.etoile-gestion.com/etg_fr_fr/ezjscore/.*',
+        EtoileGestionCharacteristicsPage
+    )
+    etoile_gestion_details = URL(r'https?://www.etoile-gestion.com/productsheet/.*', EtoileGestionDetailsPage)
     # BNP pages
-    bnp_investments = URL(r'https://optimisermon.epargne-retraite-entreprises.bnpparibas.com')
-    api_investment_details = URL(r'https://funds-api.bnpparibas.com/api/performances/FromIsinCode/', APIInvestmentDetailsPage)
+    bnp_investments = URL(r'https://optimisermon.epargne-retraite-entreprises.bnpparibas.com', BNPInvestmentsPage)
+    bnp_investment_details = URL(
+        r'https://funds-api.bnpparibas.com/api/performances/(?P<id>\w+)',
+        BNPInvestmentDetailsPage
+    )
     # Esalia pages
     esalia_details = URL(r'https://www.societegeneralegestion.fr/psSGGestionEntr/productsheet/view', EsaliaDetailsPage)
-    esalia_performance = URL(r'https://www.societegeneralegestion.fr/psSGGestionEntr/ezjscore/call(.*)_tab_2', EsaliaPerformancePage)
+    esalia_performance = URL(
+        r'https://www.societegeneralegestion.fr/psSGGestionEntr/ezjscore/call(.*)_tab_2',
+        EsaliaPerformancePage
+    )
+    # HSBC pages
+    hsbc_video = URL(r'https://(.*)videos-pedagogiques/fonds-hsbc-ee-dynamique', HsbcVideoPage)
+    amfcode_hsbc = URL(r'https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
+    hsbc_investments = URL(r'https://www.assetmanagement.hsbc.com/fr/fcpe-closed', HsbcInvestmentPage)
+    # CPR Asset Management pages
+    cpr_investments = URL(r'https://www.cpr-am.fr/particuliers/product/view', CprInvestmentPage)
+    cpr_performance = URL(r'https://www.cpr-am.fr/particuliers/ezjscore', CprPerformancePage)
+    # CM-CIC investments
+    cm_cic_investments = URL(
+        r'https://www.cmcic-am.fr/fr/particuliers/nos-fonds/VALE_FicheSynthese.aspx',
+        r'https://www.cmcic-am.fr/fr/particuliers/nos-fonds/VALE_Fiche',
+        CmCicInvestmentPage
+    )
 
     e_service_page = URL(
         r'/portal/salarie-(?P<slug>\w+)/mesdonnees/eservice\?scenario=ConsulterEService',
@@ -90,7 +116,7 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         kwargs['username'] = self.config['login'].get()
         kwargs['password'] = self.config['password'].get()
 
-        ''' All abstract modules have a regex on the password (such as '\d{6}'), except
+        r''' All abstract modules have a regex on the password (such as '\d{6}'), except
         'bnppere' because the Visiogo browser accepts non-digital passwords, since
         there is no virtual keyboard on the visiogo website. Instead of crashing, it
         sometimes works to extract the digits from the input and try to login if the original
@@ -103,7 +129,10 @@ class S2eBrowser(LoginBrowser, StatesMixin):
             # Try the 6 extracted digits as password
             kwargs['password'] = digital_password
 
-        self.secret = self.config['secret'].get() if 'secret' in self.config else None
+        self.secret = None
+        if 'secret' in self.config:
+            self.secret = self.config['secret'].get()
+
         super(S2eBrowser, self).__init__(*args, **kwargs)
         self.cache = {}
         self.cache['invs'] = {}
@@ -111,7 +140,10 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         self.cache['details'] = {}
 
     def do_login(self):
-        otp = self.config['otp'].get() if 'otp' in self.config else None
+        otp = None
+        if 'otp' in self.config:
+            otp = self.config['otp'].get()
+
         if self.login.is_here() and otp:
             self.page.check_error()
             self.page.send_otp(otp)
@@ -188,17 +220,23 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         for inv in investments:
             if inv._link:
                 if self.bnp_investments.match(inv._link):
-                    # From the current URL, which has the format:
-                    # https://optimisermon.epargne-retraite-entreprises.bnpparibas.com/Mes-Supports/11111/QS0002222T5
-                    # We can extract the investment ISIN code and use it to call routes of the BNP Wealth API
-                    self.location(inv._link)
-                    m = re.search(r'Mes-Supports/(.*)/(.*)', self.url)
+                    # Although we don't fetch anything on BNPInvestmentsPage, this request is
+                    # necessary otherwise the calls to the BNP API will return a 401 error
+                    try:
+                        self.location(inv._link)
+                    except ServerError:
+                        # For some connections, this request returns a 503 even on the website
+                        self.logger.warning('Server returned a Server Error when trying to fetch investment performances.')
+                        continue
+
+                    # Access the BNP API to get the investment details using its ID (found in its label)
+                    m = re.search(r'- (\d+)$', inv.label)
                     if m:
-                        if is_isin_valid(m.group(2)):
-                            inv.code = m.group(2)
-                            inv.code_type = Investment.CODE_TYPE_ISIN
-                        self.location('https://funds-api.bnpparibas.com/api/performances/FromIsinCode/' + inv.code)
+                        inv_id = m.group(1)
+                        self.bnp_investment_details.go(id=inv_id)
                         self.page.fill_investment(obj=inv)
+                    else:
+                        self.logger.warning('Could not fetch BNP investment ID in its label, no details will be fetched.')
 
                 elif self.amfcode_amundi.match(inv._link):
                     self.location(inv._link)
@@ -247,6 +285,48 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                         if self.etoile_gestion_characteristics.is_here():
                             inv.performance_history = self.page.get_performance_history()
 
+                elif self.cpr_investments.match(inv._link):
+                    self.location(inv._link)
+                    self.page.fill_investment(obj=inv)
+                    # Fetch all performances on the details page
+                    performance_url = self.page.get_performance_url()
+                    if performance_url:
+                        self.location(performance_url)
+                        complete_performance_history = self.page.get_performance_history()
+                        if complete_performance_history:
+                            inv.performance_history = complete_performance_history
+
+                elif self.hsbc_investments.match(inv._link):
+                    # Handle investment detail as for erehsbc subsite
+                    m = re.search(r'id=(\w+).+SH=(\w+)', inv._link)
+                    if m:
+                        params = {
+                            'feed_data': 'fundbyiden',
+                            'ctry': 'FR',
+                            'client': 'FCPC',
+                            'fId': m.group(1),
+                            'lang': 'fr',
+                            'SH': m.group(2),
+                        }
+                        self.amfcode_hsbc.go(params=params)
+                        if self.amfcode_hsbc.is_here():
+                            inv.code = self.page.get_code()
+                            inv.code_type = Investment.CODE_TYPE_AMF
+                            inv.asset_category = self.page.get_asset_category()
+
+                elif self.cm_cic_investments.match(inv._link):
+                    self.location(inv._link)
+                    if self.cm_cic_investments.is_here():
+                        # Load investment details data
+                        params = {
+                            'ddp': self.page.get_ddp(),
+                            'forceActualisation': 'O',
+                        }
+                        self.cm_cic_investments.go(params=params)
+                        inv.code = self.page.get_code()
+                        inv.code_type = Investment.CODE_TYPE_AMF
+                        inv.performance_history = self.page.get_performance_history()
+
         return investments
 
     @need_login
@@ -288,34 +368,50 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         # we might land on the documents page, but sometimes we land on user info "tab"
         self.page.select_documents_tab()
         self.page.show_more()
-        return self.page.iter_documents()
+
+        # Sometimes two documents have the same ID (same date and same type)
+        existing_id = set()
+        for document in self.page.iter_documents():
+            if document._url_id in existing_id:
+                id_suffix = 1
+                while '%s-%s' % (document._url_id, id_suffix) in existing_id:
+                    id_suffix += 1
+                    if id_suffix > 5:
+                        # Avoid infinite loops in case of an issue
+                        # There shouldn't be that many documents with the same id, we let it raise an exception
+                        break
+                document.id = '%s-%s' % (document._url_id, id_suffix)
+            else:
+                document.id = document._url_id
+            existing_id.add(document.id)
+            yield document
 
 
 class EsaliaBrowser(S2eBrowser):
     BASEURL = 'https://salaries.esalia.com'
     SLUG = 'sg'
-    LANG = 'fr' # ['fr', 'en']
+    LANG = 'fr'  # ['fr', 'en']
 
 
 class CapeasiBrowser(S2eBrowser):
     BASEURL = 'https://www.capeasi.com'
     SLUG = 'axa'
-    LANG = 'fr' # ['fr', 'en']
+    LANG = 'fr'  # ['fr', 'en']
 
 
 class ErehsbcBrowser(S2eBrowser):
     BASEURL = 'https://epargnant.ere.hsbc.fr'
     SLUG = 'hsbc'
-    LANG = 'fr' # ['fr', 'en']
+    LANG = 'fr'  # ['fr', 'en']
 
 
 class BnppereBrowser(S2eBrowser):
     BASEURL = 'https://personeo.epargne-retraite-entreprises.bnpparibas.com'
     SLUG = 'bnp'
-    LANG = 'fr' # ['fr', 'en']
+    LANG = 'fr'  # ['fr', 'en']
 
 
 class CreditdunordpeeBrowser(S2eBrowser):
     BASEURL = 'https://salaries.pee.credit-du-nord.fr'
     SLUG = 'cdn'
-    LANG = 'fr' # ['fr', 'en']
+    LANG = 'fr'  # ['fr', 'en']

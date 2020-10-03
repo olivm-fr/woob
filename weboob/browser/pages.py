@@ -33,8 +33,10 @@ import requests
 
 from weboob.exceptions import ParseError, ModuleInstallError
 from weboob.tools.compat import basestring, unicode, urljoin
+from weboob.tools.json import json, mini_jsonpath
 from weboob.tools.log import getLogger
 from weboob.tools.pdf import decompress_pdf
+
 from .exceptions import LoggedOut
 
 
@@ -58,8 +60,8 @@ def pagination(func):
     >>> from .browsers import PagesBrowser
     >>> from .url import URL
     >>> class Browser(PagesBrowser):
-    ...     BASEURL = 'https://romain.bignon.me'
-    ...     list = URL('/projects/weboob/list-(?P<pagenum>\d+).html', Page)
+    ...     BASEURL = 'https://weboob.org'
+    ...     list = URL('/tests/list-(?P<pagenum>\d+).html', Page)
     ...
     >>> b = Browser()
     >>> b.list.go(pagenum=1) # doctest: +ELLIPSIS
@@ -451,11 +453,11 @@ class JsonPage(Page):
 
     Notes on JSON format:
     JSON must be UTF-8 encoded when used for open systems interchange (https://tools.ietf.org/html/rfc8259).
-    So it can be safely assumed all JSON to be UTF-8. No Byte Order Mark is allowed.
+    So it can be safely assumed all JSON to be UTF-8.
     A little subtlety is that JSON Unicode surrogate escape sequence (used for characters > U+FFFF) are UTF-16 style, but that should be handled by libraries (some don't… Even if JSON is one of the simplest formats around…).
     """
 
-    ENCODING = 'utf-8'
+    ENCODING = 'utf-8-sig'
 
     @property
     def data(self):
@@ -468,11 +470,9 @@ class JsonPage(Page):
             return default
 
     def path(self, path, context=None):
-        from weboob.tools.json import mini_jsonpath
         return mini_jsonpath(context or self.doc, path)
 
     def build_doc(self, text):
-        from weboob.tools.json import json
         return json.loads(text)
 
 
@@ -578,6 +578,11 @@ class HTMLPage(Page):
     REFRESH_XPATH = '//head/meta[lower-case(@http-equiv)="refresh"]'
     """
     Default xpath, which is also the most commun, override it if needed
+    """
+
+    ABSOLUTE_LINKS = False
+    """
+    Make links URLs absolute.
     """
 
     def __init__(self, *args, **kwargs):
@@ -687,7 +692,12 @@ class HTMLPage(Page):
             encoding = encoding.replace(u'iso8859_', u'iso8859-')
         import lxml.html as html
         parser = html.HTMLParser(encoding=encoding)
-        return html.parse(BytesIO(content), parser)
+        doc = html.parse(BytesIO(content), parser, base_url=self.url)
+
+        if self.ABSOLUTE_LINKS:
+            doc.getroot().make_links_absolute(handle_failures='ignore')
+
+        return doc
 
     def detect_encoding(self):
         """
@@ -872,7 +882,8 @@ class AbstractPage(Page):
     PARENT_URL = None
     BROWSER_ATTR = None
 
-    def __new__(cls, browser, *args, **kwargs):
+    @classmethod
+    def _resolve_abstract(cls, browser):
         weboob = getattr(browser, 'weboob', None)
         if not weboob:
             raise AbstractPageError("weboob is not defined in %s" % browser)
@@ -897,7 +908,14 @@ class AbstractPage(Page):
         if parent is None:
             raise AbstractPageError("cls.PARENT_URL is not defined in %s" % browser)
 
+        # Parent may be an AbstractPage as well
+        if hasattr(parent.klass, '_resolve_abstract'):
+            parent.klass._resolve_abstract(browser)
+
         cls.__bases__ = (parent.klass,)
+
+    def __new__(cls, browser, *args, **kwargs):
+        cls._resolve_abstract(browser)
         return object.__new__(cls)
 
 

@@ -151,6 +151,7 @@ ACCOUNT_TYPES = {
     'DEVISE USD': Account.TYPE_CHECKING,
     'EKO': Account.TYPE_CHECKING,
     'MAJPROTEGE': Account.TYPE_CHECKING,  # Compte majeur protégé
+    'CPTEXCAGRI': Account.TYPE_CHECKING,  # Compte Excédent Agriculture
     'DAV NANTI': Account.TYPE_SAVINGS,
     'LIV A': Account.TYPE_SAVINGS,
     'LIV A ASS': Account.TYPE_SAVINGS,
@@ -174,10 +175,12 @@ ACCOUNT_TYPES = {
     'ORCH': Account.TYPE_SAVINGS,  # Orchestra / PEP
     'CB': Account.TYPE_SAVINGS,  # Carré bleu / PEL
     'LIS': Account.TYPE_SAVINGS,
+    'BOOSTE3': Account.TYPE_SAVINGS,
     'BOOSTE4': Account.TYPE_SAVINGS,  # Livret d'Epargne Forteo
     'PEPS': Account.TYPE_SAVINGS,  # Plan d'Epargne Populaire
     'LIPROJAGRI': Account.TYPE_SAVINGS,
     'épargne disponible': Account.TYPE_SAVINGS,
+    'LTA': Account.TYPE_SAVINGS,  # Livret Tandem
     'DAT': Account.TYPE_DEPOSIT,
     'DPA': Account.TYPE_DEPOSIT,
     'DATG': Account.TYPE_DEPOSIT,
@@ -216,6 +219,7 @@ ACCOUNT_TYPES = {
     'CSAN': Account.TYPE_LOAN,
     'P SPE MOD': Account.TYPE_LOAN,
     'MT AUTRE': Account.TYPE_LOAN,  # Prêt d'investissement professionnel
+    'PRET REAM.': Account.TYPE_LOAN,
     'épargne boursière': Account.TYPE_MARKET,
     'assurance vie et capitalisation': Account.TYPE_LIFE_INSURANCE,
     'PRED': Account.TYPE_LIFE_INSURANCE,
@@ -238,13 +242,17 @@ ACCOUNT_TYPES = {
     'V O E': Account.TYPE_LIFE_INSURANCE,  # Vendome Optimum Euro
     'V O E CAPI': Account.TYPE_CAPITALISATION,
     'VENDOME': Account.TYPE_LIFE_INSURANCE,  # Vendome Optimum Euro
-    'ESPGESTION': Account.TYPE_LIFE_INSURANCE,
+    'ESPGESTION': Account.TYPE_LIFE_INSURANCE,  # Espace Gestion
+    'ESPGESTPEP': Account.TYPE_LIFE_INSURANCE,  # Espace Gestion PEP
     'OPTA': Account.TYPE_LIFE_INSURANCE,  # Optalissime
+    'RENV VITAL': Account.TYPE_LIFE_INSURANCE,  # Rente viagère Vitalité
+    'ANAE': Account.TYPE_LIFE_INSURANCE,
     'ATOUT LIB': Account.TYPE_REVOLVING_CREDIT,
     'PACC': Account.TYPE_CONSUMER_CREDIT,  # 'PAC' = 'Prêt à consommer'
     'PACP': Account.TYPE_CONSUMER_CREDIT,
     'PACR': Account.TYPE_CONSUMER_CREDIT,
     'PACV': Account.TYPE_CONSUMER_CREDIT,
+    'PAC2': Account.TYPE_CONSUMER_CREDIT,
     'SUPPLETIS': Account.TYPE_REVOLVING_CREDIT,
     'OPEN': Account.TYPE_REVOLVING_CREDIT,
     'PAGR': Account.TYPE_MADELIN,
@@ -254,6 +262,9 @@ ACCOUNT_TYPES = {
 
 
 class AccountsPage(LoggedPage, JsonPage):
+    # actually, we parse the page as HTML, and lxml won't recognize utf-8-sig
+    ENCODING = 'utf-8'
+
     def build_doc(self, content):
         # Store the HTML doc to count the number of spaces
         self.html_doc = HTMLPage(self.browser, self.response).doc
@@ -356,6 +367,9 @@ class AccountsPage(LoggedPage, JsonPage):
     @method
     class iter_main_cards(DictElement):
         item_xpath = 'comptePrincipal/cartesDD'
+        # Sometimes the server sends a list of cards containing a duplicate json's object
+        # This will just send a warning instead raising an error
+        ignore_duplicate = True
 
         class item(ItemElement):
             # Main account cards are all deferred and their
@@ -602,6 +616,9 @@ class CardsPage(LoggedPage, JsonPage):
 
         class iter_cards(DictElement):
             item_xpath = 'listeCartes'
+            # Sometimes the server sends a list of cards containing a duplicate json's object
+            # This will just send a warning instead raising an error
+            ignore_duplicate = True
 
             def parse(self, el):
                 self.env['parent_id'] = Dict('idCompte')(el)
@@ -702,8 +719,36 @@ class PredicaInvestmentsPage(LoggedPage, JsonPage):
 
 
 class LifeInsuranceInvestmentsPage(LoggedPage, HTMLPage):
-    # TODO
-    pass
+    @method
+    class iter_investments(ListElement):
+        item_xpath = '//div[@id="menu1"]/div'
+
+        class item(ItemElement):
+            klass = Investment
+
+            obj_label = CleanText('.//div[has-class("PrivateBank-tabsNavContentTitle")]')
+            obj_valuation = CleanDecimal.French('.//div[contains(text(), "Valorisation")]/span')
+            obj_quantity = CleanDecimal.French(
+                './/div[contains(text(), "Nombre de parts")]/following-sibling::div[1]',
+                default=NotAvailable
+            )
+            obj_unitvalue = CleanDecimal.French(
+                './/div[contains(text(), "Valeur de la part")]/following-sibling::div[1]',
+                default=NotAvailable
+            )
+            obj_diff = CleanDecimal.French(
+                './/div[contains(text(), "+/- values")]/span',
+                default=NotAvailable
+            )
+
+            def obj_portfolio_share(self):
+                portfolio_share = CleanDecimal.French(
+                    './/div[has-class("PrivateBank-tabsNavContentTitle")]/following-sibling::div/span',
+                    default=NotAvailable
+                )(self)
+                if not empty(portfolio_share):
+                    return Eval(lambda x: x / 100, portfolio_share)(self)
+                return NotAvailable
 
 
 class BgpiRedirectionPage(LoggedPage, HTMLPage):
@@ -740,10 +785,12 @@ class BgpiInvestmentsPage(LoggedPage, HTMLPage):
                 './/span[@class="box"][span[span[text()="Nombre de part"]]]/span[2]/span'
             )
             obj_unitvalue = CleanDecimal.French(
-                './/span[@class="box"][span[span[text()="Valeur liquidative"]]]/span[2]/span'
+                './/span[@class="box"][span[span[text()="Valeur liquidative"]]]/span[2]/span',
+                default=NotAvailable
             )
             obj_unitprice = CleanDecimal.French(
-                './/span[@class="box"][span[span[text()="Prix de revient"]]]/span[2]/span', default=NotAvailable
+                './/span[@class="box"][span[span[text()="Prix de revient"]]]/span[2]/span',
+                default=NotAvailable
             )
             obj_portfolio_share = Eval(
                 lambda x: x / 100,
@@ -753,7 +800,7 @@ class BgpiInvestmentsPage(LoggedPage, HTMLPage):
             def obj_diff_ratio(self):
                 # Euro funds have '-' instead of a diff_ratio value
                 text = CleanText('.//span[@class="box"][span[span[text()="+/- value latente (%)"]]]/span[2]/span')(self)
-                if text == '-':
+                if text in ('', '-'):
                     return NotAvailable
                 return Eval(
                     lambda x: x / 100,

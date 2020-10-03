@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import datetime
@@ -43,16 +45,30 @@ from ..par.pages import ProfilePage
 class CmsoProBrowser(LoginBrowser):
     login = URL(r'https://api.(?P<website>[\w.]+)/oauth-implicit/token', LoginPage)
     subscription = URL(r'https://api.(?P<website>[\w.]+)/domiapi/oauth/json/accesAbonnement', SubscriptionPage)
-    accounts = URL(r'/domiweb/prive/professionnel/situationGlobaleProfessionnel/0-situationGlobaleProfessionnel.act', AccountsPage)
-    history = URL(r'/domiweb/prive/professionnel/situationGlobaleProfessionnel/1-situationGlobaleProfessionnel.act', HistoryPage)
-    password_creation = URL(r'/domiweb/prive/particulier/modificationMotDePasse/0-creationMotDePasse.act', PasswordCreationPage)
+    accounts = URL(
+        r'/domiweb/prive/professionnel/situationGlobaleProfessionnel/0-situationGlobaleProfessionnel.act',
+        AccountsPage
+    )
+    history = URL(
+        r'/domiweb/prive/professionnel/situationGlobaleProfessionnel/1-situationGlobaleProfessionnel.act',
+        HistoryPage
+    )
+    password_creation = URL(
+        r'/domiweb/prive/particulier/modificationMotDePasse/0-creationMotDePasse.act',
+        PasswordCreationPage
+    )
     useless = URL(r'/domiweb/prive/particulier/modificationMotDePasse/0-expirationMotDePasse.act', UselessPage)
     investment = URL(r'/domiweb/prive/particulier/portefeuilleSituation/0-situationPortefeuille.act', InvestmentPage)
-    invest_account = URL(r'/domiweb/prive/particulier/portefeuilleSituation/2-situationPortefeuille.act\?(?:csrf=[^&]*&)?indiceCompte=(?P<idx>\d+)&idRacine=(?P<idroot>\d+)', InvestmentAccountPage)
+    invest_account = URL(
+        r'/domiweb/prive/particulier/portefeuilleSituation/2-situationPortefeuille.act\?(?:csrf=[^&]*&)?indiceCompte=(?P<idx>\d+)&idRacine=(?P<idroot>\d+)',
+        InvestmentAccountPage
+    )
     error = URL(r'https://pro.(?P<website>[\w.]+)/auth/errorauthn', ErrorPage)
     profile = URL(r'https://api.(?P<website>[\w.]+)/domiapi/oauth/json/edr/infosPerson', ProfilePage)
     ssoDomiweb = URL(r'https://api.(?P<website>[\w.]+)/domiapi/oauth/json/ssoDomiwebEmbedded', SSODomiPage)
     auth_checkuser = URL(r'https://api.(?P<website>[\w.]+)/securityapi/checkuser', AuthCheckUser)
+
+    filter_page = URL(r'https://pro.(?P<website>[\w.]+)/espace/filter')
 
     arkea = '03'
 
@@ -136,6 +152,9 @@ class CmsoProBrowser(LoginBrowser):
             'service': path,
         }
 
+        # Prevent an error 403
+        self.filter_page.go(website=self.website)
+
         url = self.ssoDomiweb.go(
             website=self.website,
             headers={'ADRIM': 'isAjax:true'},
@@ -149,6 +168,10 @@ class CmsoProBrowser(LoginBrowser):
     def go_on_area(self, area):
         if self.curr_area == area:
             return
+
+        # The website raise an error 403 if we try to change the area without doing this call first.
+        self.filter_page.go(website=self.website)
+
         ret = self.location(
             'https://api.%s/securityapi/changeSpace' % (self.website),
             json={
@@ -201,10 +224,14 @@ class CmsoProBrowser(LoginBrowser):
 
     def _build_next_date_range(self, date_range):
         date_format = '%d/%m/%Y'
+
         last_day = datetime.datetime.strptime(date_range[10:], date_format)
         first_day = last_day + datetime.timedelta(days=1)
         last_day = first_day + relativedelta(months=1, days=-1)
-        return ''.join((datetime.datetime.strftime(first_day, date_format), datetime.datetime.strftime(last_day, date_format)))
+
+        first_str = datetime.datetime.strftime(first_day, date_format)
+        last_str = datetime.datetime.strftime(last_day, date_format)
+        return first_str + last_str
 
     @need_login
     def iter_history(self, account):
@@ -294,6 +321,9 @@ class CmsoProBrowser(LoginBrowser):
             'Accept': 'application/json',
             'ADRIM': 'isAjax:true',
         }
+
+        # Prevent an error 403
+        self.filter_page.go(website=self.website)
 
         return self.profile.go(
             website=self.website,

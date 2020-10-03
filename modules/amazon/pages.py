@@ -93,11 +93,19 @@ class SecurityPage(HTMLPage):
         if self.doc.xpath('//form[@action="verify"]'):
             return True
 
+
+class ApprovalPage(HTMLPage, LoggedPage):
+    def get_msg_app_validation(self):
+        msg = CleanText('//span[has-class("transaction-approval-word-break")]')
+        sending_address = CleanText('//div[@class="a-row"][1]')
+        msg = Format('%s %s', msg, sending_address)
+        return msg(self.doc)
+
+    def get_link_app_validation(self):
+        return Link('//a[contains(text(), "Click here to refresh the page")]')(self.doc)
+
+
 class LanguagePage(HTMLPage):
-    pass
-
-
-class HistoryPage(HTMLPage):
     pass
 
 
@@ -128,6 +136,11 @@ class LoginPage(HTMLPage):
         return CleanText('//div[@id="auth-error-message-box"]')(self.doc)
 
 
+class PasswordExpired(HTMLPage):
+    def get_message(self):
+        return CleanText('//form//h2')(self.doc)
+
+
 class SubscriptionsPage(LoggedPage, HTMLPage):
     @method
     class get_item(ItemElement):
@@ -145,6 +158,15 @@ class SubscriptionsPage(LoggedPage, HTMLPage):
             return self.page.browser.username
 
 
+class HistoryPage(LoggedPage, HTMLPage):
+    def get_b2b_group_key(self):
+        return Attr(
+            '//select[@name="selectedB2BGroupKey"]/option[contains(text(), "Afficher toutes les commandes")]',
+            'value',
+            default=None
+        )(self.doc)
+
+
 class DocumentsPage(LoggedPage, HTMLPage):
     @pagination
     @method
@@ -158,8 +180,13 @@ class DocumentsPage(LoggedPage, HTMLPage):
             klass = Bill
             load_details = Field('_pre_url') & AsyncLoad
 
-            obj__simple_id = CleanText('.//span[contains(text(), "N° de commande")]/following-sibling::span')
+            obj__simple_id = Coalesce(
+                CleanText('.//span[contains(text(), "N° de commande")]/following-sibling::span', default=NotAvailable),
+                CleanText('.//span[contains(text(), "Order")]/following-sibling::span'),
+            )
+
             obj_id = Format('%s_%s', Env('subid'), Field('_simple_id'))
+
             obj__pre_url = Format('/gp/shared-cs/ajax/invoice/invoice.html?orderId=%s&relatedRequestId=%s&isADriveSubscription=&isHFC=',
                                   Field('_simple_id'), Env('request_id'))
             obj_label = Format('Facture %s', Field('_simple_id'))
@@ -190,9 +217,16 @@ class DocumentsPage(LoggedPage, HTMLPage):
 
             def obj_url(self):
                 async_page = Async('details').loaded_page(self)
-                url = Link('//a[contains(@href, "download")]|//a[contains(@href, "generated_invoices")]', default=NotAvailable)(async_page.doc)
+                url = Coalesce(
+                    Link('//a[@class="a-link-normal" and contains(text(), "Invoice")]', default=NotAvailable),
+                    Link('//a[contains(text(), "Order Details")]', default=NotAvailable),
+                    default=NotAvailable,
+                )(self)
                 if not url:
-                    url = Link('//a[contains(text(), "Récapitulatif de commande")]')(async_page.doc)
+                    url = Coalesce(
+                        Link('//a[contains(@href, "download")]|//a[contains(@href, "generated_invoices")]', default=NotAvailable),
+                        Link('//a[contains(text(), "Récapitulatif de commande")]', default=NotAvailable),
+                    )(async_page.doc)
                 return url
 
             def obj_format(self):

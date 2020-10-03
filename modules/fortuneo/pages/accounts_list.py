@@ -22,17 +22,21 @@ from __future__ import unicode_literals
 import re
 import sys
 from datetime import date
+from unidecode import unidecode
 
 from dateutil.relativedelta import relativedelta
 
 from weboob.browser.elements import method, ItemElement, TableElement, ListElement
-from weboob.browser.filters.html import Link, Attr, AbsoluteLink
+from weboob.browser.filters.html import Link, Attr, AbsoluteLink, TableCell
 from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Regexp, Date, Currency, TableCell, Base, Field, MapIn,
+    CleanText, CleanDecimal, Regexp, Date, Currency, Base, Field, MapIn,
 )
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import Account, AccountOwnership
-from weboob.capabilities.wealth import Investment, MarketOrder, MarketOrderDirection, MarketOrderType
+from weboob.capabilities.wealth import (
+    Investment, MarketOrder, MarketOrderDirection, MarketOrderType,
+    MarketOrderPayment,
+)
 from weboob.capabilities.profile import Person
 from weboob.browser.pages import HTMLPage, LoggedPage, FormNotFound, CsvPage
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
@@ -102,6 +106,11 @@ MARKET_ORDER_TYPES = {
     'AML': MarketOrderType.LIMIT,
     'ASD': MarketOrderType.TRIGGER,
     'APD': MarketOrderType.TRIGGER,
+}
+
+MARKET_ORDER_PAYMENT_METHODS = {
+    'CPT': MarketOrderPayment.CASH,
+    'SRD': MarketOrderPayment.DEFERRED,
 }
 
 
@@ -256,8 +265,14 @@ class PeaHistoryPage(ActionNeededPage):
             klass = MarketOrder
 
             obj__details_link = AbsoluteLink('.//a[@class="bt_l_loupe"]', default=NotAvailable)
+            obj_id = Regexp(
+                Link('.//a[@class="bt_l_loupe"]', default=NotAvailable),
+                r'idOrdre=([^&]+)',
+                default=NotAvailable,
+            )
             obj_label = CleanText(TableCell('label'))
             obj_direction = MapIn(CleanText(TableCell('direction')), MARKET_ORDER_DIRECTIONS, MarketOrderDirection.UNKNOWN)
+            obj_payment_method = MapIn(CleanText(TableCell('direction')), MARKET_ORDER_PAYMENT_METHODS, MarketOrderPayment.UNKNOWN)
             obj_quantity = CleanDecimal.French(TableCell('quantity'))
             obj_order_type = MapIn(CleanText(TableCell('order_type_ordervalue')), MARKET_ORDER_TYPES, MarketOrderType.UNKNOWN)
             obj_ordervalue = CleanDecimal.French(
@@ -429,6 +444,11 @@ class AccountHistoryPage(ActionNeededPage):
 
         form['dateRechercheDebut'] = (date.today() - relativedelta(years=2)).strftime('%d/%m/%Y')
         form['nbrEltsParPage'] = '100'
+
+        # '�' char may be in here instead of a space char (eg: '5\xa0733,29')
+        form['montantSoldeDebut'] = unidecode(form['montantSoldeDebut'])
+        form['montantSoldeFin'] = unidecode(form['montantSoldeFin'])
+
         form.submit()
 
         return True
@@ -527,6 +547,7 @@ ACCOUNT_TYPES = {
 
 
 class AccountsList(ActionNeededPage):
+    TRANSFER_INIT_XPATH = './/a[contains(text(), "Virements")]'
     @method
     class fill_person_name(ItemElement):
         klass = Account
@@ -551,6 +572,16 @@ class AccountsList(ActionNeededPage):
         accounts = self.doc.xpath('//div[contains(@class, " compte") and not(contains(@class, "compte_selected")) and not(contains(@class, "aut"))]')
         return len(accounts) > 0
 
+    @staticmethod
+    def to_transfer_history_link(link):
+        return link.replace('saisie-virement', 'operations-en-cours/initialiser-operations-en-cours')
+
+    def iter_transfer_history_links(self):
+        for transfer_init_a in self.doc.xpath(self.TRANSFER_INIT_XPATH):
+            init_transfer_link = transfer_init_a.get('href')
+            if init_transfer_link:
+                yield self.to_transfer_history_link(init_transfer_link)
+
     @method
     class iter_accounts(ListElement):
         item_xpath = '//div[contains(@class, " compte") and not(contains(@class, "compte_selected")) and not(contains(@class, "aut"))]'
@@ -566,6 +597,13 @@ class AccountsList(ActionNeededPage):
                 'or contains(@id, "assurance_vie_operations")]',
                 default=None
             )
+
+            def obj__transfers_link(self):
+                init_transfer_link = Link(self.page.TRANSFER_INIT_XPATH, None)(self)
+                if init_transfer_link:
+                    return self.page.to_transfer_history_link(
+                        init_transfer_link
+                    )
 
             obj__investment_link = AbsoluteLink('./ul/li/a[contains(@id, "portefeuille")]', default=None)
 

@@ -19,12 +19,18 @@
 
 from __future__ import unicode_literals
 
+import re
+
 from weboob.capabilities.base import find_object, empty
-from weboob.capabilities.bank import Account, TransferInvalidLabel, CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound
+from weboob.capabilities.bank import (
+    Account, TransferInvalidLabel, CapBankTransferAddRecipient, AccountNotFound,
+    RecipientNotFound, RecipientInvalidLabel,
+)
 from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.bill import CapDocument, Subscription, Document, DocumentNotFound, SubscriptionNotFound
 from weboob.tools.backend import Module, BackendConfig
+from weboob.tools.capabilities.bank.bank_transfer import sorted_transfers
 from weboob.tools.value import ValueBackendPassword
 
 from .browser import AXABanque, AXAAssurance
@@ -84,6 +90,14 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
 
     def new_recipient(self, recipient, **params):
         recipient.label = recipient.label[:24].upper()
+
+        if not re.match(r"^[A-Z0-9/?:()\.,'+ ]+$", recipient.label):
+            # This check is done here instead of checking the error return on the pages
+            # because this appears after the sms otp. This allow the user to know that
+            # the label is incorrect before having to enter an otp.
+            # The message in the error is the exact one that is displayed on the website.
+            raise RecipientInvalidLabel("Les caractères autorisés sont l'alphabet latin, les chiffres et les caractères / - ? : ( ) . , ' + ESPACE")
+
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
@@ -166,3 +180,6 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
         if self.BROWSER != AXABanque:
             raise NotImplementedError()
         return self.browser.iter_emitters()
+
+    def iter_transfers(self, account=None):
+        return sorted_transfers(self.browser.iter_transfers(account))

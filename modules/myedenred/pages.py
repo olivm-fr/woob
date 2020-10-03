@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import ast
@@ -29,11 +31,11 @@ from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Currency, Field, Eval,
     Date, Regexp,
 )
+from weboob.browser.filters.html import Attr
 from weboob.browser.filters.json import Dict
 from weboob.capabilities.bank import Account, Transaction
 from weboob.capabilities.base import NotAvailable, empty
 from weboob.tools.json import json
-from weboob.tools.compat import urlparse, parse_qs
 
 
 class HomePage(HTMLPage):
@@ -67,28 +69,16 @@ class JsUserPage(RawPage):
         return parse_js_obj(json_data)
 
 
-class JsAppPage(RawPage):
-    def get_code_verifier(self):
-        return re.search(r'code_verifier:"([^"]+)', self.text).group(1)
-
-
-class InitLoginPage(HTMLPage):
-    pass
-
-
 class LoginPage(HTMLPage):
-    def get_json_model(self):
-        return json.loads(CleanText('//script[@id="modelJson"]', replace=[('&quot;', '"')])(self.doc))
+    def get_login_form(self):
+        form = self.get_form('//form')
+        return form
 
+    def get_recaptcha_site_key(self):
+        return Attr('//button[contains(@class, "g-recaptcha")]', 'data-sitekey', default=False)(self.doc)
 
-class ConnectCodePage(LoggedPage, HTMLPage):
-    def get_code(self):
-        return parse_qs(urlparse(self.url).query)['code'][0]
-
-
-class TokenPage(LoggedPage, JsonPage):
-    def get_access_token(self):
-        return CleanText(Dict('access_token'))(self.doc)
+    def get_error_message(self):
+        return CleanText('//div[@role="alert"]//li')(self.doc)
 
 
 class AccountsPage(LoggedPage, JsonPage):
@@ -174,7 +164,7 @@ class TransactionsPage(LoggedPage, JsonPage):
 # If node, an AST node, contains a string or a number, return
 # that. Otherwise, return the node itself.
 def get_ast_val(node):
-    if sys.version_info > (3, 5) and isinstance(node, ast.Constant):
+    if sys.version_info >= (3, 6) and isinstance(node, ast.Constant):
         return node.value
     elif isinstance(node, ast.Name):
         return node.id

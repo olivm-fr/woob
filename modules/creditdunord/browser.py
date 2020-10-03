@@ -39,6 +39,7 @@ class CreditDuNordBrowser(LoginBrowser):
                 '/.*\?.*_pageLabel=page_erreur_connexion',
                 '/.*\?.*_pageLabel=reinitialisation_mot_de_passe',
                 LoginPage)
+    logout = URL('/pkmslogout')
     login_confirm = URL(r'/sec/vk/authent.json', LoginConfirmPage)
     labels_page = URL(r'/icd/zco/data/public-menu.json', LabelsPage)
     redirect = URL('/swm/redirectCDN.html', RedirectPage)
@@ -82,17 +83,43 @@ class CreditDuNordBrowser(LoginBrowser):
 
         if self.page.get_status() != 'ok':
             raise BrowserIncorrectPassword()
-        elif self.page.get_reason() == 'chgt_mdp_oblig':
+        reason = self.page.get_reason()
+        if reason == 'chgt_mdp_oblig':
             # There is no message in the json return. There is just the code.
             raise BrowserPasswordExpired('Changement de mot de passe requis.')
+        elif reason == 'SCA':
+            raise ActionNeeded("Vous devez réaliser la double authentification sur le portail internet")
+        elif reason == 'SCAW':
+            raise ActionNeeded("Vous devez choisir si vous souhaitez dès à présent activer la double authentification sur le portail internet")
 
         self.entrypage.go()
 
+    def do_logout(self):
+        self.logout.go()
+        self.session.cookies.clear()
+
     def _iter_accounts(self):
         owner_name = self.get_profile().name.upper()
-        #self.loans.go(account_type=self.account_type, loans_page_label=self.loans_page_label)
-        #for a in self.page.get_list():
-        #    yield a
+
+        self.location(self.loans.build(account_type=self.account_type, loans_page_label=self.loans_page_label), allow_redirects=False)
+        location = self.response.headers.get('Location', '')
+        if 'errorWebCDN' in location:
+            # Attempts to access to ProAccountsPage can lead instead to RedirectPage.
+            # It would end up to a '/sites/erreur-404' URL (but in code 200).
+            # This happens only on certain connections, as a wrongly activated
+            # security feature of the server, as discussed directly with the bank,
+            # when there is no accounts on ProAccountsPage.
+            # Redirection is not followed
+            # but the whole session is broken; need to log back
+            self.do_logout()
+            self.do_login()
+        else:
+            if location:
+                # still preserve any other redirection that might occur
+                self.location(location)
+            for a in self.page.get_list():
+                yield a
+
         self.accounts.go(account_type=self.account_type, accounts_page_label=self.accounts_page_label)
         self.multitype_av.go()
         if self.multitype_av.is_here():

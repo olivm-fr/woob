@@ -21,9 +21,10 @@
 
 from __future__ import unicode_literals
 
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
 import time
+from datetime import datetime
+
+from dateutil.relativedelta import relativedelta
 from requests.exceptions import ConnectionError
 
 from weboob.browser.browsers import LoginBrowser, URL, need_login, StatesMixin
@@ -41,7 +42,7 @@ from weboob.browser.exceptions import ServerError
 from weboob.browser.elements import DataError
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserUnavailable, AppValidation,
-    AppValidationExpired,
+    AppValidationExpired, ActionNeeded,
 )
 from weboob.tools.value import Value
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
@@ -49,11 +50,11 @@ from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from .pages import (
     LoginPage, AccountsPage, AccountsIBANPage, HistoryPage, TransferInitPage,
     ConnectionThresholdPage, LifeInsurancesPage, LifeInsurancesHistoryPage,
-    LifeInsurancesDetailPage, NatioVieProPage, CapitalisationPage,
+    LifeInsurancesDetailPage, NatioVieProPage, CapitalisationPage, MarketOrdersPage,
     MarketListPage, MarketPage, MarketHistoryPage, MarketSynPage, BNPKeyboard,
     RecipientsPage, ValidateTransferPage, RegisterTransferPage, AdvisorPage,
     AddRecipPage, ActivateRecipPage, ProfilePage, ListDetailCardPage, ListErrorPage,
-    UselessPage, TransferAssertionError, LoanDetailsPage, TransfersPage,
+    UselessPage, TransferAssertionError, LoanDetailsPage, TransfersPage, OTPPage,
 )
 
 from .document_pages import DocumentsPage, DocumentsResearchPage, TitulairePage, RIBPage
@@ -76,6 +77,7 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
     )
 
     useless_page = URL(r'/fr/connexion/comptes-et-contrats', UselessPage)
+    otp = URL(r'/fr/espace-prive/authentification-forte-anr', OTPPage)
 
     con_threshold = URL(
         r'/fr/connexion/100-connexions',
@@ -112,6 +114,7 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
     market_syn = URL(r'pe-war/rpc/synthesis/get', MarketSynPage)
     market = URL(r'pe-war/rpc/portfolioDetails/get', MarketPage)
     market_history = URL(r'/pe-war/rpc/turnOverHistory/get', MarketHistoryPage)
+    market_orders = URL(r'/pe-war/rpc/orderDetailList/get', MarketOrdersPage)
 
     recipients = URL(r'/virement-wspl/rest/listerBeneficiaire', RecipientsPage)
     add_recip = URL(r'/virement-wspl/rest/ajouterBeneficiaire', AddRecipPage)
@@ -176,13 +179,16 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
         data['nouveauPassword'] = vk.get_string_code(newpass)
         data['passwordActuel'] = vk.get_string_code(oldpass)
         response = self.location('/mcs-wspl/rpc/modifiercodesecret', data=data)
-        if response.json().get('messageIden').lower() == 'nouveau mot de passe invalide':
+        statut = response.json().get('statut')
+        self.logger.warning('Password change response : statut="%s" - message="%s"', statut, response.json().get('messageIden'))
+        if statut != '1':
             return False
+        self.location('/mcs-wspl/rpc/validercodesecret')
         return True
 
     @need_login
     def get_profile(self):
-        self.profile.go(json={}, method='POST')
+        self.profile.go(json={})
         profile = self.page.get_profile()
         if profile:
             return profile
@@ -201,6 +207,10 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
             self.ibans.go()
             if not self.ibans.is_here():
                 self.ibans.go()
+
+            if self.otp.is_here():
+                raise ActionNeeded("Veuillez réaliser l'authentification forte depuis votre navigateur.")
+
             ibans = self.page.get_ibans_dict()
             # This page might be unavailable.
             try:
@@ -209,7 +219,7 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
                 pass
 
             accounts = list(self.accounts.go().iter_accounts(ibans=ibans))
-            self.market_syn.go(json={}, method='POST')  # do a post on the given URL
+            self.market_syn.go(json={})
             market_accounts = self.page.get_list()  # get the list of 'Comptes Titres'
             checked_accounts = set()
             for account in accounts:
@@ -248,9 +258,10 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
             params = self.natio_vie_pro.go().get_params()
             try:
                 # When the space does not exist we land on a 302 that tries to redirect
-                # to an unexisting domain, hence the 'allow_redirects=False'
+                # to an unexisting domain, hence the 'allow_redirects=False'.
+                # Sometimes the Life Insurance space is unavailable, hence the 'ConnectionError'.
                 self.location(self.capitalisation_page.build(params=params), allow_redirects=False)
-            except ServerError:
+            except (ServerError, ConnectionError):
                 self.logger.warning("An Internal Server Error occurred")
             else:
                 if self.capitalisation_page.is_here() and self.page.has_contracts():
@@ -282,7 +293,7 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
             if coming:
                 return []
             try:
-                self.market_list.go(json={}, method='POST')
+                self.market_list.go(json={})
             except ServerError:
                 self.logger.warning("An Internal Server Error occurred")
                 return []
@@ -368,14 +379,14 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
 
         elif account.type in (account.TYPE_MARKET, account.TYPE_PEA):
             try:
-                self.market_list.go(json={}, method='POST')
+                self.market_list.go(json={})
             except ServerError:
                 self.logger.warning("An Internal Server Error occurred")
-                return iter([])
+                return []
             for market_acc in self.page.get_list():
                 if account.number[-4:] == market_acc['securityAccountNumber'][-4:] and not account.iban:
-                    # Sometimes generate an Internal Server Error ...
                     try:
+                        # Sometimes generates an Internal Server Error ...
                         self.market.go(json={
                             "securityAccountNumber": market_acc['securityAccountNumber'],
                         })
@@ -384,7 +395,40 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
                         break
                     return self.page.iter_investments()
 
-        return iter([])
+        return []
+
+    @need_login
+    def iter_market_orders(self, account):
+        if (
+            account.type not in (Account.TYPE_MARKET, account.TYPE_PEA)
+            or 'espèces' in account.label.lower()
+        ):
+            return []
+
+        try:
+            self.market_list.go(json={})
+        except ServerError:
+            self.logger.warning('An Internal Server Error occurred')
+            return []
+
+        for market_acc in self.page.get_list():
+            if account.number[-4:] == market_acc['securityAccountNumber'][-4:] and not account.iban:
+                json = {
+                    'securityAccountNumber': market_acc['securityAccountNumber'],
+                    'filterCriteria': [],
+                    'sortColumn': 'orderDateTransmission',
+                    'sortType': 'desc',
+                }
+                try:
+                    # Sometimes generates an Internal Server Error ...
+                    self.market_orders.go(json=json)
+                except ServerError:
+                    self.logger.warning('An Internal Server Error occurred')
+                    break
+                return self.page.iter_market_orders()
+
+        # In case we haven't found the account with get_list
+        return []
 
     @need_login
     def iter_recipients(self, origin_account_id):

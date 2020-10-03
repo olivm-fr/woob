@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2014 Johann Broudin
+# Copyright(C) 2020 Johann Broudin
 #
 # This file is part of a weboob module.
 #
@@ -20,12 +20,9 @@
 
 from weboob.capabilities.radio import CapRadio, Radio
 from weboob.capabilities.audiostream import BaseAudioStream
-from weboob.tools.capabilities.streaminfo import StreamInfo
 from weboob.capabilities.collection import CapCollection
 from weboob.tools.backend import Module
-from weboob.browser import Browser
-from weboob.tools.misc import to_unicode
-
+from .browser import VirginBrowser
 
 __all__ = ['VirginRadioModule']
 
@@ -37,89 +34,45 @@ class VirginRadioModule(Module, CapRadio, CapCollection):
     VERSION = '2.1'
     DESCRIPTION = u'VirginRadio french radio'
     LICENSE = 'AGPLv3+'
-    BROWSER = Browser
-
-    _RADIOS = {
-            'officiel': (
-                u'Virgin Radio',
-                u'Virgin Radio',
-                u'http://mp3lg3.scdn.arkena.com/10490/virginradio.mp3',
-                64),
-            'new': (
-                u'Virgin Radio New',
-                u'Virgin Radio New',
-                u'http://mp3lg3.tdf-cdn.com/9145/lag_103228.mp3',
-                64),
-            'classics': (
-                u'Virgin Radio Classics',
-                u'Virgin Radio Classics',
-                u'http://mp3lg3.tdf-cdn.com/9146/lag_103325.mp3',
-                64),
-            'electroshock': (
-                u'Virgin Radio Electroshock',
-                u'Virgin Radio Electroshock',
-                u'http://mp3lg3.tdf-cdn.com/9148/lag_103401.mp3',
-                64),
-            'hits': (
-                u'Virgin Radio Hits',
-                u'Virgin Radio Hits',
-                u'http://mp3lg3.tdf-cdn.com/9150/lag_103440.mp3',
-                64),
-            'rock': (
-                u'Virgin Radio Rock',
-                u'Virgin Radio Rock',
-                u'http://mp3lg3.scdn.arkena.com/9151/lag_103523.mp3',
-                64)
-            }
-
-    def get_stream_info(self, radio, url):
-        stream = BaseAudioStream(0)
-        current = StreamInfo(0)
-
-        r = self.browser.open(url, stream=True, headers={'Icy-Metadata':'1'})
-
-        stream.bitrate = int(r.headers['icy-br'].split(',')[0])
-
-        r.raw.read(int(r.headers['icy-metaint']))
-        size = ord(r.raw.read(1))
-        content = r.raw.read(size*16)
-        r.close()
-
-        for s in content.split("\x00")[0].split(";"):
-            a = s.split("=")
-            if a[0] == "StreamTitle":
-                stream.title = to_unicode(a[1].split("'")[1])
-                res = stream.title.split(" - ")
-                current.who = to_unicode(res[0])
-                if(len(res) == 1):
-                    current.what = ""
-                else:
-                    current.what = to_unicode(res[1])
-
-        stream.format=u'mp3'
-        stream.url = url
-        return [stream], current
+    BROWSER = VirginBrowser
 
     def get_radio(self, radio):
         if not isinstance(radio, Radio):
             radio = Radio(radio)
 
-        if radio.id not in self._RADIOS:
+        r = self.browser.radio(radio.id)
+
+        if r is None:
             return None
 
-        title, description, url, bitrate = self._RADIOS[radio.id]
+        radio.title = r['title']
 
-        radio.title = title
-        radio.description = description
+        radio.description = self.browser.description(r)
 
-        radio.streams, radio.current = self.get_stream_info(radio.id, url)
+        stream_hls = BaseAudioStream(0)
+        stream_hls.url = r['hls_source']
+        stream_hls.bitrate = 135
+        stream_hls.format = u'aac'
+        stream_hls.title = u'%s %skbits/s' % (stream_hls.format, stream_hls.bitrate)
+
+        stream = BaseAudioStream(0)
+        stream.url = r['source']
+        stream.bitrate = 128
+        stream.format = u'mp3'
+        stream.title = u'%s %skbits/s' % (stream.format, stream.bitrate)
+
+        radio.streams = [stream_hls, stream]
+        radio.current = self.browser.current(r)
+
         return radio
 
     def iter_resources(self, objs, split_path):
         if Radio in objs:
             self._restrict_level(split_path)
 
-            for id in self._RADIOS:
+            radios = self.browser.radios()
+
+            for id in radios:
                 yield self.get_radio(id)
 
     def iter_radios_search(self, pattern):

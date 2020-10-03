@@ -21,16 +21,18 @@ from __future__ import unicode_literals
 
 import re
 import base64
+import datetime
 from io import BytesIO
 from PIL import Image
 
 from weboob.tools.json import json
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination
-from weboob.browser.elements import ListElement, TableElement, ItemElement, method
+from weboob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage
+from weboob.browser.elements import ListElement, TableElement, ItemElement, method, DictElement
 from weboob.browser.filters.standard import (
-    Regexp, Field, CleanText, CleanDecimal, Eval, Currency
+    Regexp, Field, CleanText, CleanDecimal, Eval, Currency, Date,
 )
 from weboob.browser.filters.html import Link, TableCell, Attr, AttributeNotFound
+from weboob.browser.filters.json import Dict
 from weboob.capabilities.bank import Account
 from weboob.capabilities.wealth import Investment
 from weboob.capabilities.base import NotAvailable
@@ -221,7 +223,6 @@ class iter_history_generic(Transaction.TransactionsElement):
         def obj_type(self):
             if len(self.el.xpath('./td')) <= 3:
                 return Transaction.TYPE_BANK
-
             col = TableCell('debittype', default=None)
             if col(self):
                 debittype = CleanText(col)(self)
@@ -290,7 +291,8 @@ class TransactionsPage(LoggedPage, HTMLPage):
     @pagination
     @method
     class iter_history(iter_history_generic):
-        pass
+        head_xpath = '//table[@id="creditHistory" or @id="TransactionHistory"]/thead/tr/th'
+        item_xpath = '//table[@id="creditHistory" or @id="TransactionHistory"]/tbody/tr[td]'
 
 
 class SavingHistoryPage(LoggedPage, HTMLPage):
@@ -332,4 +334,56 @@ class LoanHistoryPage(TransactionsPage):
 
 
 class CardHistoryPage(TransactionsPage):
-    pass
+
+    def get_previous_date(self):
+        return Attr('//a[@id="op_precedente"]', 'date_recup', default=None)(self.doc)
+
+
+class CardHistoryJsonPage(LoggedPage, JsonPage):
+
+    def get_previous_date(self):
+        return Dict('str_datePrecedente', default=None)(self.doc)
+
+    def get_last_timestamp(self):
+        # if we don't get the date_recup timestamp value in the html
+        # we get the timestampOperation timestamp of the last transactions returned by the API
+        all_tr = Dict('tab_historique', default=[])(self.doc)
+        if all_tr:
+            return all_tr[-1]['timestampOperation']
+        else:
+            return None
+
+    def on_load(self):
+        # if I do a call to the API without the good dateRecup value that the API want
+        # will return a dict of dict instead of a list of dict
+        #
+        # what we receive (and what we want) with the good dateRecup value:
+        #   [{'date': '...', 'label': '...', 'amount': '...'}, {'date': '...', 'label': '...', 'amount': '...'}]
+        #
+        # what we receive with a bad dateRecup (what we don't want):
+        #   {"1": {'date': '...', 'label': '...', 'amount': '...'}, "2": {'date': '...', 'label': '...', 'amount': '...'}}
+        #
+        # this function converts the response to the good format if needed
+        if isinstance(self.doc['tab_historique'], dict):
+            self.doc['tab_historique'] = sorted(self.doc['tab_historique'].values(), key=lambda x: x['timestampOperation'], reverse=True)
+
+    @method
+    class iter_history(DictElement):
+        item_xpath = 'tab_historique'
+
+        class item(ItemElement):
+            klass = Transaction
+
+            def obj_date(self):
+                return datetime.datetime.strptime(CleanText(Dict('timestampOperation'))(self), "%Y-%m-%d-%H.%M.%S.%f").date()
+
+            obj_rdate = Date(CleanText(Dict('date')), dayfirst=True)
+            obj_raw = CleanText(Dict('label'))
+            obj_amount = CleanDecimal.French(Dict('amount'))
+
+            def obj_type(self):
+                debittype = Dict('mode')
+                if debittype(self) == 'Différé':
+                    return Transaction.TYPE_DEFERRED_CARD
+                else:
+                    return Transaction.TYPE_CARD

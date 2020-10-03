@@ -33,8 +33,8 @@ from requests.exceptions import ConnectionError
 from weboob.browser.elements import DictElement, ListElement, TableElement, ItemElement, method
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.standard import (
-    Format, Eval, Regexp, CleanText, Date, CleanDecimal, Field, Coalesce, Map, Env,
-    Currency,
+    Format, Eval, Regexp, CleanText, Date, CleanDecimal,
+    Field, Coalesce, Map, MapIn, Env, Currency, FromTimestamp,
 )
 from weboob.browser.filters.html import TableCell
 from weboob.browser.pages import JsonPage, LoggedPage, HTMLPage, PartialHTMLPage
@@ -45,7 +45,9 @@ from weboob.capabilities.bank import (
     Emitter, EmitterNumberType, TransferStatus,
     TransferDateType,
 )
-from weboob.capabilities.wealth import Investment
+from weboob.capabilities.wealth import (
+    Investment, MarketOrder, MarketOrderDirection,
+)
 from weboob.capabilities.base import empty
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
@@ -58,7 +60,7 @@ from weboob.tools.capabilities.bank.iban import rib2iban, rebuild_rib, is_iban_v
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction, parse_with_patterns
 from weboob.tools.captcha.virtkeyboard import GridVirtKeyboard
 from weboob.tools.date import parse_french_date
-from weboob.tools.capabilities.bank.investments import is_isin_valid
+from weboob.tools.capabilities.bank.investments import is_isin_valid, IsinCode
 from weboob.tools.compat import unquote_plus
 from weboob.tools.html import html2text
 
@@ -80,10 +82,9 @@ class ConnectionThresholdPage(HTMLPage):
 
     def looks_legit(self, password):
         # the site says:
-        # no more than 2 repeats
-        for v in Counter(password).values():
-            if v > 2:
-                return False
+        # have at least 3 different digits
+        if len(Counter(password)) < 3:
+            return False
 
         # not the birthdate (but we don't know it)
         first, mm, end = map(int, (password[0:2], password[2:4], password[4:6]))
@@ -135,7 +136,7 @@ class ConnectionThresholdPage(HTMLPage):
 
         new_passwords = []
         for i in range(self.NOT_REUSABLE_PASSWORDS_COUNT):
-            new_pass = ''.join([str((int(l) + i + 1) % 10) for l in self.browser.password])
+            new_pass = ''.join(str((int(char) + i + 1) % 10) for char in self.browser.password)
             if not self.looks_legit(new_pass):
                 self.logger.warning('One of rotating password is not legit')
                 raise BrowserPasswordExpired(msg)
@@ -153,6 +154,9 @@ class ConnectionThresholdPage(HTMLPage):
             self.logger.error('Could not restore old password!')
 
         self.logger.warning('Old password restored.')
+
+        # we don't want to try to rotate password two times in a row
+        self.browser.rotating_password = 0
 
 
 def cast(x, typ, default=None):
@@ -249,7 +253,7 @@ class LoginPage(JsonPage):
             else:
                 raise AssertionError('Unexpected error at login: "%s" (code=%s)' % (msg, error))
 
-        parser = html.HTMLParser(encoding=self.encoding)
+        parser = html.HTMLParser()
         doc = html.parse(BytesIO(self.content), parser)
         error = CleanText('//div[h1[contains(text(), "Incident en cours")]]/p')(doc)
         if error:
@@ -270,12 +274,18 @@ class LoginPage(JsonPage):
         )
         # XXX useless?
         csrf = self.generate_token()
-
         response = self.browser.location(target, data={'AUTH': auth, 'CSRF': csrf})
+
+        if 'authentification-forte' in response.url:
+            raise ActionNeeded("Veuillez réaliser l'authentification forte depuis votre navigateur.")
         if response.url.startswith('https://pro.mabanque.bnpparibas'):
             self.browser.switch('pro.mabanque')
         if response.url.startswith('https://banqueprivee.mabanque.bnpparibas'):
             self.browser.switch('banqueprivee.mabanque')
+
+
+class OTPPage(HTMLPage):
+    pass
 
 
 class BNPPage(LoggedPage, JsonPage):
@@ -287,8 +297,10 @@ class BNPPage(LoggedPage, JsonPage):
 
     def on_load(self):
         code = cast(self.get('codeRetour'), int, 0)
+        message = self.get('message', '')
 
-        if code == -30:
+        # -10 : "Utilisateur non authentifie"
+        if code == -30 or (code == -10 and "non authentifie" in message):
             self.logger.debug('End of session detected, try to relog...')
             self.browser.do_login()
         elif code:
@@ -364,8 +376,10 @@ class AccountsPage(BNPPage):
 
                 LABEL_TO_TYPE = {
                     'PEA Espèces': Account.TYPE_PEA,
+                    'PEA PME Espèces': Account.TYPE_PEA,
                     'PEA Titres': Account.TYPE_PEA,
                     'PEL': Account.TYPE_SAVINGS,
+                    'BNPP MP PERP': Account.TYPE_PERP,
                     'Plan Epargne Retraite Particulier': Account.TYPE_PERP,
                     'Crédit immobilier': Account.TYPE_MORTGAGE,
                     'Réserve Provisio': Account.TYPE_REVOLVING_CREDIT,
@@ -539,7 +553,7 @@ class RecipientsPage(BNPPage):
             def obj_enabled_at(self):
                 if Dict('libelleStatut')(self) == u'Activé':
                     return datetime.now().replace(microsecond=0)
-                return (datetime.now() + timedelta(days=5)).replace(microsecond=0)
+                return (datetime.now() + timedelta(days=1)).replace(microsecond=0)
 
     def has_digital_key(self):
         return (
@@ -632,7 +646,7 @@ class Transaction(FrenchTransaction):
         (re.compile('^(?P<category>ECHEANCEPRET)(?P<text>.*)'), FrenchTransaction.TYPE_LOAN_PAYMENT),
         (
             re.compile(
-                r'^(?P<category>RETRAIT DAB) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})( (?P<HH>\d+)H(?P<MM>\d+))?( \d+)? (?P<text>.*)'
+                r'^(?P<category>RETRAIT DAB) ?((?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})( (?P<HH>\d+)H(?P<MM>\d+))?( \d+)? (?P<text>.*))?'
             ),
             FrenchTransaction.TYPE_WITHDRAWAL,
         ),
@@ -830,28 +844,28 @@ class NatioVieProPage(BNPPage):
         return params
 
 
+CAPITALISATION_TYPES = {
+    'Multiplacements': Account.TYPE_LIFE_INSURANCE,
+    'Multihorizons': Account.TYPE_LIFE_INSURANCE,
+    'Libertéa Privilège': Account.TYPE_LIFE_INSURANCE,
+    'Avenir Retraite': Account.TYPE_LIFE_INSURANCE,
+    'Multiciel Privilège': Account.TYPE_CAPITALISATION,
+    'Plan Epargne Retraite Particulier': Account.TYPE_PERP,
+    "Plan d'Épargne Retraite des Particuliers": Account.TYPE_PERP,
+    'PEP Assurvaleurs': Account.TYPE_DEPOSIT,
+}
+
+
 class CapitalisationPage(LoggedPage, PartialHTMLPage):
     def has_contracts(self):
         # This message will appear if the page "Assurance Vie" contains no contract.
         return not CleanText('//td[@class="message"]/text()[starts-with(., "Pour toute information")]')(self.doc)
-
-    # To be completed with other account labels and types seen on the "Assurance Vie" space:
-    ACCOUNT_TYPES = {
-        'BNP Paribas Multiplacements': Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Multihorizons': Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Libertéa Privilège': Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Avenir Retraite': Account.TYPE_LIFE_INSURANCE,
-        'BNP Paribas Multiciel Privilège': Account.TYPE_CAPITALISATION,
-        'Plan Epargne Retraite Particulier': Account.TYPE_PERP,
-        "Plan d'Épargne Retraite des Particuliers": Account.TYPE_PERP,
-    }
 
     @method
     class iter_capitalisation(TableElement):
         # Other types of tables may appear on the page (such as Alternative Emprunteur/Capital Assuré)
         # But they do not contain bank accounts so we must avoid them.
         item_xpath = '//table/tr[preceding-sibling::tr[th[text()="Libellé du contrat"]]][td[@class="ligneTableau"]]'
-
         head_xpath = '//table/tr/th[@class="headerTableau"]'
 
         col_label = 'Libellé du contrat'
@@ -870,12 +884,7 @@ class CapitalisationPage(LoggedPage, PartialHTMLPage):
             obj_iban = None
             obj__subscriber = None
             obj__iduser = None
-
-            def obj_type(self):
-                for k, v in self.page.ACCOUNT_TYPES.items():
-                    if Field('label')(self).startswith(k):
-                        return v
-                return Account.TYPE_UNKNOWN
+            obj_type = MapIn(Field('label'), CAPITALISATION_TYPES, Account.TYPE_UNKNOWN)
 
             def obj_currency(self):
                 currency = CleanText(TableCell('currency')(self))(self)
@@ -958,7 +967,12 @@ class MarketPage(BNPPage):
     def iter_investments(self):
         for support in self.path(self.investments_path):
             inv = Investment()
-            inv.code = inv.id = support['securityCode']
+            inv.id = support['securityCode']
+            if is_isin_valid(support['securityCode']):
+                inv.code = support['securityCode']
+                inv.code_type = Investment.CODE_TYPE_ISIN
+            else:
+                inv.code = inv.code_type = NotAvailable
             inv.quantity = support['quantityOwned']
             inv.unitvalue = support['currentQuote']
             inv.unitprice = support['averagePrice']
@@ -982,12 +996,67 @@ class MarketHistoryPage(BNPPage):
 
             tr.investments = []
             inv = Investment()
-            inv.code = op.get('securityCode')
+            if is_isin_valid(op.get('securityCode')):
+                inv.code = op.get('securityCode')
+                inv.code_type = Investment.CODE_TYPE_ISIN
+            else:
+                inv.code = inv.code_type = NotAvailable
             inv.quantity = op.get('movementQuantity')
             inv.label = op.get('securityName')
             inv.set_empty_fields(NotAvailable)
             tr.investments.append(inv)
             yield tr
+
+
+MARKET_ORDER_DIRECTIONS = {
+    'Achat': MarketOrderDirection.BUY,
+    'Vente': MarketOrderDirection.SALE,
+}
+
+
+class MarketOrdersPage(BNPPage):
+    @method
+    class iter_market_orders(DictElement):
+        item_xpath = 'contentList'
+
+        class item(ItemElement):
+            klass = MarketOrder
+
+            # Note: there is no information on the order type
+            obj_id = CleanText(Dict('orderReference'))
+            obj_label = CleanText(Dict('securityName'))
+            obj_state = CleanText(Dict('orderStatusLabel'))
+            obj_code = IsinCode(CleanText(Dict('securityCode')), default=NotAvailable)
+            obj_stock_market = CleanText(Dict('stockExchangeName'))
+            obj_date = FromTimestamp(
+                Eval(lambda t: t / 1000, Dict('orderDateTransmission'))
+            )
+            obj_direction = Map(
+                CleanText(Dict('orderNatureLabel')),
+                MARKET_ORDER_DIRECTIONS,
+                MarketOrderDirection.UNKNOWN
+            )
+
+            def obj_quantity(self):
+                if empty(Dict('quantity')(self)):
+                    return NotAvailable
+                return Decimal(str(Dict('quantity')(self)))
+
+            def obj_unitprice(self):
+                if empty(Dict('executionPrice')(self)):
+                    return NotAvailable
+                return Decimal(str(Dict('executionPrice')(self)))
+
+            def obj_ordervalue(self):
+                if empty(Dict('limitPrice')(self)):
+                    return NotAvailable
+                return Decimal(str(Dict('limitPrice')(self)))
+
+            def obj_currency(self):
+                # Most of the times the currency is set to null
+                if empty(Dict('orderCurrency')(self)):
+                    return NotAvailable
+                return Currency(Dict('orderCurrency'), default=NotAvailable)(self)
 
 
 class AdvisorPage(BNPPage):
@@ -1051,7 +1120,7 @@ class ActivateRecipPage(AddRecipPage):
         r.id = recipient.id
         r.label = recipient.label
         r.category = u'Externe'
-        r.enabled_at = datetime.now().replace(microsecond=0) + timedelta(days=5)
+        r.enabled_at = datetime.now().replace(microsecond=0) + timedelta(days=1)
         r.currency = u'EUR'
         r.bank_name = self.get('data.activationBeneficiaire.nomBanque')
         return r

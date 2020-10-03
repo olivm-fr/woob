@@ -17,17 +17,19 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from urllib3.exceptions import ReadTimeoutError
 
 from weboob.tools.decorators import retry
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from weboob.browser.exceptions import ClientError
 
 from .pages import (
-    LoginPage, WrongpassPage, AccountsPage,
+    LoginPage, WrongpassPage, HomePage, AccountsPage,
     InvestmentPage, HistoryPage, InfoPage,
 )
 
@@ -42,16 +44,17 @@ class ApivieBrowser(LoginBrowser):
         LoginPage
     )
     wrongpass = URL(r'/accueil.*saveLastPath=false', WrongpassPage)
-    info = URL(r'/coordonnees', InfoPage)
-    accounts = URL(r'/accueil-connect', AccountsPage)
+    info = URL(r'/(coordonnees|accueil-connect)', InfoPage)
+    home = URL(r'/contrats-cosy3', HomePage)
+    accounts = URL(r'https://(?P<api_url>.*)/interne/contrat/', AccountsPage)
     investments = URL(r'https://(?P<api_url>.*)/contrat/(?P<account_id>\d+)$', InvestmentPage)
     history = URL(r'https://(?P<api_url>.*)/contrat/(?P<account_id>\d+)/mouvements', HistoryPage)
-
 
     def __init__(self, website, *args, **kwargs):
         super(ApivieBrowser, self).__init__(*args, **kwargs)
         self.BASEURL = 'https://%s' % website
         self.APIURL = 'hub.apivie.fr'
+        self.client_number = ''
 
     def do_login(self):
         if not self.login.is_here():
@@ -59,23 +62,17 @@ class ApivieBrowser(LoginBrowser):
 
         self.page.login(self.username, self.password)
 
-        # If the user's contact info is too old the website asks to verify them.
-        # We are logged but we cannot go further.
-        if self.info.is_here():
-            error_message = self.page.get_error_message()
-            assert error_message, 'Error message location has changed on info page'
-            raise ActionNeeded(error_message)
-
         if self.wrongpass.is_here():
             raise BrowserIncorrectPassword()
 
-    @need_login
-    def iter_accounts(self):
-        self.accounts.go()
-        return self.page.iter_accounts()
-
-    # Investments & Transactions are scraped on the Apivie API (https://hub.apivie.fr).
+    # Accounts, Investments & Transactions are scraped on the Apivie API (https://hub.apivie.fr).
     # The API is unstable and we get various errors, hence the @retry decorators.
+
+    @need_login
+    @retry(BrowserUnavailable, tries=3)
+    def iter_accounts(self):
+        self.accounts.go(api_url=self.APIURL)
+        return self.page.iter_accounts()
 
     @need_login
     @retry(BrowserUnavailable, tries=3)
@@ -98,3 +95,12 @@ class ApivieBrowser(LoginBrowser):
             raise BrowserUnavailable()
 
         return self.page.iter_history()
+
+    def get_subscription_list(self):
+        raise NotImplementedError()
+
+    def iter_documents(self, subscription):
+        raise NotImplementedError()
+
+    def download_document(self, document):
+        raise NotImplementedError()

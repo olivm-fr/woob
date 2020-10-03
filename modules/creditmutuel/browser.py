@@ -39,7 +39,8 @@ from weboob.browser.pages import FormNotFound
 from weboob.browser.exceptions import ClientError, ServerError
 from weboob.capabilities.bank import (
     Account, AddRecipientStep, Recipient, AccountOwnership,
-    AddRecipientTimeout,
+    AddRecipientTimeout, TransferStep, TransferBankError,
+    AddRecipientBankError,
 )
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from weboob.capabilities import NotAvailable
@@ -57,7 +58,8 @@ from .pages import (
     ErrorPage, SubscriptionPage, NewCardsListPage, CardPage2, FiscalityConfirmationPage,
     ConditionsPage, MobileConfirmationPage, UselessPage, DecoupledStatePage, CancelDecoupled,
     OtpValidationPage, OtpBlockedErrorPage, TwoFAUnabledPage,
-    LoansOperationsPage, OutagePage, InvestmentDetailsPage,
+    LoansOperationsPage, OutagePage, PorInvestmentsPage, PorHistoryPage, PorHistoryDetailsPage,
+    PorMarketOrdersPage, PorMarketOrderDetailsPage,
 )
 
 
@@ -130,9 +132,26 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     por = URL(
         r'/(?P<subbank>.*)fr/banque/PORT_Synthese.aspx\?entete=1',
         r'/(?P<subbank>.*)fr/banque/PORT_Synthese.aspx',
+        r'/(?P<subbank>.*)fr/banque/SYNT_Synthese.aspx',
         PorPage
     )
-    investment_details = URL(r'/(?P<subbank>.*)fr/banque/PORT_Valo.aspx', InvestmentDetailsPage)
+    por_investments = URL(
+        r'/(?P<subbank>.*)fr/banque/PORT_Valo.aspx',
+        r'/(?P<subbank>.*)fr/banque/PORT_Valo.aspx\?&ddp=(?P<ddp>.*)',
+        PorInvestmentsPage
+    )
+    por_history = URL(
+        r'/(?P<subbank>.*)fr/banque/PORT_OperationsLst.aspx',
+        r'/(?P<subbank>.*)fr/banque/PORT_OperationsLst.aspx\?&ddp=(?P<ddp>.*)',
+        PorHistoryPage
+    )
+    por_history_details = URL(r'/(?P<subbank>.*)fr/banque/PORT_OperationsDet.aspx', PorHistoryDetailsPage)
+    por_market_orders = URL(
+        r'/(?P<subbank>.*)fr/banque/PORT_OrdresLst.aspx',
+        r'/(?P<subbank>.*)fr/banque/PORT_OrdresLst.aspx\?&ddp=(?P<ddp>.*)',
+        PorMarketOrdersPage
+    )
+    por_market_order_details = URL(r'/(?P<subbank>.*)fr/banque/PORT_OrdresDet.aspx', PorMarketOrderDetailsPage)
     por_action_needed = URL(r'/(?P<subbank>.*)fr/banque/ORDR_InfosGenerales.aspx', EmptyPage)
 
     li =          URL(r'/(?P<subbank>.*)fr/assurances/profilass.aspx\?domaine=epargne',
@@ -200,12 +219,14 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             'currentSubBank', 'logged', 'is_new_website',
             'need_clear_storage', 'recipient_form',
             'twofa_auth_state', 'polling_data', 'otp_data',
+            'key_form',
         )
         self.twofa_auth_state = {}
         self.polling_data = {}
         self.otp_data = {}
         self.keep_session = None
         self.recipient_form = None
+        self.key_form = None
 
         self.AUTHENTICATION_METHODS = {
             'resume': self.handle_polling,
@@ -213,10 +234,15 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         }
 
     def get_expire(self):
+        """
+        If 2FA is for 90 days for this client,
+        self.twofa_auth_state is present and contains the exact time of the end of its validity
+        Else, it will only last self.STATE_DURATION
+        """
         if self.twofa_auth_state:
             expires = datetime.fromtimestamp(self.twofa_auth_state['expires']).isoformat()
             return expires
-        return
+        return super(CreditMutuelBrowser, self).get_expire()
 
     def load_state(self, state):
         # when add recipient fails, state can't be reloaded.
@@ -226,11 +252,15 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             # only keep 'twofa_auth_state' state to avoid new 2FA
             state = {'twofa_auth_state': state.get('twofa_auth_state')}
 
-        if state.get('polling_data') or state.get('recipient_form') or state.get('otp_data'):
+        if (
+            state.get('polling_data')
+            or state.get('recipient_form')
+            or state.get('otp_data')
+            or state.get('key_form')
+        ):
             # can't start on an url in the middle of a validation process
             # or server will cancel it and launch another one
-            if 'url' in state:
-                state.pop('url')
+            state.pop('url', None)
 
         # if state is empty (first login), it does nothing
         super(CreditMutuelBrowser, self).load_state(state)
@@ -250,7 +280,8 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
         for cookie in self.session.cookies:
             if cookie.name == 'auth_client_state':
-                # only present if 2FA is valid
+                # only present if 2FA is valid for 90 days,
+                # not present if 2FA is triggered systematically
                 self.twofa_auth_state['value'] = cookie.value  # this is a token
                 self.twofa_auth_state['expires'] = cookie.expires  # this is a timestamp
                 self.location(self.response.headers['Location'])
@@ -326,6 +357,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         # MobileConfirmationPage or OtpValidationPage is coming but there is no request_information
         location = self.response.headers.get('Location', '')
         if 'validation.aspx' in location and not self.is_interactive:
+            self.twofa_auth_state = {}
             self.check_interactive()
         elif location:
             self.location(location, allow_redirects=False)
@@ -348,14 +380,25 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     def init_login(self):
         self.login.go()
 
-        # 2FA already done, if valid, login() redirects to home page
+        # 2FA already done ; if valid, login() redirects to home page
+        # 2FA might also now be systematic, this is handled with check_redirections()
         if self.twofa_auth_state:
             self.session.cookies.set('auth_client_state', self.twofa_auth_state['value'])
-            self.page.login(self.username, self.password, redirect=True)
+            self.page.login(self.username, self.password)
+            self.check_redirections()
+
+            if self.mobile_confirmation.is_here():
+                # website proposes to redo 2FA when approaching end of its validity
+                self.page.skip_redo_twofa()
 
         if not self.page.logged:
             # 302 redirect to catch to know if polling
-            self.page.login(self.username, self.password)
+            if self.login.is_here():
+                self.page.login(self.username, self.password)
+            else:
+                # in case client went from 90 days to systematic 2FA and self.is_interactive
+                self.check_auth_methods()
+
             self.check_redirections()
             # for cic, there is two redirections
             self.check_redirections()
@@ -406,7 +449,6 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         for account in self.accounts_list:
             if account.type == Account.TYPE_CARD and not empty(account.parent):
                 account.ownership = account.parent.ownership
-
 
     @need_login
     def get_accounts_list(self):
@@ -640,14 +682,64 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         return trs
 
     @need_login
+    def iter_market_orders(self, account):
+        if all((
+            account._is_inv,
+            account.type in (Account.TYPE_MARKET, Account.TYPE_PEA),
+            account._link_id,
+        )):
+            self.go_por_accounts()
+            self.por_market_orders.go(subbank=self.currentSubBank, ddp=account._link_id)
+            self.page.submit_date_range_form()
+            if self.page.has_no_order():
+                return
+            orders = []
+            page_index = 0
+            # We stop at a maximum of 100 pages to avoid an infinite loop.
+            while page_index < 100:
+                page_index += 1
+                for order in self.page.iter_market_orders():
+                    orders.append(order)
+                if not self.page.has_next_page():
+                    break
+                self.page.submit_next_page_form()
+            for order in orders:
+                if order._market_order_link:
+                    self.location(order._market_order_link)
+                    self.page.fill_market_order(obj=order)
+                yield order
+
+    @need_login
     def get_history(self, account):
         transactions = []
 
-        if account.type == Account.TYPE_LIFE_INSURANCE:
-            self.location(account._link_inv)
-            self.li_history.go(subbank=self.currentSubBank)
-            for tr in self.page.iter_history():
-                yield tr
+        if account._is_inv:
+            if account.type in (Account.TYPE_MARKET, Account.TYPE_PEA) and account._link_id:
+                self.go_por_accounts()
+                self.por_history.go(subbank=self.currentSubBank, ddp=account._link_id)
+                self.page.submit_date_range_form()
+                if self.page.has_no_transaction():
+                    return
+                page_index = 0
+                # We stop at a maximum of 100 pages to avoid an infinite loop.
+                while page_index < 100:
+                    page_index += 1
+                    for tr in self.page.iter_history():
+                        transactions.append(tr)
+                    if not self.page.has_next_page():
+                        break
+                    self.page.submit_next_page_form()
+                for tr in transactions:
+                    if tr._details_link:
+                        self.location(tr._details_link)
+                        self.page.fill_transaction(obj=tr)
+                    yield tr
+            elif account.type == Account.TYPE_LIFE_INSURANCE:
+                if account._link_inv:
+                    self.location(account._link_inv)
+                    self.li_history.go(subbank=self.currentSubBank)
+                    for tr in self.page.iter_history():
+                        yield tr
             return
 
         if not account._link_id:
@@ -744,7 +836,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                     transactions.append(tr)
 
             deferred_date = None
-            cards = ([page.select_card(account._card_number) for page in account._card_pages]
+            cards = ([page.select_card(account.number) for page in account._card_pages]
                      if hasattr(account, '_card_pages')
                      else account._card_links if hasattr(account, '_card_links') else [])
             for card in cards:
@@ -776,9 +868,9 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     @need_login
     def get_investment(self, account):
         if account._is_inv:
-            if account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
+            if account.type in (Account.TYPE_MARKET, Account.TYPE_PEA) and account._link_id:
                 self.go_por_accounts()
-                self.location(account._link_inv)
+                self.por_investments.go(subbank=self.currentSubBank, ddp=account._link_id)
             elif account.type == Account.TYPE_LIFE_INSURANCE:
                 if not account._link_inv:
                     return []
@@ -810,29 +902,98 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 for recipient in self.page.iter_recipients(origin_account=origin_account):
                     yield recipient
 
+    def continue_transfer(self, transfer, **params):
+        if 'Clé' in params:
+            url = self.key_form.pop('url')
+            self.format_personal_key_card_form(params['Clé'])
+            self.location(url, data=self.key_form)
+            self.key_form = None
+
+            if self.verify_pass.is_here():
+                # Do not reload state
+                self.need_clear_storage = True
+                error = self.page.get_error()
+                if error:
+                    raise TransferBankError(message=error)
+                raise AssertionError('An error occured while checking the card code')
+
+            if self.login.is_here():
+                # User took too much time to input the personal key.
+                raise TransferBankError(message='La validation du transfert par carte de clés personnelles a expiré')
+
+            transfer.id = self.page.get_transfer_webid()
+        elif 'resume' in params:
+            self.poll_decoupled(self.polling_data['polling_id'])
+
+            self.location(
+                self.polling_data['final_url'],
+                data=self.polling_data['final_url_params'],
+            )
+            # Dont set `self.polling_data = None` yet because we need to know in
+            # execute_transfer if we just did an app validation.
+
+        # At this point the app validation has already been sent (after validating the
+        # personal key card code).
+        msg = self.page.get_validation_msg()
+        if msg:
+            self.polling_data = self.page.get_polling_data(form_xpath='//form[contains(@action, "virements")]')
+            assert self.polling_data, "Can't proceed without polling data"
+            raise AppValidation(
+                resource=transfer,
+                message=msg,
+            )
+
+        return transfer
+
     @need_login
-    def init_transfer(self, account, to, amount, exec_date, reason=None):
-        if to.category != 'Interne':
+    def init_transfer(self, transfer, account, recipient):
+        if recipient.category != 'Interne':
             self.external_transfer.go(subbank=self.currentSubBank)
         else:
             self.internal_transfer.go(subbank=self.currentSubBank)
 
         if self.external_transfer.is_here() and self.page.has_transfer_categories():
             for category in self.page.iter_categories():
-                if category['name'] == to.category:
+                if category['name'] == recipient.category:
                     self.page.go_on_category(category['index'])
                     break
             self.page.IS_PRO_PAGE = True
             self.page.RECIPIENT_STRING = 'data_input_indiceBen'
-        self.page.prepare_transfer(account, to, amount, reason, exec_date)
-        return self.page.handle_response(account, to, amount, reason, exec_date)
+
+        self.page.prepare_transfer(account, recipient, transfer.amount, transfer.label, transfer.exec_date)
+
+        if self.page.needs_personal_key_card_validation():
+            self.location(self.page.get_card_key_validation_link())
+            error = self.page.get_personal_keys_error()
+            if error:
+                raise TransferBankError(message=error)
+
+            self.key_form = self.page.get_personal_key_card_code_form()
+            raise TransferStep(transfer, Value('Clé', label=self.page.get_question()))
+
+        msg = self.page.get_validation_msg()
+        if msg:
+            self.polling_data = self.page.get_polling_data(form_xpath='//form[contains(@action, "virements")]')
+            assert self.polling_data, "Can't proceed without polling data"
+            raise AppValidation(
+                resource=transfer,
+                message=msg,
+            )
+
+        return self.page.handle_response(account, recipient, transfer.amount, transfer.label, transfer.exec_date)
 
     @need_login
     def execute_transfer(self, transfer, **params):
-        form = self.page.get_form(id='P:F', submit='//input[@type="submit" and contains(@value, "Confirmer")]')
-        # For the moment, don't ask the user if he confirms the duplicate.
-        form['Bool:data_input_confirmationDoublon'] = 'true'
-        form.submit()
+        if self.polling_data:
+            # If we just did a transfer to a new recipient the transfer has already
+            # been confirmed with the app validation.
+            self.polling_data = None
+        else:
+            form = self.page.get_form(id='P:F', submit='//input[@type="submit" and contains(@value, "Confirmer")]')
+            # For the moment, don't ask the user if he confirms the duplicate.
+            form['Bool:data_input_confirmationDoublon'] = 'true'
+            form.submit()
+
         return self.page.create_transfer(transfer)
 
     @need_login
@@ -874,30 +1035,34 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         r.bank_name = NotAvailable
         return r
 
-    def format_recipient_form(self, key):
-        self.recipient_form['[t:xsd%3astring;]Data_KeyInput'] = key
+    def format_personal_key_card_form(self, key):
+        self.key_form['[t:xsd%3astring;]Data_KeyInput'] = key
 
         # we don't know the card id
         # by default all users have only one card
         # but to be sure, let's get it dynamically
-        do_validate = [k for k in self.recipient_form.keys() if '_FID_DoValidate_cardId' in k]
+        do_validate = [k for k in self.key_form.keys() if '_FID_DoValidate_cardId' in k]
         assert len(do_validate) == 1, 'There should be only one card.'
-        self.recipient_form[do_validate[0]] = ''
+        self.key_form[do_validate[0]] = ''
 
-        activate = [k for k in self.recipient_form.keys() if '_FID_GoCardAction_action' in k]
-        for _ in activate:
-            del self.recipient_form[_]
+        activate = [k for k in self.key_form.keys() if '_FID_GoCardAction_action' in k]
+        for k in activate:
+            del self.key_form[k]
 
     def continue_new_recipient(self, recipient, **params):
         if 'Clé' in params:
-            url = self.recipient_form.pop('url')
-            self.format_recipient_form(params['Clé'])
-            self.location(url, data=self.recipient_form)
-            self.recipient_form = None
+            url = self.key_form.pop('url')
+            self.format_personal_key_card_form(params['Clé'])
+            self.location(url, data=self.key_form)
+            self.key_form = None
 
             if self.verify_pass.is_here():
-                self.page.handle_error()
-                assert False, 'An error occured while checking the card code'
+                # Do not reload state
+                self.need_clear_storage = True
+                error = self.page.get_error()
+                if error:
+                    raise AddRecipientBankError(message=error)
+                raise AssertionError('An error occured while checking the card code')
 
             if self.login.is_here():
                 # User took too much time to input the personal key.
@@ -976,8 +1141,11 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
         self.page.go_to_add()
         if self.verify_pass.is_here():
-            self.page.check_personal_keys_error()
-            self.recipient_form = self.page.get_recipient_form()
+            error = self.page.get_personal_keys_error()
+            if error:
+                raise AddRecipientBankError(message=error)
+
+            self.key_form = self.page.get_personal_key_card_code_form()
             raise AddRecipientStep(self.get_recipient_object(recipient), Value('Clé', label=self.page.get_question()))
         else:
             return self.continue_new_recipient(recipient, **params)

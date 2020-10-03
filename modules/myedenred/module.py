@@ -17,12 +17,14 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from weboob.capabilities.bank import CapBank, Account, AccountNotFound
 from weboob.capabilities.base import find_object
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from weboob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import MyedenredBrowser
 
@@ -38,17 +40,15 @@ class MyedenredModule(Module, CapBank):
     LICENSE = 'LGPLv3+'
     VERSION = '2.1'
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Adresse email', masked=False, regexp=r'[^@]{1,}@[^\.]{1,}\..{2,}'),
+        ValueBackendPassword('login', label='Adresse email', masked=False, regexp=r'[^@]{1,}@([^\.]{1,}\.)+\S{2,}$'),
         ValueBackendPassword('password', label='Mot de passe'),
+        ValueTransient('captcha_response', label='Captcha Response'),
     )
 
     BROWSER = MyedenredBrowser
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config['login'].get(),
-            self.config['password'].get(),
-        )
+        return self.create_browser(self.config)
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

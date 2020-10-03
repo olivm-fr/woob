@@ -17,10 +17,12 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from weboob.tools.value import ValueBackendPassword, ValueTransient
 from weboob.capabilities.bank import CapBank
 
 from .browser import SwileBrowser
@@ -41,13 +43,11 @@ class SwileModule(Module, CapBank):
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='E-mail', masked=False),
         ValueBackendPassword('password', label='Mot de passe'),
+        ValueTransient('captcha_response', label='Captcha Response'),
     )
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config['login'].get(),
-            self.config['password'].get(),
-        )
+        return self.create_browser(self.config)
 
     def iter_accounts(self):
         return self.browser.get_account()

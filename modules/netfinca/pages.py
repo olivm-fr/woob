@@ -30,7 +30,10 @@ from weboob.browser.filters.standard import (
 )
 from weboob.browser.filters.html import TableCell, Attr, Link
 from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment, MarketOrder, MarketOrderType, MarketOrderDirection
+from weboob.capabilities.wealth import (
+    Investment, MarketOrder, MarketOrderType,
+    MarketOrderDirection, MarketOrderPayment,
+)
 from weboob.capabilities.base import NotAvailable, empty
 from weboob.tools.capabilities.bank.investments import (
     is_isin_valid, create_french_liquidity, IsinCode, IsinType,
@@ -48,6 +51,7 @@ ACCOUNT_TYPES = {
     'PARTS SOCIALES': Account.TYPE_MARKET,
     'PEA VENDOME PATRIMOINE': Account.TYPE_PEA,
 }
+
 
 class AccountsPage(LoggedPage, HTMLPage):
     # UTF8 tag in the meta div, but that's wrong
@@ -156,7 +160,10 @@ class InvestmentsPage(LoggedPage, HTMLPage):
                 tablecell = TableCell('quantity', default=NotAvailable)(self)
                 if empty(tablecell):
                     return NotAvailable
-                return CleanDecimal.French(tablecell[0].xpath('./span'))(self)
+                elif '€' in Base(tablecell, CleanText('./span'))(self):
+                    # Euro funds only have the amount invested (in euros) in this column
+                    return NotAvailable
+                return Base(tablecell, CleanDecimal.French('./span'))(self)
 
             def obj_label(self):
                 tablecell = TableCell('label')(self)[0]
@@ -231,9 +238,16 @@ class InvestmentsPage(LoggedPage, HTMLPage):
             def original_unitvalue(self):
                 tablecell = TableCell('unitvalue', default=NotAvailable)(self)
                 if empty(tablecell):
-                    return NotAvailable
-                text = tablecell[0].xpath('./text()')
-                return Currency(text, default=NotAvailable)(self), CleanDecimal.French(text, default=NotAvailable)(self)
+                    return (NotAvailable, NotAvailable)
+
+                text = Base(tablecell, CleanText('.'))(self)
+                if '%' in text:
+                    # For euro funds, the unit_value is replaced by a diff percentage
+                    return (NotAvailable, NotAvailable)
+                return (
+                    Base(tablecell, Currency('.', default=NotAvailable))(self),
+                    Base(tablecell, CleanDecimal.French('.', default=NotAvailable))(self)
+                )
 
     def get_liquidity(self):
         # Not all accounts have a Liquidity element
@@ -246,6 +260,13 @@ MARKET_ORDER_DIRECTIONS = {
     'Vente': MarketOrderDirection.SALE,
     'Achat': MarketOrderDirection.BUY,
 }
+
+
+MARKET_ORDER_PAYMENTS = {
+    'Comptant': MarketOrderPayment.CASH,
+    'SRD': MarketOrderPayment.DEFERRED,
+}
+
 
 class MarketOrdersPage(LoggedPage, HTMLPage):
     # UTF8 tag in the meta div, but that's wrong
@@ -265,6 +286,7 @@ class MarketOrdersPage(LoggedPage, HTMLPage):
         head_xpath = '//table[@id="orderListTable"]//thead//th'
         item_xpath = '//table[@id="orderListTable"]//tbody//tr'
 
+        col__details_link = 'Détails'
         col_date = 'Date de création'
         col_label = 'Libellé'
         col_direction = 'Sens'
@@ -278,24 +300,18 @@ class MarketOrdersPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = MarketOrder
 
+            obj__details_link = Base(TableCell('_details_link'), Link('.//a'))
             obj_label = Base(TableCell('label'), CleanText('.//a/@title'))
             obj_direction = MapIn(CleanText(TableCell('direction')), MARKET_ORDER_DIRECTIONS, MarketOrderDirection.UNKNOWN)
             obj_state = CleanText(TableCell('state'))
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
             obj_validity_date = Date(CleanText(TableCell('validity_date')), dayfirst=True, default=NotAvailable)
             obj_quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)
-            obj_amount = CleanDecimal.French(TableCell('amount'), default=NotAvailable)
             # Extract the unitprice from the state (e.g. 'Exécuté à 58,70 € <sometimes additional text>')
             obj_unitprice = CleanDecimal.French(
                 Regexp(CleanText(TableCell('state')), r'Exécuté à ([\d ,]+)', default=NotAvailable),
                 default=NotAvailable
             )
-
-            def obj_currency(self):
-                if empty(Field('amount')(self)):
-                    return Currency(TableCell('state'))(self)
-                # Return the currency indicated with the market order amount
-                return Currency(TableCell('amount'))(self)
 
             def obj_order_type(self):
                 # The column containing the value depends on the order type.
@@ -322,3 +338,27 @@ class MarketOrdersPage(LoggedPage, HTMLPage):
                 ),
                 default=NotAvailable
             )
+
+    @method
+    class fill_market_order(ItemElement):
+        obj_id = CleanText('//td[contains(text(), "Référence Bourse")]/following-sibling::td[1]', default=NotAvailable)
+        obj_currency = Currency('//td[contains(text(), "Devise")]/following-sibling::td[1]', default=NotAvailable)
+        obj_amount = CleanDecimal.French(
+            '//td[contains(text(), "Total")]/following-sibling::td[1]',
+            default=NotAvailable
+        )
+        obj_payment_method = Map(
+            CleanText('//td[contains(text(), "Règlement")]/following-sibling::td[1]'),
+            MARKET_ORDER_PAYMENTS,
+            MarketOrderPayment.UNKNOWN
+        )
+
+        def obj_stock_market(self):
+            # For some reason they tend to randomly add 'Meilleure Exécution',
+            # with or without parenthesis
+            raw_value = CleanText(
+                '//td[contains(text(), "Place")]/following-sibling::td[1]',
+                replace=[('(', ''), ('Meilleure exécution', ''), (')', '')],
+                default=NotAvailable
+            )(self)
+            return raw_value or NotAvailable

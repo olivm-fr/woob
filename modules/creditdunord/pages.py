@@ -28,7 +28,7 @@ from datetime import date as da
 from lxml import html
 import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
+from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage, PartialHTMLPage
 from weboob.browser.elements import method, ItemElement, TableElement
 from weboob.browser.filters.standard import CleanText, Date, CleanDecimal, Regexp, Format, Field, Eval, Lower
 from weboob.browser.filters.json import Dict
@@ -43,6 +43,7 @@ from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.investments import is_isin_valid
 from weboob.tools.captcha.virtkeyboard import GridVirtKeyboard
 from weboob.tools.compat import quote, unicode
+from weboob.tools.misc import to_unicode
 from weboob.tools.json import json
 
 
@@ -105,7 +106,6 @@ class HTMLErrorPage(HTMLPage):
         # No Coalesce here as both can be empty
         return CleanText('//b[has-class("x-attentionErreurLigneHaut")]')(self.doc) or \
                CleanText('//div[has-class("x-attentionErreur")]/b')(self.doc)
-
 
 
 class RedirectPage(HTMLPage):
@@ -272,7 +272,7 @@ class AVPage(LoggedPage, CDNBasePage):
                 a = Account()
 
                 # get acc_nb like on accounts page
-                a._acc_nb = Regexp(
+                a.number = a._acc_nb = Regexp(
                     CleanText('//div[@id="v1-cadre"]//b[contains(text(), "Compte N")]', replace=[(' ', '')]),
                     r'(\d+)'
                 )(self.doc)[5:]
@@ -318,7 +318,6 @@ class AccountsPageMixin(LoggedPage, CDNBasePage):
         'PRÊT':                    Account.TYPE_LOAN,
         'CREDIT':                  Account.TYPE_LOAN,
         'FACILINVEST':             Account.TYPE_LOAN,
-        'TITRES':                  Account.TYPE_MARKET,
         'COMPTE TIT':              Account.TYPE_MARKET,
         'PRDTS BLOQ. TIT':         Account.TYPE_MARKET,
         'PRODUIT BLOQUE TIT':      Account.TYPE_MARKET,
@@ -326,6 +325,10 @@ class AccountsPageMixin(LoggedPage, CDNBasePage):
     }
 
     def get_account_type(self, label):
+        # To differenciate between 'COMPTE COURANT' & 'COMPTE COURANT TITRES',
+        # in the TYPES dictionary, we type Market accounts right away
+        if 'TITRES' in label:
+            return Account.TYPE_MARKET
         for pattern, actype in sorted(self.TYPES.items()):
             if label.startswith(pattern) or label.endswith(pattern):
                 return actype
@@ -391,7 +394,12 @@ class AccountsPage(AccountsPageMixin):
             if re.match(r'Classement=(.*?):::Banque=(.*?):::Agence=(.*?):::SScompte=(.*?):::Serie=(.*)', a.id):
                 a.id = str(CleanDecimal().filter(a.id))
 
-            a._acc_nb = a.id.split('_')[0] if len(a.id.split('_')) > 1 else None
+            idparts = a.id.split('_')
+            if len(idparts) > 1:
+                a.number = a._acc_nb = idparts[0]
+            else:
+                a._acc_nb = None
+
             a.label = MyStrip(line[self.COL_LABEL], xpath='.//div[@class="libelleCompteTDB"]')
             # This account can be multiple life insurance accounts
             if a.label == 'ASSURANCE VIE-BON CAPI-SCPI-DIVERS *':
@@ -440,7 +448,7 @@ class AccountsPage(AccountsPageMixin):
         return re.search(r'(\d{4,})', Attr('//form[@name="changePageForm"]', 'action')(self.doc)).group(0)
 
 
-class ProAccountsPage(AccountsPageMixin):
+class ProAccountsPage(PartialHTMLPage, AccountsPageMixin):
     COL_ID = 0
     COL_BALANCE = 1
 
@@ -472,7 +480,7 @@ class ProAccountsPage(AccountsPageMixin):
             args[input.attrib['name']] = input.attrib.get('value', '')
 
         for i, key in enumerate(self.ARGS):
-            args[key] = unicode(l[self.ARGS.index(key)]).encode(self.browser.ENCODING)
+            args[key] = to_unicode(l[self.ARGS.index(key)])
 
         args['PageDemandee'] = 1
         args['PagePrecedente'] = 1
@@ -511,7 +519,7 @@ class ProAccountsPage(AccountsPageMixin):
             # The _link and _args should be None
             else:
                 a._link, a._args = None, None
-            a._acc_nb = cols[self.COL_ID].xpath('.//span[@class="right-underline"] | .//span[@class="right"]')[0].text.replace(' ', '').strip()
+            a.number = a._acc_nb = cols[self.COL_ID].xpath('.//span[@class="right-underline"] | .//span[@class="right"]')[0].text.replace(' ', '').strip()
 
             a.id = a._acc_nb
 

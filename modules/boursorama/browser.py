@@ -50,7 +50,8 @@ from .pages import (
     CardsNumberPage, CalendarPage, HomePage, PEPPage,
     TransferAccounts, TransferRecipients, TransferCharac, TransferConfirm, TransferSent,
     AddRecipientPage, StatusPage, CardHistoryPage, CardCalendarPage, CurrencyListPage, CurrencyConvertPage,
-    AccountsErrorPage, NoAccountPage, TransferMainPage, PasswordPage,
+    AccountsErrorPage, NoAccountPage, TransferMainPage, PasswordPage, NewTransferRecipients,
+    NewTransferAccounts,
 )
 from .transfer_pages import TransferListPage, TransferInfoPage
 
@@ -78,7 +79,7 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         '/infos-profil',
         ErrorPage
     )
-    login = URL(r'/connexion/saisie-mot-de-passe/', PasswordPage)
+    login = URL(r'/connexion/saisie-mot-de-passe', PasswordPage)
 
     accounts = URL(r'/dashboard/comptes\?_hinclude=300000', AccountsPage)
     accounts_error = URL(r'/dashboard/comptes\?_hinclude=300000', AccountsErrorPage)
@@ -120,6 +121,15 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements$',
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/nouveau/(?P<id>\w+)/2',
         TransferRecipients
+    )
+    new_transfer_accounts = URL(
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/?$',
+        r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/1',
+        NewTransferAccounts
+    )
+    new_recipients_page = URL(
+        r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/2',
+        NewTransferRecipients
     )
     transfer_charac = URL(
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/nouveau/(?P<id>\w+)/3',
@@ -420,6 +430,19 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             return self.get_card_transactions(account, coming)
         return self.get_regular_transactions(account, coming)
 
+    def otp_location(self, *args, **kwargs):
+        # this method is used in `otp_pagination` decorator from pages
+        # without this header, we don't get a 401 but a 302 that logs us out
+        kwargs.setdefault('headers', {}).update({'X-Requested-With': "XMLHttpRequest"})
+        try:
+            return super(BoursoramaBrowser, self).location(*args, **kwargs)
+        except ClientError as e:
+            # as done in boursorama's js : a 401 results in a popup
+            # asking to send an otp to get more than x months of transactions
+            # so... we don't want it :)
+            if e.response.status_code != 401:
+                raise e
+
     def get_regular_transactions(self, account, coming):
         if not coming:
             # We look for 3 years of history.
@@ -427,12 +450,21 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             params['movementSearch[toDate]'] = (date.today() + relativedelta(days=40)).strftime('%d/%m/%Y')
             params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
             params['movementSearch[selectedAccounts][]'] = account._webid
-            self.location('%s/mouvements' % account.url.rstrip('/'), params=params)
+            if self.otp_location('%s/mouvements' % account.url.rstrip('/'), params=params) is None:
+                return
+
             for transaction in self.page.iter_history():
                 yield transaction
 
         # Note: Checking accounts have a 'Mes prélèvements à venir' tab,
         # but these transactions have no date anymore so we ignore them.
+
+    def get_card_transaction(self, coming, tr):
+        if coming and tr.date > date.today():
+            tr._is_coming = True
+            return True
+        elif not coming and tr.date <= date.today():
+            return True
 
     def get_card_transactions(self, account, coming):
         # All card transactions can be found in the CSV (history and coming),
@@ -448,17 +480,25 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         params = {}
         params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
         params['fullSearch'] = 1
-        self.location(account.url, params=params)
+        if self.otp_location(account.url, params=params) is None:
+            return
+
         csv_link = self.page.get_csv_link()
-        if csv_link:
-            self.location(csv_link)
+        if csv_link and self.otp_location(csv_link):
             # Yield past transactions as 'history' and
             # transactions in the future as 'coming':
             for tr in sorted_transactions(self.page.iter_history(account_number=account.number)):
-                if coming and tr.date > date.today():
-                    tr._is_coming = True
+                if self.get_card_transaction(coming, tr):
                     yield tr
-                elif not coming and tr.date <= date.today():
+        else:
+            # if the export link is hidden or we got a 401 on csv link,
+            # we need to get transactions from current page or we will just get nothing
+            for tr in self.open(account.url).page.iter_history(is_card=True):
+                if self.get_card_transaction(coming, tr):
+                    yield tr
+
+            for tr in self.page.iter_history(is_card=True):
+                if self.get_card_transaction(coming, tr):
                     yield tr
 
     def get_invest_transactions(self, account, coming):
@@ -530,19 +570,31 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
 
         if self.transfer_accounts.is_here():
             self.page.submit_account(account_id)  # may raise AccountNotFound
+        elif self.transfer_main_page.is_here():
+            self.new_transfer_accounts.go(acc_type=account_type, webid=account_webid)
+            self.page.submit_account(account_id)  # may raise AccountNotFound
 
     @need_login
     def iter_transfer_recipients(self, account):
         if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE):
             return []
-        assert account.url
+
+        if not account.url:
+            account = find_object(self.get_accounts_list(), iban=account.iban)
+            assert account, 'Could not find an account with a matching iban'
+
+        assert account.url, 'Account should have an url to access its recipients'
 
         try:
             self.go_recipients_list(account.url, account.id)
         except (BrowserHTTPNotFound, AccountNotFound):
             return []
 
-        assert self.recipients_page.is_here()
+        assert (
+            self.recipients_page.is_here()
+            or self.new_recipients_page.is_here()
+        ), 'Should be on recipients page'
+
         return self.page.iter_recipients()
 
     def check_basic_transfer(self, transfer):
@@ -570,6 +622,9 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             raise TransferInvalidRecipient('The recipient cannot be used with the emitter account')
         assert len(recipients) == 1
 
+        if self.new_recipients_page.is_here():
+            raise NotImplementedError('The new transfer pages are not yet implemented')
+
         self.page.submit_recipient(recipients[0]._tempid)
         assert self.transfer_charac.is_here()
 
@@ -585,7 +640,7 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         # at this stage, the site doesn't show the real ids/ibans, we can only guess
         if recipients[0].label != ret.recipient_label:
             self.logger.info(
-                'Recipients from iter_recipient and from the transfer are diffent: "%s" and "%s"',
+                'Recipients from iter_recipient and from the transfer are different: "%s" and "%s"',
                 recipients[0].label, ret.recipient_label
             )
             if not ret.recipient_label.startswith('%s - ' % recipients[0].label):

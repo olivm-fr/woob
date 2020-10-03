@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
 
 from __future__ import unicode_literals
 
@@ -25,6 +26,7 @@ import time
 from datetime import datetime, timedelta, date
 from functools import wraps
 
+from dateutil.relativedelta import relativedelta
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserUnavailable,
     AuthMethodNotImplemented, ActionNeeded,
@@ -39,7 +41,7 @@ from weboob.capabilities.bank import (
 from weboob.tools.date import LinearDateGuesser
 from weboob.capabilities.base import find_object
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.tools.compat import basestring, urlsplit, unicode
+from weboob.tools.compat import basestring, urlsplit, unicode, urlparse, parse_qs
 from weboob.tools.value import Value
 
 from .pages import (
@@ -48,10 +50,11 @@ from .pages import (
     AddRecipientPage, RecipientPage, RecipConfirmPage, SmsPage, RecipRecapPage, LoansProPage,
     Form2Page, DocumentsPage, ClientPage, SendTokenPage, CaliePage, ProfilePage, DepositPage,
     AVHistoryPage, AVInvestmentsPage, CardsPage, AVListPage, CalieContractsPage, RedirectPage,
+    MarketOrdersPage, AVNotAuthorized, AVReroute,
 )
 
 
-__all__ = ['LCLBrowser', 'LCLProBrowser', 'ELCLBrowser']
+__all__ = ['LCLBrowser', 'LCLProBrowser']
 
 
 # Browser
@@ -105,6 +108,11 @@ class LCLBrowser(LoginBrowser, StatesMixin):
         r'/outil/UWBO.*',
         BoursePage)
 
+    market_orders = URL(
+        r'https://bourse.secure.lcl.fr/netfinca-titres/servlet/com.netfinca.frontcr.order.OrderList',
+        MarketOrdersPage
+    )
+
     disc = URL(
         r'https://bourse.secure.lcl.fr/netfinca-titres/servlet/com.netfinca.frontcr.login.ContextTransferDisconnect',
         r'https://assurance-vie-et-prevoyance.secure.lcl.fr/filiale/entreeBam\?.*\btypeaction=reroutage_retour\b',
@@ -129,7 +137,18 @@ class LCLBrowser(LoginBrowser, StatesMixin):
     av_list = URL(r'https://assurance-vie-et-prevoyance.secure.lcl.fr/rest/assurance/synthesePartenaire', AVListPage)
     avdetail = URL(r'https://assurance-vie-et-prevoyance.secure.lcl.fr/consultation/epargne', AVDetailPage)
     av_history = URL(r'https://assurance-vie-et-prevoyance.secure.lcl.fr/rest/assurance/historique', AVHistoryPage)
-    av_investments = URL(r'https://assurance-vie-et-prevoyance.secure.lcl.fr/rest/detailEpargne/contrat/(?P<life_insurance_id>\w+)', AVInvestmentsPage)
+    av_investments = URL(
+        r'https://assurance-vie-et-prevoyance.secure.lcl.fr/rest/detailEpargne/contrat/(?P<life_insurance_id>\w+)',
+        AVInvestmentsPage
+    )
+    av_access_not_authorized = URL(
+        r'https://assurance-vie-et-prevoyance.secure.lcl.fr/acces-non-autorise',
+        AVNotAuthorized
+    )
+    av_reroute = URL(
+        r'https://assurance-vie-et-prevoyance.secure.lcl.fr/filiale/entreeBam\?typeaction=reroutage_retour',
+        AVReroute
+    )
 
     loans = URL(r'/outil/UWCR/SynthesePar/', LoansPage)
     loans_pro = URL(r'/outil/UWCR/SynthesePro/', LoansProPage)
@@ -160,8 +179,11 @@ class LCLBrowser(LoginBrowser, StatesMixin):
 
     profile = URL(r'/outil/UWIP/Accueil/rafraichir', ProfilePage)
 
-    deposit = URL(r'/outil/UWPL/CompteATerme/accesSynthese',
-                  r'/outil/UWPL/DetailCompteATerme/accesDetail', DepositPage)
+    deposit = URL(
+        r'/outil/UWPL/CompteATerme/accesSynthese',
+        r'/outil/UWPL/DetailCompteATerme/accesDetail',
+        DepositPage
+    )
 
     __states__ = ('contracts', 'current_contract', 'parsed_contracts')
 
@@ -211,7 +233,7 @@ class LCLBrowser(LoginBrowser, StatesMixin):
                 # If we follow the redirection we will get a 2fa
                 # The 2fa validation is crossbrowser, for now we raise an ActionNeeded
                 # TODO Handle SMS and appvalidation
-                raise ActionNeeded('Vous devez réaliser la double authentification sur le portail internet')
+                raise ActionNeeded("Veuillez vous identifier sur le site web LCL depuis votre navigateur habituel afin de réaliser l'authentification forte")
             else:
                 # If we're not redirected to 2fa page, it's likely to be the home page and we're logged in
                 self.location(self.response.headers['location'])
@@ -255,7 +277,13 @@ class LCLBrowser(LoginBrowser, StatesMixin):
         life_insurance_routage_url = self.page.get_routage_url()
         if life_insurance_routage_url:
             self.location(life_insurance_routage_url)
-            self.av_list.go()
+            # check if the client has access to life insurance
+            if self.av_access_not_authorized.is_here():
+                # if not, reroute to the main website
+                self.av_reroute.go()
+            else:
+                self.av_list.go()
+                assert self.av_list.is_here(), 'Something went wrong while going to life insurances list page.'
 
     @need_login
     def update_life_insurance_account(self, life_insurance):
@@ -351,10 +379,12 @@ class LCLBrowser(LoginBrowser, StatesMixin):
             # retrieve life insurances on special lcl life insurance website
             if self.page.is_website_life_insurance():
                 self.go_life_insurance_website()
-                for life_insurance in self.page.iter_life_insurance():
-                    life_insurance = self.update_life_insurance_account(life_insurance)
-                    self.update_accounts(life_insurance)
-                self.go_back_from_life_insurance_website()
+                # check if av_list is here cause sometimes the user has not access to life insurance
+                if self.av_list.is_here():
+                    for life_insurance in self.page.iter_life_insurance():
+                        life_insurance = self.update_life_insurance_account(life_insurance)
+                        self.update_accounts(life_insurance)
+                    self.go_back_from_life_insurance_website()
 
         # retrieve accounts on main page
         self.accounts.go()
@@ -363,16 +393,26 @@ class LCLBrowser(LoginBrowser, StatesMixin):
                 continue
 
             self.location('/outil/UWRI/Accueil/')
+
             if self.no_perm.is_here():
                 self.logger.warning('RIB is unavailable.')
+
             elif self.page.has_iban_choice():
                 self.rib.go(data={'compte': '%s/%s/%s' % (a.id[0:5], a.id[5:11], a.id[11:])})
                 if self.rib.is_here():
                     iban = self.page.get_iban()
-                    a.iban = iban if iban and a.id[11:] in iban else NotAvailable
+                    if iban and a.id[11:] in iban:
+                        a.iban = iban
+                    else:
+                        a.iban = NotAvailable
+
             else:
                 iban = self.page.check_iban_by_account(a.id)
-                a.iban = iban if iban is not None else NotAvailable
+                if iban:
+                    a.iban = iban
+                else:
+                    a.iban = NotAvailable
+
             self.update_accounts(a)
 
         # retrieve loans accounts
@@ -452,7 +492,11 @@ class LCLBrowser(LoginBrowser, StatesMixin):
         if not account.ownership:
             if account.parent and account.parent.ownership:
                 account.ownership = account.parent.ownership
-            elif re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)', account.label, re.IGNORECASE):
+            elif re.search(
+                    r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)',
+                    account.label,
+                    re.IGNORECASE
+            ):
                 account.ownership = AccountOwnership.CO_OWNER
             elif all(n in account.label for n in owner_name.split()):
                 account.ownership = AccountOwnership.OWNER
@@ -471,10 +515,13 @@ class LCLBrowser(LoginBrowser, StatesMixin):
     def get_history(self, account):
         if hasattr(account, '_market_link') and account._market_link:
             self.connexion_bourse()
-            self.location(account._link_id, params={
-                'nump': account._market_id,
-            })
+            self.location(
+                account._link_id, params={
+                    'nump': account._market_id,
+                }
+            )
             self.page.get_fullhistory()
+
             for tr in self.page.iter_history():
                 yield tr
             self.deconnexion_bourse()
@@ -487,7 +534,37 @@ class LCLBrowser(LoginBrowser, StatesMixin):
                 # Website crashed and we are disconnected.
                 raise BrowserUnavailable()
             date_guesser = LinearDateGuesser()
+
+            failed_threshold = 5
+            failed_pages = 0
             for tr in self.page.get_operations(date_guesser=date_guesser):
+                tr_page = None
+                if (
+                    hasattr(self.page, 'open_transaction_page')
+                    and failed_pages < failed_threshold
+                ):
+                    # There are transactions details on a separate page (on the website, you click on the transaction, which opens an iframe).
+                    # Unfortunately for some accounts, no details are available. Avoid opening a lot of bogus pages by stopping after a few failed ones.
+
+                    tr_response = self.page.open_transaction_page(tr)
+                    if tr_response:
+                        tr_page = tr_response.page
+
+                        if not tr_page or isinstance(tr_page, NoPermissionPage):
+                            failed_pages += 1
+                            self.logger.warning(
+                                "failed to get transaction details page, failure count = %d",
+                                failed_pages
+                            )
+                            if failed_pages >= failed_threshold:
+                                self.logger.warning("failure threshold reached, not attempting to get transaction details anymore")
+                        else:
+                            if failed_pages:
+                                self.logger.debug("resetting failed transaction details pages count")
+                                failed_pages = 0
+
+                self.page.fix_transaction_stuff(tr, tr_page)
+
                 yield tr
 
         elif account.type == Account.TYPE_CARD:
@@ -590,6 +667,38 @@ class LCLBrowser(LoginBrowser, StatesMixin):
         elif account.id in self.get_bourse_accounts_ids():
             yield create_french_liquidity(account.balance)
 
+    def iter_market_orders(self, account):
+        if account.type not in (Account.TYPE_MARKET, account.TYPE_PEA):
+            return
+        if hasattr(account, '_market_link') and account._market_link:
+            try:
+                # We go on the market space inside a try to make sure we go back to the base website.
+                self.connexion_bourse()
+
+                params = parse_qs(urlparse(account._market_link).query)
+                params['ORDER_UPDDTMIN'] = (datetime.today() - relativedelta(years=1)).strftime('%d/%m/%Y')
+                # Sort by creation instead of last update
+                params['champsTri'] = 'CREATION_DT'
+
+                index = 1
+                last_page = 1
+
+                while index < last_page + 1:
+                    params['PAGE'] = index
+                    self.market_orders.go(params=params)
+
+                    # On the first page we check the total number of pages
+                    if last_page == 1:
+                        last_page = self.page.get_last_page_index()
+                    index += 1
+
+                    for order in self.page.iter_market_orders():
+                        self.location(order._details_link)
+                        self.page.fill_market_order(obj=order)
+                        yield order
+            finally:
+                self.deconnexion_bourse()
+
     def send_code(self, recipient, **params):
         self.location('/outil/UWAF/Otp/validationCodeOtp?codeOtp=%s' % params['code'])
         self.page.check_error(otp_sent=True)
@@ -642,7 +751,7 @@ class LCLBrowser(LoginBrowser, StatesMixin):
             # Send sms to user.
             data = [
                 ('telChoisi', 'MOBILE'),
-                ('_', int(round(time.time() * 1000)))
+                ('_', int(round(time.time() * 1000))),
             ]
             self.location('/outil/UWAF/Otp/envoiCodeOtp', params=data)
             self.page.check_error()
@@ -735,14 +844,3 @@ class LCLProBrowser(LCLBrowser):
         super(LCLProBrowser, self).__init__(*args, **kwargs)
         self.session.cookies.set("lclgen", "professionnels", domain=urlsplit(self.BASEURL).hostname)
         self.owner_type = AccountOwnerType.ORGANIZATION
-
-
-class ELCLBrowser(LCLBrowser):
-    BASEURL = 'https://e.secure.lcl.fr'
-
-    IDENTIFIANT_ROUTING = 'ELCL'
-
-    def __init__(self, *args, **kwargs):
-        super(ELCLBrowser, self).__init__(*args, **kwargs)
-
-        self.session.cookies.set('lclgen', 'ecl', domain=urlsplit(self.BASEURL).hostname)

@@ -119,7 +119,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
         r'https://npcprediweb.predica.credit-agricole.fr/rest/detailEpargne/contrat/', PredicaInvestmentsPage
     )
 
-    bgpi_redirection = URL(r'(?P<space>[\w-]+)/operations/moco/bgpi/jcr:content.init.html', BgpiRedirectionPage)
+    bgpi_redirection = URL(r'(?P<space>[\w-]+)/operations/moco/bgpi/_?jcr[:_]content.init.html', BgpiRedirectionPage)
     bgpi_accounts = URL(r'https://bgpi-gestionprivee.credit-agricole.fr/bgpi/Logon.do', BgpiAccountsPage)
     bgpi_investments = URL(r'https://bgpi-gestionprivee.credit-agricole.fr/bgpi/CompteDetail.do', BgpiInvestmentsPage)
 
@@ -187,10 +187,13 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
         super(CreditAgricoleBrowser, self).__init__(*args, **kwargs)
         self.website = website
         self.accounts_url = None
+        self.total_spaces = None
 
         # Netfinca browser:
         self.weboob = kwargs.pop('weboob')
         dirname = self.responses_dirname
+        if dirname:
+            dirname += '/netfinca'
         self.netfinca = NetfincaBrowser(
             '', '', logger=self.logger, weboob=self.weboob, responses_dirname=dirname, proxy=self.PROXIES
         )
@@ -341,10 +344,11 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def iter_spaces(self):
-        # Determine how many spaces are present on the connection
-        total_spaces = self.page.count_spaces()
-        self.logger.info('The total number of spaces on this connection is %s.', total_spaces)
-        for contract in range(total_spaces):
+        if not self.total_spaces:
+            # Determine how many spaces are present on the connection
+            self.total_spaces = self.page.count_spaces()
+            self.logger.info('The total number of spaces on this connection is %s.', self.total_spaces)
+        for contract in range(self.total_spaces):
             # Switch to another space
             if not self.check_space_connection(contract):
                 self.logger.warning(
@@ -393,6 +397,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
             accounts_list = list(self.page.iter_accounts())
             for account in accounts_list:
                 account._contract = contract
+
             ''' Other accounts have no balance in the main JSON, so we must get all
             the (_id_element_contrat, balance) pairs in the account_details JSON.
 
@@ -449,6 +454,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
                 if account.id not in all_accounts:
                     all_accounts[account.id] = account
                     yield account
+
             ''' Fetch all deferred credit cards for this space: from the space type
             we must determine the required URL parameters to build the cards URL.
             If there is no card on the space, the server will return a 500 error
@@ -567,6 +573,13 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def go_to_account_space(self, contract):
+        if self.total_spaces == 1:
+            self.location(self.accounts_url)
+            if not self.accounts_page.is_here():
+                self.logger.warning('We have been loggged out, relogin.')
+                self.do_login()
+            return
+
         # This request often returns a 500 error on this quality website
         for tries in range(4):
             try:
@@ -697,23 +710,29 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def iter_investment(self, account):
-        if account.balance == 0:
+        if account.balance == 0 or empty(account.balance):
             return
 
         if (
             account.type == Account.TYPE_LIFE_INSURANCE
             and ('rothschild' in account.label.lower() or re.match(r'^open (perspective|strat)', account.label, re.I))
         ):
+            # We must go to the right perimeter before trying to access the Life Insurance investments
+            self.go_to_account_space(account._contract)
             self.life_insurance_investments.go(space=self.space, idx=account._index, category=account._category)
-            # TODO
-            # for inv in self.page.iter_investments():
-            #     yield inv
+            if self.life_insurance_investments.is_here():
+                for inv in self.page.iter_investments():
+                    yield inv
+            else:
+                self.logger.warning('Failed to reach investment details for account %s', account.id)
+            return
 
         elif (
             account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_CAPITALISATION)
-            and ('vendome' in account.label.lower() or account.label.lower() == 'espace gestion')
+            and re.search('vendome|aster sélection|espace gestion', account.label, re.I)
         ):
-            # 'Vendome Optimum Euro', 'Vendome Patrimoine' & 'Espace Gestion' and investments are on the BGPI space
+            # 'Vendome Optimum Euro', 'Vendome Patrimoine', 'Espace Gestion' & 'Aster sélection'
+            # investments are on the BGPI space
             if self.bgpi_accounts.is_here() or self.bgpi_investments.is_here():
                 # To avoid logouts by going from Cragr to Bgpi and back, we go directly to the account details.
                 # When there are several BGPI accounts, this shortcut saves a lot of requests.
@@ -769,10 +788,11 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
             }
             try:
                 self.predica_redirection.go(space=self.space, data=data)
-            except ServerError:
-                self.logger.warning('Got ServerError when fetching investments for account id %s', account.id)
-            else:
                 self.predica_investments.go()
+            except ServerError:
+                self.logger.warning('Got ServerError when fetching investments for account %s', account.id)
+                return
+            else:
                 for inv in self.page.iter_investments():
                     yield inv
 
@@ -810,6 +830,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
                 self.location(url)
                 self.netfinca.session.cookies.update(self.session.cookies)
                 self.netfinca.accounts.go()
+                self.netfinca.check_action_needed()
                 for inv in self.netfinca.iter_investments(account):
                     if inv.code == 'XX-liquidity' and account.type == Account.TYPE_PEA:
                         # Liquidities are already fetched on the "PEA espèces"
@@ -836,6 +857,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
             # This avoids unnecessary logouts and saves a lot of requests, but only
             # works if the accounts are on the same perimeter.
             self.netfinca.accounts.go()
+            self.netfinca.check_action_needed()
             if self.netfinca.is_account_present(account.id):
                 for order in self.netfinca.iter_market_orders(account):
                     yield order

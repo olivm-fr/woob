@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import time
@@ -35,7 +37,8 @@ from weboob.tools.json import json
 
 from .pages import (
     LogoutPage, AccountsPage, HistoryPage, LifeinsurancePage, MarketPage,
-    AdvisorPage, LoginPage, ProfilePage, RedirectInsurancePage,
+    AdvisorPage, LoginPage, ProfilePage, RedirectInsurancePage, SpacesPage,
+    ChangeSpacePage,
 )
 from .transfer_pages import TransferInfoPage, RecipientsListPage, TransferPage, AllowedRecipientsPage
 
@@ -54,7 +57,8 @@ def retry(exc_check, tries=4):
     def decorator(func):
         @wraps(func)
         def wrapper(browser, *args, **kwargs):
-            cb = lambda: func(browser, *args, **kwargs)
+            def cb():
+                return func(browser, *args, **kwargs)
 
             for i in range(tries, 0, -1):
                 try:
@@ -93,6 +97,10 @@ class CmsoParBrowser(TwoFactorBrowser):
         r'https://.*/auth/errorauthn',
         LogoutPage
     )
+
+    spaces = URL(r'/domiapi/oauth/json/accesAbonnement', SpacesPage)
+    change_space = URL(r'/securityapi/changeSpace', ChangeSpacePage)
+
     accounts = URL(r'/domiapi/oauth/json/accounts/synthese(?P<type>.*)', AccountsPage)
     history = URL(r'/domiapi/oauth/json/accounts/(?P<page>.*)', HistoryPage)
     loans = URL(r'/creditapi/rest/oauth/v1/synthese', AccountsPage)
@@ -102,9 +110,12 @@ class CmsoParBrowser(TwoFactorBrowser):
         RedirectInsurancePage
     )
     lifeinsurance = URL(r'https://domiweb.suravenir.fr', LifeinsurancePage)
-    market = URL(r'/domiapi/oauth/json/ssoDomifronttitre',
-                 r'https://www.(?P<website>.*)/domifronttitre/front/sso/domiweb/01/(?P<action>.*)Portefeuille\?csrf=',
-                 r'https://www.*/domiweb/prive/particulier', MarketPage)
+    market = URL(
+        r'/domiapi/oauth/json/ssoDomifronttitre',
+        r'https://www.(?P<website>.*)/domifronttitre/front/sso/domiweb/01/(?P<action>.*)\?csrf=',
+        r'https://www.*/domiweb/prive/particulier',
+        MarketPage
+    )
     advisor = URL(r'/edrapi/v(?P<version>\w+)/oauth/(?P<page>\w+)', AdvisorPage)
 
     transfer_info = URL(r'/domiapi/oauth/json/transfer/transferinfos', TransferInfoPage)
@@ -112,7 +123,10 @@ class CmsoParBrowser(TwoFactorBrowser):
     # recipients
     ext_recipients_list = URL(r'/transfersfedesapi/api/beneficiaries', RecipientsListPage)
     int_recipients_list = URL(r'/transfersfedesapi/api/accounts', RecipientsListPage)
-    available_int_recipients = URL(r'/transfersfedesapi/api/credited-accounts/(?P<ciphered_contract_number>.*)', AllowedRecipientsPage)
+    available_int_recipients = URL(
+        r'/transfersfedesapi/api/credited-accounts/(?P<ciphered_contract_number>.*)',
+        AllowedRecipientsPage
+    )
 
     # transfers
     init_transfer_page = URL(r'/transfersfedesapi/api/transfers/control', TransferPage)
@@ -149,7 +163,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         if self.headers:
             self.session.headers = self.headers
         else:
-            self.set_profile(self.PROFILE) # reset headers but don't clear them
+            self.set_profile(self.PROFILE)  # reset headers but don't clear them
             self.session.cookies.clear()
             self.accounts_list = []
 
@@ -163,10 +177,16 @@ class CmsoParBrowser(TwoFactorBrowser):
 
     def send_sms(self):
         contact_information = self.location('/securityapi/person/coordonnees', method='POST').json()
+
+        for phone_key in ('portable', 'portablePro',):
+            if phone_key in contact_information:
+                break
+        else:
+            raise AssertionError('Phone not found in the JSON response')
         data = {
             'template': '',
             'typeMedia': 'SMS',  # can be SVI for interactive voice server
-            'valueMedia': contact_information['portable']['numeroCrypte']
+            'valueMedia': contact_information[phone_key]['numeroCrypte'],
         }
         self.location('/securityapi/otp/generate', json=data)
 
@@ -184,15 +204,15 @@ class CmsoParBrowser(TwoFactorBrowser):
             'otpValue': self.code,
             'typeMedia': 'WEB',
             'userAgent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
-            'redirectUri': '%s/auth/checkuser' % self.redirect_url,
-            'errorUri': '%s/auth/errorauthn' % self.redirect_url,
+            'redirectUri': '%s/auth/checkuser' % self.original_site,
+            'errorUri': '%s/auth/errorauthn' % self.original_site,
             'clientId': 'com.arkea.%s.siteaccessible' % self.name,
             'redirect': 'true',
             'client_id': self.arkea_client_id,
             'accessInfos': {
                 'efs': self.arkea,
                 'si': self.arkea_si,
-            }
+            },
         }
 
     def get_login_data(self):
@@ -218,7 +238,12 @@ class CmsoParBrowser(TwoFactorBrowser):
         })
         self.headers = self.session.headers
 
-        if hidden_params.get('scope') == 'consent':
+        scope = hidden_params.get('scope')
+
+        # if there is no scope, 2FA is not needed
+        if scope and scope == 'consent':
+            # 2FA is needed
+            # consent is the only scope that should send a sms
             self.check_interactive()
             self.send_sms()
 
@@ -239,6 +264,15 @@ class CmsoParBrowser(TwoFactorBrowser):
         numbers = self.page.get_numbers()
         # to know if account can do transfer
         accounts_eligibilite_debit = self.page.get_eligibilite_debit()
+
+        self.spaces.go(json={'includePart': True})
+        self.change_space.go(json={
+            'clientIdSource': self.arkea_client_id,
+            'espaceDestination': 'PART',
+            'fromMobile': False,
+            'numContractDestination': self.page.get_part_space(),
+        })
+        self.session.headers['Authorization'] = 'Bearer %s' % self.page.get_access_token()
 
         # First get all checking accounts...
         self.accounts.go(json={'typeListeCompte': 'COMPTE_SOLDE_COMPTES_CHEQUES'}, type='comptes')
@@ -307,11 +341,18 @@ class CmsoParBrowser(TwoFactorBrowser):
                 self.accounts_list.append(a)
         return self.accounts_list
 
-    def _go_market_history(self):
-        content = self.market.go(json={'place': 'SITUATION_PORTEFEUILLE'}).text
-        self.location(json.loads(content)['urlSSO'])
+    def _go_market_history(self, action):
+        try:
+            url_before_market_history = json.loads(self.market.go(json={'place': 'SITUATION_PORTEFEUILLE'}).text)['urlSSO']
+        except KeyError:
+            raise AssertionError('unable to get url to reach to be able to go on market page')
+        self.location(url_before_market_history)
+        return self.market.go(website=self.website, action=action)
 
-        return self.market.go(website=self.website, action='historique')
+    def _return_from_market(self):
+        # This function must be called after going to the market space.
+        # The next call fails if the referer host is not the API base url.
+        self.url = self.BASEURL
 
     @retry((ClientError, ServerError))
     @need_login
@@ -319,28 +360,41 @@ class CmsoParBrowser(TwoFactorBrowser):
         account = self.get_account(account.id)
 
         if account.type in (Account.TYPE_LOAN, Account.TYPE_PEE):
-            return []
+            return
 
         if account.type == Account.TYPE_LIFE_INSURANCE:
             if not account.url and not hasattr(account, '_index'):
                 # No url and no _index, we can't get history
-                return []
+                return
             url = account.url or self.redirect_insurance.go(accid=account._index).get_url()
             url = self.location(url).page.get_link("opérations")
-            return self.location(url).page.iter_history()
+            self.location(url)
+            for tr in self.page.iter_history():
+                yield tr
+            return
         elif account.type in (Account.TYPE_PEA, Account.TYPE_MARKET):
-            self._go_market_history()
-            if not self.page.go_account(account.label, account._owner):
-                return []
+            try:
+                self._go_market_history('historiquePortefeuille')
+                if not self.page.go_account(account.label, account._owner):
+                    return
 
-            if not self.page.go_account_full():
-                return []
+                if not self.page.go_account_full():
+                    return
 
-            # Display code ISIN
-            self.location(self.url, params={'reload': 'oui', 'convertirCode': 'oui'})
-            # don't rely on server-side to do the sorting, not only do you need several requests to do so
-            # but the site just toggles the sorting, resulting in reverse order if you browse multiple accounts
-            return sorted_transactions(self.page.iter_history())
+                # Display code ISIN
+                transactions_url = self.url
+                self.location(transactions_url, params={'reload': 'oui', 'convertirCode': 'oui'})
+                # don't rely on server-side to do the sorting, not only do you need several requests to do so
+                # but the site just toggles the sorting, resulting in reverse order if you browse multiple accounts
+                for tr in sorted_transactions(self.page.iter_history()):
+                    if tr.amount is None:
+                        self.page.go_transaction_detail(tr)
+                        tr.amount = self.page.get_transaction_amount()
+                        self.location(transactions_url, params={'reload': 'oui', 'convertirCode': 'oui'})
+                    yield tr
+                return
+            finally:
+                self._return_from_market()
 
         # Getting a year of history
         # We have to finish by "SIX_DERNIERES_SEMAINES" to get in priority the transactions with ids.
@@ -355,7 +409,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         self.history.go(
             json={
                 'index': account._index,
-                'filtreOperationsComptabilisees': "MOIS_MOINS_UN"
+                'filtreOperationsComptabilisees': "MOIS_MOINS_UN",
             },
             page="detailcompte"
         )
@@ -363,27 +417,30 @@ class CmsoParBrowser(TwoFactorBrowser):
 
         for tr in self.page.iter_history(index=account._index, nbs=nbs):
             # Check for duplicates
-            if tr._operationid in self.trs:
+            if tr._operationid in self.trs or (tr.id and tr.id in self.trs):
                 continue
             self.trs.add(tr._operationid)
+            if tr.id:
+                self.trs.add(tr.id)
+
             if has_deferred_cards and tr.type == Transaction.TYPE_CARD:
                 tr.type = Transaction.TYPE_DEFERRED_CARD
                 tr.bdate = tr.rdate
 
             trs.append(tr)
 
-        return sorted_transactions(trs)
+        for tr in sorted_transactions(trs):
+            yield tr
 
     @retry((ClientError, ServerError))
     @need_login
     def iter_coming(self, account):
         account = self.get_account(account.id)
 
-        if account.type is Account.TYPE_LOAN:
+        if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE):
             return []
 
         comings = []
-
         if not hasattr(account, '_index'):
             # No _index, we can't get coming
             return []
@@ -394,9 +451,9 @@ class CmsoParBrowser(TwoFactorBrowser):
                 if hasattr(c, '_deferred_date'):
                     c.bdate = c.rdate
                     c.date = c._deferred_date
-                    c.type = Transaction.TYPE_DEFERRED_CARD # force deferred card type for comings inside cards
+                    c.type = Transaction.TYPE_DEFERRED_CARD  # force deferred card type for comings inside cards
 
-                c.vdate = None # vdate don't work for comings
+                c.vdate = None  # vdate don't work for comings
 
                 comings.append(c)
         return iter(comings)
@@ -416,37 +473,59 @@ class CmsoParBrowser(TwoFactorBrowser):
                 return []
             return self.location(url).page.iter_investment()
         elif account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
-            data = {"place": "SITUATION_PORTEFEUILLE"}
-            response = self.market.go(json=data)
-            self.location(json.loads(response.text)['urlSSO'])
-            self.market.go(website=self.website, action="situation")
-            if self.page.go_account(account.label, account._owner):
-                return self.page.iter_investment()
-            return []
+            try:
+                self._go_market_history('situationPortefeuille')
+                if self.page.go_account(account.label, account._owner):
+                    return self.page.iter_investment()
+                return []
+            finally:
+                self._return_from_market()
         raise NotImplementedError()
+
+    @retry((ClientError, ServerError))
+    @need_login
+    def iter_market_orders(self, account):
+        if account.type not in (Account.TYPE_MARKET, Account.TYPE_PEA):
+            return
+
+        try:
+            self._go_market_history('carnetOrdre')
+            if self.page.go_account(account.label, account._owner):
+                orders_list_url = self.url
+                error_message = self.page.get_error_message()
+                if error_message:
+                    if 'AUCUN ORDRE' in error_message:
+                        return
+                    raise AssertionError('Unexpected error while fetching market orders')
+                for order in self.page.iter_market_orders():
+                    self.page.go_order_detail(order)
+                    self.page.fill_market_order(obj=order)
+                    self.location(orders_list_url)
+                    yield order
+        finally:
+            self._return_from_market()
+
+    def get_and_update_emitter_account(self, account):
+        # Add the `_type` and `_ciphered_contract_number` of the account
+        # if a match is made with an emitter.
+        self.int_recipients_list.go()
+
+        for rcpt in self.page.iter_int_recipients():
+            if rcpt.id == account._recipient_id:
+                account._type = rcpt._type
+                account._ciphered_contract_number = rcpt._ciphered_contract_number
+                return account
 
     def iter_internal_recipients(self, account):
         self.int_recipients_list.go()
         all_int_recipients = list(self.page.iter_int_recipients())
 
-        ciphered_contract_number = None
-        all_int_rcpt_contract_numbers = []
-        # Retrieves all the ciphered contract numbers
-        # of all internal recipients and find the contract
-        # number of the current account we want the recipients
-        # of.
-        for rcpt in all_int_recipients:
-            if rcpt.id == account._recipient_id:
-                account._type = rcpt._type
-                ciphered_contract_number = rcpt._ciphered_contract_number
-            all_int_rcpt_contract_numbers.append(rcpt._ciphered_contract_number)
+        # Retrieves all the ciphered contract numbers of all internal recipients.
+        all_int_rcpt_contract_numbers = [rcpt._ciphered_contract_number for rcpt in all_int_recipients]
 
-        assert ciphered_contract_number, 'Could not make a link between internal recipients and account (due to custom label ?)'
-
-        # Retrieve the list of ciphered contract numbers
-        # the current account can make transfer too.
+        # Retrieve the list of ciphered contract numbers the account can make transfer too.
         self.available_int_recipients.go(
-            ciphered_contract_number=ciphered_contract_number,
+            ciphered_contract_number=account._ciphered_contract_number,
             json=all_int_rcpt_contract_numbers,
             headers={'Accept': 'application/json, text/plain, */*'},
         )
@@ -467,6 +546,15 @@ class CmsoParBrowser(TwoFactorBrowser):
     @need_login
     def iter_recipients(self, account):
         if account.type not in (Account.TYPE_CHECKING, Account.TYPE_SAVINGS, Account.TYPE_DEPOSIT):
+            return
+
+        account = self.get_and_update_emitter_account(account)
+
+        # If there is no account returned, that means we were not able to find
+        # the emitter matching the account. So we can't list the recipients available
+        # for this account or make transfer on it.
+        if not account:
+            self.logger.info('Could not make a link between emitters and account, skipping recipients for this account.')
             return
 
         # Internal recipients
@@ -612,8 +700,7 @@ class iter_retry(object):
 
             # recreated iterator, consume previous items
             try:
-                nb = -1
-                for nb, sent in enumerate(self.items):
+                for sent in self.items:
                     new = next(self.it)
                     if hasattr(new, 'iter_fields'):
                         equal = dict(sent.iter_fields()) == dict(new.iter_fields())
@@ -623,7 +710,7 @@ class iter_retry(object):
                         # safety is not guaranteed
                         raise BrowserUnavailable('Site replied inconsistently between retries, %r vs %r', sent, new)
             except StopIteration:
-                raise BrowserUnavailable('Site replied fewer elements (%d) than last iteration (%d)', nb + 1, len(self.items))
+                raise BrowserUnavailable('Site replied fewer elements than last iteration')
             except self.exc_check as exc:
                 self.delogged = True
                 if self.logger:

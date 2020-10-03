@@ -17,10 +17,16 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
+from requests import ConnectionError
+from requests.exceptions import ProxyError
+
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
+from weboob.browser.exceptions import ServerError
 
 from .pages import LoginPage, AccountsPage, DetailsPage, MaintenancePage
 
@@ -41,7 +47,15 @@ class SpiricaBrowser(LoginBrowser):
         self.transaction_page = None
 
     def do_login(self):
-        self.login.go().login(self.username, self.password)
+        try:
+            self.login.go()
+        except ConnectionError as e:
+            # The ConnectionError is raised when the call is blocked.
+            if isinstance(e, ProxyError):
+                # ProxyError inherits ConnectionError but should be raised as is.
+                raise e
+            raise BrowserUnavailable(e)
+        self.page.login(self.username, self.password)
 
         if self.login.is_here():
             error = self.page.get_error()
@@ -77,7 +91,23 @@ class SpiricaBrowser(LoginBrowser):
 
     @need_login
     def iter_history(self, account):
-        self.location(account.url)
+        try:
+            self.location(account.url)
+        except ServerError:
+            # We have to handle 'fake' 500 errors, which are probably due to Spirica blocking the IPs
+            # Quite often, these errors cause logouts so we may have to re-login.
+            self.logger.warning('Access to account details has failed due to a 500 error. We try again.')
+            if self.login.is_here():
+                self.logger.warning('Server error led to a logout, we must re-login.')
+                self.do_login()
+            self.accounts.go()
+            try:
+                self.location(account.url)
+            except ServerError:
+                error_message = 'Access to details for accounts %s has failed twice.' % account.id
+                self.logger.warning(error_message)
+                raise BrowserUnavailable(error_message)
+
         self.page.go_historytab()
         self.transaction_page = self.page
 
@@ -101,7 +131,11 @@ class SpiricaBrowser(LoginBrowser):
         for inv in invs:
             # Some investments don't have PRM
             if inv._invest_type != 'Fonds en euros':
-                obj_from_list = [o for o in objects_list if all(getattr(o, field) == getattr(inv, field) for field in matching_fields)]
+                inv_fields = {field: getattr(inv, field, None) for field in matching_fields}
+                obj_from_list = []
+                for o in objects_list:
+                    if all(getattr(o, field) == inv_fields.get(field) for field in matching_fields):
+                        obj_from_list.append(o)
                 assert len(obj_from_list) == 1
                 for name, field_value in obj_from_list[0].iter_fields():
                     if field_value:

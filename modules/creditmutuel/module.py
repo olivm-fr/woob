@@ -96,6 +96,9 @@ class CreditMutuelModule(
     def iter_investment(self, account):
         return self.browser.get_investment(account)
 
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)
+
     def iter_transfer_recipients(self, origin_account):
         if not self.browser.is_new_website:
             self.logger.info('On old creditmutuel website')
@@ -114,6 +117,9 @@ class CreditMutuelModule(
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
+        if {'Clé', 'resume'} & set(params.keys()):
+            return self.browser.continue_transfer(transfer, **params)
+
         # There is a check on the website, transfer can't be done with too long reason.
         if transfer.label:
             transfer.label = transfer.label[:27]
@@ -139,12 +145,12 @@ class CreditMutuelModule(
         assert account.id.isdigit(), 'Account id is invalid'
 
         # quantize to show 2 decimals.
-        amount = Decimal(transfer.amount).quantize(Decimal(10) ** -2)
+        transfer.amount = Decimal(transfer.amount).quantize(Decimal(10) ** -2)
 
         # drop characters that can crash website
         transfer.label = transfer.label.encode('cp1252', errors="ignore").decode('cp1252')
 
-        return self.browser.init_transfer(account, recipient, amount, transfer.exec_date, transfer.label)
+        return self.browser.init_transfer(transfer, account, recipient)
 
     def execute_transfer(self, transfer, **params):
         return self.browser.execute_transfer(transfer)

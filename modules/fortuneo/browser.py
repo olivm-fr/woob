@@ -35,6 +35,7 @@ from weboob.capabilities.bank import (
 )
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
+from weboob.tools.capabilities.bank.bank_transfer import sorted_transfers
 from weboob.tools.value import Value
 
 from .pages.login import LoginPage, TwoFaPage, UnavailablePage
@@ -45,7 +46,8 @@ from .pages.accounts_list import (
     InformationsPage, ActionNeededPage,
 )
 from .pages.transfer import (
-    RegisterTransferPage, ValidateTransferPage, ConfirmTransferPage, RecipientsPage, RecipientSMSPage
+    RegisterTransferPage, ValidateTransferPage, ConfirmTransferPage, RecipientsPage, RecipientSMSPage,
+    TransferListPage,
 )
 
 __all__ = ['FortuneoBrowser']
@@ -68,6 +70,11 @@ class FortuneoBrowser(TwoFactorBrowser):
                         r'.*prive/default\.jsp.*',
                         r'.*/prive/mes-comptes/synthese-mes-comptes\.jsp',
                         AccountsList)
+    transfer_history = URL(
+        r'.*/prive/mes-comptes/.*/realiser-operations/operations-en-cours/initialiser-operations-en-cours.jsp\?ca=(?P<ca>\.*)',
+        TransferListPage
+    )
+
     account_history = URL(r'.*/prive/mes-comptes/livret/consulter-situation/consulter-solde\.jsp.*',
                           r'.*/prive/mes-comptes/compte-courant/consulter-situation/consulter-solde\.jsp.*',
                           r'.*/prive/mes-comptes/compte-especes.*',
@@ -116,6 +123,7 @@ class FortuneoBrowser(TwoFactorBrowser):
         self.investments = {}
         self.action_needed_processed = False
         self.add_recipient_form = None
+        self.sms_form = None
 
         self.AUTHENTICATION_METHODS = {
             'code': self.handle_sms,
@@ -135,6 +143,7 @@ class FortuneoBrowser(TwoFactorBrowser):
 
             # Need to convert Form object into dict for storage
             self.sms_form = dict(self.page.get_sms_form())
+            self.need_reload_state = True
             raise BrowserQuestion(Value('code', label='Entrez le code reçu par SMS'))
 
         self.last_login_step()
@@ -382,7 +391,11 @@ class FortuneoBrowser(TwoFactorBrowser):
             elif self.page.is_code_expired():
                 self.need_reload_state = True
                 raise AddRecipientStep(recipient, Value('code', label='Le code sécurité est expiré. Veuillez saisir le nouveau code reçu qui sera valable 5 minutes.'))
-            assert False, self.page.get_error()
+            else:
+                error = self.page.get_error()
+                if 'Le code saisi est incorrect' in error:
+                    raise AddRecipientBankError(message=error)
+                raise AssertionError(error)
         return self.new_recipient_before_otp(recipient, **params)
 
     @need_login
@@ -394,6 +407,10 @@ class FortuneoBrowser(TwoFactorBrowser):
         # If the form exists and has been validated, we need to go on the recipients page again
         # because the form redirects us on another page.
         if self.page.send_info_form():
+            self.recipients.go()
+
+        # Skip useless messages, same way it is done in iter_accounts.
+        if self.process_skippable_message():
             self.recipients.go()
 
         self.page.check_external_iban_form(recipient)
@@ -411,18 +428,24 @@ class FortuneoBrowser(TwoFactorBrowser):
         # get first part of confirm form
         send_code_form = self.page.get_send_code_form()
 
-        data = {
-            'appelAjax': 'true',
-            'domicileUpdated': 'false',
-            'numeroSelectionne.value': '',
-            'portableUpdated': 'false',
-            'proUpdated': 'false',
-            'typeOperationSensible': 'AJOUT_BENEFICIAIRE'
-        }
-        # this send sms to user
-        self.location(self.absurl('/fr/prive/appel-securite-forte-otp-bankone.jsp', base=True) , data=data)
-        # get second part of confirm form
-        send_code_form.update(self.page.get_send_code_form_input())
+        if 'fallbackSMS' in send_code_form:
+            # Means we have an app validation, but we want to validate with sms
+            # This send sms to user
+            send_code_form.submit()
+            send_code_form = self.page.get_send_code_form()
+        else:
+            self.logger.info('Old sms sending method is still used for new recipients')
+            data = {
+                'appelAjax': 'true',
+                'domicileUpdated': 'false',
+                'numeroSelectionne.value': '',
+                'portableUpdated': 'false',
+                'proUpdated': 'false',
+                'typeOperationSensible': 'AJOUT_BENEFICIAIRE'
+            }
+            # this send sms to user
+            self.location(self.absurl('/fr/prive/appel-securite-forte-otp-bankone.jsp', base=True) , data=data)
+            send_code_form.update(self.page.get_send_code_form_input())
 
         # save form value and url for statesmixin
         self.add_recipient_form = dict(send_code_form)
@@ -433,7 +456,7 @@ class FortuneoBrowser(TwoFactorBrowser):
         self.add_recipient_form = json.dumps(self.add_recipient_form)
 
         self.need_reload_state = True
-        raise AddRecipientStep(rcpt, Value('code', label='Veuillez saisir le code reçu.'))
+        raise AddRecipientStep(rcpt, Value('code', label='Veuillez saisir le code reçu par sms'))
 
     def send_code(self, form_data, code):
         form_url = form_data['url']
@@ -472,3 +495,21 @@ class FortuneoBrowser(TwoFactorBrowser):
     def iter_emitters(self):
         self.register_transfer.go(ca='')
         return self.page.iter_emitters()
+
+    @need_login
+    def iter_transfers(self, account):
+        transfers_list = []
+        if account is None:
+            self.accounts_page.stay_or_go()
+            history_links = self.page.iter_transfer_history_links()
+        elif account._transfers_link:
+            history_links = (account._transfers_link,)
+        else:
+            # iteration requested on an account unable to do transfers
+            return []
+
+        for history_link in history_links:
+            self.location(history_link)
+            for transfer in self.page.iter_transfers():
+                transfers_list.append(transfer)
+        return sorted_transfers(transfers_list)

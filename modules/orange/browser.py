@@ -29,7 +29,7 @@ from .pages.bills import (
     SubscriptionsPage, SubscriptionsApiPage, BillsApiProPage, BillsApiParPage,
     ContractsPage, ContractsApiPage
 )
-from .pages.profile import ProfilePage
+from .pages.profile import ProfileParPage, ProfileProPage
 from weboob.browser.exceptions import ClientError, ServerError
 from weboob.tools.compat import basestring
 from weboob.tools.decorators import retry
@@ -41,9 +41,11 @@ __all__ = ['OrangeBillBrowser']
 class OrangeBillBrowser(LoginBrowser, StatesMixin):
     TIMEOUT = 60
 
+    STATE_DURATION = 20
+
     BASEURL = 'https://espaceclientv3.orange.fr'
 
-    home_page = URL(r'https://businesslounge.orange.fr/$', HomePage)
+    home_page = URL(r'https://businesslounge.orange.fr/?$', HomePage)
     portal_page = URL(r'https://www.orange.fr/portail', PortalPage)
     loginpage = URL(
         r'https://login.orange.fr/\?service=sosh&return_url=https://www.sosh.fr/',
@@ -53,7 +55,7 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
     password_page = URL(r'https://login.orange.fr/front/password', PasswordPage)
     captcha_page = URL(r'https://login.orange.fr/captcha', CaptchaPage)
 
-    contracts = URL(r'https://espaceclientpro.orange.fr/api/contracts\?page=1&nbcontractsbypage=15', ContractsPage)
+    contracts = URL(r'https://espaceclientpro.orange.fr/api/contracts', ContractsPage)
     contracts_api = URL(r'https://sso-f.orange.fr/omoi_erb/portfoliomanager/contracts/users/current\?filter=telco,security', ContractsApiPage)
 
     subscriptions = URL(r'https://espaceclientv3.orange.fr/js/necfe.php\?zonetype=bandeau&idPage=gt-home-page', SubscriptionsPage)
@@ -83,16 +85,15 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
     doc_api_par = URL(r'https://sso-f.orange.fr/omoi_erb/facture/v1.0/pdf')
 
     doc_api_pro = URL(r'https://espaceclientpro.orange.fr/api/contract/(?P<subid>\d+)/bill/(?P<dir>.*)/(?P<fact_type>.*)/\?(?P<billparams>)')
-    profile = URL(r'/\?page=profil-infosPerso', ProfilePage)
+    profile_par = URL(r'/\?page=profil-infosPerso', ProfileParPage)
+    profile_pro = URL(r'https://businesslounge.orange.fr/profil', ProfileProPage)
 
     def locate_browser(self, state):
-        try:
-            self.portal_page.go()
-        except ClientError as e:
-            if e.response.status_code == 401:
-                self.do_login()
-                return
-            raise
+        # If a pro is logged by going to portal_page we will be redirected to home_page
+        self.portal_page.go()
+        if not self.home_page.is_here():
+            # If a par is connected by going to profile_par, we will not be redirected
+            self.profile_par.go()
 
     def do_login(self):
         assert isinstance(self.username, basestring)
@@ -136,12 +137,12 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
     @need_login
     def get_subscription_list(self):
         try:
-            self.profile.go()
-
-            if not (self.profile.is_here() or self.manage_cgi.is_here()):
-                self.session.cookies.clear()
-                self.do_login()
-                self.profile.go()
+            # look at the type of account, pro or par and associates the right profile page
+            self.portal_page.go()
+            if self.home_page.is_here():
+                self.profile_pro.go()
+            else:
+                self.profile_par.go()
 
             # we land on manage_cgi page when there is cgu to validate
             if self.manage_cgi.is_here():
@@ -158,13 +159,18 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
 
         # this only works when there are pro subs.
         nb_sub = 0
+        subscription_id_list = []
         try:
-            for sub in self.contracts.go().iter_subscriptions():
+            params = {
+                'page': 1,
+                'nbcontractsbypage': 15
+            }
+            self.contracts.go(params=params)
+            for sub in self.page.iter_subscriptions():
                 sub.subscriber = profile.name
+                subscription_id_list.append(sub.id)
                 yield sub
             nb_sub = self.page.doc['totalContracts']
-            # assert pagination is not needed
-            assert nb_sub < 15
         except ServerError:
             pass
 
@@ -175,8 +181,10 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
                 "X-Orange-Origin-ID": "ECQ",
             }
             for sub in self.contracts_api.go(headers=headers).iter_subscriptions():
-                nb_sub += 1
-                yield sub
+                # subscription returned here may be duplicated with the one returned by contracts page
+                if sub.id not in subscription_id_list:
+                    nb_sub += 1
+                    yield sub
         except (ServerError, ClientError) as e:
             # The orange website will return odd status codes when there are no subscriptions to return
             # I've seen the 404, 500 and 503 response codes
@@ -229,4 +237,7 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def get_profile(self):
-        return self.profile.go().get_profile()
+        self.profile_par.go()
+        if not self.profile_par.is_here():
+            self.profile_pro.go()
+        return self.page.get_profile()

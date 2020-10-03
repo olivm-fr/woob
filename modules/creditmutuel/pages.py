@@ -28,11 +28,15 @@ from datetime import date, datetime
 from random import randint
 from collections import OrderedDict
 
-from weboob.browser.pages import HTMLPage, FormNotFound, LoggedPage, pagination, XMLPage, PartialHTMLPage
+from weboob.browser.pages import (
+    HTMLPage, FormNotFound, LoggedPage, pagination,
+    XMLPage, PartialHTMLPage, Page,
+)
 from weboob.browser.elements import ListElement, ItemElement, SkipItem, method, TableElement
 from weboob.browser.filters.standard import (
     Filter, Env, CleanText, CleanDecimal, Field, Regexp, Async,
     AsyncLoad, Date, Format, Type, Currency, Base, Coalesce,
+    Map, MapIn,
 )
 from weboob.browser.filters.html import Link, Attr, TableCell, ColumnNotFound
 from weboob.exceptions import (
@@ -45,7 +49,10 @@ from weboob.capabilities.bank import (
     Account, Recipient, TransferBankError, Transfer,
     AddRecipientBankError, AddRecipientStep, Loan, Emitter,
 )
-from weboob.capabilities.wealth import Investment
+from weboob.capabilities.wealth import (
+    Investment, MarketOrder, MarketOrderDirection, MarketOrderType,
+    MarketOrderPayment,
+)
 from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Profile
 from weboob.tools.capabilities.bank.iban import is_iban_valid
@@ -53,7 +60,7 @@ from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.capabilities.bill import DocumentTypes, Subscription, Document
 from weboob.tools.compat import urlparse, parse_qs, urljoin, range
-from weboob.tools.date import parse_french_date
+from weboob.tools.date import parse_french_date, LinearDateGuesser
 from weboob.tools.value import Value
 
 
@@ -106,6 +113,9 @@ class LoginPage(PartialHTMLPage):
             # a expiré. Merci de bien vouloir vous identifier à nouveau.'
             self.logger.warning('Restarting connection because it expired')
             return
+        elif 'antivirus' in error_msg.lower():
+            self.logger.warning("This error message doesn't impact the success of the connection %s", error_msg)
+            return
         assert not error_msg, "Unhandled error: '%s'" % error_msg
 
     def login(self, login, passwd, redirect=False):
@@ -129,14 +139,49 @@ class FiscalityConfirmationPage(LoggedPage, HTMLPage):
     pass
 
 
+class AppValidationPage(Page):
+    def get_validation_msg(self):
+        # ex: "Une demande de confirmation mobile a été transmise à votre appareil "SuperPhone de Toto". Démarrez votre application mobile Crédit Mutuel pour vérifier et confirmer cette opération."
+        return CleanText('//div[@id="inMobileAppMessage"]//h2[not(img)]')(self.doc)
+
+    def get_polling_id(self):
+        return Regexp(CleanText('//script[contains(text(), "transactionId")]'), r"transactionId: '(.{49})', get")(self.doc)
+
+    def get_polling_data(self, form_xpath='//form'):
+        form = self.get_form(form_xpath)
+        data = {
+            'polling_id': self.get_polling_id(),
+            'final_url': form.url,
+            # Need to convert form into dict, pickling during dump_state() with boobank doesn't work
+            'final_url_params': dict(form.items()),
+        }
+        return data
+
+
 # PartialHTMLPage: this page shares URL with other pages,
 # and might be empty of text while used in a redirection
-class MobileConfirmationPage(PartialHTMLPage):
+class MobileConfirmationPage(PartialHTMLPage, AppValidationPage):
     def is_here(self):
         return (
-            'Démarrez votre application mobile' in CleanText('//div[contains(@id, "inMobileAppMessage")]')(self.doc) or
-            'demande de confirmation mobile' in CleanText('//div[contains(@id, "inMobileAppMessage")]')(self.doc)
+            'Démarrez votre application mobile' in CleanText('//div[contains(@id, "inMobileAppMessage")]')(self.doc)
+            or 'demande de confirmation mobile' in CleanText('//div[contains(@id, "inMobileAppMessage")]')(self.doc)
+            or (
+                'Authentification forte' in CleanText('//p[contains(@id, "title")]')(self.doc)
+                and CleanText('//*[contains(text(), "Confirmer mon identité")]')(self.doc)
+            )
         )
+
+    def skip_redo_twofa(self):
+        # Handle reconnection messages of the form "Si vous préférez confirmer
+        # votre identité plus tard : [cliquez ici].".
+
+        # Since there are a few DOM nodes between the link and the actual text,
+        # we can't use a plain Link here.
+        # This is feeble, but oh well.
+        link = Attr('//li[contains(text(), "confirmer votre identité plus tard")]//a[contains(@href, "Bypass") and contains(text(), "cliquez ici")]', 'href', default=None)(self.doc)
+        if link:
+            self.logger.warning("2FA is still valid, avoiding the 'confirm your identity' page.")
+            self.browser.location(link)
 
     # We land on this page for some connections, but can still bypass this verification for now
     def check_bypass(self):
@@ -146,23 +191,6 @@ class MobileConfirmationPage(PartialHTMLPage):
             self.browser.location(link)
         else:
             self.logger.warning('This connexion cannot bypass mobile confirmation')
-
-    def get_validation_msg(self):
-        # ex: "Une demande de confirmation mobile a été transmise à votre appareil "SuperPhone de Toto". Démarrez votre application mobile Crédit Mutuel pour vérifier et confirmer cette opération."
-        return CleanText('//div[@id="inMobileAppMessage"]//h2[not(img)]')(self.doc)
-
-    def get_polling_id(self):
-        return Regexp(CleanText('//script[contains(text(), "transactionId")]'), r"transactionId: '(.{49})', get")(self.doc)
-
-    def get_polling_data(self):
-        form = self.get_form()
-        data = {
-            'polling_id': self.get_polling_id(),
-            'final_url': form.url,
-            # Need to convert form into dict, pickling during dump_state() with boobank doesn't work
-            'final_url_params': dict(form.items()),
-        }
-        return data
 
 
 class TwoFAUnabledPage(PartialHTMLPage):
@@ -213,7 +241,6 @@ class OtpBlockedErrorPage(PartialHTMLPage):
 
     def get_error_message(self):
         return CleanText('//div[contains(@class, "bloctxt err")]')(self.doc)
-
 
 
 class EmptyPage(LoggedPage, HTMLPage):
@@ -362,7 +389,6 @@ class item_account_generic(ItemElement):
 
     obj_id = Env('id')
     obj_number = Env('id')
-    obj__card_number = None
     obj_label = Label(CleanText('./td[1]/a/text() | ./td[1]/a/span[@class and not(contains(@class, "doux"))] | ./td[1]/div/a[has-class("cb")]'))
     obj_coming = Env('coming')
     obj_balance = Env('balance')
@@ -483,7 +509,7 @@ class item_account_generic(ItemElement):
 
                     card = Account()
                     card.type = Account.TYPE_CARD
-                    card.id = card._card_number = card_id
+                    card.id = card.number = card_id
                     card._link_id = link
                     card._is_inv = card._is_webid = False
                     card.parent = self.parent.objects[_id]
@@ -720,19 +746,31 @@ class CardsListPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Account
 
-            obj_number = Field('_link_id') & Regexp(pattern=r'ctr=(\d+)')
-            obj__card_number = Env('id', default="")
-            obj_id = Format('%s%s', Env('id', default=""), Field('number'))
-            obj_label = Format('%s %s %s', CleanText(TableCell('card')), Env('id', default=""),
-                               CleanText(TableCell('owner')))
-            obj_coming = CleanDecimal('./td[@class="i d" or @class="p d"][2]', replace_dots=True,
-                                      default=NotAvailable)
+            obj_number = Env('number', default='')
+            obj_id = Format(
+                '%s%s',
+                Field('number'),
+                Field('_ctr'),
+            )
+            obj_label = Format(
+                '%s %s %s',
+                CleanText(TableCell('card')),
+                Field('number'),
+                CleanText(TableCell('owner')),
+            )
+            obj_coming = CleanDecimal(
+                './td[@class="i d" or @class="p d"][2]',
+                replace_dots=True,
+                default=NotAvailable,
+            )
             obj_balance = Decimal('0.00')
             obj_currency = FrenchTransaction.Currency(CleanText('./td[small][1]'))
+
             obj_type = Account.TYPE_CARD
             obj__card_pages = Env('page')
             obj__is_inv = False
             obj__is_webid = False
+            obj__ctr = Field('_link_id') & Regexp(pattern=r'ctr=(\d+)')
 
             def obj__pre_link(self):
                 return self.page.url
@@ -754,15 +792,15 @@ class CardsListPage(LoggedPage, HTMLPage):
                     card_list_page = page.browser.open(Link('//form//a[text()="Contrat"]', default=None)(page.doc)).page
                     xpath = '//table[has-class("liste")]/tbody/tr'
                     active_card = CleanText('%s[td[text()="Active"]][1]/td[2]' % xpath, replace=[(' ', '')], default=None)(card_list_page.doc)
-                    _id = CleanText('.', replace=[(' ', '')])(option)
-                    if active_card == _id:
+                    number = CleanText('.', replace=[(' ', '')])(option)
+                    if active_card == number:
                         for attr in self._attrs:
                             self.handle_attr(attr, getattr(self, 'obj_%s' % attr))
                             setattr(card, attr, getattr(self.obj, attr))
 
-                        card._card_number = _id
-                        card.id = _id + card.number
-                        card.label = card.label.replace('  ', ' %s ' % _id)
+                        card.id = number + card._ctr
+                        card.number = number
+                        card.label = card.label.replace('  ', ' %s ' % number)
                         card2 = find_object(self.page.browser.cards_list, id=card.id[:16])
                         if card2:
                             card._link_id = card2._link_id
@@ -789,7 +827,7 @@ class CardsListPage(LoggedPage, HTMLPage):
                 if not active_card and len(page.doc.xpath(xpath)) != 1:
                     raise SkipItem()
 
-                self.env['id'] = active_card or CleanText('%s[1]/td[2]' % xpath, replace=[(' ', '')])(page.doc)
+                self.env['number'] = active_card or CleanText('%s[1]/td[2]' % xpath, replace=[(' ', '')])(page.doc)
 
 
 class Transaction(FrenchTransaction):
@@ -988,9 +1026,15 @@ class CardsOpePage(OperationsPage):
                 return (abs(gross) - abs(commission)).copy_sign(gross)
 
             def parse(self, el):
-                self.env['date'] = Date(Regexp(CleanText('//td[contains(text(), "Total prélevé")]'),
-                                               r' (\d{2}/\d{2}/\d{4})', default=NotAvailable),
-                                               default=NotAvailable)(self)
+                self.env['date'] = Date(
+                    Regexp(
+                        CleanText('//td[contains(text(), "Total prélevé")]'),
+                        r' (\d{2}/\d{2}/\d{4})',
+                        default=NotAvailable,
+                    ),
+                    dayfirst=True,
+                    default=NotAvailable,
+                )(self)
                 if not self.env['date']:
                     try:
                         d = (CleanText('//select[@id="moi"]/option[@selected]')(self)
@@ -1298,7 +1342,7 @@ class CardPage2(CardPage, HTMLPage, XMLPage):
         assert False, 'No transaction date is found'
 
     def get_amount_summary(self):
-        return CleanDecimal('//div[@class="restriction"]/ul[1]/li/span/span/span/b', sign='-', replace_dots=True)(self.doc)
+        return CleanDecimal('//div[@class="restriction"]/ul[1]/li/span/span/span/b', replace_dots=True)(self.doc) * -1
 
     def get_links(self):
         links = []
@@ -1398,7 +1442,6 @@ class LIAccountsPage(LoggedPage, HTMLPage):
             obj__card_links = []
             obj_type = Account.TYPE_LIFE_INSURANCE
             obj__is_inv = True
-            obj__card_number = None
 
     @pagination
     @method
@@ -1525,6 +1568,7 @@ class PorPage(LoggedPage, HTMLPage):
                     account.valuation_diff_ratio = por_account.valuation_diff_ratio
                     account.type = por_account.type
                     account.url = por_account.url
+                    account.number = por_account.number
                     break
             else:
                 accounts.append(por_account)
@@ -1554,25 +1598,22 @@ class PorPage(LoggedPage, HTMLPage):
                     and not has_empty_balance
                 )
 
-            # These values are defined for other types of accounts
-            obj__card_number = obj__link_id = None
-
+            # This values are defined for other types of accounts
             obj__is_inv = True
 
             # IDs on the old page were differentiated with 5 digits in front of the ID, but not here.
             # We still need to differentiate them so we add ".1" at the end.
             obj_id = Format('%s.1', Env('id'))
 
-            def obj_label(self):
-                # There is a link in the cell but we only want the text outside the 'a' tag
-                return CleanText('./text()')(TableCell('raw_label')(self)[0])
+            obj_label = Base(TableCell('raw_label'), CleanText('.', children=False))
+            obj_number = Base(TableCell('raw_label'), CleanText('./a', replace=[(' ', '')]))
 
             obj_balance = Env('balance')
             obj_currency = Currency(CleanText('//table[@id="tabSYNT"]/thead//span'), default=NotAvailable)
 
             obj_valuation_diff = CleanDecimal.French(TableCell('valuation_diff'), default=NotAvailable)
 
-            obj__link_inv = Link('.//a', default=NotAvailable)
+            obj__link_id = Regexp(Link('.//a', default=NotAvailable), r'ddp=([^&]*)', default=NotAvailable)
 
             def obj_type(self):
                 return self.page.get_type(Field('label')(self))
@@ -1710,7 +1751,7 @@ class IbanPage(LoggedPage, HTMLPage):
                     a.iban = CleanText('.//em[2]', replace=[(' ', '')])(ele)
 
 
-class InvestmentDetailsPage(LoggedPage, HTMLPage):
+class PorInvestmentsPage(LoggedPage, HTMLPage):
     @method
     class iter_investment(TableElement):
         item_xpath = '//table[@id="tabValorisation"]/tbody/tr[td]'
@@ -1769,6 +1810,169 @@ class InvestmentDetailsPage(LoggedPage, HTMLPage):
                     return diff_ratio_percent / 100
                 return NotAvailable
 
+
+class PorHistoryPage(LoggedPage, HTMLPage):
+    def submit_date_range_form(self):
+        form = self.get_form(id='frmMere')
+        form['txtDateSaisie'] = (datetime.today() - relativedelta(years=1)).strftime('%d/%m/%Y')
+        form.submit()
+
+    def has_next_page(self):
+        return bool(self.doc.xpath('//input[@id="NEXT"]'))
+
+    def submit_next_page_form(self):
+        form = self.get_form(id='frmMere')
+        form['NEXT.x'] = 0
+        form['NEXT.y'] = 0
+        form.submit()
+
+    def has_no_transaction(self):
+        return bool(self.doc.xpath('//td[@id="bwebTdPasOperation"]'))
+
+    @method
+    class iter_history(TableElement):
+        item_xpath = '//table[@class="liste bourse"]/tbody/tr[td]'
+        head_xpath = '//table[@class="liste bourse"]/thead//th'
+
+        col_date = 'Exécution'
+        col_label = 'Opération'
+        col_investment_label = 'Valeur'
+        col_investment_quantity = re.compile(r'Quantité')
+        col_amount = 'Montant net'
+
+        class item(ItemElement):
+            klass = Transaction
+
+            obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
+            obj_label = CleanText(TableCell('label'))
+            obj_amount = CleanDecimal.French(TableCell('amount'), default=NotAvailable)
+            obj_type = Transaction.TYPE_BANK
+            obj__details_link = Base(TableCell('label'), Link('.//a', default=NotAvailable))
+
+
+class PorHistoryDetailsPage(LoggedPage, HTMLPage):
+    @method
+    class fill_transaction(ItemElement):
+        obj_amount = CleanDecimal.French('//td[@class="tot"]/following-sibling::td[1]')
+
+        def obj_investments(self):
+            investment = Investment()
+            investment.label = Regexp(CleanText('//td[@id="esdtdLibelleValeur"]'), r'(.*) \(')(self)
+            investment.unitprice = CleanDecimal.French('//td[@id="esdtdCrsValeur"]')(self)
+            investment.valuation = Field('amount')(self)
+            investment.quantity = CleanDecimal.French('//td[@id="esdtdQteValeur"]')(self)
+            investment.code = IsinCode(Regexp(CleanText('//td[@id="esdtdLibelleValeur"]'), r'\((.*)\)'), default=NotAvailable)(self)
+            investment.code_type = IsinType(Regexp(CleanText('//td[@id="esdtdLibelleValeur"]'), r'\((.*)\)'), default=NotAvailable)(self)
+            return [investment]
+
+
+MARKET_ORDER_DIRECTIONS = {
+    'Achat': MarketOrderDirection.BUY,
+    'Vente': MarketOrderDirection.SALE,
+}
+
+MARKET_ORDER_TYPES = {
+    'limit': MarketOrderType.LIMIT,
+    'marché': MarketOrderType.MARKET,
+    'déclenchement': MarketOrderType.TRIGGER,
+}
+
+MARKET_ORDER_PAYMENT_METHODS = {
+    'Comptant': MarketOrderPayment.CASH,
+}
+
+
+class PorMarketOrdersPage(PorHistoryPage):
+    def has_no_order(self):
+        return bool(self.doc.xpath('//td[contains(@id, "PORT_ListeOrdres1_bwebTdPasOrdreEnCours")]'))
+
+    @method
+    class iter_market_orders(TableElement):
+        item_xpath = '//table[@class="liste bourse"]/tbody/tr[td]'
+        head_xpath = '//table[@class="liste bourse"]/thead//th'
+
+        col_date = 'Saisie'
+        col_direction = 'Sens'
+        col_order_type = 'Modalité'
+        col_quantity = re.compile(r'Qté')
+        col_label = 'Valeur'
+        col_ordervalue = 'Limite-Seuil'
+        col_validity_date = re.compile(r'Validité')
+        col_state = 'Etat'
+
+        def parse(self, el):
+            self.env['date_guesser'] = LinearDateGuesser()
+
+        class item(ItemElement):
+            klass = MarketOrder
+
+            def condition(self):
+                return 'Remboursement' not in CleanText('.')(self)
+
+            obj_id = Base(TableCell('direction'), Regexp(Link('.//a', default=NotAvailable), r'ref=([^&]+)'))
+            obj_direction = Map(
+                CleanText(TableCell('direction')),
+                MARKET_ORDER_DIRECTIONS,
+                MarketOrderDirection.UNKNOWN
+            )
+            obj_order_type = MapIn(CleanText(TableCell('order_type')), MARKET_ORDER_TYPES, MarketOrderType.UNKNOWN)
+            obj_quantity = CleanDecimal.French(TableCell('quantity'))
+            obj_label = CleanText(TableCell('label'))
+
+            def obj_ordervalue(self):
+                if Field('order_type') in (MarketOrderType.LIMIT, MarketOrderType.TRIGGER):
+                    return CleanDecimal.French(Regexp(CleanText(TableCell('ordervalue')), r'[^/]+$'))
+
+            obj_validity_date = Date(CleanText(TableCell('validity_date')), dayfirst=True, default=NotAvailable)
+
+            # The creation date doesn't display the year.
+            def obj_date(self):
+                validity_date = Field('validity_date')(self)
+                match = re.match(r'(?P<day>\d{2})/(?P<month>\d{2}) .*', CleanText(TableCell('date'))(self))
+                if match:
+                    day = int(match.group('day'))
+                    month = int(match.group('month'))
+                    # If we have a validity date we can guess the creation year.
+                    if validity_date:
+                        if validity_date.month > month or validity_date.day >= day:
+                            year = validity_date.year
+                        else:
+                            year = validity_date.year - 1
+                        return date(year, month, day)
+                    # If we don't have a validity date we use other orders to guess the year.
+                    date_guesser = Env('date_guesser')(self)
+                    return date_guesser.guess_date(day, month)
+
+            obj_state = CleanText(TableCell('state'))
+            obj_code = Base(
+                TableCell('label'),
+                IsinCode(Regexp(Link('.//a'), r'isin=([^&]+)&'), default=NotAvailable)
+            )
+
+            obj__market_order_link = Base(TableCell('direction'), Link('.//a', default=NotAvailable))
+
+
+class PorMarketOrderDetailsPage(LoggedPage, HTMLPage):
+    @method
+    class fill_market_order(ItemElement):
+        obj_stock_market = Regexp(
+            CleanText('//td[contains(@id, "esdtdAchat")]/text()[contains(., "Sur")]'),
+            r'Sur (.*)',
+            default=NotAvailable
+        )
+        obj_amount = CleanDecimal.French('//td[contains(@id, "esdtdMntEstimatif")]', default=NotAvailable)
+        obj_currency = Coalesce(
+            Currency('.//table[@class="liste bourse"]/tbody', default=NotAvailable),
+            Currency('//td[contains(@id, "esdtdAchat")]/text()[contains(., "Limite :")]', default=NotAvailable),
+            default=NotAvailable,
+        )
+        obj_payment_method = MapIn(
+            CleanText('//td[contains(@id, "esdtdAchat")]/text()[contains(., "Règlement")]'),
+            MARKET_ORDER_PAYMENT_METHODS,
+            MarketOrderPayment.UNKNOWN
+        )
+
+
 class MyRecipient(ItemElement):
     klass = Recipient
 
@@ -1818,11 +2022,14 @@ class ListEmitters(ListElement):
             return '%s%s' % (bank_info, partial_number)
 
 
-class InternalTransferPage(LoggedPage, HTMLPage):
+class InternalTransferPage(LoggedPage, HTMLPage, AppValidationPage):
     RECIPIENT_STRING = 'data_input_indiceCompteACrediter'
     READY_FOR_TRANSFER_MSG = 'Confirmer un virement entre vos comptes'
     SUMMARY_RECIPIENT_TITLE = 'Compte à créditer'
     IS_PRO_PAGE = False
+
+    def needs_personal_key_card_validation(self):
+        return bool(CleanText('//div[contains(@class, "alerte")]/p[contains(text(), "Cette opération nécessite une sécurité supplémentaire")]')(self.doc))
 
     def can_transfer_pro(self, origin_account):
         for li in self.doc.xpath('//ul[@id="idDetailsListCptDebiterVertical:ul"]//ul/li'):
@@ -1893,6 +2100,9 @@ class InternalTransferPage(LoggedPage, HTMLPage):
 
         form.submit()
 
+    def get_card_key_validation_link(self):
+        return Link('//a[contains(@href, "verif_code")]')(self.doc)
+
     def check_errors(self):
         # look for known errors
         content = self.text
@@ -1945,13 +2155,15 @@ class InternalTransferPage(LoggedPage, HTMLPage):
 
         return exec_date, r_amount, currency
 
+    def get_transfer_webid(self):
+        parsed = urlparse(self.url)
+        return parse_qs(parsed.query)['_saguid'][0]
+
     def handle_response(self, account, recipient, amount, reason, exec_date):
         self.check_errors()
         self.check_success()
 
         exec_date, r_amount, currency = self.check_data_consistency(account.id, recipient.id, amount, reason)
-        parsed = urlparse(self.url)
-        webid = parse_qs(parsed.query)['_saguid'][0]
 
         transfer = Transfer()
         transfer.currency = currency
@@ -1966,7 +2178,7 @@ class InternalTransferPage(LoggedPage, HTMLPage):
         transfer.account_label = account.label
         transfer.recipient_label = recipient.label
         transfer.account_balance = account.balance
-        transfer.id = webid
+        transfer.id = self.get_transfer_webid()
 
         return transfer
 
@@ -1978,7 +2190,7 @@ class InternalTransferPage(LoggedPage, HTMLPage):
                                'Ce virement a &#233;t&#233; enregistr&#233; ce jour',
                                'Ce virement a été enregistré ce jour']
         assert any(msg for msg in transfer_ok_message if msg in content), \
-               'The expected transfer message "%s" was not found.' % transfer_ok_message
+            'The expected transfer message "%s" was not found.' % transfer_ok_message
 
         exec_date, r_amount, currency = self.check_data_consistency(transfer.account_id, transfer.recipient_id, transfer.amount, transfer.label)
 
@@ -2041,7 +2253,8 @@ class ExternalTransferPage(InternalTransferPage):
                 self.item_xpath = '//ul[@id="idDetailListCptCrediterHorizontal:ul"]/li'
 
         class item(MyRecipient):
-            condition = lambda self: Field('id')(self) not in self.env['origin_account']._external_recipients
+            def condition(self):
+                return Field('id')(self) not in self.env['origin_account']._external_recipients
 
             obj_bank_name = CleanText('(.//span[@class="_c1 doux _c1"])[2]', default=NotAvailable)
             obj_label = CleanText('./div//em')
@@ -2142,21 +2355,6 @@ class VerifCodePage(LoggedPage, HTMLPage):
     }
 
     def on_load(self):
-        errors = (
-            CleanText('//p[contains(text(), "Clé invalide !")]')(self.doc),
-            CleanText('//p[contains(text(), "Vous n\'avez pas saisi de clé")]')(self.doc),
-            CleanText('//p[contains(text(), "saisie est incorrecte")]')(self.doc),
-            CleanText('//p[contains(text(), "Vous n\'êtes pas inscrit") and a[text()="service d\'identification renforcée"]]')(self.doc),
-            CleanText('//p[contains(text(), "L\'information KeyInput est incorrecte")]')(self.doc),
-        )
-        for error in errors:
-            if error:
-                if "L'information KeyInput est incorrecte" in error:
-                    error = 'Votre saisie est incorrecte.'
-                # don't reload state
-                self.browser.need_clear_storage = True
-                raise AddRecipientBankError(message=error)
-
         actions_needed = (
             CleanText('//p[contains(text(), "Carte de CLÉS PERSONNELLES révoquée")]')(self.doc),
             CleanText('//p[contains(text(), "votre carte") and contains(text(), "a été révoquée")]')(self.doc),
@@ -2175,10 +2373,12 @@ class VerifCodePage(LoggedPage, HTMLPage):
             if h == _hash or _hash in h:
                 return v
 
-    def check_personal_keys_error(self):
+    def get_personal_keys_error(self):
         error = CleanText('//div[contains(@class, "alerte")]/p')(self.doc)
-        if 'Vous ne possédez actuellement aucune Carte de Clés Personnelles active' in error:
-            raise AddRecipientBankError(message=error)
+        if error:
+            if 'Vous ne possédez actuellement aucune Carte de Clés Personnelles active' in error:
+                return error
+            raise AssertionError('Unhandled personal key card error : "%s"' % error)
 
     def get_question(self):
         question = Regexp(CleanText('//div/p[input]'), r'(Veuillez .*):')(self.doc)
@@ -2194,19 +2394,30 @@ class VerifCodePage(LoggedPage, HTMLPage):
             question = question.replace('case', 'case %s' % key_case)
         return question
 
-    def get_recipient_form(self):
+    def get_personal_key_card_code_form(self):
         form = self.get_form('//form[contains(@action, "verif_code")]')
-        recipient_form = dict(form.items())
-        recipient_form['url'] = form.url
-        return recipient_form
+        key_form = dict(form.items())
+        key_form['url'] = form.url
+        return key_form
 
-    def handle_error(self):
+    def get_error(self):
+        errors = (
+            CleanText('//p[contains(text(), "Clé invalide !")]')(self.doc),
+            CleanText('//p[contains(text(), "Vous n\'avez pas saisi de clé")]')(self.doc),
+            CleanText('//p[contains(text(), "saisie est incorrecte")]')(self.doc),
+            CleanText('//p[contains(text(), "Vous n\'êtes pas inscrit") and a[text()="service d\'identification renforcée"]]')(self.doc),
+            CleanText('//p[contains(text(), "L\'information KeyInput est incorrecte")]')(self.doc),
+        )
+        for error in errors:
+            if error:
+                if "L'information KeyInput est incorrecte" in error:
+                    error = 'Votre saisie est incorrecte.'
+                return error
+
         error_msg = CleanText('//div[@class="blocmsg info"]/p')(self.doc)
         # the card was not activated yet
         if 'veuillez activer votre carte' in error_msg:
-            # don't reload state
-            self.browser.need_clear_storage = True
-            raise AddRecipientBankError(message=error_msg)
+            return error_msg
 
 
 class RecipientsListPage(LoggedPage, HTMLPage):
@@ -2470,6 +2681,7 @@ class NewCardsListPage(LoggedPage, HTMLPage):
 
             obj_balance = 0
             obj_type = Account.TYPE_CARD
+            obj_number = Field('id')
             obj__new_space = True
             obj__is_inv = False
 

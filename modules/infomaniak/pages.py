@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 
 # Copyright(C) 2017      Vincent A
-#
+
+# flake8: compatible
+
 # This file is part of a weboob module.
 #
 # This weboob module is free software: you can redistribute it and/or modify
@@ -24,7 +26,7 @@ from datetime import datetime
 from weboob.browser.pages import LoggedPage, JsonPage, pagination
 from weboob.browser.elements import ItemElement, method, DictElement
 from weboob.browser.filters.standard import (
-    CleanDecimal, Env, Format, Currency, Field, Eval,
+    CleanDecimal, Env, Format, Currency, Eval,
 )
 from weboob.browser.filters.json import Dict
 from weboob.capabilities.bill import Bill, Subscription
@@ -41,9 +43,9 @@ class SubscriptionsPage(LoggedPage, JsonPage):
     class get_subscription(ItemElement):
         klass = Subscription
 
-        obj_id = Eval(str, Dict('data/user/current_account_id'))
-        obj_subscriber = Dict('data/user/display_name')
-        obj_label = Dict('data/user/display_name')
+        obj_id = Eval(str, Dict('data/current_account_id'))
+        obj_subscriber = Dict('data/display_name')
+        obj_label = Dict('data/display_name')
 
 
 class DocumentsPage(LoggedPage, JsonPage):
@@ -63,18 +65,17 @@ class DocumentsPage(LoggedPage, JsonPage):
                 'order_by': 'name',
                 'order_for[name]': 'asc',
                 'page': current_page + 1,
-                'per_page': '100'
+                'per_page': '100',
             }
             return self.page.browser.documents.build(subid=self.env['subid'], params=params)
 
         class item(ItemElement):
             klass = Bill
 
-            _num = Dict('document/id')
-
-            obj_id = Format('%s_%s', Env('subid'), _num)
+            obj_number = Dict('document/id')
+            obj_id = Format('%s_%s', Env('subid'), obj_number)
             obj_date = Eval(datetime.fromtimestamp, Dict('created_at'))
-            obj_label = Format('Facture %s', Field('id'))
+            obj_label = Format('Facture %s', obj_number)
             obj_url = Dict('document/href')
             obj_price = CleanDecimal(Dict('amount/amount'))
             obj_currency = Currency(Dict('amount/currency'))

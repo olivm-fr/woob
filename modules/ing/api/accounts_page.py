@@ -23,7 +23,7 @@ from __future__ import unicode_literals
 
 import re
 
-from weboob.browser.pages import LoggedPage, JsonPage
+from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage
 from weboob.browser.elements import method, DictElement, ItemElement
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.standard import (
@@ -79,6 +79,7 @@ ACCOUNT_TYPES = {
     'Assurance Vie': Account.TYPE_LIFE_INSURANCE,
     'Crédit Immobilier': Account.TYPE_LOAN,
     'Prêt Personnel': Account.TYPE_LOAN,
+    'Plan Epargne Action': Account.TYPE_PEA,
 }
 
 
@@ -96,9 +97,14 @@ class AccountsPage(LoggedPage, JsonPage):
             obj_number = CleanText(Dict('label'), replace=[(' ', '')])
 
             def obj_balance(self):
+                # ledgerBalance=-X and hasPositiveBalance=false -> negative balance (checking account)
+                # ledgerBalance=+X and hasPositiveBalance=false -> negative balance (due mortgage)
+
                 if not Dict('hasPositiveBalance')(self):
-                    return -CleanDecimal(Dict('ledgerBalance'))(self)
-                return CleanDecimal(Dict('ledgerBalance'))(self)
+                    return CleanDecimal(Dict('ledgerBalance'), sign='-')(self)
+                return CleanDecimal(Dict('ledgerBalance'), sign='+')(self)
+
+            obj_currency = 'EUR'  # no currency info in api! we assume there's only EUR then
 
             def obj_ownership(self):
                 ownership = Dict('ownership/code', default=None)(self)
@@ -201,7 +207,25 @@ class ComingPage(LoggedPage, JsonPage):
                 )
 
     @method
-    class get_account_coming(ItemElement):
+    class fill_account_coming(ItemElement):
         klass = Account
 
         obj_coming = CleanDecimal(Dict('totalAmount', default=NotAvailable), default=NotAvailable)
+
+
+class AccountInfoPage(LoggedPage, JsonPage):
+    def get_iban(self):
+        return self.doc['iban'].replace(' ', '')
+
+
+class RedirectOldPage(LoggedPage, HTMLPage):
+    # We land here when going away from bourse website.
+    # bourse.ing.fr -> secure.ing.fr (here) -> to whatever the form points
+    def on_load(self):
+        self.get_form(name='module').submit()
+
+
+class BourseLandingPage(LoggedPage, HTMLPage):
+    # when going to bourse space, we land on this page, which is logged
+    # that's all what this class is for: know we're logged
+    pass

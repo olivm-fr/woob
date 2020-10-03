@@ -22,7 +22,10 @@ from __future__ import unicode_literals
 
 from weboob.browser.pages import HTMLPage, LoggedPage
 from weboob.browser.elements import ItemElement, method, ListElement
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Env, Regexp, Format, Date
+from weboob.browser.filters.standard import (
+    CleanText, CleanDecimal, Env,
+    Regexp, Format, Date, Currency,
+)
 from weboob.browser.filters.html import Attr, AbsoluteLink
 from weboob.capabilities.bill import Bill, Subscription
 
@@ -69,9 +72,9 @@ class DocumentsPage(LoggedPage, HTMLPage):
             klass = Bill
 
             obj_id = Format('%s_%s', Env('subid'), Regexp(CleanText('.//div[@class="facture_ref"]'), r'(\d*$)'))
-            obj_url = AbsoluteLink('//div[@class="facture_pdf"]/a')
+            obj_url = AbsoluteLink('.//div[@class="facture_pdf"]/a')
             obj_date = Date(CleanText('.//div[@class="facture_date"]'), dayfirst=True)
             obj_format = 'pdf'
             obj_label = CleanText('.//div[@class="facture_ref"]')
             obj_price = CleanDecimal.French('.//div[@class="facture_tarif"]/p')
-            obj_currency = Regexp(CleanText('.//div[@class="facture_tarif"]/p'), r' (.*)')
+            obj_currency = Currency('.//div[@class="facture_tarif"]/p')

@@ -25,7 +25,8 @@ import datetime
 from decimal import Decimal
 import re
 from datetime import date
-from base64 import b64decode
+import hashlib
+from functools import wraps
 
 from weboob.browser.pages import (
     HTMLPage, LoggedPage, pagination, NextPage, FormNotFound, PartialHTMLPage,
@@ -45,7 +46,9 @@ from weboob.capabilities.bank import (
     AddRecipientBankError, TransferInvalidAmount, Loan, AccountOwnership,
     Emitter,
 )
-from weboob.capabilities.wealth import Investment, MarketOrder, MarketOrderType, MarketOrderDirection
+from weboob.capabilities.wealth import (
+    Investment, MarketOrder, MarketOrderType, MarketOrderDirection, MarketOrderPayment,
+)
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from weboob.capabilities.base import NotAvailable, Currency, find_object, empty
 from weboob.capabilities.profile import Person
@@ -204,24 +207,36 @@ class VirtKeyboardPage(HTMLPage):
 
 
 class BoursoramaVirtKeyboard(object):
+    # sha256 hexdigest of data in src of img
+    symbols = {
+        '0': '8560081e18568aba02ef3b1f7ac0e8b238cbbd21b70a5e919360ac456d45d506',
+        '1': 'eadac6d6288cbd61524fd1a3078a19bf555735c7af13a2890e307263c4c7259b',
+        '2': 'c54018639480788c02708b2d89651627dadf74048e029844f92006e19eadc094',
+        '3': 'f3022aeced3b8f45f69c1ec001909636984c81b7e5fcdc2bc481668b1e84ae05',
+        '4': '3e3d48446781f9f337858e56d01dd9a66c6be697ba34d8f63f48e694f755a480',
+        '5': '4b16fb3592febdd9fb794dc52e4d49f5713e9af05486388f3ca259226dcd5cce',
+        '6': '9b3afcc0ceb68c70cc697330d8a609900cf330b6aef1fb102f7a1c34cd8bc3d4',
+        '7': '9e760193de1b6c5135ebe1bcad7ff65a2aacfc318973ce29ecb23ed2f86d6012',
+        '8': '64d87d9a7023788e21591679c1783390011575a189ea82bb36776a096c7ca02c',
+        '9': '1b358233ad4eb6b10bf0dadc3404261317a1b78b62f8501b70c646d654ae88f1',
+    }
+
     def __init__(self, page, codesep='|'):
         self.codesep = codesep
-        self.digits = {}
+        self.fingerprints = {}
 
         for button in page.doc.xpath('//ul[@class="password-input"]//button'):
             # src is like data:image/svg+xml;base64, [data]
             # so we split to only keep the data
-            # decode it to b64 and read svg data
-            # the number the svg path represents is found in the id of said path
-            img = button.xpath('.//img')[0]
-            b64_text = img.attrib['src'].split()[1]
-            svg_text = b64decode(b64_text).decode('utf-8')
-            number = re.search(r' id="(\d)"', svg_text).group(1)
-            self.digits[number] = button.attrib['data-matrix-key']
+            # hashed so that the symbols dict is smaller
+            img_data_hash = hashlib.sha256(
+                button.xpath('.//img')[0].attrib['src'].split()[1].encode('utf-8')
+            ).hexdigest()
+            self.fingerprints[img_data_hash] = button.attrib['data-matrix-key']
 
     def get_string_code(self, string):
         return self.codesep.join(
-            self.digits[digit] for digit in string
+            self.fingerprints[self.symbols[digit]] for digit in string
         )
 
 
@@ -562,8 +577,33 @@ class CalendarPage(LoggedPage, HTMLPage):
         self.browser.location(calendar_ics_url)
 
 
+def otp_pagination(func):
+    @wraps(func)
+    def inner(page, *args, **kwargs):
+        while True:
+            try:
+                for r in func(page, *args, **kwargs):
+                    yield r
+            except NextPage as e:
+                result = page.browser.otp_location(e.request)
+                if result is None:
+                    return
+
+                page = result.page
+            else:
+                return
+
+    return inner
+
+
 class HistoryPage(LoggedPage, HTMLPage):
-    @pagination
+    """
+    be carefull : `transaction_klass` is used in another page
+    of an another module which is an abstract of this page
+    """
+    transaction_klass = Transaction
+
+    @otp_pagination
     @method
     class iter_history(ListElement):
         item_xpath = '''
@@ -609,15 +649,21 @@ class HistoryPage(LoggedPage, HTMLPage):
                 # of deferred cards, but summary transactions must escape this rule.
                 if self.obj.type == Transaction.TYPE_CARD_SUMMARY:
                     return self.obj.type
+
                 deferred_card_labels = [card.label for card in self.page.browser.cards_list]
                 if Field('_account_name')(self).upper() in deferred_card_labels:
                     return Transaction.TYPE_DEFERRED_CARD
-                if not Env('is_card', default=False)(self):
+
+                is_card = Env('is_card', default=False)(self)
+                if is_card:
+                    if 'CARTE' in self.obj.raw:
+                        return Transaction.TYPE_DEFERRED_CARD
+                else:
                     if Env('coming', default=False)(self) and Field('raw')(self).startswith('CARTE '):
                         return Transaction.TYPE_CARD_SUMMARY
-                    # keep the value previously set by Transaction.Raw
-                    return self.obj.type
-                return Transaction.TYPE_UNKNOWN
+
+                # keep the value previously set by Transaction.Raw
+                return self.obj.type
 
             def obj_rdate(self):
                 if self.obj.rdate:
@@ -644,29 +690,34 @@ class HistoryPage(LoggedPage, HTMLPage):
                     CleanText('./preceding-sibling::li[contains(@class, "date-line")][1]', transliterate=True),
                     parse_func=parse_french_date,
                 )(self)
+
                 if Env('is_card', default=False)(self):
                     if self.page.browser.deferred_card_calendar is None:
                         self.page.browser.location(Link('//a[contains(text(), "calendrier")]')(self))
                     closest = self.page.browser.get_debit_date(date)
                     if closest:
                         return closest
+
                 return date
 
             def validate(self, obj):
                 # TYPE_DEFERRED_CARD transactions are already present in the card history
                 # so we only return TYPE_DEFERRED_CARD for the coming:
                 if not Env('coming', default=False)(self):
+                    is_card = Env('is_card', default=False)(self)
                     return (
-                        not len(self.xpath('.//span[has-class("icon-carte-bancaire")]'))
-                        and not len(self.xpath('.//a[contains(@href, "/carte")]'))
-                        and obj.type != Transaction.TYPE_DEFERRED_CARD
+                        is_card or (
+                            not len(self.xpath('.//span[has-class("icon-carte-bancaire")]'))
+                            and not len(self.xpath('.//a[contains(@href, "/carte")]'))
+                            and obj.type != Transaction.TYPE_DEFERRED_CARD
+                        )
                     )
                 elif Env('coming', default=False)(self):
                     # Do not return coming from deferred cards if their
                     # summary does not have a fixed amount yet:
-                    if obj.type == Transaction.TYPE_CARD_SUMMARY:
-                        return False
-                return True
+                    return obj.type != Transaction.TYPE_CARD_SUMMARY
+                else:
+                    return True
 
             def condition(self):
                 # Users can split their transactions if they want. We don't want this kind
@@ -674,15 +725,16 @@ class HistoryPage(LoggedPage, HTMLPage):
                 #  - The sum of this transactions can be different than the original transaction
                 #     ex: The real transaction as an amount of 100€, the user is free to split it on 50€ and 60€
                 #  - The original transaction is scraped anyway and we don't want duplicates
-                if self.xpath('./div[has-class("list__movement__line--block__split")]'):
-                    return False
-                return True
+                return not self.xpath('./div[has-class("list__movement__line--block__split")]')
 
     def get_cards_number_link(self):
         return Link('//a[small[span[contains(text(), "carte bancaire")]]]', default=NotAvailable)(self.doc)
 
     def get_csv_link(self):
-        return Link('//a[@data-operations-export-button]')(self.doc)
+        return Link(
+            '//a[@data-operations-export-button and not(has-class("hidden"))]',
+            default=None
+        )(self.doc)
 
     def get_calendar_link(self):
         return Link('//a[contains(text(), "calendrier")]')(self.doc)
@@ -793,6 +845,11 @@ MARKET_DIRECTIONS = {
     'Vente': MarketOrderDirection.SALE,
 }
 
+MARKET_ORDER_PAYMENTS = {
+    'Comptant': MarketOrderPayment.CASH,
+    'Règlement différé': MarketOrderPayment.DEFERRED,
+}
+
 
 class MarketPage(LoggedPage, HTMLPage):
     def get_balance(self, account_type):
@@ -897,6 +954,7 @@ class MarketPage(LoggedPage, HTMLPage):
 
                 yield t
 
+    @pagination
     @method
     class iter_market_orders(TableElement):
         item_xpath = '//table/tbody/tr[td]'
@@ -912,6 +970,8 @@ class MarketPage(LoggedPage, HTMLPage):
         col_validity_date = 'Validité'
         col_stock_market = 'Marché'
 
+        next_page = Link('//li[@class="pagination__next"]//a', default=None)
+
         class item(ItemElement):
             klass = MarketOrder
 
@@ -919,8 +979,20 @@ class MarketPage(LoggedPage, HTMLPage):
             obj_label = CleanText(TableCell('label'), children=False)
             obj_direction = Map(CleanText(TableCell('direction')), MARKET_DIRECTIONS, MarketOrderDirection.UNKNOWN)
             obj_code = IsinCode(Base(TableCell('label'), CleanText('.//a')))
-            obj_stock_market = CleanText(TableCell('stock_market'))
             obj_currency = CleanCurrency(TableCell('unitvalue'))
+
+            # The column contains the payment_method and the stock market (e.g. 'Comptant Euronext')
+            # We select the stock_market by using the <br> between the two.
+            obj_stock_market = Base(
+                TableCell('stock_market'),
+                CleanText('./text()[2]'),
+                default=NotAvailable
+            )
+            obj_payment_method = MapIn(
+                CleanText(TableCell('stock_market')),
+                MARKET_ORDER_PAYMENTS,
+                MarketOrderPayment.UNKNOWN
+            )
 
             # Unitprice may be absent if the order is still ongoing
             obj_unitprice = CleanDecimal.US(TableCell('state'), default=NotAvailable)
@@ -1180,6 +1252,60 @@ class TransferRecipients(LoggedPage, HTMLPage):
     def submit_recipient(self, tempid):
         form = self.get_form(name='CreditAccount')
         form['CreditAccount[creditAccountKey]'] = tempid
+        form.submit()
+
+
+class NewTransferRecipients(LoggedPage, HTMLPage):
+    @method
+    class iter_recipients(ListElement):
+        item_xpath = '//div[contains(@id, "panel-")]//div[contains(@class, "panel__body")]//label'
+
+        class item(ItemElement):
+            klass = Recipient
+
+            obj_id = CleanText(
+                './/span[contains(@class, "sub-label")]/span[not(contains(@class,"sub-label"))]',
+                replace=[(' ', '')],
+            )
+
+            obj_label = Regexp(
+                CleanText('.//span[contains(@class, "account-label")]'),
+                r'([^-]+)',
+                '\\1',
+            )
+
+            def obj_category(self):
+                text = CleanText(
+                    './ancestor::div[contains(@class, "panel__body")]'
+                    + '/preceding-sibling::div[contains(@class, "panel__header")]'
+                    + '//span[contains(@class, "panel__title")]'
+                )(self).lower()
+                if 'mes comptes boursorama banque' in text:
+                    return 'Interne'
+                elif any(exp in text for exp in ('comptes externes', 'comptes de tiers', 'mes bénéficiaires')):
+                    return 'Externe'
+
+            def obj_iban(self):
+                if Field('category')(self) == 'Externe':
+                    return Field('id')(self)
+                return NotAvailable
+
+            def obj_enabled_at(self):
+                return datetime.datetime.now().replace(microsecond=0)
+
+            obj__tempid = Attr('./input', 'value')
+
+
+class NewTransferAccounts(LoggedPage, HTMLPage):
+    def submit_account(self, account_id):
+        form = self.get_form()
+        debit_account = CleanText(
+            '//input[./following-sibling::div/span/span[contains(text(), "%s")]]/@value' % account_id
+        )(self.doc)
+        if not debit_account:
+            raise AccountNotFound()
+
+        form['DebitAccount[debit]'] = debit_account
         form.submit()
 
 

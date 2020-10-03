@@ -18,19 +18,22 @@
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
+
+import time
 from datetime import date
 
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserUnavailable, ImageCaptchaQuestion, BrowserQuestion,
     WrongCaptchaResponse, AuthMethodNotImplemented, NeedInteractiveFor2FA,
+    BrowserPasswordExpired, AppValidation, AppValidationExpired,
 )
 from weboob.tools.value import Value
 from weboob.browser.browsers import ClientError
 
 from .pages import (
     LoginPage, SubscriptionsPage, DocumentsPage, DownloadDocumentPage, HomePage,
-    PanelPage, SecurityPage, LanguagePage, HistoryPage,
+    PanelPage, SecurityPage, LanguagePage, HistoryPage, PasswordExpired, ApprovalPage,
 )
 
 
@@ -54,16 +57,22 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
     home = URL(r'/$', r'/\?language=\w+$', HomePage)
     panel = URL('/gp/css/homepage.html/ref=nav_youraccount_ya', PanelPage)
     subscriptions = URL(r'/ap/cnep(.*)', SubscriptionsPage)
-    documents = URL(r'/gp/your-account/order-history\?opt=ab&digitalOrders=1(.*)&orderFilter=year-(?P<year>.*)',
-                    r'https://www.amazon.fr/gp/your-account/order-history',
-                    DocumentsPage)
-    download_doc = URL(r'/gp/shared-cs/ajax/invoice/invoice.html', DownloadDocumentPage)
-    security = URL('/ap/dcq',
-                   '/ap/cvf/',
-                   '/ap/mfa',
-                   SecurityPage)
-    language = URL(r'/gp/customer-preferences/save-settings/ref=icp_lop_(?P<language>.*)_tn', LanguagePage)
     history = URL(r'/gp/your-account/order-history\?ref_=ya_d_c_yo', HistoryPage)
+    documents = URL(
+        r'/gp/your-account/order-history\?opt=ab&digitalOrders=1(.*)&orderFilter=year-(?P<year>.*)',
+        r'/gp/your-account/order-history',
+        DocumentsPage,
+    )
+    download_doc = URL(r'/gp/shared-cs/ajax/invoice/invoice.html', DownloadDocumentPage)
+    approval_page = URL(r'/ap/cvf/approval', ApprovalPage)
+    security = URL(
+        r'/ap/dcq',
+        r'/ap/cvf/',
+        r'/ap/mfa',
+        SecurityPage,
+    )
+    language = URL(r'/gp/customer-preferences/save-settings/ref=icp_lop_(?P<language>.*)_tn', LanguagePage)
+    password_expired = URL(r'/ap/forgotpassword/reverification', PasswordExpired)
 
     __states__ = ('otp_form', 'otp_url', 'otp_style', 'otp_headers')
 
@@ -133,6 +142,19 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
         image = self.open(captcha[0]).content
         raise ImageCaptchaQuestion(image)
 
+    def check_app_validation(self):
+        # client has 60 seconds to unlock this page
+        timeout = time.time() + 60.00
+        while time.time() < timeout:
+            link = self.page.get_link_app_validation()
+            self.location(link)
+            if self.approval_page.is_here():
+                time.sleep(2)
+            else:
+                return
+        else:
+            raise AppValidationExpired()
+
     def do_login(self):
         if self.config['pin_code'].get():
             # Resolve pin_code
@@ -144,6 +166,9 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
             else:
                 # Means security was passed, we're logged
                 return
+
+        if self.config['resume'].get():
+            self.check_app_validation()
 
         if self.security.is_here():
             self.handle_security()
@@ -184,6 +209,13 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
 
         self.page.login(self.username, self.password)
 
+        if self.approval_page.is_here():
+            msg_validation = self.page.get_msg_app_validation()
+            raise AppValidation(msg_validation)
+
+        if self.password_expired.is_here():
+            raise BrowserPasswordExpired(self.page.get_message())
+
         if self.security.is_here():
             # Raise security management
             self.handle_security()
@@ -222,14 +254,37 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
         elif not self.subscriptions.is_here():
             self.is_login()
 
+        # goes back to the subscription page as you may be redirected to the documents page
+        if not self.subscriptions.is_here():
+            self.location(self.panel.go().get_sub_link())
+
         yield self.page.get_item()
 
     @need_login
     def iter_documents(self, subscription):
+        self.history.go()
+        b2b_group_key = self.page.get_b2b_group_key()
+
+        if b2b_group_key:
+            # this value is available for business account only
+            params = {
+                'opt': 'ab',
+                'digitalOrders': 1,
+                'unifiedOrders': 1,
+                'selectedB2BGroupKey': b2b_group_key
+            }
+            # we select the page where we can find documents from every payers, not just 'myself'
+            self.location('/gp/your-account/order-history/ref=b2b_yo_dd_oma', params=params)
+            _, group_key = b2b_group_key.split(':')
+            # we need this to get bills when this is amazon business, else html page won't contain them
+            params = {'selectedB2BGroupKey': group_key}
+        else:
+            params = {}
+
         year = date.today().year
         old_year = year - 2
         while year >= old_year:
-            self.documents.go(year=year)
+            self.documents.go(year=year, params=params)
             request_id = self.page.response.headers['x-amz-rid']
             for doc in self.page.iter_documents(subid=subscription.id, currency=self.CURRENCY, request_id=request_id):
                 yield doc

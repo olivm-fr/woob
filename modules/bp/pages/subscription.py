@@ -17,15 +17,24 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import re
 
 from weboob.capabilities.bill import DocumentTypes, Subscription, Document
 from weboob.browser.pages import LoggedPage, HTMLPage
-from weboob.browser.filters.standard import CleanText, Regexp, Env, Date, Format, Field
-from weboob.browser.filters.html import Link, Attr, TableCell
+from weboob.browser.filters.standard import (
+    CleanText, Regexp, Env, Date, Format, Field, MapIn,
+)
+from weboob.browser.filters.html import AbsoluteLink, Attr, TableCell
 from weboob.browser.elements import ListElement, ItemElement, method, TableElement
+
+
+TYPE_BY_LABEL = {
+    'e-Relevé': DocumentTypes.STATEMENT,
+}
 
 
 class SubscriptionPage(LoggedPage, HTMLPage):
@@ -59,23 +68,41 @@ class SubscriptionPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Document
 
-            obj_id = Format('%s_%s%s', Env('sub_id'), Regexp(CleanText('.//a/@title'), r' (\d{2}) '), CleanText('.//span[contains(@class, "date")]' ,symbols='/'))
-            obj_label = Format('%s - %s', CleanText('.//span[contains(@class, "lib")]'), CleanText('.//span[contains(@class, "date")]'))
-            obj_url = Format('/voscomptes/canalXHTML/relevePdf/relevePdf_historique/%s', Link('./a'))
+            obj_id = Format(
+                '%s_%s%s',
+                Env('sub_id'),
+                Regexp(CleanText('.//a/@title'), r' (\d{2}) '),
+                CleanText('.//span[contains(@class, "date")]', symbols='/')
+            )
+
+            type_label = CleanText('.//span[contains(@class, "lib")]')
+
+            obj_label = Format(
+                '%s - %s',
+                type_label,
+                CleanText('.//span[contains(@class, "date")]')
+            )
+            obj_url = AbsoluteLink('./a')
             obj_format = 'pdf'
-            obj_type = DocumentTypes.OTHER
+
+            obj_type = MapIn(type_label, TYPE_BY_LABEL, default=DocumentTypes.OTHER)
 
             def obj_date(self):
-                date = CleanText('.//span[contains(@class, "date")]')(self)
+                datefilter = CleanText('.//span[has-class("date")]')
+                date = datefilter(self)
                 m = re.search(r'(\d{2}/\d{2}/\d{4})', date)
                 if m:
-                    return Date(CleanText('.//span[contains(@class, "date")]'), dayfirst=True)(self)
+                    return Date(datefilter, dayfirst=True)(self)
                 else:
+                    # the span contains "07/2020"
+                    # and the @title contains "10 Juillet 2020"
+                    # TODO just parse the title?
+
                     return Date(
                         Format(
                             '%s/%s',
                             Regexp(CleanText('.//a/@title'), r' (\d{2}) '),
-                            CleanText('.//span[contains(@class, "date")]')
+                            datefilter
                         ),
                         dayfirst=True
                     )(self)
@@ -106,6 +133,7 @@ class DownloadPage(LoggedPage, HTMLPage):
             part_link = Attr('//iframe', 'src')(self.doc).replace('..', '')
             return self.browser.open('/voscomptes/canalXHTML/relevePdf%s' % part_link).content
         return self.content
+
 
 class ProSubscriptionPage(LoggedPage, HTMLPage):
     @method
@@ -140,7 +168,7 @@ class ProSubscriptionPage(LoggedPage, HTMLPage):
             # by example, if the id is 0,
             # it means that it is the first document that you can find
             # on the page of the year XXX for the subscription YYYY
-            obj_url = Link('.//a')
+            obj_url = AbsoluteLink('.//a')
             obj_format = 'pdf'
             obj_type = DocumentTypes.OTHER
 

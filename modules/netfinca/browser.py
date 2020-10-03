@@ -39,11 +39,15 @@ class NetfincaBrowser(LoginBrowser):
 
     def iter_accounts(self):
         self.accounts.stay_or_go()
+        self.check_action_needed()
+        return self.page.iter_accounts()
+
+    def check_action_needed(self):
+        self.accounts.stay_or_go()
         message = self.page.get_action_needed_message()
         if 'merci de renseigner les informations' in message:
             # Customers have to fill their e-mail address and phone number
             raise ActionNeeded(message)
-        return self.page.iter_accounts()
 
     def iter_investments(self, account):
         self.accounts.stay_or_go()
@@ -96,6 +100,9 @@ class NetfincaBrowser(LoginBrowser):
         if self.page.has_no_order():
             return
         for order in self.page.iter_market_orders():
+            if order._details_link:
+                self.location(order._details_link)
+                self.page.fill_market_order(obj=order)
             yield order
 
         # Handle pagination

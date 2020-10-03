@@ -22,9 +22,9 @@ from __future__ import unicode_literals
 import hashlib
 import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage
+from weboob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage, RawPage
 from weboob.browser.filters.standard import (
-    CleanText, Env, Field, Regexp, Format, Date,
+    CleanText, Env, Field, Regexp, Format, Date, Coalesce,
 )
 from weboob.browser.filters.json import Dict
 from weboob.browser.elements import ListElement, ItemElement, method
@@ -57,6 +57,14 @@ class LoginAELPage(HTMLPage):
 
     def get_redirect_url(self):
         return Regexp(CleanText('//body/script'), r"postMessage\('ok,(.*)',")(self.doc)
+
+
+class NoDocumentPage(LoggedPage, RawPage):
+    pass
+
+
+class ErrorDocumentPage(LoggedPage, RawPage):
+    pass
 
 
 class ThirdPartyDocPage(LoggedPage, JsonPage):
@@ -128,9 +136,31 @@ class DocumentsPage(LoggedPage, HTMLPage):
         item_xpath = '//ul[has-class("documents")]/li'
 
         def next_page(self):
-            previous_year = CleanText('//li[has-class("blocAnnee") and has-class("selected")]/following-sibling::li[1]/a')(self.page.doc)
-            # only if previous_year, else we return to page with current year and fall to an infinite loop
+            previous_year = CleanText(
+                '//li[has-class("blocAnnee") and has-class("selected")]/following-sibling::li[1]/a',
+                children=False
+            )(self.page.doc)
+
+            # only if previous_year is not None and different from current year,
+            # else we return to page with current year and fall into infinite loop
             if previous_year:
+                previous_year = int(Regexp(None, r'(\d{4})').filter(previous_year))
+
+                current_year = int(Regexp(CleanText(
+                    '//li[has-class("blocAnnee") and has-class("selected")]/a',
+                    children=False
+                ), r'(\d{4})')(self.page.doc))
+
+                if previous_year >= current_year:
+                    # if previous year is 'something 2078' website return page of current year
+                    # previous_year has to be nothing but digit
+                    # don't return anything to not fall into infinite loop, but something bad has happened
+                    self.logger.error(
+                        "pagination loop, previous_year: %s pagination is unexpectedly superior or equal to current_year: %s",
+                        previous_year, current_year
+                    )
+                    return
+
                 return self.page.browser.documents.build(params={'n': previous_year})
 
         class item(ItemElement):
@@ -150,12 +180,23 @@ class DocumentsPage(LoggedPage, HTMLPage):
             obj_url = Format('/enp/ensu/Affichage_Document_PDF?idEnsua=%s', Field('_idEnsua'))
 
             def parse(self, el):
-                label_ct = CleanText('./div[has-class("texte")]')
-                date = Regexp(label_ct, 'le ([\w\/]+)', default=None)(self)
+                label_ct = CleanText('./div[has-class("texte")][has-class("visible-xs")]')
+                date = Regexp(label_ct, r'le ([\w\/]+?),', default=NotAvailable)(self)
                 self.env['label'] = label_ct(self)
 
                 if not date:
-                    year = Regexp(label_ct, '\s(\d{4})', default=None)(self)
+                    # exclude n° to not take n° 2555123456 as year 2555
+                    # or if there is absolutely no date written in html for this document
+                    # when label is "Mise en demeure de payer" for example
+                    # take just the year in current page
+                    year = Coalesce(
+                        Regexp(label_ct, r'\b(\d{4})\b', default=NotAvailable),
+                        CleanText(
+                            '//li[has-class("blocAnnee") and has-class("selected")]/a',
+                            children=False, default=NotAvailable,
+                        )
+                    )(self)
+
                     if 'sur les revenus de' in self.env['label']:
                         # this kind of document always appear un july, (but we don't know the day)
                         date = '%s-07-01' % year

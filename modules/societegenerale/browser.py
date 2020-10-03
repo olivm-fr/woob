@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import time
@@ -42,7 +44,7 @@ from weboob.tools.decorators import retry
 
 from .pages.accounts_list import (
     AccountsMainPage, AccountDetailsPage, AccountsPage, LoansPage, HistoryPage,
-    CardHistoryPage, PeaLiquidityPage,
+    CardHistoryPage, PeaLiquidityPage, MarketOrderPage, MarketOrderDetailPage,
     AdvisorPage, HTMLProfilePage, CreditPage, CreditHistoryPage, OldHistoryPage,
     MarketPage, LifeInsurance, LifeInsuranceHistory, LifeInsuranceInvest, LifeInsuranceInvest2,
     UnavailableServicePage, LoanDetailsPage, TemporaryBrowserUnavailable,
@@ -62,8 +64,11 @@ class SocieteGenerale(TwoFactorBrowser):
     STATE_DURATION = 10
 
     # Bank
-    accounts_main_page = URL(r'/restitution/cns_listeprestation.html',
-                             r'/com/icd-web/cbo/index.html', AccountsMainPage)
+    accounts_main_page = URL(
+        r'/restitution/cns_listeprestation.html',
+        r'/com/icd-web/cbo/index.html',
+        AccountsMainPage
+    )
     account_details_page = URL(r'/restitution/cns_detailPrestation.html', AccountDetailsPage)
     accounts = URL(r'/icd/cbo/data/liste-prestations-authsec.json\?n10_avecMontant=1', AccountsPage)
     history = URL(r'/icd/cbo/data/liste-operations-authsec.json', HistoryPage)
@@ -73,33 +78,50 @@ class SocieteGenerale(TwoFactorBrowser):
     card_history = URL(r'/restitution/cns_listeReleveCarteDd.xml', CardHistoryPage)
     credit = URL(r'/restitution/cns_detailAVPAT.html', CreditPage)
     credit_history = URL(r'/restitution/cns_listeEcrCav.xml', CreditHistoryPage)
-    old_hist_page = URL(r'/restitution/cns_detailPep.html',
-                        r'/restitution/cns_listeEcrPep.html',
-                        r'/restitution/cns_detailAlterna.html',
-                        r'/restitution/cns_listeEncoursAlterna.html', OldHistoryPage)
+    old_hist_page = URL(
+        r'/restitution/cns_detailPep.html',
+        r'/restitution/cns_listeEcrPep.html',
+        r'/restitution/cns_detailAlterna.html',
+        r'/restitution/cns_listeEncoursAlterna.html',
+        OldHistoryPage
+    )
 
     # Recipient
-    add_recipient = URL(r'/personnalisation/per_cptBen_ajouterFrBic.html',
-                        r'/lgn/url.html', AddRecipientPage)
-    json_recipient = URL(r'/sec/getsigninfo.json',
-                         r'/sec/csa/send.json',
-                         r'/sec/oob_sendoob.json',
-                         r'/sec/oob_polling.json', SignRecipientPage)
+    add_recipient = URL(
+        r'/personnalisation/per_cptBen_ajouterFrBic.html',
+        r'/lgn/url.html',
+        AddRecipientPage
+    )
+    json_recipient = URL(
+        r'/sec/getsigninfo.json',
+        r'/sec/csa/send.json',
+        r'/sec/oob_sendoob.json',
+        r'/sec/oob_polling.json',
+        SignRecipientPage
+    )
     # Transfer
-    json_transfer = URL(r'/icd/vupri/data/vupri-liste-comptes.json\?an200_isBack=false',
-                        r'/icd/vupri/data/vupri-check.json', TransferJson)
+    json_transfer = URL(
+        r'/icd/vupri/data/vupri-liste-comptes.json\?an200_isBack=false',
+        r'/icd/vupri/data/vupri-check.json',
+        TransferJson
+    )
     sign_transfer = URL(r'/icd/vupri/data/vupri-generate-token.json', SignTransferPage)
     confirm_transfer = URL(r'/icd/vupri/data/vupri-save.json', TransferJson)
 
     # Wealth
     market = URL(r'/brs/cct/comti20.html', MarketPage)
     pea_liquidity = URL(r'/restitution/cns_detailPea.html', PeaLiquidityPage)
-    life_insurance = URL(r'/asv/asvcns10.html',
-                         r'/asv/AVI/asvcns10a.html',
-                         r'/brs/fisc/fisca10a.html', LifeInsurance)
+    life_insurance = URL(
+        r'/asv/asvcns10.html',
+        r'/asv/AVI/asvcns10a.html',
+        r'/brs/fisc/fisca10a.html',
+        LifeInsurance
+    )
     life_insurance_invest = URL(r'/asv/AVI/asvcns20a.html', LifeInsuranceInvest)
     life_insurance_invest_2 = URL(r'/asv/PRV/asvcns10priv.html', LifeInsuranceInvest2)
     life_insurance_history = URL(r'/asv/AVI/asvcns2(?P<n>[0-9])c.html', LifeInsuranceHistory)
+    market_orders = URL(r'/brs/suo/suivor20.html', MarketOrderPage)
+    market_orders_details = URL(r'/brs/suo/suivor30.html', MarketOrderDetailPage)
 
     # Profile
     advisor = URL(r'/icd/pon/data/get-contacts.xml', AdvisorPage)
@@ -107,28 +129,44 @@ class SocieteGenerale(TwoFactorBrowser):
 
     # Document
     bank_statement = URL(r'/restitution/rce_derniers_releves.html', BankStatementPage)
-    bank_statement_search = URL(r'/restitution/rce_recherche.html\?noRedirect=1',
-                                r'/restitution/rce_recherche_resultat.html', BankStatementPage)
+    bank_statement_search = URL(
+        r'/restitution/rce_recherche.html\?noRedirect=1',
+        r'/restitution/rce_recherche_resultat.html',
+        BankStatementPage
+    )
     rib_pdf_page = URL(r'/com/icd-web/cbo/pdf/rib-authsec.pdf', RibPdfPage)
 
     bad_login = URL(r'/acces/authlgn.html', r'/error403.html', BadLoginPage)
-    reinit = URL(r'/acces/changecodeobligatoire.html',
-                 r'/swm/swm-changemdpobligatoire.html', ReinitPasswordPage)
-    action_needed = URL(r'/com/icd-web/forms/cct-index.html',
-                        r'/com/icd-web/gdpr/gdpr-recueil-consentements.html',
-                        r'/com/icd-web/forms/kyc-index.html',
-                        ActionNeededPage)
-    unavailable_service_page = URL(r'/com/service-indisponible.html',
-                                   r'.*/Technical-pages/503-error-page/unavailable.html',
-                                   r'.*/Technical-pages/service-indisponible/service-indisponible.html',
-                                   UnavailableServicePage)
-    error = URL(r'https://static.societegenerale.fr/pri/erreur.html',
-                r'https://.*/pri/erreur.html', ErrorPage)
-    login = URL(r'https://particuliers.societegenerale.fr//sec/vk/',  # yes, it works only with double slash
-                r'/sec/oob_sendooba.json',
-                r'/sec/oob_pollingooba.json',
-                r'/sec/oob_auth.json',
-                r'/sec/csa/check.json', LoginPage)
+    reinit = URL(
+        r'/acces/changecodeobligatoire.html',
+        r'/swm/swm-changemdpobligatoire.html',
+        ReinitPasswordPage
+    )
+    action_needed = URL(
+        r'/com/icd-web/forms/cct-index.html',
+        r'/com/icd-web/gdpr/gdpr-recueil-consentements.html',
+        r'/com/icd-web/forms/kyc-index.html',
+        ActionNeededPage
+    )
+    unavailable_service_page = URL(
+        r'/com/service-indisponible.html',
+        r'.*/Technical-pages/503-error-page/unavailable.html',
+        r'.*/Technical-pages/service-indisponible/service-indisponible.html',
+        UnavailableServicePage
+    )
+    error = URL(
+        r'https://static.societegenerale.fr/pri/erreur.html',
+        r'https://.*/pri/erreur.html',
+        ErrorPage
+    )
+    login = URL(
+        r'https://particuliers.societegenerale.fr//sec/vk/',  # yes, it works only with double slash
+        r'/sec/oob_sendooba.json',
+        r'/sec/oob_pollingooba.json',
+        r'/sec/oob_auth.json',
+        r'/sec/csa/check.json',
+        LoginPage
+    )
     main_page = URL(r'https://particuliers.societegenerale.fr', MainPage)
 
     context = None
@@ -189,10 +227,10 @@ class SocieteGenerale(TwoFactorBrowser):
             )
 
         elif auth_method['unavailability_reason']:
-            assert False, 'Unknown unavailability reason "%s" found' % auth_method['unavailability_reason']
+            raise AssertionError('Unknown unavailability reason "%s" found' % auth_method['unavailability_reason'])
 
         if auth_method['type_proc'].lower() == 'auth_oob':
-            self.location('/sec/oob_sendooba.json', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},)
+            self.location('/sec/oob_sendooba.json', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'})
 
             donnees = self.page.doc['donnees']
             self.polling_transaction = donnees['id-transaction']
@@ -216,7 +254,7 @@ class SocieteGenerale(TwoFactorBrowser):
             if auth_method['mode'] == "SMS":
                 self.location(
                     '/sec/csa/send.json',
-                    data={'csa_op': "auth",}
+                    data={'csa_op': "auth"}
                 )
                 raise BrowserQuestion(
                     Value(
@@ -230,7 +268,7 @@ class SocieteGenerale(TwoFactorBrowser):
         else:
             self.logger.warning('Unknown sign method "%s" found', auth_method['type_proc'])
 
-        assert False, 'Unknown auth method "%s: %s" found' % (auth_method['type_proc'], auth_method.get('mod'))
+        raise AssertionError('Unknown auth method "%s: %s" found' % (auth_method['type_proc'], auth_method.get('mod')))
 
     def init_login(self):
         self.check_password()
@@ -281,7 +319,7 @@ class SocieteGenerale(TwoFactorBrowser):
 
         self.check_polling_errors(status)
 
-        data.update({'oob_op': "auth",})
+        data['oob_op'] = "auth"
         self.location('/sec/oob_auth.json', data=data)
 
         if self.page.doc.get('commun', {}).get('statut').lower() == "nok":
@@ -375,7 +413,7 @@ class SocieteGenerale(TwoFactorBrowser):
             accounts[account.id] = account
 
         # Adding parent account to LOAN account
-        for account_id, account in accounts.items():
+        for account in accounts.values():
             if account._parent_id:
                 account.parent = accounts.get(account._parent_id, NotAvailable)
 
@@ -405,7 +443,7 @@ class SocieteGenerale(TwoFactorBrowser):
         if any((
                 account.type in (account.TYPE_LIFE_INSURANCE, account.TYPE_PERP),
                 account.type == account.TYPE_REVOLVING_CREDIT and account._loan_type != 'PR_CONSO',
-                account.type in (account.TYPE_REVOLVING_CREDIT, account.TYPE_SAVINGS) and not account._is_json_histo
+                account.type in (account.TYPE_REVOLVING_CREDIT, account.TYPE_SAVINGS) and not account._is_json_histo,
         )):
             go = retry(TemporaryBrowserUnavailable)(self.account_details_page.go)
             go(params={'idprest': account._prestation_id})
@@ -454,9 +492,16 @@ class SocieteGenerale(TwoFactorBrowser):
 
     @need_login
     def iter_coming(self, account):
-        if account.type in (account.TYPE_LOAN, account.TYPE_MARKET, account.TYPE_PEA,
-                            account.TYPE_LIFE_INSURANCE, account.TYPE_REVOLVING_CREDIT,
-                            account.TYPE_CONSUMER_CREDIT, Account.TYPE_PERP, ):
+        skipped_types = (
+            Account.TYPE_LOAN,
+            Account.TYPE_MARKET,
+            Account.TYPE_PEA,
+            Account.TYPE_LIFE_INSURANCE,
+            Account.TYPE_REVOLVING_CREDIT,
+            Account.TYPE_CONSUMER_CREDIT,
+            Account.TYPE_PERP,
+        )
+        if account.type in skipped_types:
             return
 
         if not account._internal_id:
@@ -497,8 +542,10 @@ class SocieteGenerale(TwoFactorBrowser):
 
     @need_login
     def iter_investment(self, account):
-        if account.type not in (Account.TYPE_MARKET, Account.TYPE_LIFE_INSURANCE,
-                                Account.TYPE_PEA, Account.TYPE_PERP, ):
+        if account.type not in (
+            Account.TYPE_MARKET, Account.TYPE_LIFE_INSURANCE,
+            Account.TYPE_PEA, Account.TYPE_PERP,
+        ):
             self.logger.debug('This account is not supported')
             return
 
@@ -509,12 +556,83 @@ class SocieteGenerale(TwoFactorBrowser):
             for invest in self.page.iter_investments(account=account):
                 yield invest
 
-        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP, ):
+        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP):
             if self.page.has_link():
                 self.life_insurance_invest.go()
 
             for invest in self.page.iter_investment():
                 yield invest
+
+    @need_login
+    def access_market_orders(self, account):
+        account_dropdown_id = self.page.get_dropdown_menu()
+        link = self.page.get_market_order_link()
+        if not link:
+            self.logger.warning('Could not find Market Order link for account %s.', account.label)
+            return
+        self.location(link)
+        # Once we reached the Market Orders page, we must select the right market account:
+        params = {
+            'action': '10',
+            'numPage': '1',
+            'idCptSelect': account_dropdown_id,
+        }
+        self.market_orders.go(params=params)
+
+    @need_login
+    def iter_market_orders(self, account):
+        if account.type not in (Account.TYPE_MARKET, Account.TYPE_PEA):
+            return
+
+        # Market Orders page sometimes bugs so we try accessing them twice
+        for trial in range(2):
+            self.account_details_page.go(params={'idprest': account._prestation_id})
+            if self.pea_liquidity.is_here():
+                self.logger.debug('Liquidity PEA have no market orders')
+                return
+
+            self.access_market_orders(account)
+            if not self.market_orders.is_here():
+                self.logger.warning(
+                    'Landed on unknown page when trying to fetch market orders for account %s',
+                    account.label
+                )
+                return
+
+            if self.page.orders_unavailable():
+                if trial == 0:
+                    self.logger.warning(
+                        'Market Orders page is unavailable for account %s, retrying now.',
+                        account.label
+                    )
+                    continue
+                self.logger.warning('Market Orders are unavailable for account %s.', account.label)
+                return
+
+        if self.page.has_no_market_order():
+            self.logger.debug('Account %s has no market orders.', account.label)
+            return
+
+        # Handle pagination
+        total_pages = self.page.get_pages()
+        account_dropdown_id = self.page.get_dropdown_menu()
+        for page in range(1, total_pages + 1):
+            if page > 1:
+                # Select the right page
+                params = {
+                    'action': '12',
+                    'numPage': page,
+                    'idCptSelect': account_dropdown_id,
+                }
+                self.market_orders.go(params=params)
+            for order in self.page.iter_market_orders():
+                if order.url:
+                    self.location(order.url)
+                    if self.market_orders_details.is_here():
+                        self.page.fill_market_order(obj=order)
+                    else:
+                        self.logger.warning('Landed on unknown Market Order detail page for order %s', order.label)
+                yield order
 
     @need_login
     def iter_recipients(self, account):
@@ -541,7 +659,7 @@ class SocieteGenerale(TwoFactorBrowser):
     def execute_transfer(self, transfer):
         assert transfer.id, 'Transfer token is missing'
         data = {
-            'b64e200_idVirement': transfer.id
+            'b64e200_idVirement': transfer.id,
         }
         # get token and virtual keyboard
         self.sign_transfer.go(params=data)
@@ -562,7 +680,7 @@ class SocieteGenerale(TwoFactorBrowser):
             ('context', [self.context, self.context]),
             ('dup', self.dup),
             ('code', params['code']),
-            ('csa_op', 'sign')
+            ('csa_op', 'sign'),
         ]
         # needed to confirm recipient validation
         add_recipient_url = self.absurl('/lgn/url.html', base=True)
@@ -583,7 +701,7 @@ class SocieteGenerale(TwoFactorBrowser):
             ('b64_jeton_transaction', self.context),
             ('dup', self.dup),
             ('n10_id_transaction', self.id_transaction),
-            ('oob_op', 'sign')
+            ('oob_op', 'sign'),
         ]
         # needed to confirm recipient validation
         add_recipient_url = self.absurl('/lgn/url.html', base=True)
@@ -596,7 +714,10 @@ class SocieteGenerale(TwoFactorBrowser):
         data['csa_op'] = 'sign'
         data['context'] = self.context
         self.open(self.absurl('/sec/csa/send.json'), data=data)
-        raise AddRecipientStep(recipient, Value('code', label='Cette opération doit être validée par un Code Sécurité.'))
+        raise AddRecipientStep(
+            recipient,
+            Value('code', label='Cette opération doit être validée par un Code Sécurité.')
+        )
 
     def send_notif_to_user(self, recipient):
         """Add recipient with 'pass sécurité' authentication"""
@@ -616,7 +737,7 @@ class SocieteGenerale(TwoFactorBrowser):
         self.add_recipient.go()
         if self.main_page.is_here():
             self.page.handle_error()
-            assert False, 'Should not be on this page.'
+            raise AssertionError('Should not be on this page.')
 
         self.page.post_iban(recipient)
         self.page.post_label(recipient)
@@ -633,7 +754,7 @@ class SocieteGenerale(TwoFactorBrowser):
             return self.send_sms_to_user(recipient)
         elif sign_method == 'OOB':
             return self.send_notif_to_user(recipient)
-        assert False, 'Sign process unknown: %s' % sign_method
+        raise AssertionError('Sign process unknown: %s' % sign_method)
 
     @need_login
     def get_advisor(self):

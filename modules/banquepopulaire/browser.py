@@ -26,12 +26,12 @@ from uuid import uuid4
 from datetime import datetime
 from collections import OrderedDict
 from functools import wraps
-
 from dateutil.relativedelta import relativedelta
+
 from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from weboob.browser.exceptions import HTTPNotFound, ClientError, ServerError
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.capabilities.bank import Account, AccountOwnership
+from weboob.capabilities.bank import Account, AccountOwnership, Loan
 from weboob.capabilities.base import NotAvailable, find_object
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
 from weboob.tools.compat import urlparse, parse_qs
@@ -108,8 +108,8 @@ def no_need_login(func):
 
 class BanquePopulaire(LoginBrowser):
     login_page = URL(r'https://[^/]+/auth/UI/Login.*', LoginPage)
-    new_login = URL(r'https://[^/]+/se-connecter/sso', NewLoginPage)
-    js_file = URL(r'https://[^/]+/se-connecter/main-.*.js$', JsFilePage)
+    new_login = URL(r'https://[^/]+/.*se-connecter/sso', NewLoginPage)
+    js_file = URL(r'https://[^/]+/.*se-connecter/main-.*.js$', JsFilePage)
     authorize = URL(r'https://www.as-ex-ath-groupe.banquepopulaire.fr/api/oauth/v2/authorize', AuthorizePage)
     login_tokens = URL(r'https://www.as-ex-ath-groupe.banquepopulaire.fr/api/oauth/v2/consume', LoginTokensPage)
     info_tokens = URL(r'https://www.as-ex-ano-groupe.banquepopulaire.fr/api/oauth/token', InfoTokensPage)
@@ -208,7 +208,7 @@ class BanquePopulaire(LoginBrowser):
     documents_page = URL(r'/api-bp/wapi/2.0/abonnes/current/documents/recherche-avancee', DocumentsPage)
 
     def __init__(self, website, *args, **kwargs):
-        self.retry_login_without_phase = False
+        self.retry_login_without_phase = False  # used to manage re-login cases, DO NOT set to False elsewhere (to avoid infinite recursion)
         self.website = website
         self.BASEURL = 'https://%s' % website
         # this url is required because the creditmaritime abstract uses an other url
@@ -264,10 +264,8 @@ class BanquePopulaire(LoginBrowser):
             return
 
         if self.new_login.is_here():
-            if not self.password.isnumeric():
-                # Vk from new login only accepts numeric characters
-                raise BrowserIncorrectPassword('Le mot de passe doit être composé de chiffres uniquement')
             return self.do_new_login()
+
         return self.do_old_login()
 
     def do_old_login(self):
@@ -293,6 +291,18 @@ class BanquePopulaire(LoginBrowser):
             # 1 more request is necessary
             data = {'integrationMode': 'INTERNET_RESCUE'}
             self.location('/cyber/internet/Login.do', data=data)
+
+    def get_bpcesta(self, cdetab):
+        return {
+            'csid': str(uuid4()),
+            'typ_app': 'rest',
+            'enseigne': 'bp',
+            'typ_sp': 'out-band',
+            'typ_act': 'auth',
+            'snid': '123456',
+            'cdetab': cdetab,
+            'typ_srv': self.user_type,
+        }
 
     def do_new_login(self):
         # Same login as caissedepargne
@@ -335,16 +345,7 @@ class BanquePopulaire(LoginBrowser):
         # 'Accept': 'applcation/json'. If we do not add this header, we
         # instead have a form that we can directly send to complete
         # the login.
-        bpcesta = {
-            'csid': str(uuid4()),
-            'typ_app': 'rest',
-            'enseigne': 'bp',
-            'typ_sp': 'out-band',
-            'typ_act': 'auth',
-            'snid': '123456',
-            'cdetab': cdetab,
-            'typ_srv': self.user_type,
-        }
+        bpcesta = self.get_bpcesta(cdetab)
         claims = {
             'userinfo': {
                 'cdetab': None,
@@ -359,13 +360,13 @@ class BanquePopulaire(LoginBrowser):
             },
         }
         # We need to avoid to add "phase":"1" for some sub-websites
-        # The phase information seems to be in js file and the value is not hardcode
+        # The phase information seems to be in js file and the value is not hardcoded
         # Consequently we try the login twice with and without phase param
-        # Because the problem occurs during do_redirect
+        # The problem may occur before/during do_redirect()
         if not self.retry_login_without_phase:
             bpcesta['phase'] = '1'
 
-        params={
+        params = {
             'nonce': nonce,
             'scope': '',
             'response_type': 'id_token token',
@@ -381,6 +382,11 @@ class BanquePopulaire(LoginBrowser):
         self.authorize.go(params=params)
         self.page.send_form()
 
+        if self.need_relogin_before_redirect():
+            # Banque populaire now checks if the association login/phase parameter
+            # are well associated. Let's do login again without phase parameter
+            return self.do_login()
+
         self.page.check_errors(feature='login')
 
         validation_id = self.page.get_validation_id()
@@ -393,6 +399,9 @@ class BanquePopulaire(LoginBrowser):
             # no VK, password to submit
             code = self.password
         else:
+            if not self.password.isnumeric():
+                raise BrowserIncorrectPassword('Le mot de passe doit être composé de chiffres uniquement')
+
             vk_images_url = vk_info['virtualKeyboard']['externalRestMediaApiUrl']
 
             self.location(vk_images_url)
@@ -419,8 +428,10 @@ class BanquePopulaire(LoginBrowser):
         )
 
         assert self.authentication_step.is_here()
-        self.page.check_errors(feature='login')
 
+        if self.need_relogin_before_redirect():
+            return self.do_login()
+        self.page.check_errors(feature='login')
         self.do_redirect(headers)
 
         access_token = self.page.get_access_token()
@@ -438,6 +449,10 @@ class BanquePopulaire(LoginBrowser):
                 'expires_in': expires_in,
             },
         )
+        if self.response.status_code == 302:
+            # No redirection to the next url
+            # Let's do the job instead of the bank
+            self.location('/portailinternet')
 
         url_params = parse_qs(urlparse(self.url).query)
         validation_id = url_params['transactionID'][0]
@@ -448,11 +463,35 @@ class BanquePopulaire(LoginBrowser):
 
     ACCOUNT_URLS = ['mesComptes', 'mesComptesPRO', 'maSyntheseGratuite', 'accueilSynthese', 'equipementComplet']
 
+    def need_relogin_before_redirect(self):
+        """
+        Just after having logged in with phase parameter,
+        user may have an 'AUTHENTICATION_LOCKED' status right away.
+        Retry login without phase can avoid that.
+        WARNING: doing so can serves as a backdoor to avoid 2FA,
+        but we don't know for how long. Logger here to have a trace.
+        If 2FA still happens, it is catched in 'self.page.check_errors(feature='login')'
+
+        Moreover, for some users the phase paramater can't validate:
+            - In password request. Consequently we get the same state than login transaction request (Authentication)
+            - The login post leads to AUTHENTICATION_FAILED
+        """
+        status = self.page.get_status()
+        if status in ('AUTHENTICATION', 'AUTHENTICATION_LOCKED', 'AUTHENTICATION_FAILED' ):
+            if self.retry_login_without_phase:
+                raise BrowserIncorrectPassword()
+
+            self.retry_login_without_phase = True
+            self.session.cookies.clear()
+            self.logger.warning("'AUTHENTICATION_LOCKED' status at first login, trying second login, whitout phase parameter")
+            return True
+
     def do_redirect(self, headers):
         redirect_data = self.page.get_redirect_data()
         if not redirect_data and self.page.is_new_login():
             # assert to avoid infinite loop
             assert not self.retry_login_without_phase, 'the login failed with and without phase 1 param'
+
             self.retry_login_without_phase = True
             self.session.cookies.clear()
             return self.do_login()
@@ -495,6 +534,26 @@ class BanquePopulaire(LoginBrowser):
         # In case of prevAction maybe we have reached an expanded accounts list page, need to go back
         self.follow_back_button_if_any()
 
+    def get_loan_from_account(self, account):
+        loan = Loan.from_dict(account.to_dict())
+        loan._prev_debit = account._prev_debit
+        loan._next_debit = account._next_debit
+        loan._params = account._params
+        loan._coming_params = account._coming_params
+        loan._coming_count = account._coming_count
+        loan._invest_params = account._invest_params
+        loan._loan_params = account._loan_params
+
+        if account._invest_params and account._invest_params['taskInfoOID'] == 'mesComptes':
+            form = self.page.get_form(id='myForm')
+            form.update(account._invest_params)
+            form['token'] = self.page.build_token(form['token'])
+            form.submit()
+            self.page.fill_loan(obj=loan)
+            self.follow_back_button_if_any()
+
+        return loan
+
     @retry(LoggedOut)
     @need_login
     def iter_accounts(self, get_iban=True):
@@ -524,6 +583,9 @@ class BanquePopulaire(LoginBrowser):
         for a in self.page.iter_accounts(next_pages):
             if owner_name:
                 self.set_account_ownership(a, owner_name)
+
+            if a.type == Account.TYPE_LOAN:
+                a = self.get_loan_from_account(a)
 
             accounts.append(a)
             if not get_iban:
@@ -895,9 +957,9 @@ class BanquePopulaire(LoginBrowser):
     @need_login
     def iter_documents(self, subscription):
         now = datetime.now()
-        # website says we can't get documents more than one year range at once but it seems it's just a javascript check
-        # no problem here so far
-        first_date = now - relativedelta(years=5)
+        # website says we can't get documents more than one year range, even if we can get 5 years
+        # but they tell us this overload their server
+        first_date = now - relativedelta(years=1)
         start_date = first_date.strftime('%Y-%m-%dT00:00:00.000+00:00')
         end_date = now.strftime('%Y-%m-%dT%H:%M:%S.000+00:00')
         body = {
@@ -908,10 +970,25 @@ class BanquePopulaire(LoginBrowser):
                 {'identifiantContrat': {'identifiant': subscription.id, 'codeBanque': subscription._bank_code}}
             ],
             'inListeTypesDocuments': [
-                {'typeDocument': {'code': 'EXTRAIT', 'label': 'Extrait de compte', 'type': 'referenceLogiqueDocument'}}
+                {'typeDocument': {'code': 'EXTRAIT', 'label': 'Extrait de compte', 'type': 'referenceLogiqueDocument'}},
+                # space at the end of 'RELVCB ' is mandatory
+                {'typeDocument': {'code': 'RELVCB ', 'label': 'Relevé Carte Bancaire', 'type': 'referenceLogiqueDocument'}}
             ]
         }
-        self.documents_page.go(json=body, headers=self.documents_headers)
+        # if the syntax is not exactly the correct one we have an error 400 for card statement
+        # banquepopulaire has subdomain so the param change if we are in subdomain or not
+        # if we are in subdomain the param for card statement is 'RLVCB  '
+        # else the param is 'RELVCB '
+        try:
+            self.documents_page.go(json=body, headers=self.documents_headers)
+        except ClientError as e:
+            if e.response.status_code == 400:
+                # two spaces at the end of 'RLVCB  ' is mandatory
+                body['inListeTypesDocuments'][1] = {'typeDocument': {'code': 'RLVCB  ', 'label': 'Relevé Carte Bancaire', 'type': 'referenceLogiqueDocument'}}
+                self.documents_page.go(json=body, headers=self.documents_headers)
+            else:
+                raise
+
         return self.page.iter_documents(subid=subscription.id)
 
     @retry(ClientError)

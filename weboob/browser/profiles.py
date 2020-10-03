@@ -20,6 +20,8 @@
 
 from collections import OrderedDict
 
+from weboob import __version__
+
 try:
     from requests.packages.urllib3.util.request import ACCEPT_ENCODING
 except ImportError:
@@ -52,8 +54,8 @@ class Weboob(Profile):
     Recommended for Weboob-friendly websites only.
     """
 
-    def __init__(self, version):
-        self.version = version
+    def __init__(self, version=None):
+        self.version = version or __version__
 
     def setup_session(self, session):
         session.headers['User-Agent'] = 'weboob/%s' % self.version
@@ -81,7 +83,7 @@ class Firefox(Profile):
             ('Accept-Language', 'en-US,en;q=0.5'),
             ('Accept-Encoding', 'gzip, deflate'),
             ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
-            ('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0'),
+            ('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:78.0) Gecko/20100101 Firefox/78.0'),
             ('Upgrade-Insecure-Requests', '1'),
             ('DNT', '1'),
         ])

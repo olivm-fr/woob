@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 import re
@@ -28,14 +30,14 @@ from weboob.tools.date import LinearDateGuesser
 from weboob.capabilities.bank import Account, AccountNotFound, AccountOwnership
 from weboob.tools.capabilities.bank.transactions import sorted_transactions, keep_only_card_transactions
 from weboob.tools.compat import parse_qsl, urlparse
-from weboob.exceptions import BrowserIncorrectPassword
+from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.browser.exceptions import HTTPNotFound
 from weboob.capabilities.base import find_object
 
 from .pages.account_pages import (
     AccountsPage, OwnersListPage, CBOperationPage, CPTOperationPage, LoginPage,
-    AppGonePage, RibPage, UnavailablePage, OtherPage, FrameContainer, ProfilePage, ScpiHisPage
+    AppGonePage, RibPage, UnavailablePage, OtherPage, FrameContainer, ProfilePage, ScpiHisPage,
 )
 from .pages.life_insurances import (
     LifeInsurancesPage, LifeInsurancePortal, LifeInsuranceMain, LifeInsuranceUseless,
@@ -99,7 +101,10 @@ class HSBC(LoginBrowser):
 
     # other site
     life_insurance_portal = URL(r'/cgi-bin/emcgi', LifeInsurancePortal)
-    life_insurance_main = URL(r'https://assurances.hsbc.fr/fr/accueil/b2c/accueil.html\?pointEntree=PARTIEGENERIQUEB2C', LifeInsuranceMain)
+    life_insurance_main = URL(
+        r'https://assurances.hsbc.fr/fr/accueil/b2c/accueil.html\?pointEntree=PARTIEGENERIQUEB2C',
+        LifeInsuranceMain
+    )
     life_insurances = URL(r'https://assurances.hsbc.fr/navigation', LifeInsurancesPage)
     life_not_found = URL(r'https://assurances.hsbc.fr/fr/404.html', LifeNotFound)
 
@@ -162,10 +167,10 @@ class HSBC(LoginBrowser):
 
         self.page.login(self.username)
 
-        no_secure_key_link = self.page.get_no_secure_key()
+        no_secure_key_link = self.page.get_no_secure_key_link()
+        if not no_secure_key_link and self.page.is_secure_key():
+            raise ActionNeeded("Vous devez réaliser l'authentification forte sur le portail internet avec Secure Key")
 
-        if not no_secure_key_link:
-            raise BrowserIncorrectPassword()
         self.location(no_secure_key_link)
 
         self.page.login_w_secure(self.password, self.secret)
@@ -264,10 +269,14 @@ class HSBC(LoginBrowser):
                 # update cards parent and currency
                 for a in self.accounts_dict[owner].values():
                     if a.type == Account.TYPE_CARD:
-                        for card in all_card_and_parent:  # card[0] and card[1] are labels containing the id for the card and its parents account, respectively
-                            if a.id in card[0].replace(' ', ''):  # cut spaces in labels such as 'CARTE PREMIER N° 1234 00XX XXXX 5678'
-                                parent_id = re.match(r'^(\d*)?(\d{11}EUR)$', card[1]).group(2)  # ids in the HTML have 5 numbers added at the beginning, catch only the end
+                        for card in all_card_and_parent:
+                            # card[0] and card[1] are labels containing the id for the card and its parents account, respectively
+                            # cut spaces in labels such as 'CARTE PREMIER N° 1234 00XX XXXX 5678'
+                            if a.id in card[0].replace(' ', ''):
+                                # ids in the HTML have 5 numbers added at the beginning, catch only the end
+                                parent_id = re.match(r'^(\d*)?(\d{11}EUR)$', card[1]).group(2)
                                 a.parent = find_object(self.accounts_dict[owner].values(), id=parent_id)
+
                             if a.parent and not a.currency:
                                 a.currency = a.parent.currency
 
@@ -377,7 +386,12 @@ class HSBC(LoginBrowser):
         self._quit_li_space()
         self.go_post(account.url)
 
-        if self.accounts.is_here() or self.frame_page.is_here() or self.life_insurance_useless.is_here() or self.life_not_found.is_here():
+        if (
+                self.accounts.is_here()
+                or self.frame_page.is_here()
+                or self.life_insurance_useless.is_here()
+                or self.life_not_found.is_here()
+        ):
             self.logger.warning('cannot go to life insurance %r', account)
             return False
 
@@ -500,7 +514,14 @@ class HSBC(LoginBrowser):
                     return (account.id in tr.label.replace(' ', ''))
                 history.extend(keep_only_card_transactions(self.get_history(account.parent), match_card))
 
-            history = [tr for tr in history if (coming and tr.date > date.today()) or (not coming and tr.date <= date.today())]
+            history = [
+                tr
+                for tr in history
+                if (
+                    (coming and tr.date > date.today())
+                    or (not coming and tr.date <= date.today())
+                )
+            ]
             history = sorted_transactions(history)
             return history
         elif not coming:
@@ -629,7 +650,11 @@ class HSBC(LoginBrowser):
 
         if self.page.get_patrimoine_url():
             self.location(self.page.get_patrimoine_url())
-            self.page.go_next()
+            try:
+                self.page.go_next()
+            except BrowserUnavailable:
+                # Some wealth accounts are on linebourse and can't be accessed with the current authentication.
+                return False
 
             if self.login.is_here():
                 self.logger.warning('Connection to the Logon page failed, we must try again.')

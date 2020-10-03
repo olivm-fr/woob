@@ -24,6 +24,7 @@ from functools import wraps
 import re
 import pickle
 import base64
+import io
 from hashlib import sha256
 import zlib
 from functools import reduce
@@ -53,8 +54,10 @@ from weboob.exceptions import (
 
 from weboob.tools.log import getLogger
 from weboob.tools.compat import basestring, unicode, urlparse, urljoin, urlencode, parse_qsl
+from weboob.tools.misc import to_unicode
 from weboob.tools.json import json
 from weboob.tools.value import Value
+from weboob import __version__
 
 from .adapters import HTTPAdapter
 from .cookies import WeboobCookieJar
@@ -136,7 +139,7 @@ class Browser(object):
         self.logger = getLogger('browser', logger)
         self.responses_dirname = responses_dirname
         self.responses_count = 1
-        self.responses_count_lock = Lock()
+        self.responses_lock = Lock()
 
         if isinstance(self.VERIFY, basestring):
             self.VERIFY = self.asset(self.VERIFY)
@@ -146,6 +149,7 @@ class Browser(object):
         self._setup_session(self.PROFILE)
         self.url = None
         self.response = None
+        self.har_bundle = None
 
     def deinit(self):
         self.session.close()
@@ -171,7 +175,7 @@ class Browser(object):
             # try to get an extension (and avoid adding 'None')
             ext = mimetypes.guess_extension(mimetype, False) or ''
 
-        with self.responses_count_lock:
+        with self.responses_lock:
             counter = self.responses_count
             self.responses_count += 1
 
@@ -204,6 +208,154 @@ class Browser(object):
         with open(match_filepath, 'a') as f:
             f.write('# %d %s %s\n' % (response.status_code, response.reason, response.headers.get('Content-Type', '')))
             f.write('%s\t%s\n' % (response.url, filename))
+
+        request = response.request
+
+        if not self.har_bundle:
+            self.har_bundle = {
+                'log': {
+                    'version': '1.2',
+                    'creator': {
+                        'name': 'weboob',
+                        'version': __version__,
+                    },
+                    'browser': {
+                        'name': 'weboob',
+                        'version': __version__,
+                    },
+                    # there are no pages, but we need that to please firefox
+                    'pages': [{
+                        'id': 'fake_page',
+                        'pageTimings': {},
+                        # and chromium wants some of it too
+                        'startedDateTime': (datetime.now() - response.elapsed).isoformat(),
+                    }],
+                    # don't put additional data after this list, to have a fixed-size suffix after it
+                    # so we can add more entries without rewriting the whole file.
+                    'entries': [],
+                },
+            }
+
+        har_entry = {
+            'startedDateTime': (datetime.now() - response.elapsed).isoformat(),
+            'pageref': 'fake_page',
+            'time': int(response.elapsed.total_seconds() * 1000),
+            'request': {
+                'method': request.method,
+                'url': request.url,
+                'httpVersion': 'HTTP/%.1f' % (response.raw.version / 10.),
+                'headers': [
+                    {
+                        'name': k,
+                        'value': v,
+                    }
+                    for k, v in request.headers.items()
+                ],
+                'queryString': [
+                    {
+                        'name': key,
+                        'value': value,
+                    }
+                    for key, value in parse_qsl(
+                        urlparse(request.url).query,
+                        keep_blank_values=True,
+                    )
+                ],
+                'cookies': [
+                    {
+                        'name': k,
+                        'value': v,
+                    }
+                    for k, v in request._cookies.items()
+                ],
+                # for chromium
+                'bodySize': -1,
+                'headersSize': -1,
+            },
+            'response': {
+                'status': response.status_code,
+                'statusText': to_unicode(response.reason),
+                'httpVersion': 'HTTP/%.1f' % (response.raw.version / 10.),
+                'headers': [
+                    {
+                        'name': k,
+                        'value': v,
+                    }
+                    for k, v in response.headers.items()
+                ],
+                'content': {
+                    'mimeType': response.headers.get('Content-Type', ''),
+                    'size': len(response.content),
+                    # systematically use base64 to avoid more content alteration
+                    # than there already is...
+                    'encoding': "base64",
+                    'text': base64.b64encode(response.content).decode('ascii'),
+                },
+                'cookies': [
+                    {
+                        'name': k,
+                        'value': v,
+                    }
+                    for k, v in response.cookies.items()
+                ],
+                'redirectURL': response.headers.get('location', ''),
+                # for chromium
+                'bodySize': -1,
+                'headersSize': -1,
+            },
+            'timings': {  # please chromium
+                'send': -1,
+                'wait': -1,
+                'receive': -1,
+            },
+            'cache': {},
+        }
+        if request.body is not None:
+            har_entry['request']['postData'] = {
+                'mimeType': request.headers.get('Content-Type', ''),
+                'params': [],
+            }
+            if isinstance(request.body, str):
+                har_entry['request']['postData']['text'] = request.body
+            else:
+                # HAR format has no proper way to encode posted binary data!
+                har_entry['request']['postData']['text'] = request.body.decode('latin-1')
+                # add a non-standard key to indicate how should "text" be decoded.
+                har_entry['request']['postData']['x-binary'] = True
+
+            if request.headers.get('Content-Type') == 'application/x-www-form-urlencoded':
+                har_entry['request']['postData']['params'] = [
+                    {
+                        "name": key,
+                        "value": value,
+                    } for key, value in parse_qsl(request.body)
+                ]
+
+        with self.responses_lock:
+            self.har_bundle['log']['entries'].append(har_entry)
+
+            har_path = os.path.join(self.responses_dirname, 'bundle.har')
+            if not os.path.isfile(har_path):
+                with open(har_path, 'w') as fd:
+                    json.dump(self.har_bundle, fd, separators=(',', ':'))
+            else:
+                # hack to avoid rewriting the whole file: entries are last in the JSON file
+                # we need to seek at the right place and write the new entry.
+                # this will unfortunately overwrite closings.
+                suffix = "]}}"
+                with open(har_path, 'r+') as fd:
+                    # can't seek with a negative value...
+                    fd.seek(0, io.SEEK_END)
+                    after_entry_pos = fd.tell() - len(suffix)
+                    fd.seek(after_entry_pos)
+
+                    if fd.read(len(suffix)) != suffix:
+                        self.logger.warning('HAR file does not end with the expected pattern')
+                    else:
+                        fd.seek(after_entry_pos)
+                        fd.write(',')  # there should have been at least one entry
+                        json.dump(har_entry, fd, separators=(',', ':'))
+                        fd.write(suffix)
 
         msg = u'Response saved to %s' % response_filepath
         if warning:
@@ -426,7 +578,14 @@ class Browser(object):
 
         # guess method
         if req.method is None:
-            if req.data or req.json:
+            # 'data' and 'json' (even if empty) are (always?) passed to build_request
+            # and None is their default. For a Request object, the defaults are different.
+            # Request.json is None and Request.data == [] by default.
+            # Could they break unexpectedly?
+            if (
+                req.data or kwargs.get('data') is not None
+                or req.json or kwargs.get('json') is not None
+            ):
                 req.method = 'POST'
             else:
                 req.method = 'GET'
@@ -779,8 +938,8 @@ class PagesBrowser(DomainBrowser):
         ...             raise NextPage(next.attrib['href'])
         ...
         >>> class Browser(PagesBrowser):
-        ...     BASEURL = 'https://romain.bignon.me'
-        ...     list = URL('/projects/weboob/list-(?P<pagenum>\d+).html', Page)
+        ...     BASEURL = 'https://weboob.org'
+        ...     list = URL('/tests/list-(?P<pagenum>\d+).html', Page)
         ...
         >>> b = Browser()
         >>> b.list.go(pagenum=1) # doctest: +ELLIPSIS
@@ -874,16 +1033,34 @@ class StatesMixin(object):
         except (requests.exceptions.HTTPError, requests.exceptions.TooManyRedirects):
             pass
 
+    def _load_cookies(self, cookie_state):
+        try:
+            uncompressed = zlib.decompress(base64.b64decode(cookie_state))
+        except (TypeError, zlib.error, EOFError, ValueError):
+            self.logger.error('Unable to uncompress cookies from storage')
+            return
+
+        try:
+            jcookies = json.loads(uncompressed)
+        except ValueError:
+            try:
+                self.session.cookies = pickle.loads(uncompressed)
+            except (TypeError, EOFError, ValueError):
+                self.logger.error('Unable to reload cookies from storage')
+            else:
+                self.logger.warning('Reloaded deprecated cookie format')
+        else:
+            for jcookie in jcookies:
+                self.session.cookies.set(**jcookie)
+            self.logger.info('Reloaded cookies from storage')
+
     def load_state(self, state):
         if state.get('expire') and parser.parse(state['expire']) < datetime.now():
             return self.logger.info('State expired, not reloading it from storage')
+
         if 'cookies' in state:
-            try:
-                self.session.cookies = pickle.loads(zlib.decompress(base64.b64decode(state['cookies'])))
-            except (TypeError, zlib.error, EOFError, ValueError):
-                self.logger.error('Unable to reload cookies from storage')
-            else:
-                self.logger.info('Reloaded cookies from storage')
+            self._load_cookies(state['cookies'])
+
         for attrname in self.__states__:
             if attrname in state:
                 setattr(self, attrname, state[attrname])
@@ -898,7 +1075,15 @@ class StatesMixin(object):
         state = {}
         if hasattr(self, 'page') and self.page:
             state['url'] = self.page.url
-        state['cookies'] = base64.b64encode(zlib.compress(pickle.dumps(self.session.cookies, -1))).decode('ascii')
+
+        cookies = [
+            {
+                attr: getattr(cookie, attr)
+                for attr in ('name', 'value', 'domain', 'path', 'secure', 'expires')
+            }
+            for cookie in self.session.cookies
+        ]
+        state['cookies'] = base64.b64encode(zlib.compress(json.dumps(cookies).encode('utf-8'))).decode('ascii')
         for attrname in self.__states__:
             try:
                 state[attrname] = getattr(self, attrname)

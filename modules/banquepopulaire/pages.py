@@ -30,7 +30,7 @@ from PIL import Image, ImageFilter
 from weboob.browser.elements import method, DictElement, ItemElement
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Regexp, Eval,
-    Date, Field, MapIn,
+    Date, Field, MapIn, Coalesce,
 )
 from weboob.browser.filters.html import Attr, Link, AttributeNotFound
 from weboob.browser.filters.json import Dict
@@ -376,11 +376,20 @@ class AuthenticationMethodPage(AbstractPage):
         # We check here if we are doing a new login
         return bool(Dict('step/phase/state', default=NotAvailable)(self.doc))
 
+    def get_status(self):
+        return Dict('response/status', default=NotAvailable)(self.doc)
+
 
 class AuthenticationStepPage(AbstractPage):
     PARENT = 'caissedepargne'
     PARENT_URL = 'authentication_step'
     BROWSER_ATTR = 'package.browser.CaisseEpargne'
+
+    def get_status(self):
+        return Coalesce(
+            Dict('response/status', default=NotAvailable),
+            Dict('phase/state', default=NotAvailable)
+        )(self.doc)
 
 
 class LoginPage(MyHTMLPage):
@@ -671,7 +680,7 @@ class GenericAccountsPage(LoggedPage, MyHTMLPage):
         (re.compile(r'^Plan Epargne Enfant Mul.*'), Account.TYPE_MARKET),
         (re.compile(r'^Alc Premium'), Account.TYPE_MARKET),
         (re.compile(r'^Plan Epargne Enfant Msu.*'), Account.TYPE_LIFE_INSURANCE),
-        (re.compile(r'^Parts Sociales.*'), Account.TYPE_MARKET),
+        (re.compile(r'^Parts? Sociales?.*'), Account.TYPE_MARKET),
         (re.compile(r'^Contrat Generali.*'), Account.TYPE_LIFE_INSURANCE),
         (re.compile(r'^Reserve Facelia.*'), Account.TYPE_REVOLVING_CREDIT),
     ]
@@ -775,6 +784,8 @@ class GenericAccountsPage(LoggedPage, MyHTMLPage):
                 account._coming_params = None
                 account._coming_count = None
                 account._invest_params = None
+                account._loan_params = None
+
                 if balance != '' and len(tds[3].xpath('.//a')) > 0:
                     account._params = params.copy()
                     account._params['dialogActionPerformed'] = 'SOLDE'
@@ -966,6 +977,23 @@ class InvestmentPage(LoggedPage, HTMLPage):
 
 
 class TransactionsPage(LoggedPage, MyHTMLPage):
+    @method
+    class fill_loan(ItemElement):
+        obj_name = CleanText('//span[@id="IntituleContrat"]')
+        obj_subscription_date = Date(CleanText('//span[@id="DateSouscription"]'), dayfirst=True, default=NotAvailable)
+        obj_maturity_date = Date(CleanText('//span[@id="DateEcheance"]'), dayfirst=True, default=NotAvailable)
+
+        def obj_duration(self):
+            duration = CleanDecimal.French('//span[@id="Duree"]', default=None)(self)
+            if duration is not None:
+                return int(duration)
+            return NotAvailable
+
+        obj_total_amount = CleanDecimal.French('//span[@id="Nominal"]', default=NotAvailable)
+        obj_next_payment_date = Date(CleanText('//span[@id="ProchaineEcheance"]'), dayfirst=True, default=NotAvailable)
+        obj_next_payment_amount = CleanDecimal.French('//span[@id="MontantEcheance"]', default=NotAvailable)
+        obj_rate = CleanDecimal.French('//span[@id="TEG"]', default=NotAvailable)
+
     def is_sorted_by_most_recent(self):
         # If the transactions are not sorted correctly, the class of this
         # 'a' tag changes ('tcth' if sorted the other way, 'tctm' if not sorted
