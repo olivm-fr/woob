@@ -62,11 +62,10 @@ class AnytimeBrowser(PagesBrowser):
 class AnytimeApiBrowser(APIBrowser, StatesMixin):
     BASEURL = 'https://secure.anyti.me'
 
-    __states__ = ('csrf_token') # TODO remove CSRF token for production, as it generates an additional 403 call at 1st try
+    #__states__ = ('csrf_token') # TODO remove CSRF token for production, as it generates an additional 403 call at 1st try
     csrf_token = None
 
     tokenid = None
-    #twofa_logged_date = None
 
 
     def __init__(self, config, *args, **kwargs):
@@ -99,8 +98,10 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
         else:
             data = {"email": self.config['username'].get(), "password": self.config['password'].get(), "tokenValue":self.config['smscode'].get(), "tokenId": self.tokenid}
             response = self.request(self.BASEURL + '/api/v1/customer/auth-token', method='PUT', data=data)
-            self.logger.info('Using DSP2 %s to login', self.session.cookies.get('dsp2_auth_token'))
-
+            if response.status_code == 204:
+                self.logger.info('Using DSP2 %s to login', self.session.cookies.get('dsp2_auth_token'))
+            else:
+                raise BrowserIncorrectPassword(response.text)
 
     def do_login(self):
         if self.session.cookies.get('dsp2_auth_token') is None:
@@ -118,9 +119,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
                     raise BrowserIncorrectPassword(json_response.get('message'))
             raise
         self.csrf_token = response.headers.get('X-CSRF-Token')
-
-    #self.token_expire = (datetime.now() + timedelta(seconds=expires_in)).strftime('%Y-%m-%d %H:%M:%S')
-    #raise NeedInteractiveFor2FA()
+        #self.token_expire = (datetime.now() + timedelta(seconds=expires_in)).strftime('%Y-%m-%d %H:%M:%S')
 
     @property
     def logged(self):
@@ -133,11 +132,9 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
         except ClientError as ex:
             self.csrf_token = None
             raise
-        self.logger.debug(response)
 
         a = Account()
 
-        # Number26 only provides a checking account (as of sept 19th 2016).
         a.type = Account.TYPE_CHECKING
         a.label = u'Checking account'
 
@@ -152,10 +149,6 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     @need_login
     def get_account(self, _id):
         return find_object(self.get_accounts(), id=_id, error=AccountNotFound)
-
-    @staticmethod
-    def is_past_transaction(t):
-        return "userAccepted" in t or "confirmed" in t
 
     @need_login
     def get_transactions(self):
