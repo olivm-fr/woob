@@ -37,7 +37,7 @@ class OzeModule(Module, CapGauge):
     MAINTAINER = 'olivm38'
     EMAIL = 'olivier@zron.fr'
     LICENSE = 'AGPLv3+'
-    VERSION = '1.6'
+    VERSION = '2.1'
     CONFIG = BackendConfig(Value('username', label='Username', regexp='.+'),
                            ValueBackendPassword('password', label='Password'))
     

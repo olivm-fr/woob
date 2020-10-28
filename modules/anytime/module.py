@@ -19,6 +19,8 @@
 
 from __future__ import unicode_literals
 
+import sys
+
 from weboob.capabilities.bank import CapBank
 
 from weboob.tools.backend import Module, BackendConfig
@@ -47,6 +49,20 @@ class AnytimeModule(Module, CapBank):
     STORAGE = {}
 
     def create_default_browser(self):
+        # HACK for history and all non-boobank-application requests
+        if sys.stdout.isatty():
+            # Set a non-None value to all backends's request_information
+            #
+            # - None indicates non-interactive: do not trigger 2FA challenges,
+            #   raise NeedInteractive* exceptions before doing so
+            # - non-None indicates interactive: ok to trigger 2FA challenges,
+            #   raise BrowserQuestion/AppValidation when facing one
+            # It should be a dict because when non-empty, it will contain HTTP
+            # headers for legal PSD2 AIS/PIS authentication.
+            key = 'request_information'
+            if key in self.config and self.config[key].get() is None:
+                self.config[key].set({})
+
         return self.create_browser(self.config)
 
 
