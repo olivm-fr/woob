@@ -144,7 +144,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
         a = Account()
         a.type = Account.TYPE_CHECKING
-        a.label = u'Checking account'
+        a.label = u'Checking-account-' + response[0]["name"]
         a.id = response[0]["id"]
         a.number = NotAvailable
         a.balance = Decimal(str(response[0]["amount"]))
@@ -156,7 +156,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     def _parse_card(card):
         a = Account()
         a.type = Account.TYPE_CARD
-        a.label = u'Card ' + card["type"] + ' ' + card["name"]
+        a.label = u'Card-' + card["type"] + '-' + card["name"]
         a.id = card["reference"]
         a.number = card["pan"]
         a.balance = Decimal(str(card["balance"]))
