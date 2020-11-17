@@ -19,18 +19,18 @@
 
 from __future__ import unicode_literals
 
-import base64
+import base64, re
 from decimal import Decimal
 
 from weboob.browser import URL, need_login, StatesMixin
 from weboob.browser.browsers import APIBrowser, PagesBrowser
 from weboob.browser.exceptions import ClientError
-from weboob.browser.switch import SiteSwitch
 from weboob.capabilities.bank import Account, AccountNotFound
 from weboob.capabilities.base import NotAvailable, find_object
 from weboob.exceptions import BrowserIncorrectPassword, BrowserQuestion, NeedInteractiveFor2FA
+from weboob.tools.date import datetime
 from weboob.tools.value import Value
-from .pages import TransactionsPage
+from .pages import TransactionsPage, BankTransaction
 
 __all__ = ['AnytimeBrowser']
 
@@ -94,6 +94,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             self.session.cookies.clear()
             response = self.request(self.BASEURL + '/api/v1/customer/auth-sms', method='POST', data=data)
             self.tokenid = response.json()['tokenId']
+            self.logger.warn('Vous allez recevoir un SMS sur le numéro enregistré dans le compte Anytime.')
             raise BrowserQuestion(Value('smscode', label='Veuillez entrer le code reçu par SMS'))
         else:
             data = {"email": self.config['username'].get(), "password": self.config['password'].get(), "tokenValue":self.config['smscode'].get(), "tokenId": self.tokenid}
@@ -127,30 +128,77 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
     @need_login
     def get_accounts(self):
+        yield self.get_main_account()
+        response = self.request(self.BASEURL + '/api/v1/customer/cards', method='GET').json() #?filter=plastic&limitOffset=0 ou filter=all , status=activated
+        for card in response['cards']:
+            yield self._parse_card(card)
+        # single card detail available here : https://secure.anyti.me/api/v1/customer/card/ANYxxxxxxxxx
+
+    @need_login
+    def get_main_account(self):
         try:
             response = self.request(self.BASEURL + '/api/v1/customer/accounts', method='GET').json()
-        except ClientError as ex:
+        except ClientError:
             self.csrf_token = None
             raise
 
         a = Account()
-
         a.type = Account.TYPE_CHECKING
         a.label = u'Checking account'
-
         a.id = response[0]["id"]
         a.number = NotAvailable
         a.balance = Decimal(str(response[0]["amount"]))
         a.iban = response[0]["iban"]
         a.currency = response[0]["currency"]
+        return a
 
-        return [a]
+    @staticmethod
+    def _parse_card(card):
+        a = Account()
+        a.type = Account.TYPE_CARD
+        a.label = u'Card ' + card["type"] + ' ' + card["name"]
+        a.id = card["reference"]
+        a.number = card["pan"]
+        a.balance = Decimal(str(card["balance"]))
+        a.currency = card["currency"]
+        return a
 
     @need_login
     def get_account(self, _id):
         return find_object(self.get_accounts(), id=_id, error=AccountNotFound)
 
     @need_login
-    def get_transactions(self):
-        self.session.cookies.update({'csrf_token': self.csrf_token})
-        raise SiteSwitch('html')
+    def get_transactions(self, account):
+        if account.type == Account.TYPE_CHECKING:
+            # portal v1:
+            #self.session.cookies.update({'csrf_token': self.csrf_token})
+            #raise SiteSwitch('html')
+            # portal v2, nov 2020 :
+            response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/transactions' % account.id.replace('corp-', ''), method='GET').json() # ?limitOffset=0
+            for t in response['transactions']:
+                yield self._parse_transaction(t, account.id)
+        elif account.type == Account.TYPE_CARD:
+            response = self.request(self.BASEURL + '/api/v1/customer/cards/transactions', method='GET').json() # ?limitOffset=0
+            for t in response['transactions']:
+                yield self._parse_transaction(t, account.id)
+
+    def _parse_transaction(self, trans, acc_id):
+        # id, icon, canAddFiles, nbFiles, files, isCashTx, currency : ignored
+        t = BankTransaction()
+        if trans['isFailed']:
+            self.logger.info("Transaction failed, ignored : %s", str(trans))
+            return None
+        if trans['isExpired']:
+            self.logger.warn("Transaction expired, ignored : %s", str(trans))
+            return None
+        if 'card' in trans:
+            if acc_id.replace('@anytime', '') != trans['card']['ref']:
+                return None
+        # else: see account.acc_id et account.name
+        date = datetime.fromisoformat(trans['date'])
+        t.parse(
+            date,
+            re.sub(r'[ ]+', ' ', ' '.join([s for s in [trans['description'], trans['comment'], trans['note']] if s is not None and len(s) > 0])),
+            vdate=date)
+        t.set_amount(re.sub(r'[.]', ',', str(trans['amount'])))
+        return t

@@ -69,13 +69,11 @@ class AnytimeModule(Module, CapBank):
     def iter_accounts(self):
         return self.browser.get_accounts()
 
-
     def get_account(self, id):
         return self.browser.get_account(id)
 
-
     def iter_history(self, account):
-        return self.browser.get_transactions()
+        return self.browser.get_transactions(account)
 
     def deinit(self):
         Module.deinit(self)
