@@ -22,6 +22,8 @@ from __future__ import unicode_literals
 import sys
 
 from weboob.capabilities.bank import CapBank
+from weboob.capabilities.base import find_object
+from weboob.capabilities.bill import CapDocument, SubscriptionNotFound, Subscription, Document, DocumentNotFound
 
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
@@ -31,7 +33,7 @@ from .proxy_browser import ProxyBrowser
 __all__ = ['AnytimeModule']
 
 
-class AnytimeModule(Module, CapBank):
+class AnytimeModule(Module, CapBank, CapDocument):
     NAME = 'anytime'
     DESCRIPTION = u'Bank Anytime'
     MAINTAINER = u'olivm38'
@@ -74,6 +76,28 @@ class AnytimeModule(Module, CapBank):
 
     def iter_history(self, account):
         return self.browser.get_transactions(account)
+
+    def get_subscription(self, _id):
+        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
+
+    # see https://dev.weboob.org/api/capabilities/bill.html#weboob.capabilities.bill.CapDocument.iter_documents
+    def iter_documents(self, subscription):
+        if not isinstance(subscription, Subscription):
+            subscription = self.get_subscription(subscription)
+        return self.browser.iter_documents(subscription)
+
+    def get_document(self, id):
+        sub_id = id.split('/')[0]
+        return find_object(self.iter_documents(sub_id), id=id, error=DocumentNotFound)
+
+    # to get the download name, use the whole document instead of the id as parameter ; then read document.label
+    def download_document(self, id):
+        if not isinstance(id, Document):
+            return self.browser.download_document(self.get_document(id))
+        return self.browser.download_document(id)
+
+    def iter_subscription(self):
+        return self.browser.iter_subscription()
 
     def deinit(self):
         Module.deinit(self)

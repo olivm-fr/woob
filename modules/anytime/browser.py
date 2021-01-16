@@ -27,6 +27,7 @@ from weboob.browser.browsers import APIBrowser, PagesBrowser
 from weboob.browser.exceptions import ClientError
 from weboob.capabilities.bank import Account, AccountNotFound
 from weboob.capabilities.base import NotAvailable, find_object
+from weboob.capabilities.bill import Subscription, Document
 from weboob.exceptions import BrowserIncorrectPassword, BrowserQuestion, NeedInteractiveFor2FA
 from weboob.tools.date import datetime
 from weboob.tools.value import Value
@@ -202,3 +203,53 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             vdate=date)
         t.set_amount(re.sub(r'[.]', ',', str(trans['amount'])))
         return t
+
+    @need_login
+    def iter_subscription(self):
+        done = []
+        for a in self.get_accounts():
+            if a.type not in done:
+                done.append(a.type)
+                sub = Subscription()
+                sub.id = '_anytime_%s' % a.id
+                sub.label = 'Anytime %s' % a.id
+                sub._account = a
+                if a.type == Account.TYPE_CARD:
+                    sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=card"
+                elif a.type == Account.TYPE_CHECKING:
+                    sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=corp"
+                yield sub
+
+    @need_login
+    def iter_documents(self, subscription):
+        if subscription._account.type == Account.TYPE_CHECKING:
+            response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/statements' % subscription._account.id.replace('corp-', ''), method='GET').json() # ?limitOffset=0
+            for s in response:
+                doc = Document()
+                doc.date = datetime.strptime(s['date'], '%Y-%m-%d %H:%M:%S')
+                doc.id = subscription.id + '/' + s['date'][0:7]  # s['id']
+                doc.url = '%s&cid=%s&month=%s' % (subscription.url, subscription._account.id.replace('corp-', ''), s['date'][0:7])
+                doc.label = "Download the document to get the label"
+                doc.format = 'pdf'
+                yield doc
+        elif subscription._account.type == Account.TYPE_CARD:
+            response = self.request(self.BASEURL + '/api/v1/customer/card/%s/transactions' % subscription._account.id, method='GET').json()
+            cid = response['cid']
+            done = []
+            for s in response['transactions']:
+                doc = Document()
+                doc.date = datetime.strptime(s['date'], '%Y-%m-%d %H:%M:%S')
+                doc.id = subscription.id + '/' + s['date'][0:7]
+                doc.label = "Download the document to get the label"
+                doc.format = 'pdf'
+                if doc.id not in done:
+                    done.append(doc.id)
+                    doc.url = '%s&cid=%s&month=%s' % (subscription.url, cid, s['date'][0:7])
+                    yield doc
+
+    @need_login
+    def download_document(self, document):
+        url = document.url + '&csrf=' + self.csrf_token
+        response = self.request(url, method='GET')
+        document.label = re.sub(r'.*filename="([^"]*)"', '\\1', response.headers['content-disposition'])
+        return response.content
