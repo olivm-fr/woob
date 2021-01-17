@@ -206,19 +206,16 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
     @need_login
     def iter_subscription(self):
-        done = []
         for a in self.get_accounts():
-            if a.type not in done:
-                done.append(a.type)
-                sub = Subscription()
-                sub.id = '_anytime_%s' % a.id
-                sub.label = 'Anytime %s' % a.id
-                sub._account = a
-                if a.type == Account.TYPE_CARD:
-                    sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=card"
-                elif a.type == Account.TYPE_CHECKING:
-                    sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=corp"
-                yield sub
+            sub = Subscription()
+            sub.id = '_anytime_%s' % a.id
+            sub.label = 'Anytime %s' % a.id
+            sub._account = a
+            if a.type == Account.TYPE_CARD:
+                sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=card"
+            elif a.type == Account.TYPE_CHECKING:
+                sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=corp"
+            yield sub
 
     @need_login
     def iter_documents(self, subscription):
