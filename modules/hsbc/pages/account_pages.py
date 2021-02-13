@@ -37,6 +37,7 @@ from weboob.capabilities.profile import Person
 from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.compat import urljoin
+
 from .landing_pages import GenericLandingPage
 
 
@@ -140,11 +141,13 @@ class Label(Filter):
 
 
 class AccountsPage(GenericLandingPage):
+    IS_HERE_CONDITIONS = '//p[contains(text(), "Tous mes comptes au ")]|//span[contains(text(), "Tous mes comptes au ")]'
+
     def is_here(self):
         return (
             CleanText('//h1[contains(text(), "Synthèse")]')(self.doc)
             or CleanText(
-                '//p[contains(text(), "Tous mes comptes au ")]|//span[contains(text(), "Tous mes comptes au ")]'
+                self.IS_HERE_CONDITIONS
             )(self.doc)
         )
 
@@ -536,6 +539,7 @@ class LoginPage(HTMLPage):
                     'Please enter valid credentials for memorable answer and password.',
                     'Please enter a valid Username.',
                     'mot de passe invalide',
+                    'Log on error',  # wrong otp
                 ]
             ):
                 raise BrowserIncorrectPassword(error_msg)
@@ -580,6 +584,12 @@ class LoginPage(HTMLPage):
             if int(inpu.attrib['id'].split('first')[1]) < 10:
                 split_pass += password[i]
         form['password'] = split_pass
+        form.submit()
+
+    def login_with_secure_key(self, secret, otp):
+        form = self.get_form(nr=0)
+        form['memorableAnswer'] = secret
+        form['idv_OtpCredential'] = otp
         form.submit()
 
     def useless_form(self):

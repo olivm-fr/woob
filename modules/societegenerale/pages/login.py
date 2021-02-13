@@ -23,8 +23,8 @@ from io import BytesIO
 from base64 import b64decode
 from logging import error
 import re
-from weboob.tools.json import json
 
+from weboob.tools.json import json
 from weboob.exceptions import BrowserUnavailable, BrowserPasswordExpired, ActionNeeded
 from weboob.browser.pages import HTMLPage, JsonPage
 from weboob.browser.filters.standard import CleanText
@@ -143,6 +143,13 @@ class LoginPage(JsonPage):
     # statut, status...
     def get_reason(self):
         if Dict('commun/statut')(self.doc).lower() != 'ok':
+            return Dict('commun/raison')(self.doc)
+
+    def get_skippable_action_needed(self):
+        if (
+            Dict('commun/statut', default='')(self.doc).lower() == 'ok'
+            and Dict('commun/raison', default=None)(self.doc)
+        ):
             return Dict('commun/raison')(self.doc)
 
     def has_twofactor(self):

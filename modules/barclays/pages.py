@@ -215,6 +215,10 @@ class AccountsPage(StatefulPage):
                         return True
                 return False
 
+            def obj__fetch_history(self):
+                # We only fetch history for the first occurrence of a "multiple-type" account
+                return not Field('_multiple_type')(self)
+
 
 class Transaction(FrenchTransaction):
     PATTERNS = [
@@ -237,7 +241,11 @@ class Transaction(FrenchTransaction):
             FrenchTransaction.TYPE_WITHDRAWAL,
         ),
         (
-            re.compile(r'(\w+) (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) CB[:\*][^ ]+ (?P<text>.*)'),
+            re.compile(r'(\w+) (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2}) CB[:*][^ ]+ (?P<text>.*)'),
+            FrenchTransaction.TYPE_CARD,
+        ),
+        (
+            re.compile(r'(?P<text>.*) ACHAT DU (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2}) CARTE .*'),
             FrenchTransaction.TYPE_CARD,
         ),
         (
@@ -248,14 +256,14 @@ class Transaction(FrenchTransaction):
         (re.compile(r'PRELEVEMENT (?P<text>.*)'), FrenchTransaction.TYPE_ORDER),
         (re.compile(r'^CHEQUE.*? (REF \w+)?$'), FrenchTransaction.TYPE_CHECK),
         (re.compile(r'^(AGIOS /|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-        (re.compile(r'^(CONVENTION \d+ )?COTIS(ATION)? (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'.*(CONVENTION \d+ )?COTIS(ATION)? (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
         (re.compile(r'^REMISE (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
         (re.compile(r'^(?P<text>.*)( \d+)? QUITTANCE .*'), FrenchTransaction.TYPE_ORDER),
         (re.compile(r'^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'), FrenchTransaction.TYPE_UNKNOWN),
         (re.compile(r'^CARTE .*'), FrenchTransaction.TYPE_CARD_SUMMARY),
         (re.compile(r'CONTRIBUTIONS SOCIALES'), FrenchTransaction.TYPE_BANK),
         (re.compile(r'COMMISSION INTERVENTION'), FrenchTransaction.TYPE_BANK),
-        (re.compile(r'INTERETS CREDITEURS'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'INTERETS (CREDITEURS|ANNUELS)'), FrenchTransaction.TYPE_BANK),
         (re.compile(r'(ANNUL |ANNULATION |)FRAIS '), FrenchTransaction.TYPE_BANK),
         (re.compile(r'(ANNUL |ANNULATION |)INT DEB'), FrenchTransaction.TYPE_BANK),
         (re.compile(r'TAEG APPLIQUE '), FrenchTransaction.TYPE_BANK),
@@ -582,6 +590,7 @@ class RevolvingAccountPage(AbstractAccountPage):
         loan.type = account.type
         loan._uncleaned_id = account._uncleaned_id
         loan._multiple_type = account._multiple_type
+        loan._fetch_history = account._fetch_history
         return loan
 
 
@@ -609,7 +618,7 @@ class LoanAccountPage(AbstractAccountPage):
         )(self.doc)
 
         loan.rate = CleanDecimal.French('//div/span[contains(text(), "Taux fixe")]/following-sibling::*[1]')(self.doc)
-        loan.last_payment_amount = CleanDecimal.SI(
+        loan.last_payment_amount = CleanDecimal.French(
             '//div[@class="txt-detail  " and not (@style)]//span[contains(text(), "Echéance du")]/following-sibling::span[1]'
         )(self.doc)
         loan.last_payment_date = Date(
@@ -628,6 +637,7 @@ class LoanAccountPage(AbstractAccountPage):
         loan.type = account.type
         loan._uncleaned_id = account._uncleaned_id
         loan._multiple_type = account._multiple_type
+        loan._fetch_history = account._fetch_history
         return loan
 
 

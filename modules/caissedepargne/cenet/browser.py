@@ -21,10 +21,11 @@
 
 from __future__ import unicode_literals
 
+import time
 from collections import Counter
 from fnmatch import fnmatch
 
-from weboob.browser import LoginBrowser, need_login, StatesMixin
+from weboob.browser import need_login
 from weboob.browser.url import URL
 from weboob.browser.exceptions import ClientError
 from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
@@ -33,38 +34,40 @@ from weboob.tools.capabilities.bank.transactions import (
     sorted_transactions, omit_deferred_transactions, keep_only_card_transactions,
 )
 from weboob.tools.json import json
+from weboob.tools.compat import urlparse
 
 from .pages import (
     ErrorPage,
     LoginPage, CenetLoginPage, CenetHomePage,
     CenetAccountsPage, CenetAccountHistoryPage, CenetCardsPage,
     CenetCardSummaryPage, SubscriptionPage, DownloadDocumentPage,
-    CenetLoanPage,
+    CenetLoanPage, LinebourseTokenPage,
 )
+from ..browser import CaisseEpargneLogin
+from ..linebourse_browser import LinebourseAPIBrowser
 from ..pages import CaissedepargneKeyboard
 
 
 __all__ = ['CenetBrowser']
 
 
-class CenetBrowser(LoginBrowser, StatesMixin):
+class CenetBrowser(CaisseEpargneLogin):
     BASEURL = "https://www.cenet.caisse-epargne.fr"
 
     STATE_DURATION = 5
 
-    login = URL(
-        r'https://(?P<domain>[^/]+)/authentification/manage\?step=identification&identifiant=(?P<login>.*)',
-        r'https://.*/authentification/manage\?step=identification&identifiant=.*',
-        r'https://.*/login.aspx',
-        LoginPage,
-    )
     account_login = URL(
-        r'https://(?P<domain>[^/]+)/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)',
+        r'/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)',
         LoginPage
     )
     cenet_vk = URL(r'https://www.cenet.caisse-epargne.fr/Web/Api/ApiAuthentification.asmx/ChargerClavierVirtuel')
-    cenet_home = URL(r'/Default.aspx$', CenetHomePage)
+    cenet_home = URL(
+        r'/Default.aspx$',
+        r'/default.aspx$',
+        CenetHomePage
+    )
     cenet_accounts = URL(r'/Web/Api/ApiComptes.asmx/ChargerSyntheseComptes', CenetAccountsPage)
+    cenet_market_accounts = URL(r'/Web/Api/ApiBourse.asmx/ChargerComptesTitres', CenetAccountsPage)
     cenet_loans = URL(r'/Web/Api/ApiFinancements.asmx/ChargerListeFinancementsMLT', CenetLoanPage)
     cenet_account_history = URL(r'/Web/Api/ApiComptes.asmx/ChargerHistoriqueCompte', CenetAccountHistoryPage)
     cenet_account_coming = URL(r'/Web/Api/ApiCartesBanquaires.asmx/ChargerEnCoursCarte', CenetAccountHistoryPage)
@@ -81,33 +84,49 @@ class CenetBrowser(LoginBrowser, StatesMixin):
         r'https://.*/default.aspx',
         CenetLoginPage,
     )
+    linebourse_token = URL(r'/Web/Api/ApiBourse.asmx/GenererJeton', LinebourseTokenPage)
 
     subscription = URL(r'/Web/Api/ApiReleves.asmx/ChargerListeEtablissements', SubscriptionPage)
     documents = URL(r'/Web/Api/ApiReleves.asmx/ChargerListeReleves', SubscriptionPage)
     download = URL(r'/Default.aspx\?dashboard=ComptesReleves&lien=SuiviReleves', DownloadDocumentPage)
 
-    __states__ = ('BASEURL',)
+    LINEBOURSE_BROWSER = LinebourseAPIBrowser
+    MARKET_URL = 'https://www.caisse-epargne.offrebourse.com'
 
-    def __init__(self, nuser, *args, **kwargs):
-        # The URL to log in and to navigate are different
-        self.login_domain = kwargs.pop('domain', self.BASEURL)
-        if not self.BASEURL.startswith('https://'):
-            self.BASEURL = 'https://%s' % self.BASEURL
-
-        self.accounts = None
-        self.nuser = nuser
-
+    def __init__(self, *args, **kwargs):
         super(CenetBrowser, self).__init__(*args, **kwargs)
 
+        dirname = self.responses_dirname
+        if dirname:
+            dirname += '/bourse'
+
+        self.linebourse = self.LINEBOURSE_BROWSER(
+            self.MARKET_URL,
+            logger=self.logger,
+            responses_dirname=dirname,
+            weboob=self.weboob,
+            proxy=self.PROXIES,
+        )
+
+    def deinit(self):
+        super(CenetBrowser, self).deinit()
+        self.linebourse.deinit()
+
     def do_login(self):
-        data = self.login.go(login=self.username, domain=self.login_domain).get_response()
+        if self.API_LOGIN:
+            self.browser_switched = True
+            # We use CaisseEpargneLogin do_login
+            # browser_switched avoids to switch again
+            return super(CenetBrowser, self).do_login()
+
+        data = self.login.go(login=self.username).get_response()
 
         if len(data['account']) > 1:
             # additional request where there is more than one
             # connection type (called typeAccount)
             # TODO: test all connection type values if needed
             account_type = data['account'][0]
-            self.account_login.go(login=self.username, accountType=account_type, domain=self.login_domain)
+            self.account_login.go(login=self.username, accountType=account_type)
             data = self.page.get_response()
 
         if data is None:
@@ -115,7 +134,11 @@ class CenetBrowser(LoginBrowser, StatesMixin):
         elif not self.nuser:
             raise BrowserIncorrectPassword("Erreur: Numéro d'utilisateur requis.")
 
-        if "authMode" in data and data['authMode'] != 'redirect':
+        if data.get('authMode') == 'redirectArrimage' and self.BASEURL in data['url']:
+            # The login authentication is the same than non cenet user
+            self.browser_switched = True
+            return super(CenetBrowser, self).do_login()
+        elif data.get('authMode') != 'redirect':
             raise BrowserIncorrectPassword()
 
         payload = {'contexte': '', 'dataEntree': None, 'donneesEntree': "{}", 'filtreEntree': "\"false\""}
@@ -137,6 +160,29 @@ class CenetBrowser(LoginBrowser, StatesMixin):
         self.location(data['url'], data=post_data, headers={'Referer': 'https://www.cenet.caisse-epargne.fr/'})
 
         return self.page.login(self.username, self.password, self.nuser, data['codeCaisse'], _id, code)
+
+    @need_login
+    def go_linebourse(self):
+        data = {
+            'contexte': '',
+            'dateEntree': None,
+            'donneesEntree': 'null',
+            'filtreEntree': None,
+        }
+        try:
+            self.linebourse_token.go(json=data)
+        except BrowserUnavailable:
+            # The linebourse space is not available on every connection
+            raise AssertionError('No linebourse space')
+        linebourse_token = self.page.get_token()
+
+        self.location(
+            self.absurl('/ReroutageSJR', self.MARKET_URL),
+            data={'SJRToken': linebourse_token},
+        )
+        self.linebourse.session.cookies.update(self.session.cookies)
+        domain = urlparse(self.url).netloc
+        self.linebourse.session.headers['X-XSRF-TOKEN'] = self.session.cookies.get('XSRF-TOKEN', domain=domain)
 
     @need_login
     def get_accounts_list(self):
@@ -183,6 +229,27 @@ class CenetBrowser(LoginBrowser, StatesMixin):
             for account in self.page.get_accounts():
                 self.accounts.append(account)
 
+            # get market accounts from market_accounts page
+            self.cenet_market_accounts.go(json=data)
+            market_accounts = list(self.page.get_accounts())
+            if market_accounts:
+                linebourse_account_ids = {}
+                try:
+                    self.go_linebourse()
+                    params = {'_': '{}'.format(int(time.time() * 1000))}
+                    self.linebourse.account_codes.go(params=params)
+                    if self.linebourse.account_codes.is_here():
+                        linebourse_account_ids = self.linebourse.page.get_accounts_list()
+                except AssertionError as e:
+                    if str(e) != 'No linebourse space':
+                        raise e
+                finally:
+                    self.cenet_home.go()
+                for account in market_accounts:
+                    for linebourse_id in linebourse_account_ids:
+                        if account.id in linebourse_id:
+                            account._is_linebourse = True
+                    self.accounts.append(account)
         return self.accounts
 
     def get_loans_list(self):
@@ -199,8 +266,14 @@ class CenetBrowser(LoginBrowser, StatesMixin):
         if self.has_no_history(account):
             return []
 
-        if account.type == account.TYPE_CARD:
+        if getattr(account, '_is_linebourse', False):
+            try:
+                self.go_linebourse()
+                return self.linebourse.iter_history(account.id)
+            finally:
+                self.cenet_home.go()
 
+        if account.type == account.TYPE_CARD:
             if not account.parent._formated and account._hist:
                 # this is a card account with a shallow parent
                 return []
@@ -285,12 +358,22 @@ class CenetBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def get_investment(self, account):
-        # not available for the moment
+        if getattr(account, '_is_linebourse', False):
+            try:
+                self.go_linebourse()
+                return self.linebourse.iter_investments(account.id)
+            finally:
+                self.cenet_home.go()
         return []
 
     @need_login
     def iter_market_orders(self, account):
-        # not available for the moment
+        if getattr(account, '_is_linebourse', False):
+            try:
+                self.go_linebourse()
+                return self.linebourse.iter_market_orders(account.id)
+            finally:
+                self.cenet_home.go()
         return []
 
     @need_login

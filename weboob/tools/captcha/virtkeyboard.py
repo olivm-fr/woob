@@ -150,15 +150,19 @@ class VirtKeyboard(object):
                     s += b" "
         return hashlib.md5(s).hexdigest()
 
-    def get_symbol_code(self, md5sum_list):
-        if isinstance(md5sum_list, basestring):
-            md5sum_list = [md5sum_list]
+    def get_symbol_code(self, all_known_md5_for_symbol):
+        if isinstance(all_known_md5_for_symbol, basestring):
+            all_known_md5_for_symbol = [all_known_md5_for_symbol]
 
-        for md5sum in md5sum_list:
-            for i in self.md5:
-                if md5sum == self.md5[i]:
-                    return i
-        raise VirtKeyboardError('Symbol not found for hash "%s".' % md5sum)
+        current_md5_in_keyboard = self.md5
+
+        for known_md5 in all_known_md5_for_symbol:
+            for code, cur_md5 in current_md5_in_keyboard.items():
+                if known_md5 == cur_md5:
+                    return code
+        raise VirtKeyboardError(
+                'Code not found for these hashes "%s".'
+                % all_known_md5_for_symbol)
 
     def get_string_code(self, string):
         return self.codesep.join(self.get_symbol_code(self.symbols[c]) for c in string)
@@ -364,6 +368,7 @@ class SimpleVirtualKeyboard(object):
     tile_margin = None
     symbols = None
     convert = None
+    tile_klass = Tile
 
     def __init__(self, file, cols, rows, matching_symbols=None, matching_symbols_coords=None, browser=None):
         self.cols = cols
@@ -376,8 +381,10 @@ class SimpleVirtualKeyboard(object):
         self.load_image(file, self.margin, self.convert)
 
         # Get self.tiles
-        self.get_tiles( matching_symbols=matching_symbols,
-                        matching_symbols_coords=matching_symbols_coords)
+        self.get_tiles(
+            matching_symbols=matching_symbols,
+            matching_symbols_coords=matching_symbols_coords
+        )
 
         # Tiles processing
         self.cut_tiles(self.tile_margin)
@@ -420,11 +427,12 @@ class SimpleVirtualKeyboard(object):
         assert ((margin[0] + margin[2]) < height) & ((margin[1] + margin[3]) < width), \
             "Margin is too high, there is not enough pixel to cut."
 
-        image = image.crop((0 + margin[3],
-                            0 + margin[0],
-                            width - margin[1],
-                            height - margin[2]
-                            ))
+        image = image.crop((
+            0 + margin[3],
+            0 + margin[0],
+            width - margin[1],
+            height - margin[2]
+        ))
         return image
 
     def get_tiles(self, matching_symbols=None, matching_symbols_coords=None):
@@ -433,9 +441,12 @@ class SimpleVirtualKeyboard(object):
         # Tiles coords are given
         if matching_symbols_coords:
             for matching_symbol in matching_symbols_coords:
-                self.tiles.append(Tile( matching_symbol=matching_symbol,
-                                        coords=matching_symbols_coords[matching_symbol]
-                                 ))
+                self.tiles.append(
+                    self.tile_klass(
+                        matching_symbol=matching_symbol,
+                        coords=matching_symbols_coords[matching_symbol]
+                    )
+                )
             return
 
         assert (not self.width%self.cols) & (not self.height%self.rows), \
@@ -497,6 +508,7 @@ class SimpleVirtualKeyboard(object):
             else:
                 # Dump file only if the symbol is not found
                 self.dump_tiles(self.path)
-                raise VirtKeyboardError("Symbol '%s' not found; all symbol hashes are available in %s"
-                                        % (digit, self.path))
+                raise VirtKeyboardError(
+                    "Symbol '%s' not found; all symbol hashes are available in %s" % (digit, self.path)
+                )
         return self.codesep.join(word)

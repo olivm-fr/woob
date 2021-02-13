@@ -33,8 +33,8 @@ from weboob.browser.pages import LoggedPage
 from weboob.browser.elements import TableElement, ItemElement, method
 from weboob.browser.filters.html import Link, TableCell
 from weboob.browser.filters.standard import (
-    CleanDecimal, CleanText, Eval, Field, Async, AsyncLoad, Date, Env, Format,
-    Regexp,
+    CleanDecimal, CleanText, Eval, Async, AsyncLoad, Date, Env, Format,
+    Regexp, Base,
 )
 from weboob.tools.compat import urljoin
 
@@ -80,6 +80,7 @@ class Transaction(FrenchTransaction):
         (re.compile(r'^(?P<category>FRAIS (TRIMESTRIELS )?DE TENUE DE COMPTE).*'), FrenchTransaction.TYPE_BANK),
         (re.compile(r'^(?P<category>FRAIS IRREGULARITES ET INCIDENTS).*'), FrenchTransaction.TYPE_BANK),
         (re.compile(r'^(?P<category>COMMISSION PAIEMENT PAR CARTE)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(?P<text>(?P<category>INTERETS).*)'), FrenchTransaction.TYPE_BANK),
         (
             re.compile(r'^(?P<category>CREDIT CARTE BANCAIRE) (?P<text>.*) (?P<dd>\d{2})\.(?P<mm>\d{2})\.(?P<yy>\d{2,4}) .*'),
             FrenchTransaction.TYPE_CARD,
@@ -200,24 +201,25 @@ class AccountHistory(LoggedPage, MyHTMLPage):
 
         col_date = re.compile('Date')
         col_label = re.compile('Libellé')
-        col_amount = re.compile('Valeur')
+        col_amount = [re.compile('Montant'), re.compile('Valeur')]
 
         class item(ItemElement):
             klass = Transaction
 
-            obj_raw = Transaction.Raw(Field('label'))
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
             obj_amount = CleanDecimal(TableCell('amount'), replace_dots=True)
             obj__coming = Env('coming', False)
 
-            def obj_label(self):
+            def parse(self, el):
                 raw_label = CleanText(TableCell('label'))(self)
                 label = CleanText(TableCell('label')(self)[0].xpath('./br/following-sibling::text()'))(self)
 
                 if (label and label.split()[0] != raw_label.split()[0]) or not label:
                     label = raw_label
 
-                return CleanText(TableCell('label')(self)[0].xpath('./noscript'))(self) or label
+                self.env['raw_label'] = Base(TableCell('label'), CleanText('a'))(self) or label
+
+            obj_raw = Transaction.Raw(Env('raw_label'))
 
     def get_single_card(self, parent_id):
         div, = self.doc.xpath('//div[@class="infosynthese"]')
@@ -334,6 +336,15 @@ class CachemireCatalogPage(LoggedPage, MyHTMLPage):
         return product_codes
 
 
+class LifeInsuranceSummary(LoggedPage, MyHTMLPage):
+    def get_opening_date(self):
+        return Date(
+            CleanText('//dt[span/text()="Date d\'effet :"]/following-sibling::dd[1]'),
+            dayfirst=True,
+            default=NotAvailable,
+        )(self.doc)
+
+
 class LifeInsuranceInvest(LoggedPage, MyHTMLPage):
     def has_error(self):
         return 'erreur' in CleanText('//p[has-class("titlePage")]')(self.doc) or 'ERREUR' in CleanText('//h2')(self.doc)
@@ -414,3 +425,13 @@ class RetirementHistory(LoggedPage, MyHTMLPage):
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
             obj_amount = CleanDecimal(TableCell('amount'), replace_dots=True)
             obj__coming = False
+
+
+class TemporaryPage(LoggedPage, MyHTMLPage):
+    def get_next_link(self):
+        return self.absurl(
+            Regexp(
+                CleanText('//script'),
+                r'location.replace\([\'"](.*)[\'"]\)'
+            )(self.doc)
+        )

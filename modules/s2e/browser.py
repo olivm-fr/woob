@@ -22,6 +22,7 @@
 from __future__ import unicode_literals
 
 import re
+
 from requests.exceptions import ConnectionError
 from urllib3.exceptions import ReadTimeoutError
 
@@ -112,6 +113,7 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     )
 
     STATE_DURATION = 10
+    TIMEOUT = 60
 
     def __init__(self, config=None, *args, **kwargs):
         self.config = config
@@ -248,7 +250,10 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                             self.logger.warning('Could not connect to the BNP API, no investment details will be fetched.')
                             continue
                         else:
-                            self.page.fill_investment(obj=inv)
+                            if self.page.text == 'null':
+                                self.logger.warning('Empty page on BNP API, no investment details will be fetched.')
+                            else:
+                                self.page.fill_investment(obj=inv)
                     else:
                         self.logger.warning('Could not fetch BNP investment ID in its label, no investment details will be fetched.')
 

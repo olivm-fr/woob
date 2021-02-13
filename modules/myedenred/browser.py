@@ -24,10 +24,15 @@ from __future__ import unicode_literals
 from functools import wraps
 
 from weboob.browser import URL, OAuth2PKCEMixin, PagesBrowser
-from weboob.exceptions import BrowserIncorrectPassword, NocaptchaQuestion, WrongCaptchaResponse
-from weboob.browser.exceptions import ServerError, ClientError
+from weboob.exceptions import BrowserIncorrectPassword, RecaptchaV2Question, WrongCaptchaResponse, ActionNeeded
+from weboob.browser.exceptions import ServerError, ClientError, BrowserUnavailable
+from weboob.tools.decorators import retry
 
-from .pages import LoginPage, AccountsPage, TransactionsPage, JsParamsPage, JsUserPage, HomePage
+from .pages import (
+    LoginPage, AccountsPage, TransactionsPage,
+    JsParamsPage, JsUserPage, JsAppPage, HomePage,
+    AuthorizePage,
+)
 
 
 def need_login(func):
@@ -43,7 +48,6 @@ def need_login(func):
 class MyedenredBrowser(OAuth2PKCEMixin, PagesBrowser):
     BASEURL = 'https://app-container.eu.edenred.io'
 
-    AUTHORIZATION_URI = 'https://sso.eu.edenred.io/connect/authorize'
     ACCESS_TOKEN_URI = 'https://sso.eu.edenred.io/connect/token'
 
     redirect_uri = 'https://www.myedenred.fr/connect'
@@ -56,7 +60,9 @@ class MyedenredBrowser(OAuth2PKCEMixin, PagesBrowser):
         TransactionsPage,
     )
     params_js = URL(r'https://www.myedenred.fr/js/parameters.(?P<random_str>\w+).js', JsParamsPage)
+    app_js = URL(r'https://www.myedenred.fr/js/app.(?P<random_str>\w+).js', JsAppPage)
     connexion_js = URL(r'https://myedenred.fr/js/connexion.(?P<random_str>\w+).js', JsUserPage)
+    authorize = URL(r'https://sso.eu.edenred.io/connect/authorize', AuthorizePage)
 
     def __init__(self, config, *args, **kwargs):
         super(MyedenredBrowser, self).__init__(*args, **kwargs)
@@ -67,10 +73,14 @@ class MyedenredBrowser(OAuth2PKCEMixin, PagesBrowser):
 
         self._fetch_auth_parameters()
 
+    @retry(BrowserUnavailable)
     def _fetch_auth_parameters(self):
         self.home.go()
         params_random_str = self.page.get_href_randomstring('parameters')
-        connexion_random_str = self.page.get_href_randomstring('connexion')
+        app_random_str = self.page.get_href_randomstring('app')
+
+        self.app_js.go(random_str=app_random_str)
+        connexion_random_str = self.page.get_js_randomstring('connexion')
 
         self.params_js.go(random_str=params_random_str)
         js_parameters = self.page.get_json_content()
@@ -103,14 +113,15 @@ class MyedenredBrowser(OAuth2PKCEMixin, PagesBrowser):
         }
         return params
 
+    @retry(BrowserUnavailable)
     def request_authorization(self):
         self.session.cookies.clear()
 
-        self.location(self.build_authorization_uri())
+        self.authorize.go(params=self.build_authorization_parameters())
         website_key = self.page.get_recaptcha_site_key()
 
         if not self.config['captcha_response'].get() and website_key:
-            raise NocaptchaQuestion(website_key=website_key, website_url=self.url)
+            raise RecaptchaV2Question(website_key=website_key, website_url=self.url)
 
         form = self.page.get_login_form()
         form['Username'] = self.username
@@ -121,9 +132,11 @@ class MyedenredBrowser(OAuth2PKCEMixin, PagesBrowser):
         if self.login.is_here():
             message = self.page.get_error_message()
             if 'Couple Email' in message:
-                raise BrowserIncorrectPassword()
+                raise BrowserIncorrectPassword(message)
             elif 'validation du captcha' in message:
                 raise WrongCaptchaResponse()
+            elif 'compte est verrouillé' in message:
+                raise ActionNeeded(message)
             raise AssertionError('Unhandled error at login: "%s".' % message)
 
         self.auth_uri = self.url

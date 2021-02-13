@@ -38,7 +38,7 @@ from weboob.browser.filters.standard import (
     AsyncLoad, Date, Format, Type, Currency, Base, Coalesce,
     Map, MapIn,
 )
-from weboob.browser.filters.html import Link, Attr, TableCell, ColumnNotFound
+from weboob.browser.filters.html import Link, Attr, TableCell, ColumnNotFound, AbsoluteLink
 from weboob.exceptions import (
     BrowserIncorrectPassword, ParseError, ActionNeeded, BrowserUnavailable,
     AppValidation,
@@ -58,7 +58,7 @@ from weboob.capabilities.profile import Profile
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.capabilities.bill import DocumentTypes, Subscription, Document
+from weboob.capabilities.bill import DocumentTypes, Document
 from weboob.tools.compat import urlparse, parse_qs, urljoin, range
 from weboob.tools.date import parse_french_date, LinearDateGuesser
 from weboob.tools.value import Value
@@ -231,10 +231,11 @@ class CancelDecoupled(HTMLPage):
 # and might be empty of text while used in a redirection
 class OtpValidationPage(PartialHTMLPage):
     def is_here(self):
-        return 'envoyé par SMS' in CleanText('//div[contains(@id, "OTPDeliveryChannelText")]')(self.doc)
+        return 'code de confirmation vient de vous être envoyé par' in CleanText('//div[contains(@id, "OTPDeliveryChannelText")]')(self.doc)
 
     def get_message(self):
         # Ex: 'Un code de confirmation vient de vous être envoyé par SMS au 06 XX XX X1 23, le jeudi 26 décembre 2019 à 18:12:56.'
+        # can be 'par SMS', 'par appel téléphonique', or 'par email'
         return Regexp(CleanText('//div[contains(@id, "OTPDeliveryChannelText")]'), r'(.+\d{2}), le')(self.doc)
 
     def get_error_message(self):
@@ -1607,22 +1608,25 @@ class PorPage(LoggedPage, HTMLPage):
                 self.env['id'] = CleanText('.//a', replace=[(' ', '')])(self)
                 self.env['balance'] = CleanDecimal.French(TableCell('balance'), default=None)(self)
                 is_total = 'TOTAL VALO' in CleanText('.')(self)
+                is_liquidity = (
+                    'LIQUIDITE' in CleanText(TableCell('raw_label'))(self)
+                    or 'TOTAL Compte espèces' in CleanText('.')(self)
+                )
                 is_global_view = Env('id')(self) == 'Vueconsolidée'
                 has_empty_balance = Env('balance')(self) is None
                 return (
                     not is_total
+                    and not is_liquidity
                     and not is_global_view
                     and not has_empty_balance
                 )
 
             # This values are defined for other types of accounts
             obj__is_inv = True
-
-            # IDs on the old page were differentiated with 5 digits in front of the ID, but not here.
-            # We still need to differentiate them so we add ".1" at the end.
-            obj_id = Format('%s.1', Env('id'))
-
-            obj_label = Base(TableCell('raw_label'), CleanText('.', children=False))
+            obj_label = Coalesce(
+                Base(TableCell('raw_label'), CleanText('.', children=False)),
+                Base(TableCell('raw_label'), CleanText('./span[not(.//a)]')),
+            )
             obj_number = Base(TableCell('raw_label'), CleanText('./a', replace=[(' ', '')]))
 
             obj_balance = Env('balance')
@@ -1630,7 +1634,11 @@ class PorPage(LoggedPage, HTMLPage):
 
             obj_valuation_diff = CleanDecimal.French(TableCell('valuation_diff'), default=NotAvailable)
 
-            obj__link_id = Regexp(Link('.//a', default=NotAvailable), r'ddp=([^&]*)', default=NotAvailable)
+            obj__link_id = Regexp(Link('.//a', default=''), r'ddp=([^&]*)', default=NotAvailable)
+
+            # IDs on the old page were differentiated with 5 digits in front of the ID, but not here.
+            # We still need to differentiate them so we add ".1" at the end.
+            obj_id = Format('%s.1', Env('id'))
 
             def obj_type(self):
                 return self.page.get_type(Field('label')(self))
@@ -1766,6 +1774,17 @@ class IbanPage(LoggedPage, HTMLPage):
             for a in accounts:
                 if a.id.split('EUR')[0] in CleanText('.//em[2]', replace=[(' ', '')])(ele):
                     a.iban = CleanText('.//em[2]', replace=[(' ', '')])(ele)
+
+    def get_iban_document(self, subscription):
+        for raw in self.doc.xpath('//table[has-class("liste")]//tbody//tr[not(@class)]'):
+            if raw.xpath('.//td[1]')[0].text_content().startswith(subscription.label.upper()):
+                iban_document = Document()
+                iban_document.label = 'IBAN {}'.format(subscription.label)
+                iban_document.url = Link(raw.xpath('.//a'))(self.doc)
+                iban_document.id = '{}_IBAN'.format(subscription.id)
+                iban_document.format = 'pdf'
+                iban_document.type = DocumentTypes.RIB
+                return iban_document
 
 
 class PorInvestmentsPage(LoggedPage, HTMLPage):
@@ -1924,9 +1943,9 @@ class PorMarketOrdersPage(PorHistoryPage):
             klass = MarketOrder
 
             def condition(self):
-                return 'Remboursement' not in CleanText('.')(self)
+                return Base(TableCell('direction'), Link('.//a', default=None))(self) is not None
 
-            obj_id = Base(TableCell('direction'), Regexp(Link('.//a', default=NotAvailable), r'ref=([^&]+)'))
+            obj_id = Base(TableCell('direction'), Regexp(Link('.//a', default=''), r'ref=([^&]+)', default=None))
             obj_direction = Map(
                 CleanText(TableCell('direction')),
                 MARKET_ORDER_DIRECTIONS,
@@ -2047,6 +2066,9 @@ class InternalTransferPage(LoggedPage, HTMLPage, AppValidationPage):
 
     def needs_personal_key_card_validation(self):
         return bool(CleanText('//div[contains(@class, "alerte")]/p[contains(text(), "Cette opération nécessite une sécurité supplémentaire")]')(self.doc))
+
+    def needs_otp_validation(self):
+        return bool(self.doc.xpath('//input[@name="otp_password"]'))
 
     def can_transfer_pro(self, origin_account):
         for li in self.doc.xpath('//ul[@id="idDetailsListCptDebiterVertical:ul"]//ul/li'):
@@ -2305,70 +2327,73 @@ class ExternalTransferPage(InternalTransferPage):
 
 class VerifCodePage(LoggedPage, HTMLPage):
     HASHES = {
-        ('b1b472cb6e6adc28bfdcc4bc86661fa7', 'f8d9330f322575cb3d5853c347c4ed16'): 'A1',
-        '72b11c4c4991a6ec37126a8892f9e398': 'A2',
-        'dce4a0228485a23f490ebbdd7ec96bff': 'A3',
-        'b09099c0cccfa5843793e29cc6b50c2e': 'A4',
-        '83fdc778b984cc7df4c54c74b3e06118': 'A5',
-        '70e1292e81678f3dd4463dc78ac20c23': 'A6',
-        '6a3c5cecde55a71af5ad52f3c3218bd8': 'A7',
-        'e94d438f1301e7ba7b69061b09766d2d': 'A8',
-        'd0eb3289d399cc070963cdbe8ed74482': 'B1',
-        'c66bbade362a73b5a1304d15ba7cec3f': 'B2',
-        '698e0ed53572c112bdcd4e02b90c0f76': 'B3',
-        '453023b486e4baddc5c866fd3a0dae6a': 'B4',
-        '78cab490f003eaa6c9260a08daee3c48': 'B5',
-        'a6cf0fed8511f655421c9d1d6c1dfae9': 'B6',
-        '79873f1e9af1833b9691dcd9c97096ac': 'B7',
-        '6f76286584707a1e6a0d8e3d421f7b0d': 'B8',
-        '57f365a252248e9376003329cd798fd3': 'C1',
-        'd052368c3aba2c4296669b25dc3f5b83': 'C2',
-        '423612655316cdb050378004b2bc5d2e': 'C3',
-        'd679310f45034c095afcaa88a5422256': 'C4',
-        'd739655c364a3b489260be7b42a13252': 'C5',
-        '7c1e33515a42bfd819a6004f78b09615': 'C6',
-        '55ffe065456d33e70152ad860154d190': 'C7',
-        '13a927f61873ba6f2615fb529608629f': 'C8',
-        'e48146297f68ce172b9d4092827fbd2c': 'D1',
-        '92ee176c2ee21821066747ca22ab42f0': 'D2',
-        'b405d1912ba172052c198b14b50db18f': 'D3',
-        '6a65689653e2465fc50e8765b8d5f89b': 'D4',
-        'de0f615ea01463a764e5031a696160a2': 'D5',
-        'b90f7ee198f0384480d79f7ebc8e8d3c': 'D6',
-        '844def4fead85f22e280a5b379b69492': 'D7',
-        '7485085e2dda01d90a190371509518d5': 'D8',
-        'd2142b7028ee0e67f03379468243ab09': 'E1',
-        'c42126f7c01365992c2a99d6164c6599': 'E2',
-        '978172427932c2a2a867baa25eb68ee0': 'E3',
-        '837c374cba2c11cfea800aaff06ca0b1': 'E4',
-        '041deaaff4b0d312f99afd5d9256af6c': 'E5',
-        'a3d2eea803f71200b851146d6f57998b': 'E6',
-        '9cd913b53b6cd028bd609b8546af9b0d': 'E7',
-        '17308564239363735a6a9f34021d26a9': 'E8',
-        '89b913bc935a3788bf4fe6b35778a372': 'F1',
-        '7651835218b5a7538b5b9d20546d014b': 'F2',
-        'f32bcdac80720bf39927dde41a8a21b8': 'F3',
-        '4ed222ecfd6676fcb6a4908ce915e63d': 'F4',
-        '4151f3c6531cde9bc6a1c44e89d9e47a': 'F5',
-        '6a2987e43cccc6a265c37aa73bb18703': 'F6',
-        '67f777297fec2040638378fae4113aa5': 'F7',
-        '50c2c36fbb49e64365f43068ee76c521': 'F8',
-        '8c38cd983eac6a02080c880e9c5c5a42': 'G1',
-        '4eba3b877f4e99fadb9369bfea6bc100': 'G2',
-        '4a3f409303806e53f8d5397a24fa0966': 'G3',
-        '88a7ec3d1377f913969c05859489020b': 'G4',
-        '4feda60f9dce97a400b3a6e07c8ad3f1': 'G5',
-        '0247c3ab8786018e4b324b05991a137c': 'G6',
-        'c3c2eac333cc3f8ff6b7d2814ad51943': 'G7',
-        '395881853e2d2fe7ed317c0b82227c8c': 'G8',
-        '213cab37d52ebcddd3950f2132fdeafd': 'H1',
-        'a826e4b3f2bfc9e07882a55929523a21': 'H2',
-        'cb4c92a05ef2c621b49b3b12bdc1676e': 'H3',
-        '641883bd5878f512b6bcd60c53872749': 'H4',
-        '9e5541bd54865ba57514466881b9db41': 'H5',
-        '03cc8d41cdf5e3d8d7e3f11b25f1cd5c': 'H6',
-        '203ec0695ec93bfd947c33b41802562b': 'H7',
-        'cbd1e9d2276ecc9cd7e6cae9b0127d58': 'H8',
+        (
+            'b1b472cb6e6adc28bfdcc4bc86661fa7', 'f8d9330f322575cb3d5853c347c4ed16',
+            '6609729896a0477e0f40688c487ce2c6',
+        ): 'A1',
+        ('72b11c4c4991a6ec37126a8892f9e398', 'e1b48e53ebd4235378d1f337fca63b7a'): 'A2',
+        ('dce4a0228485a23f490ebbdd7ec96bff', '407d54059c4e0e07536959d233547b4a'): 'A3',
+        ('b09099c0cccfa5843793e29cc6b50c2e', '3e5dd87f8de5178afd90db4870b31bd5'): 'A4',
+        ('83fdc778b984cc7df4c54c74b3e06118', 'f4c1c878faee6c5e5f958d2804aea142'): 'A5',
+        ('70e1292e81678f3dd4463dc78ac20c23', '4df8519132914248cf0a5ffd16563c56'): 'A6',
+        ('6a3c5cecde55a71af5ad52f3c3218bd8', '51789743c7c98da5e33b6f60f56e0f0c'): 'A7',
+        ('e94d438f1301e7ba7b69061b09766d2d', '3d17c3f4e34bd5d3261517cadba4e8e2'): 'A8',
+        ('d0eb3289d399cc070963cdbe8ed74482', '148a69cf559610764c14eac4506cfafc'): 'B1',
+        ('c66bbade362a73b5a1304d15ba7cec3f', '26547de41d3f23922f5ac4213f9e247d'): 'B2',
+        ('698e0ed53572c112bdcd4e02b90c0f76', '41cc98cd6f3535f397298f54906eceaf'): 'B3',
+        ('453023b486e4baddc5c866fd3a0dae6a', 'fa7f00d41ab5b5508c0126746d876d80'): 'B4',
+        ('78cab490f003eaa6c9260a08daee3c48', '406890424828135510c46bf0fc21fddb'): 'B5',
+        ('a6cf0fed8511f655421c9d1d6c1dfae9', 'd472284aae761026d6209c1b7a477a03'): 'B6',
+        ('79873f1e9af1833b9691dcd9c97096ac', 'edeef2ebcca148a007f4e8723c81d128'): 'B7',
+        ('6f76286584707a1e6a0d8e3d421f7b0d', '4014b24e5357be78a3e56ca399ebd284'): 'B8',
+        ('57f365a252248e9376003329cd798fd3', '2bf59e1c5638cb0a098de4fb74588e7f'): 'C1',
+        ('d052368c3aba2c4296669b25dc3f5b83', '7bf29831ba67a3ba5089fc153663fb96'): 'C2',
+        ('423612655316cdb050378004b2bc5d2e', 'efa234bbce273ada5edc57d0690a3ebe'): 'C3',
+        ('d679310f45034c095afcaa88a5422256', '2fc7415a06581d8fb5efeb8450d5f403'): 'C4',
+        ('d739655c364a3b489260be7b42a13252', '1d950b715db03d91d5b7761acc756beb'): 'C5',
+        ('7c1e33515a42bfd819a6004f78b09615', 'dfa8b36bc37fcf9be020ac95d57b9f72'): 'C6',
+        ('55ffe065456d33e70152ad860154d190', 'afcea9006642ddfcad53e294447b27b7'): 'C7',
+        ('13a927f61873ba6f2615fb529608629f', '867a9c529f7d0171b1deee2151a06222'): 'C8',
+        ('e48146297f68ce172b9d4092827fbd2c', '34c430aa3511c4907ece6fd5ac84214f'): 'D1',
+        ('92ee176c2ee21821066747ca22ab42f0', 'fece6856f73a859cb2c17bbca6fd2c03'): 'D2',
+        ('b405d1912ba172052c198b14b50db18f', 'aae816d9f713594e84ac6da85bbb23c0'): 'D3',
+        ('6a65689653e2465fc50e8765b8d5f89b', 'a85c4adaa89bb00dd37c07621303a42b'): 'D4',
+        ('de0f615ea01463a764e5031a696160a2', '052128e55a74f1f449ee6df6fb4a69cd'): 'D5',
+        ('b90f7ee198f0384480d79f7ebc8e8d3c', 'c17c17853b4a583bc51736c1092242aa'): 'D6',
+        ('844def4fead85f22e280a5b379b69492', '0358dd693c309d4098a4a76f6c0f0b94'): 'D7',
+        ('7485085e2dda01d90a190371509518d5', 'cd454f4c1da157fb6d148ea38808bafd'): 'D8',
+        ('d2142b7028ee0e67f03379468243ab09', 'c3d964f2303b79a71d8fd8ff1145b57c'): 'E1',
+        ('c42126f7c01365992c2a99d6164c6599', '1f0136688725ef85f44eb0ed064793ca'): 'E2',
+        ('978172427932c2a2a867baa25eb68ee0', 'a7baafd3e3660f44f8b510036dbee71a'): 'E3',
+        ('837c374cba2c11cfea800aaff06ca0b1', 'ad60a37bab2b14a399a9aa5b8cb251dc'): 'E4',
+        ('041deaaff4b0d312f99afd5d9256af6c', 'f779b306a255a996739dbac816ad99f2'): 'E5',
+        ('a3d2eea803f71200b851146d6f57998b', '6cfc1b99757a5a37d84475846e838537'): 'E6',
+        ('9cd913b53b6cd028bd609b8546af9b0d', '14f85349a31996c9e58d0cf697ddd49d'): 'E7',
+        ('17308564239363735a6a9f34021d26a9', '173ce025e2ca0a9610954e438710db9a'): 'E8',
+        ('89b913bc935a3788bf4fe6b35778a372', '2e6304f4d50865f23808ded36ed0b2fc'): 'F1',
+        ('7651835218b5a7538b5b9d20546d014b', 'c54439ff4bdc0350f43a96750faece77'): 'F2',
+        ('f32bcdac80720bf39927dde41a8a21b8', '5e813a31d5a255cf93a2a166cc5aa99a'): 'F3',
+        ('4ed222ecfd6676fcb6a4908ce915e63d', 'dc104bd7d4efffde4ccddb8d6eb9f219'): 'F4',
+        ('4151f3c6531cde9bc6a1c44e89d9e47a', '6bb39f995dcb88ba58425cf640114d58'): 'F5',
+        ('6a2987e43cccc6a265c37aa73bb18703', 'e7c382f64459f453bf6fc3edc80b3781'): 'F6',
+        ('67f777297fec2040638378fae4113aa5', 'b157059eb75450c30111957d54679aad'): 'F7',
+        ('50c2c36fbb49e64365f43068ee76c521', '770880c67173dd91dae2632002e3d1e6'): 'F8',
+        ('8c38cd983eac6a02080c880e9c5c5a42', '70894ff4e64bee425e5ed443f41d318a'): 'G1',
+        ('4eba3b877f4e99fadb9369bfea6bc100', 'fab655a87ec0b4c1f0b6db6012d8bf2f'): 'G2',
+        ('4a3f409303806e53f8d5397a24fa0966', '96773c36f26089d2de1adaea21b4e369'): 'G3',
+        ('88a7ec3d1377f913969c05859489020b', '183d711e12455e2299ac4f5cfe0d48dd'): 'G4',
+        ('4feda60f9dce97a400b3a6e07c8ad3f1', '5e768122450602438907946375c37e11'): 'G5',
+        ('0247c3ab8786018e4b324b05991a137c', '711aa6e3b873897addb8980c34cd33d5'): 'G6',
+        ('c3c2eac333cc3f8ff6b7d2814ad51943', 'eacfa5e486b142197f4d952f3643ba0b'): 'G7',
+        ('395881853e2d2fe7ed317c0b82227c8c', 'df518a94e59d753dc4b9ff7785edf7a6'): 'G8',
+        ('213cab37d52ebcddd3950f2132fdeafd', '105c8a5877aec8b3c18436f4a91b50bb'): 'H1',
+        ('a826e4b3f2bfc9e07882a55929523a21', 'a59e7b5fa4d1129b1fa1818362d7562e'): 'H2',
+        ('cb4c92a05ef2c621b49b3b12bdc1676e', '58b6cc8dbffd2410ba6f176f1193fa80'): 'H3',
+        ('641883bd5878f512b6bcd60c53872749', '489377fde4e5079b5e83786897689911'): 'H4',
+        ('9e5541bd54865ba57514466881b9db41', '7d0d46923ae9e3a45ea4f17034d3e095'): 'H5',
+        ('03cc8d41cdf5e3d8d7e3f11b25f1cd5c', '0571d352020fde0463904e6e09c7f309'): 'H6',
+        ('203ec0695ec93bfd947c33b41802562b', '4661c8f340b67b406c21b7451a8493b5'): 'H7',
+        ('cbd1e9d2276ecc9cd7e6cae9b0127d58', '4a4e4a8b623d6e351c0ab4ec698cfaa9'): 'H8',
     }
 
     def on_load(self):
@@ -2594,88 +2619,46 @@ class RevolvingLoanDetails(LoggedPage, HTMLPage):
 
 
 class SubscriptionPage(LoggedPage, HTMLPage):
-    def submit_form(self, subscriber):
-        form = self.get_form(id='frmDoc')
-        form['SelTiers'] = subscriber
-        form.submit()
+    def get_link_to_bank_statements(self):
+        return Link('//a[@id="C:R1:N"]')(self.doc)
 
-    def get_subscriptions(self, subscription_list, subscriber=None):
-        for account in self.doc.xpath('//table[@class="liste"]//tr//td[contains(text(), "Compte")]'):
-            sub = Subscription()
-            sub.id = Regexp(CleanText('.', replace=[('.', ''), (' ', '')]), r'(\d+)')(account)
+    def get_internal_account_id_to_filter_subscription(self, subscription):
+        for option in self.doc.xpath('//select[@id="C:S:F2_0.dropDownCritSec:DataEntry"]//option'):
+            value = option.attrib['value']
+            if value.endswith(subscription.id):
+                # this parameter looks like:
+                # '<account type (for example COURANT)><a number of spaces><a number><account_id>'
+                return value
 
-            if find_object(subscription_list, id=sub.id):
-                continue
-
-            sub.label = CleanText('.')(account)
-
-            if subscriber != None:
-                sub.subscriber = CleanText('.')(subscriber)
-            else:
-                sub.subscriber = CleanText('//span[@id="NomTiers"]')(self.doc)
-
-            subscription_list.append(sub)
-            yield sub
-
-    def iter_subscriptions(self):
-        subscription_list = []
-
-        options = self.doc.xpath('//select[@id="SelTiers"]/option')
-        if options:
-            for opt in options:
-                subscriber = self.doc.xpath('//select[@id="SelTiers"]/option[contains(text(), $subscriber)]', subscriber=CleanText('.')(opt))[0]
-                self.submit_form(Attr('.', 'value')(subscriber))
-                for sub in self.get_subscriptions(subscription_list, subscriber):
-                    yield sub
-        else:
-            for sub in self.get_subscriptions(subscription_list):
-                yield sub
+    def is_last_page(self):
+        return not Attr('//input[@alt="Page suivante"]', 'name', default=None)(self.doc)
 
     @method
     class iter_documents(TableElement):
-        item_xpath = '//table[caption[contains(text(), "Extraits de comptes")]]//tr[td]'
-        head_xpath = '//table[@class="liste"]//th'
+        item_xpath = '//table[contains(@id, "panelListeDocs.listeDocs")]//tr'
+        head_xpath = '//table[contains(@id, "panelListeDocs.listeDocs")]//th'
 
         col_date = 'Date'
         col_label = 'Information complémentaire'
         col_url = 'Nature du document'
 
         class item(ItemElement):
-            def condition(self):
-                # For some documents like "Synthèse ISF", the label column is empty.
-                # Consequently we can't associate the document to an account: we skip it.
-                return CleanText(TableCell('label'))(self) and Env('sub_id')(self) == Regexp(CleanText(TableCell('label'), replace=[('.', ''), (' ', '')]), r'(\d+)')(self)
-
             klass = Document
+
+            def condition(self):
+                return TableCell('label')(self)
 
             # Some documents may have the same date, name and label; only parts of the PDF href may change,
             # so we must pick a unique ID including the href to avoid document duplicates:
             obj_id = Format('%s_%s_%s', Env('sub_id'), CleanText(TableCell('date'), replace=[('/', '')]),
-                            Regexp(Field('url'), r'NOM=(.*)&RFL='))
+                            Regexp(Field('url'), r'guid=(.*)&sit='))
             obj_label = Format('%s %s', CleanText(TableCell('url')), CleanText(TableCell('date')))
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
             obj_format = 'pdf'
-            obj_type = DocumentTypes.OTHER
+            obj_type = DocumentTypes.STATEMENT
 
             def obj_url(self):
-                return urljoin(self.page.url, '/fr/banque/%s' % Link('./a')(TableCell('url')(self)[0]))
-
-    def next_page(self):
-        form = self.get_form(id='frmDoc')
-        form['__EVENTTARGET'] = ''
-        form['__EVENTARGUMENT'] = ''
-        form['__LASTFOCUS'] = ''
-        form['SelIndex1'] = ''
-        form['NEXT.x'] = '7'
-        form['NEXT.y'] = '8'
-        form.submit()
-
-    def is_last_page(self):
-        if self.doc.xpath('//td[has-class("ERREUR")]'):
-            return True
-        if re.search(r'(\d\/\d)', CleanText('//div[has-class("blocpaginb")]', symbols=' ')(self.doc)):
-            return True
-        return False
+                return AbsoluteLink(TableCell('url')(self)[0].xpath('.//a'), default=NotAvailable)(self)
 
 
 class NewCardsListPage(LoggedPage, HTMLPage):
@@ -2754,8 +2737,8 @@ class NewCardsListPage(LoggedPage, HTMLPage):
                             raise SkipItem()
                     elif doc.xpath('//div/p[contains(text(), "Vous n\'avez pas l\'autorisation")]'):
                         self.logger.warning("The user can't reach this page")
-                    elif doc.xpath('//td[contains(text(), "Problème technique")]'):
-                        raise BrowserUnavailable(CleanText(doc.xpath('//td[contains(text(), "Problème technique")]'))(self))
+                    elif doc.xpath('//p[contains(text(), "Problème technique")]'):
+                        raise BrowserUnavailable(CleanText(doc.xpath('//p[contains(text(), "Problème technique")]'))(self))
                     else:
                         assert False, 'xpath for card type information could have changed'
                 elif not CleanText('//ul//a[contains(@title, "Consulter le différé")]')(history_page.doc):

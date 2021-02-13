@@ -172,12 +172,20 @@ class AccountTypePage(LoggedPage, JsonPage):
         elif account_type == "menu_espace_perso_ent":
             return "entreprises"
 
+REASONS_MAPPING = {
+    'SCA': 'Vous devez réaliser la double authentification sur le portail internet',
+    'SCAW': 'Vous devez choisir si vous souhaitez dès à présent activer la double authentification sur le portail internet',
+    'GDPR': 'GDPR',
+    'alerting_pull_incitation': 'Mise à jour de votre dossier',  # happens when the user needs to send a document ID
+}
+
+
 class LabelsPage(LoggedPage, JsonPage):
     def on_load(self):
         if Dict('commun/statut', default='')(self.doc) == 'nok':
             reason = Dict('commun/raison')(self.doc)
-            assert reason == 'GDPR', 'Labels page is not available with message %s' % reason
-            raise ActionNeeded(reason)
+            assert reason in REASONS_MAPPING, 'Labels page is not available with message %s' % reason
+            raise ActionNeeded(REASONS_MAPPING[reason])
 
     def get_labels(self):
         synthesis_labels = ["synthèse"]
@@ -197,8 +205,8 @@ class ProfilePage(LoggedPage, JsonPage):
     def get_profile(self):
         if CleanText(Dict('commun/statut', default=''))(self.doc) == 'nok':
             reason = CleanText(Dict('commun/raison', default=''))(self.doc)
-            assert reason == 'GDPR', 'Unhandled error : %s' % reason
-            raise ActionNeeded(reason)
+            assert reason in REASONS_MAPPING, 'Unhandled error : %s' % reason
+            raise ActionNeeded(REASONS_MAPPING[reason])
 
         profile = Profile()
         profile.name = Format('%s %s', CleanText(Dict('donnees/nom')), CleanText(Dict('donnees/prenom'), default=''))(self.doc)
@@ -724,11 +732,19 @@ class TransactionsPage(LoggedPage, CDNBasePage):
             klass = Investment
 
             obj_label = CleanText(TableCell('label', colspan=True))
-            obj_valuation = MyDecimal(TableCell('valuation', colspan=True))
-            obj_quantity = MyDecimal(TableCell('quantity', colspan=True))
-            obj_unitvalue = MyDecimal(TableCell('unitvalue', colspan=True))
-            obj_unitprice = MyDecimal(TableCell('unitprice', colspan=True))
-            obj_portfolio_share = Eval(lambda x: x / 100, MyDecimal(TableCell('portfolio_share')))
+            obj_valuation = CleanDecimal.French(TableCell('valuation', colspan=True))
+            obj_quantity = CleanDecimal.French(TableCell('quantity', colspan=True), default=NotAvailable)
+            obj_unitvalue = CleanDecimal.French(TableCell('unitvalue', colspan=True), default=NotAvailable)
+            obj_unitprice = CleanDecimal.French(
+                TableCell('unitprice', colspan=True, default=None),
+                default=NotAvailable
+            )
+
+            def obj_portfolio_share(self):
+                portfolio_share_percent = CleanDecimal.French(TableCell('portfolio_share'), default=None)(self)
+                if portfolio_share_percent is not None:
+                    return portfolio_share_percent / 100
+                return NotAvailable
 
             def obj_code(self):
                 for code in Field('label')(self).split():

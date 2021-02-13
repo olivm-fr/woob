@@ -21,6 +21,7 @@
 
 from decimal import Decimal
 from datetime import timedelta
+
 from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
 from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.contact import CapContact
@@ -51,7 +52,7 @@ class BPModule(
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'La Banque Postale'
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Identifiant', masked=False),
+        ValueBackendPassword('login', label='Identifiant', regexp=r'\d{10}[a-zA-Z0-9]?', masked=False),
         ValueBackendPassword('password', label='Mot de passe', regexp=r'^(\d{6})$'),
         Value(
             'website', label='Type de compte', default='par',
@@ -103,10 +104,10 @@ class BPModule(
         if self.config['website'].get() != 'par':
             raise NotImplementedError()
 
-        if 'transfer_honor_savings' in params:
-            return self.browser.validate_transfer_eligibility(transfer, **params)
-        elif 'code' in params:
+        if 'code' in params:
             return self.browser.validate_transfer_code(transfer, params['code'])
+        elif 'resume' in params:
+            return self.browser.end_with_polling(transfer)
 
         self.logger.info('Going to do a new transfer')
         account = strict_find_object(self.iter_accounts(), iban=transfer.account_iban)

@@ -25,8 +25,8 @@ from datetime import date
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserUnavailable, ImageCaptchaQuestion, BrowserQuestion,
-    WrongCaptchaResponse, AuthMethodNotImplemented, NeedInteractiveFor2FA,
-    BrowserPasswordExpired, AppValidation, AppValidationExpired,
+    WrongCaptchaResponse, NeedInteractiveFor2FA, BrowserPasswordExpired,
+    AppValidation, AppValidationExpired,
 )
 from weboob.tools.value import Value
 from weboob.browser.browsers import ClientError
@@ -94,6 +94,19 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
             # don't perform a GET to this url, it's the otp url, which will be reached by otp_form
             self.location(state['url'])
 
+    def check_interactive(self):
+        if self.config['request_information'].get() is None:
+            raise NeedInteractiveFor2FA()
+
+    def send_notification_interactive_mode(self):
+        # send app validation if we are in interactive mode
+        redirect = self.response.headers.get('Location', "")
+        if self.response.status_code == 302 and '/ap/challenge' in redirect:
+            self.check_interactive()
+
+        if redirect:
+            self.location(self.response.headers['Location'])
+
     def push_security_otp(self, pin_code):
         res_form = self.otp_form
         res_form['rememberDevice'] = ""
@@ -112,22 +125,22 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
             self.config['captcha_response'] = Value(value=None)
         else:
             otp_type = self.page.get_otp_type()
+
             if otp_type == '/ap/signin':
                 # this otp will be always present until user deactivate it
-                raise AuthMethodNotImplemented('Connection with OTP for every login is not handled')
+                # we don't raise an error because for the seller account 2FA is mandatory
+                self.logger.warning('2FA is enabled, all connections send an OTP')
 
-            if self.page.has_form_verify():
-                if self.config['request_information'].get() is None:
-                    raise NeedInteractiveFor2FA()
-
+            if self.page.has_form_verify() or self.page.has_form_auth_mfa() or self.page.has_form_select_device():
+                self.check_interactive()
                 self.page.send_code()
-
                 captcha = self.page.get_captcha_url()
+
                 if captcha and not self.config['captcha_response'].get():
                     image = self.open(captcha).content
                     raise ImageCaptchaQuestion(image)
 
-        if self.page.has_form_verify():
+        if self.page.has_form_verify() or self.page.has_form_auth_mfa():
             form = self.page.get_response_form()
             self.otp_form = form['form']
             self.otp_url = self.url
@@ -144,7 +157,9 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
 
     def check_app_validation(self):
         # client has 60 seconds to unlock this page
-        timeout = time.time() + 60.00
+        # the resend link will appear from 60 seconds is why there are 2 additional seconds, it's to have a margin
+        timeout = time.time() + 62.00
+        second_try = True
         while time.time() < timeout:
             link = self.page.get_link_app_validation()
             self.location(link)
@@ -152,6 +167,13 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
                 time.sleep(2)
             else:
                 return
+
+            if time.time() >= timeout and second_try:
+                # second try because 60 seconds is short, the second try is longger
+                second_try = False
+                timeout = time.time() + 70.00
+                self.page.resend_link()
+
         else:
             raise AppValidationExpired()
 
@@ -169,6 +191,8 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
 
         if self.config['resume'].get():
             self.check_app_validation()
+            # we are logged
+            return
 
         if self.security.is_here():
             self.handle_security()
@@ -176,6 +200,7 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
         if self.config['captcha_response'].get():
             # Resolve captcha code
             self.page.login(self.username, self.password, self.config['captcha_response'].get())
+            self.send_notification_interactive_mode()
             # many captcha reset value
             self.config['captcha_response'] = Value(value=None)
 
@@ -192,8 +217,11 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
                     raise WrongCaptchaResponse(msg)
                 else:
                     assert False, msg
-            else:
-                return
+
+        if self.approval_page.is_here():
+            # if we have captcha and app validation
+            msg_validation = self.page.get_msg_app_validation()
+            raise AppValidation(msg_validation)
 
         # Change language so everything is handled the same way
         self.to_english(self.LANGUAGE)
@@ -208,8 +236,10 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
             return
 
         self.page.login(self.username, self.password)
+        self.send_notification_interactive_mode()
 
         if self.approval_page.is_here():
+            # if we don't have captcha and we have app validation
             msg_validation = self.page.get_msg_app_validation()
             raise AppValidation(msg_validation)
 
@@ -233,6 +263,10 @@ class AmazonBrowser(LoginBrowser, StatesMixin):
         if self.login.is_here():
             self.do_login()
         else:
+            if self.approval_page.is_here():
+                self.check_interactive()
+                self.check_app_validation()
+                return
             raise BrowserUnavailable()
 
     def to_english(self, language):

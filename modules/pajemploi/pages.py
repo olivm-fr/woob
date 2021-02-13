@@ -40,8 +40,10 @@ from weboob.browser.filters.standard import (
     Format,
     Field,
     Eval,
+    ItemNotFound,
 )
-from weboob.browser.filters.html import Attr, Link, TableCell
+from weboob.browser.filters.html import Attr, Link, TableCell, FormValue
+from weboob.browser.filters.javascript import JSVar
 from weboob.tools.date import parse_french_date
 
 
@@ -60,10 +62,12 @@ class LoginPage(HTMLPage):
     def is_here(self):
         return not bool(CleanText('//a[contains(text(), "- Déconnexion")]')(self.doc))
 
-    def login(self, username, password):
-        form = self.get_form(id="frmConnexionInfo")
+    def login(self, username, password, captcha=None):
+        form = self.get_form(id="frmConnexion")
         form["j_username"] = username
         form["j_password"] = password
+        if captcha is not None:
+            form['g-recaptcha-response'] = captcha
         form.submit()
 
 
@@ -143,7 +147,7 @@ class TaxCertificatesPage(PajemploiPage):
             d.id = "%s_%s" % (subscription.id, d._annee)
             d.date = parse_french_date("%s-12-31" % d._annee)
             d.label = "Attestation fiscale %s" % (d._annee)
-            d.type = DocumentTypes.OTHER
+            d.type = DocumentTypes.CERTIFICATE
             d.format = "pdf"
             d.url = Link("./table//div/a")(frm)
 
@@ -173,7 +177,7 @@ class DeclarationSetupPage(PajemploiPage):
             "paye": "false",
             "noIntSala": subscription.id,
             "order": "periode",
-            "byAsc": "true",
+            "byAsc": "false",
         }
         if debut_mois_periode:
             data["dtDebMois"] = min(debut_mois_periode[0].value_options)
@@ -268,45 +272,50 @@ class DeclarationDetailPage(PajemploiPage):
     def iter_documents(self, proto_doc, subscription):
         date = self.get_date()
 
+        script = CleanText('//script[not(@src)][contains(text(), "traitementEffectue")]')
+        try:
+            traitementEffectue = JSVar(script, var='traitementEffectue')(self.doc)
+            presAnnule = JSVar(script, var='presAnnule')(self.doc)
+        except ItemNotFound:
+            traitementEffectue = True
+            presAnnule = 0
+
         # Bulletin de salaire
         frm = self.doc.xpath('//form[@name="formBulletinSalaire"]')
-        if frm:
+        if frm and traitementEffectue and (presAnnule == 0):
             bs = Document()
             bs.id = "%s_%s" % (proto_doc.id, "bs")
             bs.date = date
             bs.format = "pdf"
-            bs.type = DocumentTypes.OTHER
+            bs.type = DocumentTypes.STATEMENT
             bs.label = "Bulletin de salaire %s %s" % (subscription.label, date.strftime("%d/%m/%Y"))
             bs.url = Attr(".", "action")(frm[0])
+            bs._ref = FormValue('./input[@id="ref"]')(frm[0])
             yield bs
 
         # Relevé mensuel
-        btn = self.doc.xpath('//input[@id="btRecapEdit"]')
-        if btn:
+        frm = self.doc.xpath('//form[@name="formReleveMensuel"]')
+        if frm and traitementEffectue and (presAnnule == 0):
             rm = Document()
             rm.id = "%s_%s" % (proto_doc.id, "rm")
             rm.date = date
             rm.format = "pdf"
-            rm.type = DocumentTypes.OTHER
+            rm.type = DocumentTypes.STATEMENT
             rm.label = "Relevé mensuel %s %s" % (subscription.label, date.strftime("%d/%m/%Y"))
-            rm.url = Regexp(
-                Attr(".", "onclick", default=""), r"open\('([^\']+)'", default=None
-            )(btn[0])
+            rm.url = Attr(".", "action")(frm[0])
             rm._need_refresh_previous_page = True
             yield rm
 
         # Certificat d'Enregistrement
-        btn = self.doc.xpath('//input[@id="genererPDF"]')
-        if btn:
+        frm = self.doc.xpath('//form[@name="formGenererPDF"]')
+        if frm:
             ce = Document()
             ce.id = "%s_%s" % (proto_doc.id, "ce")
             ce.date = date
             ce.format = "pdf"
-            ce.type = DocumentTypes.OTHER
+            ce.type = DocumentTypes.CERTIFICATE
             ce.label = "Certificat d'enregistrement %s %s" % (subscription.label, date.strftime("%d/%m/%Y"))
-            ce.url = Regexp(
-                Attr(".", "onclick", default=""), r"open\('([^\']+)'", default=None
-            )(btn[0])
+            ce.url = Attr(".", "action")(frm[0])
             ce._need_refresh_previous_page = True
             yield ce
 
@@ -317,7 +326,7 @@ class DeclarationDetailPage(PajemploiPage):
             dc.id = "%s_%s" % (proto_doc.id, "dc")
             dc.date = date
             dc.format = "pdf"
-            dc.type = DocumentTypes.OTHER
+            dc.type = DocumentTypes.STATEMENT
             dc.label = "Décompte de cotisations %s %s" % (subscription.label, date.strftime("%d/%m/%Y"))
             dc.url = Attr(".", "action")(frm[0])
             yield dc

@@ -26,7 +26,7 @@ import re
 import json
 from datetime import datetime
 
-from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage
+from weboob.browser.pages import AbstractPage, LoggedPage, HTMLPage, JsonPage
 from weboob.browser.elements import DictElement, ItemElement, method
 from weboob.browser.filters.standard import (
     Date, CleanDecimal, CleanText, Format, Field, Env, Regexp, Currency,
@@ -76,9 +76,10 @@ class Transaction(FrenchTransaction):
     ]
 
 
-class LoginPage(JsonPage):
-    def get_response(self):
-        return self.doc
+class LoginPage(AbstractPage):
+    PARENT = 'caissedepargne'
+    PARENT_URL = 'login'
+    BROWSER_ATTR = 'package.browser.CaisseEpargneLogin'
 
 
 class CenetLoginPage(HTMLPage):
@@ -101,6 +102,11 @@ class CenetLoginPage(HTMLPage):
 
 
 class CenetHomePage(LoggedPage, HTMLPage):
+    def is_here(self):
+        # "default.aspx" url is shared with CenetLoginPage
+        # We just verify that we are logged
+        return self.doc.xpath('//li[@class="identite"]') and self.doc.xpath('//li[@class="deconnexion"]')
+
     @method
     class get_advisor(ItemElement):
         klass = Advisor
@@ -139,6 +145,7 @@ class CenetAccountsPage(LoggedPage, CenetJsonPage):
     ACCOUNT_TYPES = {
         'CCP': Account.TYPE_CHECKING,
         'DAT': Account.TYPE_SAVINGS,
+        'AUT': Account.TYPE_MARKET,
     }
 
     @method
@@ -150,7 +157,11 @@ class CenetAccountsPage(LoggedPage, CenetJsonPage):
 
             obj_id = obj_number = CleanText(Dict('Numero'))
             obj_label = CleanText(Dict('Intitule'))
-            obj_iban = CleanText(Dict('IBAN'))
+
+            def obj_iban(self):
+                iban = Dict('IBAN')(self)  # IBAN can be `null`
+                if iban:
+                    return CleanText().filter(iban)
 
             def obj_balance(self):
                 absolut_amount = CleanDecimal(Dict('Solde/Valeur'))(self)
@@ -217,6 +228,7 @@ class CenetCardsPage(LoggedPage, CenetJsonPage):
     @method
     class iter_cards(DictElement):
         item_xpath = 'DonneesSortie'
+        ignore_duplicate = True
 
         class item(ItemElement):
             def condition(self):
@@ -445,3 +457,8 @@ class DownloadDocumentPage(LoggedPage, HTMLPage):
         form['__EVENTTARGET'] = 'btn_telecharger'
         form['__EVENTARGUMENT'] = json.dumps(data)
         return form.submit()
+
+
+class LinebourseTokenPage(LoggedPage, CenetJsonPage):
+    def get_token(self):
+        return CleanText(Dict('DonneesSortie'))(self.doc)

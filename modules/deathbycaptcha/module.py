@@ -21,7 +21,7 @@ from __future__ import unicode_literals
 
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword, Value
-from weboob.capabilities.captcha import CapCaptchaSolver, ImageCaptchaJob
+from weboob.capabilities.captcha import CapCaptchaSolver, ImageCaptchaJob, RecaptchaV2Job
 
 from .browser import DeathbycaptchaBrowser
 
@@ -48,9 +48,12 @@ class DeathbycaptchaModule(Module, CapCaptchaSolver):
         return self.create_browser(self.config['login'].get(), self.config['password'].get())
 
     def create_job(self, job):
-        if not isinstance(job, ImageCaptchaJob):
+        if isinstance(job, ImageCaptchaJob):
+            job.id = self.browser.create_job(job.image)
+        elif isinstance(job, RecaptchaV2Job):
+            job.id = self.browser.create_recaptcha2_job(job.site_url, job.site_key)
+        else:
             raise NotImplementedError()
-        job.id = self.browser.create_job(job.image)
 
     def poll_job(self, job):
         job.solution = self.browser.poll(job.id)

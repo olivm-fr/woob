@@ -334,7 +334,7 @@ else:
 
 def ssl_wrap_socket(sock, *args, **kwargs):
     if kwargs.get('certfile'):
-        LOGGER.info('a client certificate is used, falling back to OpenSSL')
+        LOGGER.debug('a client certificate is used, falling back to OpenSSL')
         # TODO implement NSS client certificate support
         return old_ssl_wrap_socket(sock, *args, **kwargs)
 
@@ -554,6 +554,6 @@ def reinit_if_needed():
     # so we should reinit NSS
 
     if INIT_PID and INIT_PID != os.getpid():
-        LOGGER.info('nss inited in %s but now in %s', INIT_PID, os.getpid())
+        LOGGER.debug('nss inited in %s but now in %s', INIT_PID, os.getpid())
         assert INIT_ARGS
         init_nss(*INIT_ARGS)

@@ -26,6 +26,7 @@ import re
 import json
 
 import dateutil
+
 from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
 from weboob.exceptions import ActionNeeded
 from weboob.capabilities import NotAvailable
@@ -152,6 +153,7 @@ ACCOUNT_TYPES = {
     'EKO': Account.TYPE_CHECKING,
     'MAJPROTEGE': Account.TYPE_CHECKING,  # Compte majeur protégé
     'CPTEXCAGRI': Account.TYPE_CHECKING,  # Compte Excédent Agriculture
+    'LFDJ': Account.TYPE_CHECKING,  # Compte de mandataire LFDJ
     'DAV NANTI': Account.TYPE_SAVINGS,
     'LIV A': Account.TYPE_SAVINGS,
     'LIV A ASS': Account.TYPE_SAVINGS,
@@ -247,6 +249,8 @@ ACCOUNT_TYPES = {
     'OPTA': Account.TYPE_LIFE_INSURANCE,  # Optalissime
     'RENV VITAL': Account.TYPE_LIFE_INSURANCE,  # Rente viagère Vitalité
     'ANAE': Account.TYPE_LIFE_INSURANCE,
+    'PAT STH': Account.TYPE_LIFE_INSURANCE,  # Patrimoine ST Honoré
+    'PRSH2': Account.TYPE_LIFE_INSURANCE,  # Prestige ST Honoré 2
     'ATOUT LIB': Account.TYPE_REVOLVING_CREDIT,
     'PACC': Account.TYPE_CONSUMER_CREDIT,  # 'PAC' = 'Prêt à consommer'
     'PACP': Account.TYPE_CONSUMER_CREDIT,
@@ -524,8 +528,19 @@ class AccountDetailsPage(LoggedPage, JsonPage):
 
 
 class IbanPage(LoggedPage, JsonPage):
+    def build_doc(self, content):
+        # dict can have missing ending '"'
+        # ex: '..."faxNumber":"},...'
+        content = content.replace(':"}', ':""}')
+        # ex: '..."phoneNumber":",...'
+        content = re.sub(r'":","(?![,}])', '":"","', content)
+        return super(IbanPage, self).build_doc(content)
+
     def get_iban(self):
-        return Dict('ibanData/ibanCode', default=NotAvailable)(self.doc)
+        return Coalesce(
+            Dict('ibanData/ibanCode', default=NotAvailable),
+            Dict('ibanData/ibanData/ibanCode', default=NotAvailable),
+        )(self.doc)
 
 
 class HistoryPage(LoggedPage, JsonPage):
@@ -573,6 +588,14 @@ class HistoryPage(LoggedPage, JsonPage):
             # we do not use it.
             obj_date = Date(CleanText(Dict('dateOperation')))
 
+            obj_label = CleanText(
+                Format(
+                    '%s %s',
+                    CleanText(Dict('libelleTypeOperation', default='')),
+                    CleanText(Dict('libelleOperation'))
+                )
+            )
+
             # Transactions in foreign currencies have no 'libelleTypeOperation'
             # and 'libelleComplementaire' keys, hence the default values.
             # The CleanText() gets rid of additional spaces.
@@ -601,11 +624,6 @@ class HistoryPage(LoggedPage, JsonPage):
                     return rdate
                 return date
 
-            obj_label = CleanText(
-                Format(
-                    '%s %s', CleanText(Dict('libelleTypeOperation', default='')), CleanText(Dict('libelleOperation'))
-                )
-            )
             obj_amount = Eval(float_to_decimal, Dict('montant'))
             obj_type = Map(
                 CleanText(Dict('libelleTypeOperation', default='')), TRANSACTION_TYPES, Transaction.TYPE_UNKNOWN
@@ -652,8 +670,8 @@ class CardHistoryPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Transaction
 
-            obj_raw = CleanText(Dict('libelleOperation'))
             obj_label = CleanText(Dict('libelleOperation'))
+            obj_raw = Transaction.Raw(CleanText(Dict('libelleOperation')))
             obj_amount = Eval(float_to_decimal, Dict('montant'))
             obj_type = Transaction.TYPE_DEFERRED_CARD
             obj_bdate = Field('rdate')
@@ -707,6 +725,12 @@ class PredicaInvestmentsPage(LoggedPage, JsonPage):
                 quantity = Dict('qtpaaspt', default=None)(self)
                 if quantity:
                     return Eval(float_to_decimal, quantity)(self)
+                return NotAvailable
+
+            def obj_diff(self):
+                diff = Dict('mtpmvspt', default=None)(self)
+                if diff is not None:
+                    return Eval(float_to_decimal, diff)(self)
                 return NotAvailable
 
             def obj_code(self):

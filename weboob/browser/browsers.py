@@ -39,6 +39,7 @@ import inspect
 from datetime import datetime, timedelta
 from dateutil import parser
 from threading import Lock
+from uuid import uuid4
 
 try:
     import requests
@@ -49,7 +50,7 @@ except ImportError:
 
 from weboob.exceptions import (
     BrowserHTTPSDowngrade, ModuleInstallError, BrowserRedirect, BrowserIncorrectPassword,
-    NeedInteractiveFor2FA
+    NeedInteractiveFor2FA, BrowserInteraction,
 )
 
 from weboob.tools.log import getLogger
@@ -138,7 +139,7 @@ class Browser(object):
     def __init__(self, logger=None, proxy=None, responses_dirname=None, weboob=None, proxy_headers=None):
         self.logger = getLogger('browser', logger)
         self.responses_dirname = responses_dirname
-        self.responses_count = 1
+        self.responses_count = 0
         self.responses_lock = Lock()
 
         if isinstance(self.VERIFY, basestring):
@@ -165,49 +166,52 @@ class Browser(object):
         elif not os.path.isdir(self.responses_dirname):
             os.makedirs(self.responses_dirname)
 
-        import mimetypes
-        # get the content-type, remove optionnal charset part
-        mimetype = response.headers.get('Content-Type', '').split(';')[0]
-        # due to http://bugs.python.org/issue1043134
-        if mimetype == 'text/plain':
-            ext = '.txt'
-        else:
-            # try to get an extension (and avoid adding 'None')
-            ext = mimetypes.guess_extension(mimetype, False) or ''
+        slug = uuid4().hex
 
         with self.responses_lock:
             counter = self.responses_count
             self.responses_count += 1
 
-        path = re.sub(r'[^A-z0-9\.-_]+', '_', urlparse(response.url).path.rpartition('/')[2])[-10:]
-        if path.endswith(ext):
-            ext = ''
-        filename = '%02d-%d%s%s%s' % \
-            (counter, response.status_code, '-' if path else '', path, ext)
+        response_filepath = slug
 
-        response_filepath = os.path.join(self.responses_dirname, filename)
+        if os.environ.get('WEBOOB_USE_OBSOLETE_RESPONSES_DIR') == '1':
+            import mimetypes
+            # get the content-type, remove optionnal charset part
+            mimetype = response.headers.get('Content-Type', '').split(';')[0]
+            # due to http://bugs.python.org/issue1043134
+            if mimetype == 'text/plain':
+                ext = '.txt'
+            else:
+                # try to get an extension (and avoid adding 'None')
+                ext = mimetypes.guess_extension(mimetype, False) or ''
 
-        request = response.request
-        with open(response_filepath + '-request.txt', 'w') as f:
-            f.write('%s %s\n\n\n' % (request.method, request.url))
-            for key, value in request.headers.items():
-                f.write('%s: %s\n' % (key, value))
-            if request.body is not None:  # separate '' from None
-                f.write('\n\n\n%s' % request.body)
-        with open(response_filepath + '-response.txt', 'w') as f:
-            if hasattr(response.elapsed, 'total_seconds'):
-                f.write('Time: %3.3fs\n' % response.elapsed.total_seconds())
-            f.write('%s %s\n\n\n' % (response.status_code, response.reason))
-            for key, value in response.headers.items():
-                f.write('%s: %s\n' % (key, value))
+            filename = '%02d-%d-%s%s' % \
+                (counter, response.status_code, slug, ext)
 
-        with open(response_filepath, 'wb') as f:
-            f.write(response.content)
+            response_filepath = os.path.join(self.responses_dirname, filename)
 
-        match_filepath = os.path.join(self.responses_dirname, 'url_response_match.txt')
-        with open(match_filepath, 'a') as f:
-            f.write('# %d %s %s\n' % (response.status_code, response.reason, response.headers.get('Content-Type', '')))
-            f.write('%s\t%s\n' % (response.url, filename))
+            request = response.request
+            with open(response_filepath + '-request.txt', 'w') as f:
+                f.write('%s %s\n\n\n' % (request.method, request.url))
+
+                for key, value in request.headers.items():
+                    f.write('%s: %s\n' % (key, value))
+                if request.body is not None:  # separate '' from None
+                    f.write('\n\n\n%s' % request.body)
+            with open(response_filepath + '-response.txt', 'w') as f:
+                if hasattr(response.elapsed, 'total_seconds'):
+                    f.write('Time: %3.3fs\n' % response.elapsed.total_seconds())
+                f.write('%s %s\n\n\n' % (response.status_code, response.reason))
+                for key, value in response.headers.items():
+                    f.write('%s: %s\n' % (key, value))
+
+            with open(response_filepath, 'wb') as f:
+                f.write(response.content)
+
+            match_filepath = os.path.join(self.responses_dirname, 'url_response_match.txt')
+            with open(match_filepath, 'a') as f:
+                f.write('# %d %s %s\n' % (response.status_code, response.reason, response.headers.get('Content-Type', '')))
+                f.write('%s\t%s\n' % (response.url, filename))
 
         request = response.request
 
@@ -237,6 +241,7 @@ class Browser(object):
             }
 
         har_entry = {
+            '$anchor': slug,
             'startedDateTime': (datetime.now() - response.elapsed).isoformat(),
             'pageref': 'fake_page',
             'time': int(response.elapsed.total_seconds() * 1000),
@@ -548,18 +553,14 @@ class Browser(object):
         """
         Like Response.raise_for_status but will use other classes if needed.
         """
-        http_error_msg = None
         if 400 <= response.status_code < 500:
             http_error_msg = '%s Client Error: %s' % (response.status_code, response.reason)
-            cls = ClientError
             if response.status_code == 404:
-                cls = HTTPNotFound
+                raise HTTPNotFound(http_error_msg, response=response)
+            raise ClientError(http_error_msg, response=response)
         elif 500 <= response.status_code < 600:
             http_error_msg = '%s Server Error: %s' % (response.status_code, response.reason)
-            cls = ServerError
-
-        if http_error_msg:
-            raise cls(http_error_msg, response=response)
+            raise ServerError(http_error_msg, response=response)
 
         # in case we did not catch something that should be
         response.raise_for_status()
@@ -1052,7 +1053,7 @@ class StatesMixin(object):
         else:
             for jcookie in jcookies:
                 self.session.cookies.set(**jcookie)
-            self.logger.info('Reloaded cookies from storage')
+            self.logger.debug('Reloaded cookies from storage')
 
     def load_state(self, state):
         if state.get('expire') and parser.parse(state['expire']) < datetime.now():
@@ -1091,7 +1092,7 @@ class StatesMixin(object):
                 pass
         if self.STATE_DURATION is not None:
             state['expire'] = self.get_expire()
-        self.logger.info('Stored cookies into storage')
+        self.logger.debug('Stored cookies into storage')
         return state
 
 
@@ -1432,6 +1433,11 @@ class TwoFactorBrowser(LoginBrowser, StatesMixin):
         If no backend configuration could be found,
         it will then call init_login method.
         """
+
+        def clear_sca_key(config_key):
+            if self.config.get(config_key):
+                self.config[config_key] = self.config[config_key].default
+
         assert self.AUTHENTICATION_METHODS, 'There is no config for the double authentication.'
         self.twofa_logged_date = None
 
@@ -1442,14 +1448,20 @@ class TwoFactorBrowser(LoginBrowser, StatesMixin):
 
             setattr(self, config_key, config_value.get())
             if getattr(self, config_key):
-                handle_method()
+                try:
+                    handle_method()
+                except BrowserInteraction:
+                    # If a BrowserInteraction is raised during the handling of the sca_key,
+                    # we need to clear it before restarting the process to prevent it to block
+                    # other sca_keys handling.
+                    clear_sca_key(config_key)
+                    raise
 
                 self.twofa_logged_date = datetime.now()
 
                 # cleaning authentication config keys
                 for config_key in self.AUTHENTICATION_METHODS.keys():
-                    if config_key in self.config:
-                        self.config[config_key] = self.config[config_key].default
+                    clear_sca_key(config_key)
 
                 break
         else:

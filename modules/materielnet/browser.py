@@ -21,7 +21,7 @@ from __future__ import unicode_literals
 
 
 from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, NocaptchaQuestion
+from weboob.exceptions import BrowserIncorrectPassword, RecaptchaV2Question
 
 from .pages import LoginPage, CaptchaPage, ProfilePage, DocumentsPage, DocumentsDetailsPage
 
@@ -64,7 +64,7 @@ class MaterielnetBrowser(LoginBrowser):
         # captcha is not always present
         if sitekey:
             if not self.config['captcha_response'].get():
-                raise NocaptchaQuestion(website_key=sitekey, website_url=self.login.build(lang=self.lang))
+                raise RecaptchaV2Question(website_key=sitekey, website_url=self.login.build(lang=self.lang))
 
         self.page.login(self.username, self.password, self.config['captcha_response'].get())
 
@@ -85,7 +85,7 @@ class MaterielnetBrowser(LoginBrowser):
 
     @need_login
     def iter_documents(self, subscription):
-        json_response = self.par_or_pro_location('/Orders/CompletedOrdersPeriodSelection').json()
+        json_response = self.par_or_pro_location('/Orders/CompletedOrdersPeriodSelection', data={}).json()
 
         for data in json_response:
             for doc in self.par_or_pro_location('/Orders/PartialCompletedOrdersHeader', data=data).page.get_documents():

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2012-2019  Budget Insight
+# Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a weboob module.
 #
@@ -20,9 +20,7 @@
 
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword
-from weboob.capabilities.bank import AccountNotFound
 from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.base import find_object
 
 from .browser import DegiroBrowser
 
@@ -35,18 +33,20 @@ class DegiroModule(Module, CapBankWealth):
     DESCRIPTION = u'De giro'
     MAINTAINER = u'Jean Walrave'
     EMAIL = 'jwalrave@budget-insight.com'
-    LICENSE = 'AGPLv3+'
+    LICENSE = 'LGPLv3+'
     VERSION = '2.1'
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label='Nom d\'utilisateur', masked=False),
-                           ValueBackendPassword('password', label='Mot de passe'))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Nom d\'utilisateur', masked=False),
+        ValueBackendPassword('password', label='Mot de passe')
+    )
 
     BROWSER = DegiroBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
-
-    def get_account(self, _id):
-        return find_object(self.browser.iter_accounts(), id=_id, error=AccountNotFound)
+        return self.create_browser(
+            self.config['login'].get(),
+            self.config['password'].get()
+        )
 
     def iter_accounts(self):
         return self.browser.iter_accounts()
@@ -56,3 +56,6 @@ class DegiroModule(Module, CapBankWealth):
 
     def iter_investment(self, account):
         return self.browser.iter_investment(account)
+
+    def iter_market_orders(self, account):
+        return self.browser.iter_market_orders(account)

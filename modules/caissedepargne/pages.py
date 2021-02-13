@@ -25,11 +25,12 @@ from __future__ import unicode_literals
 import re
 from base64 import b64decode
 from collections import OrderedDict
-from PIL import Image, ImageFilter
 from io import BytesIO
 from decimal import Decimal
 from datetime import datetime
+
 from lxml import html
+from PIL import Image, ImageFilter
 
 from weboob.browser.pages import (
     LoggedPage, HTMLPage, JsonPage, pagination,
@@ -38,7 +39,7 @@ from weboob.browser.pages import (
 from weboob.browser.elements import ItemElement, method, ListElement, TableElement, SkipItem, DictElement
 from weboob.browser.filters.standard import (
     Date, CleanDecimal, Regexp, CleanText, Env, Upper,
-    Field, Eval, Format, Currency, Coalesce,
+    Field, Eval, Format, Currency, Coalesce, MapIn,
 )
 from weboob.browser.filters.html import Link, Attr, TableCell
 from weboob.capabilities.base import NotAvailable, empty
@@ -55,7 +56,7 @@ from weboob.tools.capabilities.bank.investments import is_isin_valid, IsinCode, 
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.iban import is_rib_valid, rib2iban, is_iban_valid
 from weboob.tools.captcha.virtkeyboard import SplitKeyboard, GridVirtKeyboard
-from weboob.tools.compat import unicode, urlparse, parse_qsl
+from weboob.tools.compat import unicode, urlparse, parse_qsl, urljoin
 from weboob.exceptions import (
     NoAccountsException, BrowserUnavailable, ActionNeeded, BrowserIncorrectPassword,
     BrowserPasswordExpired,
@@ -111,12 +112,25 @@ class LoginPage(JsonPage):
         return next_login_url['type_srv']
 
 
+class ConfigPage(JsonPage):
+    def get_continue_url(self, cdetab, user_type):
+        continue_url = self.doc['continueUrls']['dei'].get(cdetab)
+        if not continue_url:
+            # Login does not exist
+            raise BrowserIncorrectPassword()
+
+        return continue_url[user_type]
+
+
 class JsFilePage(RawPage):
     def get_client_id(self):
         return Regexp(pattern=r'{authenticated:{clientId:"([^"]+)"').filter(self.text)
 
     def get_nonce(self):
         return Regexp(pattern=r'\("nonce","([a-z0-9]+)"\)').filter(self.text)
+
+    def get_csid(self):
+        return Regexp(pattern=r't.CE="(\d+)"').filter(self.text)
 
 
 class AuthorizePage(HTMLPage):
@@ -175,6 +189,12 @@ class AuthenticationMethodPage(JsonPage):
         # The data we are looking for is in a dict with a random uuid key.
         return self.validation_units[self.validation_unit_id][0]
 
+    def is_other_authentication_method(self):
+        return Coalesce(
+            Dict('step/phase/fallbackFactorAvailable', default=None),
+            Dict('phase/fallbackFactorAvailable', default=None),
+        )(self.doc)
+
     def get_authentication_method_type(self):
         return self.get_authentication_method_info()['type']
 
@@ -182,8 +202,14 @@ class AuthenticationMethodPage(JsonPage):
         # AUTHENTICATION_LOCKED is a BrowserIncorrectPassword because there is a key
         # 'unlockingDate', in the json, that tells when the account will be unlocked.
         # So it does not require any action from the user and is automatic.
-        if error in ('FAILED_AUTHENTICATION', 'AUTHENTICATION_LOCKED', 'AUTHENTICATION_FAILED'):
-            raise BrowserIncorrectPassword()
+        if error == 'AUTHENTICATION_LOCKED':
+            message = "L'accès à votre espace a été bloqué temporairement suite à plusieurs essais infructueux."
+            if 'response' in self.doc and self.doc['response'].get('unlockingDate'):
+                unlocking_date = datetime.strptime(self.doc['response']['unlockingDate'], '%Y-%m-%dT%H:%M:%SZ')
+                message = ' '.join([message, "Il sera de nouveau disponible le %s" % unlocking_date])
+            raise BrowserIncorrectPassword(message)
+        if error in ('FAILED_AUTHENTICATION', 'AUTHENTICATION_FAILED'):
+            raise BrowserIncorrectPassword('Les identifiants renseignés sont incorrects.')
         if error in ('ENROLLMENT', ):
             raise BrowserPasswordExpired()
 
@@ -240,6 +266,47 @@ class VkImagePage(JsonPage):
 
 class ValidationPageOption(LoggedPage, HTMLPage):
     pass
+
+
+class TokenPage(JsonPage):
+    def get_access_token(self):
+        return Dict('access_token')(self.doc)
+
+
+class LoginApi(JsonPage):
+    def get_cdetab(self):
+        return Dict('characteristics/bankId')(self.doc)
+
+    def get_connection_type(self):
+        user_types = {
+            'part': 'part',
+            'personne protégé': 'pp',
+            'personne morale': 'ent',
+            'ei': 'pro',
+        }
+        user_subscriptions = []
+        for sub in self.doc['characteristics']['subscribeTypeItems']:
+            # MapIn because it can be "Abonnement Particulier" for example
+            user_subscriptions.append(MapIn(self.doc, user_types).filter(sub['label'].lower()))
+
+        if len(user_subscriptions) == 2:
+            # Multi spaces
+            if 'part' in user_subscriptions:
+                if not self.browser.nuser:
+                    return 'part'
+                else:
+                    # If user gives nuser we must go to ent/pro/pp website
+                    return [sub for sub in user_subscriptions if sub != 'part'][0]
+            else:
+                # Never seen this case yet
+                # All these spaces need nuser
+                # But we don't know which one to go
+                raise AssertionError('There are 2 spaces without part')
+
+        elif len(user_subscriptions) > 2:
+            raise AssertionError('There are 3 spaces, need to check how to choose the good one')
+
+        return user_subscriptions[0]
 
 
 class LoginTokensPage(JsonPage):
@@ -343,7 +410,10 @@ class MessagePage(GarbagePage):
 
 class _LogoutPage(HTMLPage):
     def on_load(self):
-        raise BrowserUnavailable(CleanText('//*[@class="messErreur"]')(self.doc))
+        message = CleanText('//*[@class="messErreur"]')(self.doc)
+        if 'votre identifiant client et votre code confidentiel' in message:
+            raise BrowserIncorrectPassword(message)
+        raise BrowserUnavailable(message)
 
 
 class ErrorPage(_LogoutPage):
@@ -485,10 +555,12 @@ class IndexPage(LoggedPage, BasePage):
         return bool(CleanText('//span[contains(text(), "Authentification non rejouable")]')(self.doc))
 
     def check_no_loans(self):
-        return (
-            not bool(CleanText('//table[@class="menu"]//div[contains(., "Crédits")]')(self.doc))
-            and not bool(CleanText('//table[@class="header-navigation_main"]//a[contains(., "Crédits")]')(self.doc))
-        )
+        return not any((
+            CleanText('//table[@class="menu"]//div[contains(., "Crédits")]')(self.doc),
+            CleanText(
+                '//table[@class="header-navigation_main"]//a[contains(@href, "CRESYNT0")]'
+            )(self.doc),
+        ))
 
     def check_measure_accounts(self):
         return not CleanText(
@@ -579,7 +651,17 @@ class IndexPage(LoggedPage, BasePage):
         if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP):
             account.ownership = AccountOwnership.OWNER
 
-        balance = balance or self.get_balance(account)
+        if not balance:
+            try:
+                balance = self.get_balance(account)
+            except BrowserUnavailable as e:
+                if 'erreur_technique' in e.response.url:
+                    # Details account are not accessible and navigation is broken here
+                    # This account must be skipped
+                    self.logger.warning('Could not access to %s details: we skip it', account.label)
+                    self.browser.do_login()
+                    return
+                raise
 
         if not empty(balance):
             account.balance = Decimal(FrenchTransaction.clean_amount(balance))
@@ -894,6 +976,11 @@ class IndexPage(LoggedPage, BasePage):
         form['__EVENTTARGET'] = eventtarget
         form['m_ScriptManager'] = scriptmanager
         fix_form(form)
+
+        # For Pro users, after several redirections, leading to GarbagePage,
+        # baseurl can be back to Par users URL, when this form must be submitted.
+        self.browser.url = urljoin(self.browser.BASEURL, form.url)
+
         form.submit()
 
     def go_levies(self, account_id=None):

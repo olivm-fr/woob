@@ -23,7 +23,6 @@ from __future__ import unicode_literals
 
 import re
 from decimal import Decimal
-from collections import OrderedDict
 
 from weboob.capabilities.bank import CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound
 from weboob.capabilities.wealth import CapBankWealth
@@ -36,7 +35,7 @@ from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.base import find_object
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
+from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .proxy_browser import ProxyBrowser
 
@@ -51,24 +50,12 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
     DESCRIPTION = 'Caisse d\'Épargne'
     LICENSE = 'LGPLv3+'
     BROWSER = ProxyBrowser
-    website_choices = {
-        'www.caisse-epargne.fr': u"Caisse d'Épargne",
-        'www.banquebcp.fr': u'Banque BCP',
-    }
-    website_choices = OrderedDict(
-        [
-            (k, u'%s (%s)' % (v, k))
-            for k, v in sorted(
-                website_choices.items(),
-                key=lambda k_v: (k_v[1], k_v[0])
-            )
-        ]
-    )
     CONFIG = BackendConfig(
-        Value('website', label='Banque', choices=website_choices, default='www.caisse-epargne.fr'),
         ValueBackendPassword('login', label='Identifiant client', masked=False),
         ValueBackendPassword('password', label='Code personnel', regexp=r'\d+'),
         Value('nuser', label='User ID (optional)', default='', regexp=r'[A-Z0-9]{0,8}'),
+        ValueTransient('emv_otp', regexp=r'\d{8}'),
+        ValueTransient('request_information'),
     )
 
     accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.OTHER,)
@@ -76,9 +63,9 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
     def create_default_browser(self):
         return self.create_browser(
             nuser=self.config['nuser'].get(),
+            config=self.config,
             username=self.config['login'].get(),
             password=self.config['password'].get(),
-            domain=self.config['website'].get(),
             weboob=self.weboob
         )
 

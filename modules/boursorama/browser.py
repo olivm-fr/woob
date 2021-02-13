@@ -21,26 +21,31 @@
 
 from __future__ import unicode_literals
 
-import requests
-
 from datetime import date, datetime
+import re
+
 from dateutil.relativedelta import relativedelta
+import requests
 
 from weboob.browser.retry import login_method, retry_on_logout, RetryLoginBrowser
 from weboob.browser.browsers import need_login, TwoFactorBrowser
 from weboob.browser.url import URL
-from weboob.exceptions import BrowserIncorrectPassword, BrowserHTTPNotFound, NoAccountsException, BrowserUnavailable
+from weboob.exceptions import (
+    BrowserIncorrectPassword, BrowserHTTPNotFound, NoAccountsException,
+    BrowserUnavailable, ActionNeeded,
+)
 from weboob.browser.exceptions import LoggedOut, ClientError
 from weboob.capabilities.bank import (
     Account, AccountNotFound, TransferError, TransferInvalidAmount,
     TransferInvalidEmitter, TransferInvalidLabel, TransferInvalidRecipient,
     AddRecipientStep, Rate, TransferBankError, AccountOwnership, RecipientNotFound,
     AddRecipientTimeout, TransferDateType, Emitter, TransactionType,
+    AddRecipientBankError,
 )
-from weboob.capabilities.base import empty, find_object
+from weboob.capabilities.base import NotLoaded, empty, find_object, strict_find_object
 from weboob.capabilities.contact import Advisor
 from weboob.tools.value import Value
-from weboob.tools.compat import basestring, urlsplit
+from weboob.tools.compat import urlsplit
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 from weboob.tools.capabilities.bank.bank_transfer import sorted_transfers
 
@@ -48,13 +53,15 @@ from .pages import (
     VirtKeyboardPage, AccountsPage, AsvPage, HistoryPage, AuthenticationPage,
     MarketPage, LoanPage, SavingMarketPage, ErrorPage, IncidentPage, IbanPage, ProfilePage, ExpertPage,
     CardsNumberPage, CalendarPage, HomePage, PEPPage,
-    TransferAccounts, TransferRecipients, TransferCharac, TransferConfirm, TransferSent,
+    TransferAccounts, TransferRecipients, TransferCharacteristics, TransferConfirm, TransferSent,
     AddRecipientPage, StatusPage, CardHistoryPage, CardCalendarPage, CurrencyListPage, CurrencyConvertPage,
-    AccountsErrorPage, NoAccountPage, TransferMainPage, PasswordPage, NewTransferRecipients,
-    NewTransferAccounts, CardSumDetailPage,
+    AccountsErrorPage, NoAccountPage, TransferMainPage, PasswordPage, NewTransferWizard,
+    NewTransferEstimateFees, NewTransferConfirm, NewTransferSent, CardSumDetailPage, MinorPage,
 )
 from .transfer_pages import TransferListPage, TransferInfoPage
-
+from .document_pages import (
+    BankIdentityPage, BankStatementsPage, PdfDocumentPage,
+)
 
 __all__ = ['BoursoramaBrowser']
 
@@ -71,6 +78,10 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
 
     home = URL('/$', HomePage)
     keyboard = URL(r'/connexion/clavier-virtuel\?_hinclude=1', VirtKeyboardPage)
+    # following URL has to be declared early because there are two other URL with the same url
+    # PdfDocumentPage has been declared with a is_here attribute to be differentiated to the 2 others
+    # (the two other pages seem to be in csv format)
+    pdf_document_page = URL(r'https://api.boursorama.com/services/api/files/download.phtml.*', PdfDocumentPage)
     status = URL(r'/aide/messages/dashboard\?showza=0&_hinclude=1', StatusPage)
     calendar = URL('/compte/cav/.*/calendrier', CalendarPage)
     card_calendar = URL('https://api.boursorama.com/services/api/files/download.phtml.*', CardCalendarPage)
@@ -79,8 +90,14 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         '/infos-profil',
         ErrorPage
     )
-    login = URL(r'/connexion/saisie-mot-de-passe', PasswordPage)
-
+    login = URL(
+        r'/connexion/saisie-mot-de-passe',
+        # When getting logged out, we get redirected to
+        # either /connexion/ or /connexion/?ubiquite=1
+        r'/connexion/(\?ubiquite=1)?$',
+        PasswordPage
+    )
+    minor = URL(r'/connexion/mineur', MinorPage)
     accounts = URL(r'/dashboard/comptes\?_hinclude=300000', AccountsPage)
     accounts_error = URL(r'/dashboard/comptes\?_hinclude=300000', AccountsErrorPage)
     pro_accounts = URL(r'/dashboard/comptes-professionnels\?_hinclude=1', AccountsPage)
@@ -123,18 +140,9 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/nouveau/(?P<id>\w+)/2',
         TransferRecipients
     )
-    new_transfer_accounts = URL(
-        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/?$',
-        r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/1',
-        NewTransferAccounts
-    )
-    new_recipients_page = URL(
-        r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/2',
-        NewTransferRecipients
-    )
-    transfer_charac = URL(
+    transfer_characteristics = URL(
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/nouveau/(?P<id>\w+)/3',
-        TransferCharac
+        TransferCharacteristics
     )
     transfer_confirm = URL(
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/nouveau/(?P<id>\w+)/4',
@@ -143,6 +151,28 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
     transfer_sent = URL(
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/nouveau/(?P<id>\w+)/5',
         TransferSent
+    )
+    # transfer_type should be one of : "immediat", "programme"
+    new_transfer_wizard = URL(
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/(?P<transfer_type>immediat|programme)/nouveau/?$',
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/(?P<step>[1-6])$',
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/programme/nouveau/(?P<id>\w+)/(?P<step>[1-7])$',
+        NewTransferWizard
+    )
+    new_transfer_estimate_fees = URL(
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/7$',
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/programme/nouveau/(?P<id>\w+)/8$',
+        NewTransferEstimateFees
+    )
+    new_transfer_confirm = URL(
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/[78]$',
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/programme/nouveau/(?P<id>\w+)/[89]$',
+        NewTransferConfirm
+    )
+    new_transfer_sent = URL(
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/immediat/nouveau/(?P<id>\w+)/9$',
+        r'/compte/(?P<acc_type>[^/]+)/(?P<webid>\w+)/virements/programme/nouveau/(?P<id>\w+)/10$',
+        NewTransferSent
     )
     rcpt_page = URL(
         r'/compte/(?P<type>[^/]+)/(?P<webid>\w+)/virements/comptes-externes/nouveau/(?P<id>\w+)/\d',
@@ -186,12 +216,14 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         CurrencyConvertPage
     )
 
+    statements_page = URL(r'/documents/releves', BankStatementsPage)
+    rib_page = URL(r'/documents/rib', BankIdentityPage)
+
     __states__ = ('auth_token', 'recipient_form',)
 
     def __init__(self, config=None, *args, **kwargs):
         self.config = config
         self.auth_token = None
-        self.accounts_list = None
         self.cards_list = None
         self.deferred_card_calendar = None
         self.recipient_form = None
@@ -251,23 +283,36 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         self.login.go()
         self.page.enter_password(self.username, self.password)
 
-        if self.error.is_here():
+        if self.minor.is_here():
+            raise NoAccountsException(self.page.get_error_message())
+        elif self.error.is_here():
             raise BrowserIncorrectPassword()
         elif self.login.is_here():
             error = self.page.get_error()
             assert error, 'Should not be on login page without error message'
 
-            wrongpass_messages = (
-                'Identifiant ou mot de passe invalide',
-                "Erreur d'authentification",
-                "Cette valeur n'est pas valide",
-                "votre identifiant ou votre mot de passe n'est pas valide",
+            is_wrongpass = re.search(
+                "Identifiant ou mot de passe invalide"
+                + "|Erreur d'authentification"
+                + "|Cette valeur n'est pas valide"
+                + "|votre identifiant ou votre mot de passe n'est pas valide",
+                error
             )
 
-            if 'vous pouvez actuellement rencontrer des difficultés pour accéder à votre Espace Client' in error:
+            is_website_unavailable = re.search(
+                "vous pouvez actuellement rencontrer des difficultés pour accéder à votre Espace Client"
+                + "|Une erreur est survenue. Veuillez réessayer ultérieurement"
+                + "|Oups, Il semble qu'une erreur soit survenue de notre côté",
+                error
+            )
+
+            if is_website_unavailable:
                 raise BrowserUnavailable()
-            elif any(msg in error for msg in wrongpass_messages):
+            elif is_wrongpass:
                 raise BrowserIncorrectPassword(error)
+            elif "pour changer votre mot de passe" in error:
+                # this popup appears after few wrongpass errors and requires a password change
+                raise ActionNeeded(error)
 
             raise AssertionError('Unhandled error message : "%s"' % error)
 
@@ -278,36 +323,37 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
     def do_login(self):
         return super(BoursoramaBrowser, self).do_login()
 
-    def ownership_guesser(self):
-        ownerless_accounts = [account for account in self.accounts_list if empty(account.ownership)]
+    def ownership_guesser(self, accounts_list):
+        ownerless_accounts = [account for account in accounts_list if empty(account.ownership)]
 
-        # On Boursorama website, all mandatory accounts have the real owner name in their label, and
-        # children names are findable in the PSU profile.
-        self.profile_children.go()
-        children_names = self.page.get_children_firstnames()
+        if ownerless_accounts:
+            # On Boursorama website, all mandatory accounts have the real owner name in their label, and
+            # children names are findable in the PSU profile.
+            self.profile_children.go()
+            children_names = self.page.get_children_firstnames()
 
-        for ownerless_account in ownerless_accounts:
-            for child_name in children_names:
-                if child_name in ownerless_account.label:
-                    ownerless_account.ownership = AccountOwnership.ATTORNEY
-                    break
+            for ownerless_account in ownerless_accounts:
+                for child_name in children_names:
+                    if child_name in ownerless_account.label:
+                        ownerless_account.ownership = AccountOwnership.ATTORNEY
+                        break
 
         # If there are two deferred card for with the same parent account, we assume that's the parent checking
         # account is a 'CO_OWNER' account
         parent_accounts = []
-        for account in self.accounts_list:
+        for account in accounts_list:
             if account.type == Account.TYPE_CARD and empty(account.parent.ownership):
                 if account.parent in parent_accounts:
                     account.parent.ownership = AccountOwnership.CO_OWNER
                 parent_accounts.append(account.parent)
 
         # We set all accounts without ownership as if they belong to the credential owner
-        for account in self.accounts_list:
+        for account in accounts_list:
             if empty(account.ownership) and account.type != Account.TYPE_CARD:
                 account.ownership = AccountOwnership.OWNER
 
         # Account cards should be set with the same ownership of their parents accounts
-        for account in self.accounts_list:
+        for account in accounts_list:
             if account.type == Account.TYPE_CARD:
                 account.ownership = account.parent.ownership
 
@@ -320,18 +366,20 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
     def get_accounts_list(self):
         self.status.go()
 
+        accounts_list = None  # necessary to loop again after being logged out
+
         exc = None
         for _ in range(3):
-            if self.accounts_list is not None:
+            if accounts_list is not None:
                 break
 
-            self.accounts_list = []
-            self.loans_list = []
+            accounts_list = []
+            loans_list = []
             # Check that there is at least one account for this user
             has_account = False
             self.pro_accounts.go()
             if self.pro_accounts.is_here():
-                self.accounts_list.extend(self.page.iter_accounts())
+                accounts_list.extend(self.get_filled_accounts())
                 has_account = True
             else:
                 # We dont want to let has_account=False if we landed on an unknown page
@@ -343,11 +391,11 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             except BrowserUnavailable as e:
                 self.logger.warning('par accounts seem unavailable, retrying')
                 exc = e
-                self.accounts_list = None
+                accounts_list = None
                 continue
             else:
                 if self.accounts.is_here():
-                    self.accounts_list.extend(self.page.iter_accounts())
+                    accounts_list.extend(self.get_filled_accounts())
                     has_account = True
                 else:
                     # We dont want to let has_account=False if we landed on an unknown page
@@ -360,18 +408,18 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
                 # if we landed twice on NoAccountPage, it means there is neither pro accounts nor pp accounts
                 raise NoAccountsException()
 
-            for account in list(self.accounts_list):
+            for account in accounts_list:
                 if account.type == Account.TYPE_LOAN:
                     # Loans details are present on another page so we create
                     # a Loan object and remove the corresponding Account:
                     self.location(account.url)
                     loan = self.page.get_loan()
                     loan.url = account.url
-                    self.loans_list.append(loan)
-                    self.accounts_list.remove(account)
-            self.accounts_list.extend(self.loans_list)
+                    loans_list.append(loan)
+                    accounts_list.remove(account)
+            accounts_list.extend(loans_list)
 
-            self.cards_list = [acc for acc in self.accounts_list if acc.type == Account.TYPE_CARD]
+            self.cards_list = [acc for acc in accounts_list if acc.type == Account.TYPE_CARD]
             if self.cards_list:
                 self.go_cards_number(self.cards_list[0].url)
                 if self.cards.is_here():
@@ -379,7 +427,7 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             # Cards without a number are not activated yet:
             for card in self.cards_list:
                 if not card.number:
-                    self.accounts_list.remove(card)
+                    accounts_list.remove(card)
 
             type_with_iban = (
                 Account.TYPE_CHECKING,
@@ -387,14 +435,14 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
                 Account.TYPE_MARKET,
                 Account.TYPE_PEA,
             )
-            for account in self.accounts_list:
+            for account in accounts_list:
                 if account.type in type_with_iban:
                     account.iban = self.iban.go(webid=account._webid).get_iban()
 
             for card in self.cards_list:
                 checking, = [
                     account
-                    for account in self.accounts_list
+                    for account in accounts_list
                     if account.type == Account.TYPE_CHECKING and account.url in card.url
                 ]
                 card.parent = checking
@@ -402,16 +450,43 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         if exc:
             raise exc
 
-        self.ownership_guesser()
-        return self.accounts_list
+        self.ownership_guesser(accounts_list)
+        return accounts_list
 
-    def get_account(self, id):
-        assert isinstance(id, basestring)
+    def get_filled_accounts(self):
+        accounts_list = []
+        for account in self.page.iter_accounts():
+            try:
+                self.location(account.url)
+            except requests.exceptions.HTTPError as e:
+                # We do not yield life insurance accounts with a 404 error. Since we have verified, that
+                # it is a website scoped problem and not a bad request from our part.
+                if (
+                    e.response.status_code == 404
+                    and account.type == Account.TYPE_LIFE_INSURANCE
+                ):
+                    self.logger.warning(
+                        '404 ! Broken link for life insurance account (%s). Account will be skipped',
+                        account.label
+                    )
+                    continue
+                raise
 
-        for a in self.get_accounts_list():
-            if a.id == id:
-                return a
-        return None
+            self.page.fill_account(obj=account)
+            if account.id:
+                accounts_list.append(account)
+        return accounts_list
+
+    def get_account(self, account_id=None, account_iban=None):
+        acc_list = self.get_accounts_list()
+        account = strict_find_object(acc_list, id=account_id)
+        if not account:
+            account = strict_find_object(acc_list, iban=account_iban)
+        return account
+
+    def get_opening_date(self, account_url):
+        self.location(account_url)
+        return self.page.fetch_opening_date()
 
     def get_debit_date(self, debit_date):
         for i, j in zip(self.deferred_card_calendar, self.deferred_card_calendar[1:]):
@@ -423,7 +498,7 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
     def get_history(self, account, coming=False):
         if account.type in (Account.TYPE_LOAN, Account.TYPE_CONSUMER_CREDIT) or '/compte/derive' in account.url:
             return []
-        if account.type is Account.TYPE_SAVINGS and u"PLAN D'ÉPARGNE POPULAIRE" in account.label:
+        if account.type is Account.TYPE_SAVINGS and "PLAN D'ÉPARGNE POPULAIRE" in account.label:
             return []
         if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_MARKET):
             return self.get_invest_transactions(account, coming)
@@ -445,17 +520,21 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
                 raise e
 
     def get_regular_transactions(self, account, coming):
-        if not coming:
-            # We look for 3 years of history.
-            params = {}
-            params['movementSearch[toDate]'] = (date.today() + relativedelta(days=40)).strftime('%d/%m/%Y')
-            params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
-            params['movementSearch[selectedAccounts][]'] = account._webid
-            if self.otp_location('%s/mouvements' % account.url.rstrip('/'), params=params) is None:
-                return
+        # We look for 3 years of history.
+        params = {}
+        params['movementSearch[toDate]'] = (date.today() + relativedelta(days=40)).strftime('%d/%m/%Y')
+        params['movementSearch[fromDate]'] = (date.today() - relativedelta(years=3)).strftime('%d/%m/%Y')
+        params['movementSearch[selectedAccounts][]'] = account._webid
+        if self.otp_location('%s/mouvements' % account.url.rstrip('/'), params=params) is None:
+            return
 
-            for transaction in self.page.iter_history():
+        for transaction in self.page.iter_history():
+            if coming == transaction._is_coming:
                 yield transaction
+
+            if coming and not transaction._is_coming:
+                # end of coming, this is history
+                break
 
     def get_html_past_card_transactions(self, account):
         """ Get card transactions from parent account page """
@@ -569,11 +648,11 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
     def get_advisor(self):
         # same for everyone
         advisor = Advisor()
-        advisor.name = u"Service clientèle"
-        advisor.phone = u"0146094949"
+        advisor.name = "Service clientèle"
+        advisor.phone = "0146094949"
         return iter([advisor])
 
-    def go_recipients_list(self, account_url, account_id):
+    def go_recipients_list(self, account_url, account_id, for_scheduled=False):
         # url transfer preparation
         url = urlsplit(account_url)
         parts = [part for part in url.path.split('/') if part]
@@ -582,20 +661,33 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         account_type = parts[1]  # cav, ord, epargne ...
         account_webid = parts[-1]
 
-        self.transfer_main_page.go(acc_type=account_type, webid=account_webid)  # may raise a BrowserHTTPNotFound
+        # may raise a BrowserHTTPNotFound
+        self.transfer_main_page.go(acc_type=account_type, webid=account_webid)
 
         # can check all account available transfer option
         if self.transfer_main_page.is_here():
             self.transfer_accounts.go(acc_type=account_type, webid=account_webid)
 
         if self.transfer_accounts.is_here():
-            self.page.submit_account(account_id)  # may raise AccountNotFound
+            # may raise AccountNotFound
+            self.page.submit_account(account_id)
         elif self.transfer_main_page.is_here():
-            self.new_transfer_accounts.go(acc_type=account_type, webid=account_webid)
-            self.page.submit_account(account_id)  # may raise AccountNotFound
+            if for_scheduled:
+                transfer_type = 'programme'
+            else:
+                transfer_type = 'immediat'
+            self.new_transfer_wizard.go(
+                acc_type=account_type,
+                webid=account_webid,
+                transfer_type=transfer_type
+            )
+            # may raise AccountNotFound
+            self.page.submit_account(account_id)
+
+        return account_type, account_webid
 
     @need_login
-    def iter_transfer_recipients(self, account):
+    def iter_transfer_recipients(self, account, for_scheduled=False):
         if account.type in (Account.TYPE_LOAN, Account.TYPE_LIFE_INSURANCE):
             return []
 
@@ -606,18 +698,20 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         assert account.url, 'Account should have an url to access its recipients'
 
         try:
-            self.go_recipients_list(account.url, account.id)
+            self.go_recipients_list(account.url, account.id, for_scheduled)
         except (BrowserHTTPNotFound, AccountNotFound):
             return []
 
         assert (
             self.recipients_page.is_here()
-            or self.new_recipients_page.is_here()
+            or self.new_transfer_wizard.is_here()
         ), 'Should be on recipients page'
 
         return self.page.iter_recipients()
 
     def check_basic_transfer(self, transfer):
+        if transfer.date_type == TransferDateType.PERIODIC:
+            raise NotImplementedError('Periodic transfer is not implemented')
         if transfer.amount <= 0:
             raise TransferInvalidAmount('transfer amount must be positive')
         if transfer.recipient_id == transfer.account_id:
@@ -627,35 +721,73 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
 
     @need_login
     def init_transfer(self, transfer, **kwargs):
+        # Transfer_date_type is set and used only for the new transfer wizard flow
+        # the support for the old transfer wizard is left untouched as much as possible
+        # until it can be removed.
+        transfer_date_type = transfer.date_type
+        if empty(transfer_date_type):
+            if not empty(transfer.exec_date) and transfer.exec_date > date.today():
+                transfer_date_type = TransferDateType.DEFERRED
+            else:
+                transfer_date_type = TransferDateType.FIRST_OPEN_DAY
+
+        is_scheduled = (transfer_date_type in [TransferDateType.DEFERRED, TransferDateType.PERIODIC])
+
         self.check_basic_transfer(transfer)
 
-        account = self.get_account(transfer.account_id)
+        account = self.get_account(transfer.account_id, transfer.account_iban)
         if not account:
             raise AccountNotFound()
 
-        recipients = list(self.iter_transfer_recipients(account))
+        recipients = list(self.iter_transfer_recipients(account, is_scheduled))
         if not recipients:
             raise TransferInvalidEmitter('The account cannot emit transfers')
 
         recipients = [rcpt for rcpt in recipients if rcpt.id == transfer.recipient_id]
+        if len(recipients) == 0 and not empty(transfer.recipient_iban):
+            # try to find recipients by iban:
+            recipients = [rcpt for rcpt in recipients
+                          if not empty(rcpt.iban) and rcpt.iban == transfer.recipient_iban]
         if len(recipients) == 0:
             raise TransferInvalidRecipient('The recipient cannot be used with the emitter account')
         assert len(recipients) == 1
 
-        if self.new_recipients_page.is_here():
-            raise NotImplementedError('The new transfer pages are not yet implemented')
-
         self.page.submit_recipient(recipients[0]._tempid)
-        assert self.transfer_charac.is_here()
 
-        self.page.submit_info(transfer.amount, transfer.label, transfer.exec_date)
-        assert self.transfer_confirm.is_here()
+        if self.transfer_characteristics.is_here():
+            # Old transfer interface of Boursorama
+            self.page.submit_info(transfer.amount, transfer.label, transfer.exec_date)
+            assert self.transfer_confirm.is_here()
 
-        if self.page.need_refresh():
-            # In some case we are not yet in the transfer_charac page, you need to refresh the page
-            self.location(self.url)
-            assert not self.page.need_refresh()
-        ret = self.page.get_transfer()
+            if self.page.need_refresh():
+                # In some case we are not yet in the transfer_characteristics page, you need to refresh the page
+                self.location(self.url)
+                assert not self.page.need_refresh()
+            ret = self.page.get_transfer()
+
+        else:
+            # New transfer interface
+            assert self.new_transfer_wizard.is_here()
+            self.page.submit_amount(transfer.amount)
+
+            assert self.new_transfer_wizard.is_here()
+            if is_scheduled:
+                self.page.submit_programme_date_type(transfer_date_type)
+
+            self.page.submit_info(transfer.label, transfer_date_type, transfer.exec_date)
+
+            fees = NotLoaded
+            if self.new_transfer_estimate_fees.is_here():
+                fees = self.page.get_transfer_fee()
+                self.page.submit()
+
+            assert self.new_transfer_confirm.is_here()
+            transfer_error = self.page.get_errors()
+            if transfer_error:
+                raise TransferBankError(message=transfer_error)
+            ret = self.page.get_transfer()
+
+        ## Last checks to ensure that the confirmation matches what was expected
 
         # at this stage, the site doesn't show the real ids/ibans, we can only guess
         if recipients[0].label != ret.recipient_label:
@@ -674,20 +806,24 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         ret.recipient_iban = recipients[0].iban
 
         if account.label != ret.account_label:
-            raise TransferError('Account label changed during transfer')
+            raise TransferError('Account label changed during transfer (from "%s" to "%s")'
+                                % (account.label, ret.account_label))
 
         ret.account_id = account.id
         ret.account_iban = account.iban
+
+        if not empty(fees) and empty(ret.fees):
+            ret.fees = fees
 
         return ret
 
     @need_login
     def execute_transfer(self, transfer, **kwargs):
-        assert self.transfer_confirm.is_here()
+        assert self.transfer_confirm.is_here() or self.new_transfer_confirm.is_here()
         self.page.submit()
 
-        assert self.transfer_sent.is_here()
-        transfer_error = self.page.get_transfer_error()
+        assert self.transfer_sent.is_here() or self.new_transfer_sent.is_here()
+        transfer_error = self.page.get_errors()
         if transfer_error:
             raise TransferBankError(message=transfer_error)
 
@@ -696,26 +832,50 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
 
     @need_login
     def init_new_recipient(self, recipient):
-        self.recipient_form = None  # so it is reset when a new recipient is added
+        # so it is reset when a new recipient is added
+        self.recipient_form = None
 
         # get url
+        # If an account was provided for the recipient, use it
+        # otherwise use the first checking account available
         account = None
         for account in self.get_accounts_list():
-            if account.url:
+            if not account.url:
+                continue
+            if recipient.origin_account_id is None:
+                if account.type == Account.TYPE_CHECKING:
+                    break
+            elif account.id == recipient.origin_account_id:
                 break
-
-        suffix = 'virements/comptes-externes/nouveau'
-        if account.url.endswith('/'):
-            target = account.url + suffix
+            elif (not empty(recipient.origin_account_iban)
+                  and not empty(account.iban)
+                  and account.iban == recipient.origin_account_iban):
+                break
         else:
-            target = account.url + '/' + suffix
+            raise AddRecipientBankError(message="Compte ne permettant pas l'ajout de bénéficiaires")
 
+        try:
+            self.go_recipients_list(account.url, account.id)
+        except AccountNotFound:
+            raise AddRecipientBankError(message="Compte ne permettant pas d'emettre des virements")
+
+        assert (
+            self.recipients_page.is_here()
+            or self.new_transfer_wizard.is_here()
+        ), 'Should be on recipients page'
+
+        if not self.page.is_new_recipient_allowed():
+            raise AddRecipientBankError(message="Compte ne permettant pas l'ajout de bénéficiaires")
+
+        target = '%s/virements/comptes-externes/nouveau' % account.url.rstrip('/')
         self.location(target)
-        assert self.page.is_charac(), 'Not on the page to add recipients.'
+
+        assert self.page.is_characteristics(), 'Not on the page to add recipients.'
 
         # fill recipient form
         self.page.submit_recipient(recipient)
-        recipient.origin_account_id = account.id
+        if recipient.origin_account_id is None:
+            recipient.origin_account_id = account.id
 
         # confirm sending sms
         assert self.page.is_confirm_send_sms(), 'Cannot reach the page asking to send a sms.'
@@ -730,8 +890,9 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             self.recipient_form['account_url'] = account.url
             raise AddRecipientStep(recipient, Value('otp_sms', label='Veuillez saisir le code recu par sms'))
 
-        # if the add recipient is restarted after the sms has been confirmed recently, the sms step is not presented again
-        return self.rcpt_after_sms()
+        # if the add recipient is restarted after the sms has been confirmed recently,
+        # the sms step is not presented again
+        return self.rcpt_after_sms(recipient, account.url)
 
     def new_recipient(self, recipient, **kwargs):
         # step 2 of new_recipient
@@ -740,8 +901,9 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
             # validating the sms code directly adds the recipient
             account_url = self.send_recipient_form(kwargs['otp_sms'])
             return self.rcpt_after_sms(recipient, account_url)
+
         # step 3 of new_recipient (not always used)
-        elif 'otp_email' in kwargs:
+        if 'otp_email' in kwargs:
             account_url = self.send_recipient_form(kwargs['otp_email'])
             return self.check_and_update_recipient(recipient, account_url)
 
@@ -782,8 +944,12 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         # here we just want to return the right Recipient object.
         # We are taking it from the recipient list page
         # because there is no summary of the adding
-        self.go_recipients_list(account_url, recipient.origin_account_id)
-        return find_object(self.page.iter_recipients(), id=recipient.id, error=RecipientNotFound)
+        account = self.get_account(recipient.origin_account_id, recipient.origin_account_iban)
+        if not account:
+            raise AccountNotFound()
+
+        self.go_recipients_list(account_url, account.id)
+        return find_object(self.page.iter_recipients(), iban=recipient.iban, error=RecipientNotFound)
 
     @need_login
     def iter_transfers(self, account):
@@ -868,4 +1034,46 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         # It seems that if we give a wrong acc_type and webid to the transfer page
         # we are redirected to a page where we can choose the emitter account
         self.transfer_accounts.go(acc_type='temp', webid='temp')
+        if self.transfer_main_page.is_here():
+            self.new_transfer_wizard.go(acc_type='temp', webid='temp', transfer_type='immediat')
         return self.page.iter_emitters()
+
+    @need_login
+    def iter_subscriptions(self):
+        self.statements_page.go()
+
+        pagination = []
+        for account_key in self.page.account_keys:
+            r = self.open(
+                '/documents/comptes-doc-type',
+                params={'accountKey': account_key}
+            )
+            pagination.append(
+                {
+                    "account": account_key,
+                    "type": list(r.json().keys())[0],
+                }
+            )
+
+        for page_info in pagination:
+            page = self.page.submit_form(**page_info)
+            yield page.get_subscription()
+
+    @need_login
+    def iter_documents(self, subscription):
+        self.statements_page.go()
+        r = self.open(
+            '/documents/comptes-doc-type',
+            params={'accountKey': subscription._account_key}
+        )
+        for acctype in r.json().keys():
+            page = self.page.submit_form(
+                account=subscription._account_key,
+                type=acctype,
+            )
+            for doc in page.iter_documents(subid=subscription.id, statement_type=acctype):
+                yield doc
+
+        self.rib_page.go()
+        for doc in self.page.get_document(subid=subscription.id):
+            yield doc

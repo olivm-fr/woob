@@ -29,7 +29,7 @@ from weboob.capabilities.wealth import CapBankWealth
 from weboob.capabilities.base import find_object
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, Value
+from weboob.tools.value import ValueBackendPassword, Value, ValueTransient
 
 from .bred import BredBrowser
 from .dispobank import DispoBankBrowser
@@ -51,6 +51,10 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
         Value('website', label="Site d'accès", default='bred',
               choices={'bred': 'BRED', 'dispobank': 'DispoBank'}),
         Value('accnum', label='Numéro du compte bancaire (optionnel)', default='', masked=False),
+        ValueTransient('request_information'),
+        ValueTransient('resume'),
+        ValueTransient('otp_sms'),
+        ValueTransient('otp_app'),
     )
 
     BROWSERS = {
@@ -58,13 +62,15 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
         'dispobank': DispoBankBrowser,
     }
 
+    def get_website(self):
+        return self.config['website'].get()
+
     def create_default_browser(self):
-        self.BROWSER = self.BROWSERS[self.config['website'].get()]
+        self.BROWSER = self.BROWSERS[self.get_website()]
 
         return self.create_browser(
             self.config['accnum'].get().replace(' ', '').zfill(11),
-            self.config['login'].get(),
-            self.config['password'].get(),
+            self.config,
             weboob=self.weboob,
         )
 
@@ -90,7 +96,7 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
         return self.browser.get_profile()
 
     def fill_account(self, account, fields):
-        if self.config['website'].get() != 'bred':
+        if self.get_website() != 'bred':
             return
 
         self.browser.fill_account(account, fields)
@@ -100,7 +106,7 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
     }
 
     def iter_transfer_recipients(self, account):
-        if self.config['website'].get() != 'bred':
+        if self.get_website() != 'bred':
             raise NotImplementedError()
 
         if not isinstance(account, Account):
@@ -109,7 +115,7 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
         return self.browser.iter_transfer_recipients(account)
 
     def new_recipient(self, recipient, **params):
-        if self.config['website'].get() != 'bred':
+        if self.get_website() != 'bred':
             raise NotImplementedError()
 
         recipient.label = recipient.label[:32].strip()
@@ -122,7 +128,7 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
-        if self.config['website'].get() != 'bred':
+        if self.get_website() != 'bred':
             raise NotImplementedError()
 
         transfer.label = transfer.label[:140].strip()
@@ -144,6 +150,6 @@ class BredModule(Module, CapBankWealth, CapProfile, CapBankTransferAddRecipient)
         return self.browser.init_transfer(transfer, account, recipient, **params)
 
     def execute_transfer(self, transfer, **params):
-        if self.config['website'].get() != 'bred':
+        if self.get_website() != 'bred':
             raise NotImplementedError()
         return self.browser.execute_transfer(transfer, **params)

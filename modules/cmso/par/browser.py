@@ -22,14 +22,17 @@
 from __future__ import unicode_literals
 
 import time
+import os
+import base64
 from datetime import date
 from functools import wraps
+from hashlib import sha256
 
 from weboob.browser.browsers import TwoFactorBrowser, URL, need_login
 from weboob.browser.exceptions import ClientError, ServerError
 from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion
 from weboob.capabilities.bank import Account, Transaction, AccountNotFound
-from weboob.capabilities.base import find_object
+from weboob.capabilities.base import find_object, empty
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
 from weboob.tools.compat import urlparse, parse_qsl
 from weboob.tools.value import Value
@@ -38,7 +41,7 @@ from weboob.tools.json import json
 from .pages import (
     LogoutPage, AccountsPage, HistoryPage, LifeinsurancePage, MarketPage,
     AdvisorPage, LoginPage, ProfilePage, RedirectInsurancePage, SpacesPage,
-    ChangeSpacePage,
+    ChangeSpacePage, ConsentPage,
 )
 from .transfer_pages import TransferInfoPage, RecipientsListPage, TransferPage, AllowedRecipientsPage
 
@@ -80,15 +83,16 @@ def retry(exc_check, tries=4):
 
 
 class CmsoParBrowser(TwoFactorBrowser):
-    __states__ = ('headers',)
-    STATE_DURATION = 1
+    __states__ = ('login_session_id', 'login_verifier', )
+    STATE_DURATION = 5  # SMS validity
     headers = None
     HAS_CREDENTIALS_ONLY = True
+    NEW_PROFILE = True
 
     BASEURL = 'https://api.cmso.com'
 
     login = URL(
-        r'/oauth-implicit/token',
+        r'/securityapi/checkuser',
         r'/auth/checkuser',
         LoginPage
     )
@@ -100,6 +104,7 @@ class CmsoParBrowser(TwoFactorBrowser):
 
     spaces = URL(r'/domiapi/oauth/json/accesAbonnement', SpacesPage)
     change_space = URL(r'/securityapi/changeSpace', ChangeSpacePage)
+    consent = URL(r'/consentapi/tpp/consents', ConsentPage)
 
     accounts = URL(r'/domiapi/oauth/json/accounts/synthese(?P<type>.*)', AccountsPage)
     history = URL(r'/domiapi/oauth/json/accounts/(?P<page>.*)', HistoryPage)
@@ -132,9 +137,16 @@ class CmsoParBrowser(TwoFactorBrowser):
     init_transfer_page = URL(r'/transfersfedesapi/api/transfers/control', TransferPage)
     execute_transfer_page = URL(r'/transfersfedesapi/api/transfers', TransferPage)
 
-    profile = URL(r'/domiapi/oauth/json/edr/infosPerson', ProfilePage)
+    profile = URL(r'/personapi/api/v2/clients/me/infos', ProfilePage)
 
     json_headers = {'Content-Type': 'application/json'}
+
+    authorization_uri = URL(r'/oauth/authorize')
+    access_token_uri = URL(r'/oauth/token')
+    authorization_codegen_uri = URL(r'/oauth/authorization-code')
+    redirect_uri = 'https://mon.cmso.com/auth/checkuser'
+    error_uri = 'https://mon.cmso.com/auth/errorauthn'
+    client_uri = 'com.arkea.cmso.siteaccessible'
 
     # Values needed for login which are specific for each arkea child
     name = 'cmso'
@@ -152,100 +164,142 @@ class CmsoParBrowser(TwoFactorBrowser):
 
         self.website = website
         self.accounts_list = []
-        self.logged = False
+        self.login_session_id = None
+        self.login_verifier = None
+        self.login_challenge = None
 
         self.AUTHENTICATION_METHODS = {
             'code': self.handle_sms,
         }
 
+    def code_challenge(self, verifier):
+        digest = sha256(verifier.encode('utf8')).digest()
+        return base64.b64encode(digest).decode('ascii')
+
+    def code_verifier(self):
+        return base64.b64encode(os.urandom(128)).decode('ascii')
+
+    def get_pkce_codes(self):
+        verifier = self.code_verifier()
+        return verifier, self.code_challenge(verifier)
+
     def init_login(self):
         self.location(self.original_site)
-        if self.headers:
-            self.session.headers = self.headers
-        else:
-            self.set_profile(self.PROFILE)  # reset headers but don't clear them
-            self.session.cookies.clear()
-            self.accounts_list = []
-
-            data = self.get_login_data()
-            self.login.go(data=data)
-
-            if self.logout.is_here():
-                raise BrowserIncorrectPassword()
-
-            self.update_authentication_headers()
-
-    def send_sms(self):
-        contact_information = self.location('/securityapi/person/coordonnees', method='POST').json()
-
-        for phone_key in ('portable', 'portablePro',):
-            if phone_key in contact_information:
-                break
-        else:
-            raise AssertionError('Phone not found in the JSON response')
-        data = {
-            'template': '',
-            'typeMedia': 'SMS',  # can be SVI for interactive voice server
-            'valueMedia': contact_information[phone_key]['numeroCrypte'],
+        self.login_verifier, self.login_challenge = self.get_pkce_codes()
+        params = {
+            'redirect_uri': self.redirect_uri,
+            'client_id': self.arkea_client_id,
+            'response_type': 'code',
+            'error_uri': self.error_uri,
+            'code_challenge_method': 'S256',
+            'code_challenge': self.login_challenge,
         }
-        self.location('/securityapi/otp/generate', json=data)
+        response = self.authorization_uri.go(params=params)
 
-        raise BrowserQuestion(Value('code', label='Enter the SMS code'))
+        # get session_id in param location url
+        location_params = dict(parse_qsl(urlparse(self.url).fragment))
+        self.login_session_id = location_params['session_id']
+
+        self.set_profile(self.PROFILE)  # reset headers but don't clear them
+
+        # authorization-code generation
+        data = self.get_authcode_data()
+        headers = self.get_tpp_headers(data)
+
+        try:
+            response = self.authorization_codegen_uri.go(
+                data=data,
+                params={'session_id': self.login_session_id},
+                headers=headers
+            )
+        except ClientError as e:
+            if e.response.status_code == 403:
+                response = e.response.json()
+
+                if response.get('error_code') == 'SCA_REQUIRED':
+                    label = 'Saisissez le code reçu par SMS'
+                    phone = response['sca_medias'][0].get('numero_masque')
+                    if phone:
+                        label += ' envoyé au %s' % phone
+                    raise BrowserQuestion(Value('code', label=label))
+            raise
+
+        location_params = dict(parse_qsl(urlparse(response.headers['Location']).fragment))
+
+        if location_params.get('error'):
+            if location_params.get('error_description') == 'authentication-failed':
+                raise BrowserIncorrectPassword()
+            # we encounter this case when an error comes from the website
+            elif location_params['error'] == 'server_error':
+                raise BrowserUnavailable()
+
+        # authentication token generation
+        data = self.get_tokengen_data(location_params['code'])
+        response = self.access_token_uri.go(json=data)
+        self.update_authentication_headers(response.json())
+
+        self.login.go(json={'espaceApplication': 'PART'})
 
     def handle_sms(self):
-        self.session.headers = self.headers
-        data = self.get_sms_data()
-        otp_validation = self.location('/securityapi/otp/authenticate', json=data).json()
-        self.session.headers['Authorization'] = 'Bearer %s' % otp_validation['access_token']
-        self.headers = self.session.headers
+        data = {
+            'access_code': self.username,
+            'password': self.code,
+            'authenticationMethod': 'SMS_MFA2',
+        }
+        headers = self.get_tpp_headers(data)
+        self.authorization_codegen_uri.go(
+            params={'session_id': self.login_session_id},
+            data=data,
+            headers=headers
+        )
+        location_params = dict(parse_qsl(urlparse(self.response.headers['Location']).fragment))
 
-    def get_sms_data(self):
-        return {
-            'otpValue': self.code,
-            'typeMedia': 'WEB',
-            'userAgent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
-            'redirectUri': '%s/auth/checkuser' % self.original_site,
-            'errorUri': '%s/auth/errorauthn' % self.original_site,
-            'clientId': 'com.arkea.%s.siteaccessible' % self.name,
-            'redirect': 'true',
+        if location_params.get('error'):
+            if location_params.get('error_description') == 'authentication-failed':
+                raise BrowserIncorrectPassword()
+            # we encounter this case when an error comes from the website
+            elif location_params['error'] == 'server_error':
+                raise BrowserUnavailable()
+
+        data = {
+            'code': location_params['code'],
+            'grant_type': 'authorization_code',
             'client_id': self.arkea_client_id,
-            'accessInfos': {
-                'efs': self.arkea,
-                'si': self.arkea_si,
-            },
+            'redirect_uri': self.redirect_uri,
+            'code_verifier': self.login_verifier,
         }
 
-    def get_login_data(self):
+        access_token = self.access_token_uri.go(json=data).json()
+        self.session.headers['Authorization'] = 'Bearer %s' % access_token['access_token']
+        self.update_authentication_headers(access_token)
+        self.login.go(json={'espaceApplication': 'PART'})
+
+    def get_authcode_data(self):
         return {
-            'client_id': self.arkea_client_id,
-            'responseType': 'token',
-            'accessCode': self.username,
+            'access_code': self.username,
             'password': self.password,
-            'clientId': 'com.arkea.%s.siteaccessible' % self.name,
-            'redirectUri': '%s/auth/checkuser' % self.original_site,
-            'errorUri': '%s/auth/errorauthn' % self.original_site,
-            'fingerprint': 'b61a924d1245beb7469fef44db132e96',
+            'space': 'PART',
         }
 
-    def update_authentication_headers(self):
-        hidden_params = dict(parse_qsl(urlparse(self.url).fragment))
+    def get_tokengen_data(self, code):
+        return {
+            'client_id': self.arkea_client_id,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'code_verifier': self.login_verifier,
+            'redirect_uri': self.redirect_uri,
+        }
 
-        self.session.headers.update({
-            'Authorization': "Bearer %s" % hidden_params['access_token'],
-            'X-ARKEA-EFS': self.arkea,
-            'X-Csrf-Token': hidden_params['access_token'],
-            'X-REFERER-TOKEN': 'RWDPART',
-        })
-        self.headers = self.session.headers
+    def get_tpp_headers(self, data=''):
+        # This method can be overload by a TPP
+        # to add specific headers and be recognize by the bank
+        return {}
 
-        scope = hidden_params.get('scope')
-
-        # if there is no scope, 2FA is not needed
-        if scope and scope == 'consent':
-            # 2FA is needed
-            # consent is the only scope that should send a sms
-            self.check_interactive()
-            self.send_sms()
+    def update_authentication_headers(self, params):
+        self.session.headers['Authorization'] = "Bearer %s" % params['access_token']
+        self.session.headers['X-ARKEA-EFS'] = self.arkea
+        self.session.headers['X-Csrf-Token'] = params['access_token']
+        self.session.headers['X-REFERER-TOKEN'] = 'RWDPART'
 
     def get_account(self, _id):
         return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
@@ -258,6 +312,7 @@ class CmsoParBrowser(TwoFactorBrowser):
 
         seen = {}
         seen_savings = {}
+        livret_ibans = {}
         owner_name = self.get_profile().name.upper()
 
         self.transfer_info.go(json={"beneficiaryType": "INTERNATIONAL"})
@@ -266,18 +321,25 @@ class CmsoParBrowser(TwoFactorBrowser):
         accounts_eligibilite_debit = self.page.get_eligibilite_debit()
 
         self.spaces.go(json={'includePart': True})
+        part_space = self.page.get_part_space()
+        if part_space is None:
+            # no par account for this connection
+            return []
         self.change_space.go(json={
             'clientIdSource': self.arkea_client_id,
             'espaceDestination': 'PART',
             'fromMobile': False,
-            'numContractDestination': self.page.get_part_space(),
+            'numContractDestination': part_space,
         })
         self.session.headers['Authorization'] = 'Bearer %s' % self.page.get_access_token()
 
         # First get all checking accounts...
+        # We might have some savings accounts here for special cases such as mandated accounts
+        # (e.g children's accounts)
         self.accounts.go(json={'typeListeCompte': 'COMPTE_SOLDE_COMPTES_CHEQUES'}, type='comptes')
         self.page.check_response()
         for key in self.page.get_keys():
+            livret_ibans.update(self.page.get_livret_ibans(key))
             for a in self.page.iter_accounts(key=key):
                 a._eligible_debit = accounts_eligibilite_debit.get(a.id, False)
                 # Can have duplicate account, avoid them
@@ -289,7 +351,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         numbers.update(self.page.get_numbers())
         page = self.accounts.go(json={}, type='epargne')
         for key in page.get_keys():
-            for a in page.iter_savings(key=key, numbers=numbers, name=owner_name):
+            for a in page.iter_savings(key=key, numbers=numbers, name=owner_name, livret_ibans=livret_ibans):
                 seen_savings[a.id] = a
                 a._eligible_debit = accounts_eligibilite_debit.get(a.id, False)
                 if a._index in seen:
@@ -375,7 +437,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         elif account.type in (Account.TYPE_PEA, Account.TYPE_MARKET):
             try:
                 self._go_market_history('historiquePortefeuille')
-                if not self.page.go_account(account.label, account._owner):
+                if not self.page.go_account(account.id):
                     return
 
                 if not self.page.go_account_full():
@@ -396,16 +458,25 @@ class CmsoParBrowser(TwoFactorBrowser):
             finally:
                 self._return_from_market()
 
-        # Getting a year of history
-        # We have to finish by "SIX_DERNIERES_SEMAINES" to get in priority the transactions with ids.
-        # In "SIX_DERNIERES_SEMAINES" you can have duplicates transactions without ids of the previous two months.
-        nbs = ["DEUX", "TROIS", "QUATRE", "CINQ", "SIX", "SEPT", "HUIT", "NEUF", "DIX", "ONZE", "DOUZE", "SIX_DERNIERES_SEMAINES"]
-        trs = []
-
         self.history.go(json={"index": account._index}, page="pendingListOperations")
-
         has_deferred_cards = self.page.has_deferred_cards()
 
+        # 1.fetch the last 6 weeks transactions but keep only the current month ones
+        # those don't have any id and include 'hier' and 'Plus tôt dans la semaine'
+        trs = []
+        self.history.go(
+            json={
+                'index': account._index,
+                'filtreOperationsComptabilisees': "SIX_DERNIERES_SEMAINES",
+            },
+            page="detailcompte"
+        )
+        for tr in self.page.iter_history(index=account._index, last_trs=True):
+            trs.append(tr)
+
+        # 2. get the month by month transactions
+        # and avoid duplicates based on ids
+        nbs = ["DEUX", "TROIS", "QUATRE", "CINQ", "SIX", "SEPT", "HUIT", "NEUF", "DIX", "ONZE", "DOUZE"]
         self.history.go(
             json={
                 'index': account._index,
@@ -414,7 +485,6 @@ class CmsoParBrowser(TwoFactorBrowser):
             page="detailcompte"
         )
         self.trs = set()
-
         for tr in self.page.iter_history(index=account._index, nbs=nbs):
             # Check for duplicates
             if tr._operationid in self.trs or (tr.id and tr.id in self.trs):
@@ -475,7 +545,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         elif account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
             try:
                 self._go_market_history('situationPortefeuille')
-                if self.page.go_account(account.label, account._owner):
+                if self.page.go_account(account.id):
                     return self.page.iter_investment()
                 return []
             finally:
@@ -490,7 +560,7 @@ class CmsoParBrowser(TwoFactorBrowser):
 
         try:
             self._go_market_history('carnetOrdre')
-            if self.page.go_account(account.label, account._owner):
+            if self.page.go_account(account.id):
                 orders_list_url = self.url
                 error_message = self.page.get_error_message()
                 if error_message:
@@ -510,15 +580,15 @@ class CmsoParBrowser(TwoFactorBrowser):
         # if a match is made with an emitter.
         self.int_recipients_list.go()
 
-        for rcpt in self.page.iter_int_recipients():
-            if rcpt.id == account._recipient_id:
-                account._type = rcpt._type
-                account._ciphered_contract_number = rcpt._ciphered_contract_number
-                return account
+        emitter = find_object(self.page.iter_int_recipients(availableFor='Debit'), id=account._recipient_id)
+        if emitter:
+            account._type = emitter._type
+            account._ciphered_contract_number = emitter._ciphered_contract_number
+        return emitter
 
     def iter_internal_recipients(self, account):
         self.int_recipients_list.go()
-        all_int_recipients = list(self.page.iter_int_recipients())
+        all_int_recipients = list(self.page.iter_int_recipients(availableFor='Credit'))
 
         # Retrieves all the ciphered contract numbers of all internal recipients.
         all_int_rcpt_contract_numbers = [rcpt._ciphered_contract_number for rcpt in all_int_recipients]
@@ -539,6 +609,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         self.ext_recipients_list.go()
         seen_ciphered_iban = set()
         for rcpt in self.page.iter_ext_recipients():
+            # cmb and cmso allows the user to add multiple times the same iban...
             if rcpt._ciphered_iban not in seen_ciphered_iban:
                 seen_ciphered_iban.add(rcpt._ciphered_iban)
                 yield rcpt
@@ -548,13 +619,18 @@ class CmsoParBrowser(TwoFactorBrowser):
         if account.type not in (Account.TYPE_CHECKING, Account.TYPE_SAVINGS, Account.TYPE_DEPOSIT):
             return
 
+        if not hasattr(account, '_recipient_id') or empty(account._recipient_id):
+            # Account does not have an iban so we cant match it with any emitter
+            # because there might be duplicates.
+            return
+
         account = self.get_and_update_emitter_account(account)
 
         # If there is no account returned, that means we were not able to find
         # the emitter matching the account. So we can't list the recipients available
         # for this account or make transfer on it.
         if not account:
-            self.logger.info('Could not make a link between emitters and account, skipping recipients for this account.')
+            self.logger.info('Either account cannot make transfers or the link between emitters and the account could not be made.')
             return
 
         # Internal recipients
@@ -656,6 +732,10 @@ class CmsoParBrowser(TwoFactorBrowser):
     @retry((ClientError, ServerError))
     @need_login
     def get_profile(self):
+        if self.NEW_PROFILE:
+            # The site changes url and method but not for all children
+            # To avoid to copy retry code, NEW_PROFILE can handle it
+            return self.profile.go().get_profile()
         return self.profile.go(json={}).get_profile()
 
     @retry((ClientError, ServerError))

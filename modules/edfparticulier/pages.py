@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2016      Edouard Lambert
+# Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a weboob module.
 #
@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from datetime import datetime
@@ -27,12 +29,16 @@ from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage, RawPage
 from weboob.browser.filters.standard import Env, Format, Date, Eval, CleanText, Regexp
 from weboob.browser.elements import ItemElement, DictElement, method
 from weboob.browser.filters.json import Dict
-from weboob.capabilities.bill import DocumentTypes, Bill, Subscription
+from weboob.capabilities.bill import Bill, Subscription
 from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.profile import Profile
 
 
 class HomePage(HTMLPage):
+    pass
+
+
+class XUIPage(HTMLPage):
     pass
 
 
@@ -60,11 +66,12 @@ class WrongPasswordPage(HTMLPage):
         script = CleanText('//script[contains(text(), "Mot de passe incorrect")]')
 
         if attempt_number > 0:
-            return Format('%s %s %s',
-                          Regexp(script, r">(Mot de passe incorrect.*?)<"),
-                          CleanText('//div[@class="arrow_box--content"]', children=False), int(attempt_number))(self.doc)
+            return Format(
+                '%s %s %s',
+                Regexp(script, r">(Mot de passe incorrect.*?)<"),
+                CleanText('//div[@class="arrow_box--content"]', children=False), int(attempt_number)
+            )(self.doc)
         return Regexp(script, r">(Vous avez atteint.*?)<")(self.doc)
-
 
 
 class WelcomePage(LoggedPage, HTMLPage):
@@ -91,8 +98,7 @@ class ProfilPage(JsonPage):
         class item(ItemElement):
             klass = Subscription
 
-            obj_subscriber = Format('%s %s', Dict('bp/identity/firstName'),
-                                             Dict('bp/identity/lastName'))
+            obj_subscriber = Format('%s %s', Dict('bp/identity/firstName'), Dict('bp/identity/lastName'))
             obj_id = Dict('number')
             obj_label = obj_id
 
@@ -115,11 +121,9 @@ class DocumentsPage(LoggedPage, JsonPage):
             klass = Bill
 
             obj_id = Format('%s_%s', Env('subid'), Dict('documentNumber'))
-            obj_date = Date(Eval(lambda t: datetime.fromtimestamp(int(t) / 1000) \
-                                 .strftime('%Y-%m-%d'), Dict('creationDate')))
+            obj_date = Date(Eval(lambda t: datetime.fromtimestamp(int(t) / 1000).strftime('%Y-%m-%d'), Dict('creationDate')))
             obj_format = 'pdf'
             obj_label = Format('Facture %s', Dict('documentNumber'))
-            obj_type = DocumentTypes.BILL
             obj_price = Env('price')
             obj_currency = 'EUR'
             obj_vat = NotAvailable
@@ -138,22 +142,23 @@ class DocumentsPage(LoggedPage, JsonPage):
             'docId': Dict('docId')(self.doc),
             'docName': Dict('docName')(self.doc),
             'numAcc': Dict('numAcc')(self.doc),
-            'parNumber': Dict('parNumber')(self.doc)
+            'parNumber': Dict('parNumber')(self.doc),
         }
 
 
 class ProfilePage(LoggedPage, JsonPage):
     def get_profile(self):
         data = self.doc['bp']
-        p = Profile()
+        profile = Profile()
 
-        p.address = '%s %s %s %s' % (data['streetNumber'], data['streetName'],
-                                     data['postCode'], data['city'])
-        p.name = '%s %s %s' % (data['civility'], data['lastName'], data['firstName'])
-        p.phone = data['mobilePhoneNumber'] or data['fixPhoneNumber']
-        p.email = data['mail']
+        profile.address = '%s %s %s %s' % (
+            data['streetNumber'], data['streetName'], data['postCode'], data['city'],
+        )
+        profile.name = '%s %s %s' % (data['civility'], data['lastName'], data['firstName'])
+        profile.phone = data['mobilePhoneNumber'] or data['fixPhoneNumber']
+        profile.email = data['mail']
 
-        return p
+        return profile
 
 
 class BillDownload(LoggedPage, RawPage):

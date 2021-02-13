@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2012  Florent Fourcot
+# Copyright(C) 2020      Vincent A
 #
 # This file is part of a weboob module.
 #
@@ -17,11 +17,10 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
 
-from .homepage import HomePage
-from .history import HistoryPage, DetailsPage
-from .login import LoginPage
-from .options import OptionsPage
-from .profile import ProfilePage
 
-__all__ = ['LoginPage', 'HomePage', 'HistoryPage', 'DetailsPage', 'OptionsPage', 'ProfilePage']
+from .module import InstagramModule
+
+
+__all__ = ['InstagramModule']

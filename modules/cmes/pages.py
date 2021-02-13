@@ -22,12 +22,12 @@ from __future__ import unicode_literals
 import re
 
 from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import ListElement, ItemElement, method
+from weboob.browser.elements import ListElement, ItemElement, method, TableElement
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Date, Regexp, Field, Currency,
-    Upper, MapIn, Eval, Title,
+    MapIn, Eval, Title, Env,
 )
-from weboob.browser.filters.html import Link
+from weboob.browser.filters.html import Link, TableCell
 from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.bank import Account
 from weboob.capabilities.wealth import Investment, Pocket
@@ -41,11 +41,6 @@ class Transaction(FrenchTransaction):
         (re.compile(r'^(?P<text>([Rr]etrait|[Pp]aiement.*))'), FrenchTransaction.TYPE_WITHDRAWAL),
         (re.compile(r'^(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
     ]
-
-
-def MyDecimal(*args, **kwargs):
-    kwargs.update(replace_dots=True, default=NotAvailable)
-    return CleanDecimal(*args, **kwargs)
 
 
 class LoginPage(HTMLPage):
@@ -82,10 +77,11 @@ class AccountsPage(LoggedPage, HTMLPage):
             balance_xpath = './/span[contains(text(), "Montant total")]/following-sibling::span'
 
             obj_label = CleanText('./tbody/tr/th//div')
-            obj_balance = MyDecimal(balance_xpath)
+            obj_balance = CleanDecimal.French(balance_xpath)
             obj_currency = Currency(balance_xpath)
             obj_type = MapIn(Field('label'), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
             obj_company_name = CleanText('(//p[contains(@class, "profil_entrep")]/text())[1]')
+            obj_number = NotAvailable
 
             def obj_id(self):
                 # Use customer number + label to build account id
@@ -94,8 +90,6 @@ class AccountsPage(LoggedPage, HTMLPage):
                     r'(\d+)$', '\\1'
                 )(self)
                 return Field('label')(self) + number
-
-            obj_number = obj_id
 
     def iter_invest_rows(self, account):
         """
@@ -116,52 +110,42 @@ class AccountsPage(LoggedPage, HTMLPage):
                 row.xpath('//div[contains(@id, "dv::s::%s")]' % id_diff[0].rsplit(':', 1)[0])[0] if id_diff else None,
             )
 
+    def get_investment_form(self):
+        form = self.get_form(id='I0:P5:F')
+        # Each investment uses the same form with a different submit input.
+        # We remove all relevant inputs and will add the one we want manually as we submit the form.
+        keys_to_remove = [key for key in form if key.startswith('_FID_')]
+        for key in keys_to_remove:
+            form.pop(key)
+        return form
+
     def iter_investments(self, account):
         for row, elem_repartition, elem_pocket, elem_diff in self.iter_invest_rows(account=account):
             inv = Investment()
             inv._account = account
-            inv._el_pocket = elem_pocket
             inv.label = CleanText('.//td[1]')(row)
-            _url = Link('.//td[1]/a', default=None)(row)
-            if _url:
-                inv._url = self.absurl(_url)
-            else:
-                # If _url is None, self.absurl returns the BASEURL, so we need to set the value manually.
-                inv._url = None
-            inv.valuation = MyDecimal('.//td[2]')(row)
+            inv._form_param = CleanText('.//td[1]/input/@name')(row)
+            inv.valuation = CleanDecimal.French('.//td[2]')(row)
 
             # On all Cmes children the row shows percentages and the popup shows absolute values in currency.
             # On Cmes it is mirrored, the popup contains the percentage.
             is_mirrored = '%' in row.text_content()
 
             if not is_mirrored:
-                inv.diff = MyDecimal('.//td[3]')(row)
+                inv.diff = CleanDecimal.French('.//td[3]', default=NotAvailable)(row)
                 if elem_diff is not None:
-                    inv.diff_ratio = Eval(lambda x: x / 100,
-                                          MyDecimal(Regexp(CleanText('.'), r'([+-]?[\d\s]+[\d,]+)\s*%')))(elem_diff)
+                    inv.diff_ratio = Eval(
+                        lambda x: x / 100,
+                        CleanDecimal.French(Regexp(CleanText('.'), r'([+-]?[\d\s]+[\d,]+)\s*%'))
+                    )(elem_diff)
             else:
-                inv.diff = MyDecimal('.')(elem_diff)
+                inv.diff = CleanDecimal.French('.', default=NotAvailable)(elem_diff)
                 if elem_diff is not None:
-                    inv.diff_ratio = Eval(lambda x: x / 100,
-                                          MyDecimal(Regexp(CleanText('.//td[3]'), r'([+-]?[\d\s]+[\d,]+)\s*%')))(row)
+                    inv.diff_ratio = Eval(
+                        lambda x: x / 100,
+                        CleanDecimal.French(Regexp(CleanText('.//td[3]'), r'([+-]?[\d\s]+[\d,]+)\s*%'))
+                    )(row)
             yield inv
-
-    def iter_pocket(self, inv):
-        if inv._el_pocket:
-            for i, row in enumerate(inv._el_pocket.xpath('.//tr[position()>1]')):
-                pocket = Pocket()
-                pocket.id = "%s%s%s" % (inv._account.label, inv.label, i)
-                pocket.label = inv.label
-                pocket.investment = inv
-                pocket.amount = MyDecimal('./td[2]')(row)
-
-                if 'DISPONIBLE' in Upper(CleanText('./td[1]'))(row):
-                    pocket.condition = Pocket.CONDITION_AVAILABLE
-                else:
-                    pocket.condition = Pocket.CONDITION_DATE
-                    pocket.availability_date = Date(Regexp(Upper(CleanText('./td[1]')), r'AU[\s]+(.*)'), dayfirst=True)(row)
-
-                yield pocket
 
     def iter_ccb_pockets(self, account):
         # CCB accounts have a specific table with more columns and specific attributes
@@ -214,7 +198,7 @@ class InvestmentPage(LoggedPage, HTMLPage):
         return Eval(lambda x: x/100, CleanDecimal.French('//p[contains(@class, "plusvalue--value")]'))(self.doc)
 
     def go_investment_details(self):
-        investment_details_url = Link('//a[text()="Mes avoirs"]')(self.doc)
+        investment_details_url = Link('//a[text()="Mes avoirs" or text()="Mon épargne"]')(self.doc)
         self.browser.location(investment_details_url)
 
 
@@ -250,6 +234,13 @@ class AssetManagementPage(LoggedPage, HTMLPage):
             return perfs
 
 
+POCKET_CONDITIONS = {
+    'retraite': Pocket.CONDITION_RETIREMENT,
+    'disponibilites': Pocket.CONDITION_DATE,
+    'immediate': Pocket.CONDITION_AVAILABLE,
+}
+
+
 class InvestmentDetailsPage(LoggedPage, HTMLPage):
     def get_quantity(self):
         return CleanDecimal.French('//tr[th[text()="Nombre de parts"]]//em', default=NotAvailable)(self.doc)
@@ -257,6 +248,39 @@ class InvestmentDetailsPage(LoggedPage, HTMLPage):
     def go_back(self):
         go_back_url = Link('//a[@id="C:A"]')(self.doc)
         self.browser.location(go_back_url)
+
+    @method
+    class iter_pockets(TableElement):
+        item_xpath = '//table[contains(caption/span/text(), "Détail par échéance")]/tbody/tr'
+        head_xpath = '//table[contains(caption/span/text(), "Détail par échéance")]/thead//th'
+
+        col_condition = 'Echéance'
+        col_amount = 'Montant investi'
+        col_quantity = 'Nombre de parts'
+
+        class item(ItemElement):
+            klass = Pocket
+
+            obj_investment = Env('inv')
+            obj_amount = CleanDecimal.French(TableCell('amount'))
+            obj_quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)
+
+            def obj_label(self):
+                return Env('inv')(self).label
+
+            def obj_condition(self):
+                condition_text = CleanText(TableCell('condition'), transliterate=True)(self)
+                condition = MapIn(self, POCKET_CONDITIONS, Pocket.CONDITION_UNKNOWN).filter(condition_text.lower())
+                if condition == Pocket.CONDITION_UNKNOWN:
+                    self.page.logger.warning('Unhandled availability condition for pockets: %s', condition_text)
+                return condition
+
+            def obj_availability_date(self):
+                if Field('condition')(self) == Pocket.CONDITION_DATE:
+                    return Date(
+                        Regexp(CleanText(TableCell('condition')), r'Disponibilités (.*)'),
+                        dayfirst=True,
+                    )(self)
 
 
 class OperationPage(LoggedPage, HTMLPage):
@@ -272,7 +296,7 @@ class OperationPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Transaction
 
-            obj_amount = MyDecimal('./th[@scope="rowgroup"][2]')
+            obj_amount = CleanDecimal.French('./th[@scope="rowgroup"][2]')
             obj_label = CleanText('(//p[contains(@id, "smltitle")])[2]')
             obj_raw = Transaction.Raw(Field('label'))
             obj_date = Date(Regexp(CleanText('(//p[contains(@id, "smltitle")])[1]'), r'(\d{1,2}/\d{1,2}/\d+)'), dayfirst=True)

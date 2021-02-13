@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# flake8: compatible
+
 # Copyright(C) 2012-2014 Florent Fourcot
 #
 # This file is part of a weboob module.
@@ -17,7 +19,10 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.bill import DocumentTypes, CapDocument, Subscription, Bill, SubscriptionNotFound, DocumentNotFound
+from weboob.capabilities.bill import (
+    DocumentTypes, CapDocument, Subscription,
+    Bill, SubscriptionNotFound, DocumentNotFound,
+)
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.messages import CantSendMessage, CapMessages, CapMessagesPost
 from weboob.capabilities.base import find_object
@@ -30,41 +35,43 @@ from .browser import Freemobile
 __all__ = ['FreeMobileModule']
 
 
-class FreeMobileModule(Module, CapDocument, CapMessages, CapMessagesPost, CapProfile):
+class FreeMobileModule(Module, CapDocument, CapProfile, CapMessages, CapMessagesPost):
     NAME = 'freemobile'
     MAINTAINER = u'Florent Fourcot'
     EMAIL = 'weboob@flo.fourcot.fr'
     VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'Free Mobile website'
-    CONFIG = BackendConfig(ValueBackendPassword('login',
-                                                label='Account ID',
-                                                masked=False,
-                                                regexp='^(\d{8}|)$'),
-                           ValueBackendPassword('password',
-                                                label='Password')
-                           )
+    CONFIG = BackendConfig(
+        ValueBackendPassword(
+            'login',
+            label='Account ID',
+            masked=False,
+            regexp=r'^(\d{8}|)$'
+        ),
+        ValueBackendPassword(
+            'password',
+            label='Password'
+        )
+    )
     BROWSER = Freemobile
 
     accepted_document_types = (DocumentTypes.BILL,)
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(
+            self.config['login'].get(),
+            self.config['password'].get()
+        )
 
     def iter_subscription(self):
-        return self.browser.get_subscription_list()
+        return self.browser.iter_subscription()
 
     def get_subscription(self, _id):
         return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
 
-    def iter_documents_history(self, subscription):
-        if not isinstance(subscription, Subscription):
-            subscription = self.get_subscription(subscription)
-        return self.browser.get_history(subscription)
-
     def get_document(self, _id):
-        subid = _id.split('.')[0]
+        subid = _id.split('_')[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
@@ -73,11 +80,6 @@ class FreeMobileModule(Module, CapDocument, CapMessages, CapMessagesPost, CapPro
         if not isinstance(subscription, Subscription):
             subscription = self.get_subscription(subscription)
         return self.browser.iter_documents(subscription)
-
-    def get_details(self, subscription):
-        if not isinstance(subscription, Subscription):
-            subscription = self.get_subscription(subscription)
-        return self.browser.get_details(subscription)
 
     def download_document(self, bill):
         if not isinstance(bill, Bill):

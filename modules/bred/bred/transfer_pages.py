@@ -26,7 +26,7 @@ from weboob.capabilities.bank import Recipient
 from weboob.browser.pages import LoggedPage, JsonPage
 from weboob.browser.elements import ItemElement, DictElement, method
 from weboob.browser.filters.standard import (
-    CleanText, Currency, Format, CleanDecimal,
+    CleanText, Currency, Format, CleanDecimal, Regexp,
 )
 from weboob.browser.filters.json import Dict
 
@@ -39,16 +39,6 @@ class ListAuthentPage(LoggedPage, JsonPage):
         for auth_method in auth_methods:
             if Dict('content/%s' % auth_method)(self.doc):
                 return auth_method
-
-
-class InitAuthentPage(LoggedPage, JsonPage):
-    def get_authent_id(self):
-        return Dict('content')(self.doc)
-
-
-class AuthentResultPage(LoggedPage, JsonPage):
-    def get_status(self):
-        return Dict('content/status', default=None)(self.doc)
 
 
 class EmittersListPage(LoggedPage, JsonPage):
@@ -110,17 +100,6 @@ class RecipientListPage(LoggedPage, JsonPage):
             obj_category = 'Interne'
 
 
-class CheckOtpPage(LoggedPage, JsonPage):
-    def get_error(self):
-       error = CleanText(Dict('erreur/libelle'))(self.doc)
-       if error != 'OK':
-           return error
-
-
-class SendSmsPage(LoggedPage, JsonPage):
-    pass
-
-
 class ErrorJsonPage(JsonPage):
     def get_error(self):
         error = CleanText(Dict('erreur/libelle'))(self.doc)
@@ -136,7 +115,16 @@ class ErrorJsonPage(JsonPage):
 
 
 class AddRecipientPage(LoggedPage, ErrorJsonPage):
-    pass
+    def get_transfer_limit(self):
+        error = self.get_error()
+        if not error:
+            return None
+        # The message is some partial html in a json key, we can't use
+        # the html tags to limit the search.
+        text_limit = Regexp(
+            pattern=r"(?:plafond de virement est limité à|l'augmenter, au delà de) ([\d ,€]+)"
+        ).filter(error)
+        return CleanDecimal.French().filter(text_limit)
 
 
 class TransferPage(LoggedPage, ErrorJsonPage):

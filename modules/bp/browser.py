@@ -36,14 +36,14 @@ from weboob.exceptions import (
     BrowserUnavailable, ActionNeeded, NeedInteractiveFor2FA,
     BrowserQuestion, AppValidation, AppValidationCancelled, AppValidationExpired,
 )
-from weboob.tools.compat import urlsplit, urlunsplit, parse_qsl
+from weboob.tools.compat import urlsplit, urlunsplit
 from weboob.tools.decorators import retry
 from weboob.capabilities.bank import (
     Account, Recipient, AddRecipientStep, TransferStep,
-    TransferInvalidEmitter, RecipientInvalidOTP, TransferBankError,
+    TransferInvalidRecipient, RecipientInvalidOTP, TransferBankError,
     AddRecipientBankError, TransferInvalidOTP,
 )
-from weboob.tools.value import Value, ValueBool
+from weboob.tools.value import Value
 
 from .pages import (
     LoginPage, Initident, CheckPassword, repositionnerCheminCourant, BadLoginPage, AccountDesactivate,
@@ -52,17 +52,20 @@ from .pages import (
     ValidateCountry, ConfirmPage, RcptSummary,
     SubscriptionPage, DownloadPage, ProSubscriptionPage,
     RevolvingAttributesPage,
-    TwoFAPage, Validated2FAPage, SmsPage, DecoupledPage, HonorTransferPage,
-    RecipientSubmitDevicePage, OtpErrorPage,
+    TwoFAPage, Validated2FAPage, SmsPage, DecoupledPage, Loi6902TransferPage,
+    CerticodePlusSubmitDevicePage, OtpErrorPage, PersonalLoanRoutagePage, TemporaryPage,
 )
 from .pages.accounthistory import (
     LifeInsuranceInvest, LifeInsuranceHistory, LifeInsuranceHistoryInv, RetirementHistory,
-    SavingAccountSummary, CachemireCatalogPage,
+    SavingAccountSummary, CachemireCatalogPage, LifeInsuranceSummary,
 )
 from .pages.accountlist import (
     MarketLoginPage, UselessPage, ProfilePage, MarketCheckPage, MarketHomePage,
 )
-from .pages.pro import RedirectPage, ProAccountsList, ProAccountHistory, DownloadRib, RibPage
+from .pages.pro import (
+    RedirectPage, ProAccountsList, ProAccountHistory, DownloadRib, RibPage, RedirectAfterVKPage,
+    SwitchQ5CPage, Detect2FAPage,
+)
 from .pages.mandate import MandateAccountsList, PreMandate, PreMandateBis, MandateLife, MandateMarket
 from .linebourse_browser import LinebourseAPIBrowser
 
@@ -134,9 +137,19 @@ class BPBrowser(LoginBrowser, StatesMixin):
         r'/voscomptes/canalXHTML/pret/creditRenouvelable/init-consulterCreditRenouvelable.ea',
         r'/voscomptes/canalXHTML/pret/encours/rechercherPret-encoursPrets.ea',
         r'/voscomptes/canalXHTML/sso/commun/init-integration.ea\?partenaire=cristalCEC',
+        r'https://espaceclientcreditconso.labanquepostale.fr/esd/contratDetail',
         AccountList
     )
-
+    temporary_page = URL(
+        r'/voscomptes/canalXHTML/securite/authentification/verifierSyndicationParapheur-identif.ea',
+        r'/voscomptes/canalXHTML/sso/espaceDigitalLBPF/init-espaceDigitalLBPF.ea',
+        r'voscomptes/canalXHTML/pret/encours/preparerRedirectionEsdLbpf-encoursPrets.ea',
+        TemporaryPage
+    )
+    personal_loan_routage_url = URL(
+        '/voscomptes/canalXHTML/sso/espaceDigitalLBPF/routage-espaceDigitalLBPF.ea',
+        PersonalLoanRoutagePage
+    )
     revolving_start = URL(r'/voscomptes/canalXHTML/sso/lbpf/souscriptionCristalFormAutoPost.jsp', AccountList)
     par_accounts_revolving = URL(
         r'https://espaceclientcreditconso.labanquepostale.fr/sav/loginlbpcrypt.do',
@@ -157,6 +170,10 @@ class BPBrowser(LoginBrowser, StatesMixin):
         SavingAccountSummary
     )
 
+    lifeinsurance_summary = URL(
+        r'/voscomptes/canalXHTML/assurance/vie/syntheseVie-assuranceVie.ea\?numContrat=(?P<id>\w+)',
+        LifeInsuranceSummary
+    )
     lifeinsurance_invest = URL(
         r'/voscomptes/canalXHTML/assurance/retraiteUCEuro/afficherSansDevis-assuranceRetraiteUCEuros.ea\?numContrat=(?P<id>\w+)',
         LifeInsuranceInvest
@@ -195,7 +212,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
     )
 
     par_account_checking_history = URL(
-        r'/voscomptes/canalXHTML/CCP/releves_ccp/init-releve_ccp.ea\?typeRecherche=10&compte.numero=(?P<accountId>.*)',
+        r'/voscomptes/canalXHTML/CCP/releves_ccp/init-releve_ccp.ea\?typeRecherche=4&compte.numero=(?P<accountId>.*)',
         r'/voscomptes/canalXHTML/CCP/releves_ccp/afficher-releve_ccp.ea',
         AccountHistory
     )
@@ -248,18 +265,9 @@ class BPBrowser(LoginBrowser, StatesMixin):
         r'/voscomptes/canalXHTML/virement/virementSafran_sepa/init-creerVirementSepa.ea',
         CompleteTransfer
     )
-    honor_transfer = URL(
-        r'/voscomptes/canalXHTML/virement/popinEligibiliteLoi6902/popinEligibiliteLoi6902_debiteur.jsp',
-        HonorTransferPage
-    )
-
-    validate_honor_transfer = URL(
-        r'/voscomptes/canalXHTML/virement/mpiaiguillage/validerPopinEligibilite-saisieComptes.ea',
-        HonorTransferPage
-    )
-    validated_honor_transfer = URL(
-        r'/voscomptes/canalXHTML/virement/mpiaiguillage/retourPopinEligibilite-saisieComptes.ea',
-        HonorTransferPage
+    popup_loi6902_transfer = URL(
+        r'/voscomptes/canalXHTML/virement/popinBlocageLoi6902/popinBlocageLoi6902_(?P<popin_suffix>.*).jsp',
+        Loi6902TransferPage
     )
 
     # transfer_summary needs to be before transfer_confirm because both
@@ -281,8 +289,8 @@ class BPBrowser(LoginBrowser, StatesMixin):
         r'/voscomptes/canalXHTML/virement/virementSafran_sepa/confirmerInformations-virementSepa.ea',
         r'/voscomptes/canalXHTML/virement/virementSafran_national/valider-creerVirementNational.ea',
         r'/voscomptes/canalXHTML/virement/virementSafran_national/validerVirementNational-virementNational.ea',
-        # the following url is already used in transfer_summary
-        # but we need it to detect the case where the website displaies the list of devices
+        # The following url is already used in transfer_summary
+        # but we need it to detect the case where the website displays the list of devices
         # when a transfer is made with an otp or decoupled
         r'/voscomptes/canalXHTML/virement/virementSafran_sepa/confirmer-creerVirementSepa.ea',
         TransferConfirm
@@ -301,9 +309,9 @@ class BPBrowser(LoginBrowser, StatesMixin):
         r'/voscomptes/canalXHTML/virement/mpiGestionBeneficiairesVirementsCreationBeneficiaire/valider-creationBeneficiaire.ea',
         ValidateRecipient
     )
-    recipient_submit_device = URL(
+    certicode_plus_submit_device = URL(
         r'/voscomptes/canalXHTML/securisation/mpin/demandeCreation-securisationMPIN.ea',
-        RecipientSubmitDevicePage
+        CerticodePlusSubmitDevicePage
     )
     rcpt_code = URL(
         r'/voscomptes/canalXHTML/virement/mpiGestionBeneficiairesVirementsCreationBeneficiaire/validerRecapBeneficiaire-creationBeneficiaire.ea',
@@ -483,7 +491,9 @@ class BPBrowser(LoginBrowser, StatesMixin):
                 raise BrowserQuestion(Value('code', label='Entrez le code reçu par SMS'))
 
             elif auth_method == 'no2fa':
-                self.location(self.page.get_skip_url())
+                skip_twofa_url = self.page.get_skip_twofa_url()
+                assert skip_twofa_url, 'No url found to skip 2FA'
+                self.location(skip_twofa_url)
 
         # If we are here, we don't need 2FA, we are logged
 
@@ -554,30 +564,27 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
                 for account in self.page.iter_accounts(name=owner_name):
                     if account.type == Account.TYPE_LOAN:
-                        self.location(account.url)
-                        if 'initSSO' not in account.url:
-                            for loan in self.page.iter_loans():
-                                loan.currency = account.currency
-                                accounts.append(loan)
-                            student_loan = self.page.get_student_loan()
-                            if student_loan:
-                                # Number of headers and item elements are the same
-                                assert len(student_loan._heads) == len(student_loan._items)
-                                student_loan.currency = account.currency
-                                accounts.append(student_loan)
-                        else:
-                            # The main revolving page is not accessible, we can reach it by this new way
-                            self.go_revolving()
-                            revolving_loan = self.page.get_revolving_attributes(account)
-                            accounts.append(revolving_loan)
+                        accounts.extend(self.get_loans(account))
+                        page.go()
+
+                    elif account.type == Account.TYPE_LIFE_INSURANCE:
+                        self.lifeinsurance_summary.go(id=account.id)
+                        account.opening_date = self.page.get_opening_date()
+                        accounts.append(account)
                         page.go()
 
                     elif account.type == Account.TYPE_PERP:
                         # PERP balances must be fetched from the details page,
                         # otherwise we just scrape the "Rente annuelle estimée":
-                        balance = self.open(account.url).page.get_balance()
-                        if balance is not None:
-                            account.balance = balance
+                        balance_page = self.open(account.url).page
+                        # Sometimes the balance page is not available (with the site saying the account detail will
+                        # soon be available). In the meantime, just skip it and use the balance we already have.
+                        if balance_page and isinstance(balance_page, SavingAccountSummary):
+                            balance = balance_page.get_balance()
+                            if balance is not None:
+                                account.balance = balance
+                        else:
+                            self.logger.debug('Balance page not yet available for account %r', account)
                         accounts.append(account)
 
                     else:
@@ -602,6 +609,46 @@ class BPBrowser(LoginBrowser, StatesMixin):
                 raise NoAccountsException()
 
         return self.accounts
+
+    def get_loans(self, account):
+        loans = []
+        self.location(account.url)
+        if 'initSSO' not in account.url:
+            if self.temporary_page.is_here():
+                # The main way to access to all "PRÊT PERSONNEL" seems to be broken
+                # We must follow the following urls for cookies
+                self.location(self.page.get_next_link())
+                self.temporary_page.go()
+                self.location(self.page.get_next_link())
+                self.personal_loan_routage_url.go()
+                self.page.form_submit()
+
+                if self.par_accounts_loan.is_here():
+                    loan = self.page.get_personal_loan()
+                    # These Loans were not returned before
+                    # So if they repair the precedent behaviour
+                    # we must check where to get them
+                    loan.id = loan.number = account.id
+                    loan.label = account.label
+                    loan.currency = account.currency
+                    loan.url = account.url
+                    loans.append(loan)
+            else:
+                for loan in self.page.iter_loans():
+                    loan.currency = account.currency
+                    loans.append(loan)
+                student_loan = self.page.get_student_loan()
+                if student_loan:
+                    # Number of headers and item elements are the same
+                    assert len(student_loan._heads) == len(student_loan._items)
+                    student_loan.currency = account.currency
+                    loans.append(student_loan)
+        else:
+            # The main revolving page is not accessible, we can reach it by this new way
+            self.go_revolving()
+            revolving_loan = self.page.get_revolving_attributes(account)
+            loans.append(revolving_loan)
+        return loans
 
     @retry(BrowserUnavailable, delay=5)
     def go_revolving(self):
@@ -667,6 +714,13 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
             return []
 
+    def update_linebourse_session(self):
+        self.linebourse.session.cookies.update(self.session.cookies)
+        self.linebourse.session.headers['X-XSRF-TOKEN'] = self.session.cookies.get(
+            'XSRF-TOKEN',
+            domain='labanquepostale.offrebourse.com',
+        )
+
     @need_login
     def go_linebourse(self, account):
         # Sometimes the redirection done from MarketLoginPage
@@ -682,9 +736,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
             go = retry(HTTPError, delay=5)(self.market_login.go)
             go()
 
-        self.linebourse.session.cookies.update(self.session.cookies)
-        self.linebourse.session.headers['X-XSRF-TOKEN'] = self.session.cookies.get('XSRF-TOKEN')
-
+        self.update_linebourse_session()
         self.par_accounts_checking.go()
 
     def _get_coming_transactions(self, account):
@@ -792,38 +844,17 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         # Happens when making a transfer from a savings account
         # to an external account.
-        if self.page.has_popin_eligibility():
-            self.honor_transfer.go()
+        # The transfer will be blocked with an error popup related to loi 6902
+        blocage_popin_suffix = self.page.get_blocage_popin_url_suffix()
+        if blocage_popin_suffix:
+            self.popup_loi6902_transfer.go(popin_suffix=blocage_popin_suffix)
 
-            msg = self.page.get_honor_message()
-            self.need_reload_state = True
-            raise TransferStep(
-                transfer,
-                ValueBool(
-                    'transfer_honor_savings',
-                    label=msg,
-                    default=False,
-                ),
-            )
+            msg = self.page.get_popup_message()
+            raise TransferInvalidRecipient(msg)
 
         self.page.complete_transfer(transfer)
 
         return self.page.handle_response(transfer)
-
-    def validate_transfer_eligibility(self, transfer, **params):
-        # Using ValueBool to be sure to handle any kind of response.
-        # If it is not the accepted strings/bools, it crashes.
-        value = ValueBool()
-        value.set(params['transfer_honor_savings'])
-        if value.get():
-            self.honor_transfer.go()
-            self.validate_honor_transfer.go()
-            # 302 that redirect us to transfer_complete
-            self.validated_honor_transfer.go()
-
-            self.page.complete_transfer(transfer)
-            return self.page.handle_response(transfer)
-        raise TransferInvalidEmitter("Impossible d'effectuer un virement sans attestation sur l'honneur que vous êtes bien le titulaire, représentant légal ou mandataire du compte à vue ou CCP.")
 
     def validate_transfer_code(self, transfer, code):
         if not self.post_code(code):
@@ -842,15 +873,26 @@ class BPBrowser(LoginBrowser, StatesMixin):
         # If we just validated a code we land on transfer_summary.
         # If we just initiated the transfer we land on transfer_confirm.
         if self.transfer_confirm.is_here():
-            # This will send a sms if a certicode validation is needed
+            # This will send a sms or an app validation if a certicode
+            # or certicode+ validation is needed.
             self.page.confirm()
-            if self.transfer_confirm.is_here() and self.page.is_certicode_needed():
+            if self.transfer_confirm.is_here():
                 self.need_reload_state = True
-                self.sms_form = self.page.get_sms_form()
-                raise TransferStep(
-                    transfer,
-                    Value('code', label='Veuillez saisir le code de validation reçu par SMS'),
-                )
+                if self.page.is_certicode_needed():
+                    self.sms_form = self.page.get_sms_form()
+                    raise TransferStep(
+                        transfer,
+                        Value('code', label='Veuillez saisir le code de validation reçu par SMS'),
+                    )
+                elif self.page.is_certicode_plus_needed():
+                    device_choice_url = self.page.get_device_choice_url()
+                    self.location(device_choice_url)
+                    self.certicode_plus_submit_device.go(params={'deviceSelected': 0})
+                    message = self.page.get_app_validation_message()
+                    raise AppValidation(
+                        resource=transfer,
+                        message=message,
+                    )
 
         return self.page.handle_response(transfer)
 
@@ -879,7 +921,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         return True
 
-    def end_new_recipient_with_polling(self, recipient):
+    def end_with_polling(self, obj):
         polling_url = self.absurl(
             '/voscomptes/canalXHTML/securisation/mpin/validerOperation-securisationMPIN.ea',
             base=True
@@ -889,7 +931,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
             '/voscomptes/canalXHTML/securisation/mpin/operationSucces-securisationMPIN.ea',
             base=True
         ))
-        return recipient
+        return obj
 
     @need_login
     def init_new_recipient(self, recipient, is_bp_account=False, **params):
@@ -914,7 +956,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
             self.location(device_choice_url)
             # force to use the first device like in the login to receive notification
             # this url send mobile notification
-            self.recipient_submit_device.go(params={'deviceSelected': 0})
+            self.certicode_plus_submit_device.go(params={'deviceSelected': 0})
 
             # Can do transfer to these recipient 48h after
             recipient.enabled_at = datetime.now().replace(microsecond=0) + timedelta(days=2)
@@ -928,7 +970,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
     def new_recipient(self, recipient, is_bp_account=False, **params):
         if params.get('resume') or self.resume:
             # Case of mobile app validation
-            return self.end_new_recipient_with_polling(recipient)
+            return self.end_with_polling(recipient)
 
         if 'code' in params:
             # Case of SMS OTP
@@ -1007,24 +1049,58 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
 
 class BProBrowser(BPBrowser):
+    BASEURL = 'https://banqueenligne.entreprises.labanquepostale.fr'
+
+    # login
     login_url = "https://banqueenligne.entreprises.labanquepostale.fr/wsost/OstBrokerWeb/loginform?TAM_OP=login&ERROR_CODE=0x00000000&URL=%2Fws_q47%2Fvoscomptes%2Fidentification%2Fidentification.ea%3Forigin%3Dprofessionnels"
-    accounts_and_loans_url = None
 
-    pro_accounts_list = URL(r'.*voscomptes/synthese/synthese.ea', ProAccountsList)
+    # Landing page after virtual keyboard. The response is a redirection to
+    # switch_q5c only if an SCA is activated (TODO: check), and just a standard
+    # page for connections without SCA
+    redirect_after_vk = URL(
+        r'.*voscomptes/identification/identification.ea.*',
+        RedirectAfterVKPage
+    )
+    switch_q5c = URL(
+        r'/ws_q47/voscomptes/switchQ5C/redirectSyntheseQ5C-switchQ5C.ea',
+        SwitchQ5CPage
+    )
+    detect_2fa = URL(
+        r'/ws_q47/voscomptes/switchQ5C/dsp2Engageante-switchQ5C.ea',
+        Detect2FAPage,
+    )
 
+    # bank
+    pro_accounts_list = URL(
+        r'/ws_q5c/api/pmo/recupererSyntheseComptes',
+        ProAccountsList
+    )
+    rib_choice = URL(
+        r'/ws_q47/voscomptes/rib/retourQ5C-rib.ea',
+        DownloadRib
+    )
+    rib = URL(
+        r'/ws_q47/voscomptes/rib/preparerRIB-rib.ea',
+        RibPage
+    )
     pro_history = URL(
-        r'.*voscomptes/historique(ccp|cne)/(\d+-)?historique(operationnel)?(ccp|cne).*',
+        r'/ws_q5c/api/pmo/comptes/(?P<account_id>\w+)/operations\?typeOperations=IMPUTEES',
         ProAccountHistory
     )
 
+    # market
     useless2 = URL(
         r'.*/voscomptes/bourseenligne/lancementBourseEnLigne-bourseenligne.ea\?numCompte=(?P<account>\d+)',
         UselessPage
     )
-    market_login = URL(r'.*/voscomptes/bourseenligne/oicformautopost.jsp', MarketLoginPage)
+    market_login = URL(
+        r'.*/voscomptes/bourseenligne/oicformautopost.jsp',
+        MarketLoginPage
+    )
 
+    # bill
     subscription = URL(
-        r'(?P<base_url>.*)/voscomptes/relevespdf/histo-consultationReleveCompte.ea',
+        r'/ws_q47/voscomptes/relevespdf/histo-consultationReleveCompte.ea',
         r'.*/voscomptes/relevespdf/rechercheHistoRelevesCompte-consultationReleveCompte.ea',
         ProSubscriptionPage
     )
@@ -1033,20 +1109,44 @@ class BProBrowser(BPBrowser):
         DownloadPage
     )
 
-    BASEURL = 'https://banqueenligne.entreprises.labanquepostale.fr'
+    # Redefined from BPBrowser.redirect_page because
+    # 'voscomptes/identification/identification.ea' is an expected page and
+    # we shouldn't raise a BrowserUnavailable, at least for pro website
+    redirect_page = URL(
+        r'.*voscomptes/synthese/3-synthese.ea',
+        RedirectPage
+    )
 
-    def set_variables(self):
-        v = urlsplit(self.url)
-        version = v.path.split('/')[1]
+    def do_login(self):
+        self.login_without_2fa()  # vk
 
-        self.base_url = 'https://banqueenligne.entreprises.labanquepostale.fr/%s' % version
-        self.accounts_url = self.base_url + '/voscomptes/synthese/synthese.ea'
+        if self.redirect_after_vk.is_here():
+            self.page.check_pro_website_or_raise()
+
+            # Check if 2FA is needed
+            #
+            # This check is only done when:
+            # - the 2FA is not activated by the user yet
+            # - the 2FA is activated but not done yet
+            #
+            # Else (if the user has already completed the 2FA (valid 90 days))
+            # the next request is not done by the website and we don't do the 2FA check
+            # (because we don't land on redirect_after_vk Page after calling login_without_2fa())
+            self.detect_2fa.go()
+            self.page.raise_if_2fa_needed()
+
+        # TODO: implement SCA: requests have changed in comparison to par website
 
     def go_linebourse(self, account):
-        self.location(account.url)
+        self.location(
+            '/ws_q47/voscomptes/bourseenligne/lancementBourseEnLigne-bourseenligne.ea',
+            params={'numCompte': account.id}
+        )  # mandatory request (not sure why, not about cookies, maybe to get correct referer)
+
         self.location('../bourseenligne/oicformautopost.jsp')
-        self.linebourse.session.cookies.update(self.session.cookies)
-        self.location(self.accounts_url)
+        self.update_linebourse_session()
+
+        self.pro_accounts_list.go()  # just to reinit bprobrowser session to be able to go to linebourse once more
 
     @need_login
     def get_history(self, account):
@@ -1054,22 +1154,14 @@ class BProBrowser(BPBrowser):
             self.go_linebourse(account)
             return self.linebourse.iter_history(account.id)
 
-        transactions = []
-        v = urlsplit(account.url)
-        args = dict(parse_qsl(v.query))
-        args['typeRecherche'] = 10
+        self.pro_history.go(account_id=account.id)  # seems to fetch by default max nb of transactions without pagination (last 3 months)
+        return self.page.iter_history()
 
-        self.location(v.path, params=args)
-
-        self.first_transactions = []
-        for tr in self.page.iter_history():
-            transactions.append(tr)
-        transactions.sort(key=lambda tr: tr.rdate, reverse=True)
-
-        return transactions
-
-    def _get_coming_transactions(self, account):
-        return []
+    @need_login
+    def get_coming(self, account):
+        if account.type == Account.TYPE_CARD:
+            raise AssertionError('new pro website: implement for cards')
+        return []  # TODO: add condition if "gestion sous-mandat"
 
     def check_accounts_list_error(self):
         error = self.page.get_errors()
@@ -1078,75 +1170,70 @@ class BProBrowser(BPBrowser):
                 raise ActionNeeded(error)
             raise BrowserUnavailable(error)
 
+    def go_to_rib(self, account):
+        self.rib_choice.go(params={'numeroCompte': account.id})  # iban only available from RIB
+        value = self.page.get_rib_value(account.id)
+        if value:
+            self.rib.go(params={'idxSelection': value})
+        else:
+            # TODO: no select value: connection with no rib or only one account ?
+            self.logger.info('rib: handle when there is no html select choice')
+
+    def set_iban(self, account):
+        self.go_to_rib(account)
+        if self.rib.is_here():
+            account.iban = self.page.get_iban()
+
     @need_login
     def get_accounts_list(self):
-        if self.accounts is None:
-            self.set_variables()
-
-            accounts = []
-            ids = set()
-
-            self.location(self.accounts_url)
-            assert self.pro_accounts_list.is_here()
-
-            self.check_accounts_list_error()
-            for account in self.page.iter_accounts():
-                ids.add(account.id)
-                accounts.append(account)
-
-            if self.accounts_and_loans_url:
-                self.location(self.accounts_and_loans_url)
-                assert self.pro_accounts_list.is_here()
-
-            self.check_accounts_list_error()
-            for account in self.page.iter_accounts():
-                if account.id not in ids:
-                    ids.add(account.id)
-                    accounts.append(account)
-
-            for acc in accounts:
-                self.location('%s/voscomptes/rib/init-rib.ea' % self.base_url)
-                value = self.page.get_rib_value(acc.id)
-                if value:
-                    self.location('%s/voscomptes/rib/preparerRIB-rib.ea?idxSelection=%s' % (self.base_url, value))
-                    if self.rib.is_here():
-                        acc.iban = self.page.get_iban()
-
-            self.accounts = accounts
-
-        return self.accounts
+        self.pro_accounts_list.go()
+        accounts = self.page.iter_accounts()
+        for account in accounts:
+            self.set_iban(account)
+            yield account
 
     @need_login
     def get_profile(self):
-        acc = self.get_accounts_list()[0]
-        self.location('%s/voscomptes/rib/init-rib.ea' % self.base_url)
-        value = self.page.get_rib_value(acc.id)
-        if value:
-            self.location('%s/voscomptes/rib/preparerRIB-rib.ea?idxSelection=%s' % (self.base_url, value))
-            if self.rib.is_here():
-                return self.page.get_profile()
+        accounts = list(self.get_accounts_list())
+        if not accounts:
+            return
+        acc = accounts[0]
+        self.go_to_rib(acc)
+        if self.rib.is_here():
+            return self.page.get_profile()
+
+    @need_login
+    def iter_investment(self, account):
+        if account.type == Account.TYPE_MARKET:
+            self.go_linebourse(account)
+            return self.linebourse.iter_investments(account.id)
+        return []
 
     @need_login
     def iter_subscriptions(self):
-        subscriber = self.get_profile().name
-        self.subscription.go(base_url=self.base_url)
+        profile = self.get_profile()
+        if profile:
+            subscriber = profile.name
+        else:  # TODO: find why we don't get profile though the rib (and consequently the profile) exists
+            subscriber = NotAvailable
+        self.subscription.go()
         return self.page.iter_subscriptions(subscriber=subscriber)
 
     @need_login
     def iter_documents(self, subscription):
-        self.subscription.go(base_url=self.base_url)
+        self.subscription.go()
 
         for year in self.page.get_years():
             self.page.submit_form(sub_number=subscription._number, year=year)
 
             if self.page.no_statement():
-                self.subscription.go(base_url=self.base_url)
+                self.subscription.go()
                 continue
 
             for doc in self.page.iter_documents(sub_id=subscription.id):
                 yield doc
 
-            self.subscription.go(base_url=self.base_url)
+            self.subscription.go()
 
     @need_login
     def download_document(self, document):

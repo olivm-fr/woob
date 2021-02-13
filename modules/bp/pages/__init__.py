@@ -21,15 +21,15 @@
 from .login import (
     LoginPage, Initident, CheckPassword, repositionnerCheminCourant,
     BadLoginPage, AccountDesactivate, UnavailablePage,
-    Validated2FAPage, TwoFAPage, SmsPage, DecoupledPage,
+    Validated2FAPage, TwoFAPage, SmsPage, DecoupledPage, PersonalLoanRoutagePage
 )
 from .accountlist import AccountList, AccountRIB, Advisor, RevolvingAttributesPage
-from .accounthistory import AccountHistory, CardsList
+from .accounthistory import AccountHistory, CardsList, TemporaryPage
 from .transfer import (
     TransferChooseAccounts, CompleteTransfer, TransferConfirm,
     TransferSummary, CreateRecipient, ValidateRecipient,
     ValidateCountry, ConfirmPage, RcptSummary,
-    HonorTransferPage, RecipientSubmitDevicePage,
+    Loi6902TransferPage, CerticodePlusSubmitDevicePage,
     OtpErrorPage,
 )
 from .subscription import SubscriptionPage, DownloadPage, ProSubscriptionPage
@@ -40,5 +40,6 @@ __all__ = [
     'AccountDesactivate', 'TransferChooseAccounts', 'CompleteTransfer', 'TransferConfirm', 'TransferSummary', 'UnavailablePage',
     'CardsList', 'AccountRIB', 'Advisor', 'CreateRecipient', 'ValidateRecipient', 'ValidateCountry', 'ConfirmPage', 'RcptSummary',
     'SubscriptionPage', 'DownloadPage', 'ProSubscriptionPage', 'RevolvingAttributesPage', 'Validated2FAPage', 'TwoFAPage',
-    'SmsPage', 'DecoupledPage', 'HonorTransferPage', 'RecipientSubmitDevicePage', 'OtpErrorPage',
+    'SmsPage', 'DecoupledPage', 'Loi6902TransferPage', 'CerticodePlusSubmitDevicePage', 'OtpErrorPage', 'PersonalLoanRoutagePage',
+    'TemporaryPage',
 ]

@@ -28,6 +28,7 @@ from weboob.browser.filters.standard import (
     MapIn, Map, Field,
 )
 from weboob.browser.filters.html import AbsoluteLink
+from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.bank import (
     Transfer, TransferStatus, TransferFrequency,
 )
@@ -59,19 +60,29 @@ class TransferListPage(LoggedPage, HTMLPage):
             )
             obj_label = CleanText('.//div[has-class("ticket__title")]')
 
-            _bank_iban = CleanText('.//div[has-class("ticket__body-content")]')
-            obj_recipient_iban = CleanText(
-                # format: "{bank name} • {iban with spaces}"
-                # or just "{iban with spaces}"
-                Regexp(_bank_iban, r'^(?:.*• )?([A-Z0-9 ]+?)$'),
-                symbols=' ',
-            )
+            def obj_recipient_iban(self):
+                # Iban line is not available for bank initiated transfer (ex. GENERALI VIE)
+                # and also for transfers to a previously registered recipient that was removed
+                _bank_iban = CleanText('.//div[has-class("ticket__body-content")]')(self)
+
+                if not _bank_iban:
+                    return NotAvailable
+
+                real_iban = CleanText(
+                    # format: "{bank name} • {iban with spaces}"
+                    # or just "{iban with spaces}"
+                    Regexp(pattern=r'^(?:.*• )?([A-Z0-9 ]+?)$'),
+                    symbols=' '
+                ).filter(_bank_iban)
+                return real_iban
+
             obj_recipient_label = CleanText('.//div[has-class("ticket__body-title")]')
 
             STATUSES = {
                 'Terminé': TransferStatus.DONE,
                 'En attente': TransferStatus.SCHEDULED,
                 'Non Réalisé': TransferStatus.CANCELLED,
+                'Supprimé': TransferStatus.CANCELLED,  # typically for periodic transfers
                 # TODO what's the label for bank_canceled
             }
             _status_text = CleanText('.//div[has-class("ticket__foot-status")]')

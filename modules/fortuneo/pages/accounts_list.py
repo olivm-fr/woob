@@ -408,6 +408,12 @@ class InvestmentHistoryPage(ActionNeededPage):
                 if 'Valorisation' in CleanText('.')(div):
                     return Currency('./p[@class="synthese_data_line_right_text"]')(div)
 
+        obj_opening_date = Date(
+            CleanText('//p[text()="Date d\'adhésion"]/following-sibling::p[1]'),
+            dayfirst=True,
+            default=NotAvailable
+        )
+
 
 class AccountHistoryPage(ActionNeededPage):
     def build_doc(self, content):
@@ -609,6 +615,7 @@ class AccountsList(ActionNeededPage):
 
             obj_id = obj_number = Regexp(CleanText('./a[contains(@class, "numero_compte")]/div'), r'N° *([^ ]+)')
             obj__ca = CleanText('./a[contains(@class, "numero_compte")]/@rel')
+            obj__tpp_id = NotAvailable
 
             def obj__card_links(self):
                 card_links = []
@@ -633,6 +640,17 @@ class AccountsList(ActionNeededPage):
                     return AccountOwnership.ATTORNEY
                 return NotAvailable
 
+    @method
+    class fill_tpp_account_id(ItemElement):
+        def obj__tpp_id(self):
+            return Attr(
+                '//input[@name="numeroCompte" and contains(@value, "%s")]/preceding-sibling::input[1]' % self.obj.id,
+                'value',
+                default=self.obj.id,
+            )(self)
+
+    def is_loading(self):
+        return bool(self.doc.xpath('//span[@class="loading"]'))
 
 class FalseActionPage(ActionNeededPage):
     pass

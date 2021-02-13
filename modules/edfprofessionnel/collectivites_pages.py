@@ -1,6 +1,21 @@
 # -*- coding: utf-8 -*-
 
 # Copyright(C) 2012-2020  Budget Insight
+#
+# This file is part of a weboob module.
+#
+# This weboob module is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This weboob module is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
 
@@ -102,10 +117,11 @@ class AuraPage(LoggedPage, JsonPage):
 
             obj__id = CleanText(Dict('identiteFacture/identifiant'))
             obj_id = Format('%s_%s', Env('subid'), Field('_id'))
-            obj_price = CleanDecimal.SI(Dict('montantFacture/montantTTC'))
-            obj_vat = CleanDecimal.SI(Dict('taxesFacture/montantTVA'))
-            obj_date = Date(Dict('caracteristiquesFacture/dateLegaleFacture'))
-            obj_duedate = Date(Dict('caracteristiquesFacture/dateEcheanceFacture'))
+            obj_total_price = CleanDecimal.SI(Dict('montantFacture/montantTTC', default=NotAvailable), default=NotAvailable)
+            obj_pre_tax_price = CleanDecimal.SI(Dict('montantFacture/montantHT', default=NotAvailable), default=NotAvailable)
+            obj_vat = CleanDecimal.SI(Dict('taxesFacture/montantTVA', default=NotAvailable), default=NotAvailable)
+            obj_date = Date(Dict('caracteristiquesFacture/dateLegaleFacture'), dayfirst=True)
+            obj_duedate = Date(Dict('caracteristiquesFacture/dateEcheanceFacture'), dayfirst=True)
             obj_format = 'pdf'
 
             def obj_label(self):

@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# flake8: compatible
+
 # Copyright(C) 2012-2014 Florent Fourcot
 #
 # This file is part of a weboob module.
@@ -17,79 +19,94 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+
+import itertools
+
 from weboob.browser import LoginBrowser, URL, need_login
 from weboob.capabilities.messages import CantSendMessage
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.tools.compat import basestring
-from .pages import HomePage, LoginPage, HistoryPage, DetailsPage, OptionsPage, ProfilePage
+from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
+
+from .pages import LoginPage, BillsPage, ProfilePage, PdfPage, OfferPage, OptionsPage
 
 __all__ = ['Freemobile']
 
 
 class Freemobile(LoginBrowser):
-    BASEURL = 'https://mobile.free.fr/moncompte/'
+    BASEURL = 'https://mobile.free.fr'
 
-    homepage = URL('index.php\?page=home', HomePage)
-    detailspage = URL('index.php\?page=suiviconso', DetailsPage)
-    optionspage = URL('index.php\?page=options&o=(?P<username>)', OptionsPage)
-    profile = URL('index.php\?page=coordonnees', ProfilePage)
-    loginpage = URL('index.php', LoginPage)
-    historypage = URL('ajax.php\?page=consotel_current_month', HistoryPage)
-    sendAPI = URL('https://smsapi.free-mobile.fr/sendmsg\?user=(?P<username>)&pass=(?P<apikey>)&msg=(?P<msg>)')
+    login_page = URL(r'/account/$', LoginPage)
+    logoutpage = URL(r'/account/\?logout=user', LoginPage)
+    pdfpage = URL(r'/account/conso-et-factures\?facture=pdf', PdfPage)
+    bills = URL(r'/account/conso-et-factures', BillsPage)
+    profile = URL(r'/account/mes-informations', ProfilePage)
+    offerpage = URL(r'/account/mon-offre', OfferPage)
+    optionspage = URL(r'/account/mes-options', OptionsPage)
+    sendAPI = URL(r'https://smsapi.free-mobile.fr/sendmsg\?user=(?P<username>)&pass=(?P<apikey>)&msg=(?P<msg>)')
 
     def do_login(self):
-        assert isinstance(self.username, basestring)
-        assert isinstance(self.password, basestring)
-        assert self.username.isdigit()
+        self.login_page.go()
+        if not self.page.logged:
+            self.page.login(self.username, self.password)
 
-        self.loginpage.stay_or_go().login(self.username, self.password)
+        if not self.page.logged:
+            error = self.page.get_error()
+            if "nom d'utilisateur ou mot de passe incorrect" in error.lower():
+                raise BrowserIncorrectPassword(error)
+            elif error:
+                raise AssertionError('Unexpected error at login: %s' % error)
+            raise AssertionError('Unexpected error at login')
 
-        self.homepage.go()
-        if self.loginpage.is_here():
-            raise BrowserIncorrectPassword()
+    def do_logout(self):
+        self.logoutpage.go()
+        self.session.cookies.clear()
 
     @need_login
-    def get_subscription_list(self):
-        subscriptions = self.homepage.stay_or_go().get_list()
+    def iter_subscription(self):
+        self.offerpage.stay_or_go()
+        if self.login_page.is_here():
+            error = self.page.get_error()
+            if 'Vous ne pouvez pas avoir accès à cette page' in error:
+                raise BrowserUnavailable(error)
+            elif error:
+                raise AssertionError('Unexpected error at subscription: %s' % error)
 
-        self.detailspage.go()
+        subscriptions = itertools.chain([self.page.get_first_subscription()], self.page.iter_next_subscription())
+
         for subscription in subscriptions:
-            subscription._login = self.page.get_login(subscription.id)
-            subscription._virtual = self.page.load_virtual(subscription.id)
-            subscription.renewdate = self.page.get_renew_date(subscription)
+            self.login_page.go(params={"switch-user": subscription._userid})
+            self.offerpage.go()
+            self.page.fill_subscription(subscription)
             yield subscription
 
-    def get_history(self, subscription):
-        self.historypage.go(data={'login': subscription._login})
-        return sorted([x for x in self.page.get_calls()], key=lambda self: self.datetime, reverse=True)
-
-    def get_details(self, subscription):
-        return self.detailspage.stay_or_go().get_details(subscription)
-
+    @need_login
     def iter_documents(self, subscription):
-        return self.detailspage.stay_or_go().date_bills(subid=subscription.id)
+        self.login_page.go(params={"switch-user": subscription._userid})
+        self.bills.stay_or_go()
+        return self.page.iter_documents(sub=subscription.id)
 
     @need_login
     def post_message(self, message):
         receiver = message.thread.id
         username = [
-            subscription._login
-            for subscription in self.get_subscription_list()
+            subscription._userid
+            for subscription in self.iter_subscription()
             if subscription.id.split("@")[0] == receiver
         ]
         if username:
             username = username[0]
         else:
             raise CantSendMessage(
-                u'Cannot fetch own number.'
+                'Cannot fetch own number.'
             )
 
-        self.optionspage.go(username=username)
+        self.login_page.go(params={"switch-user": username})
+        self.optionspage.go()
 
         api_key = self.page.get_api_key()
         if not api_key:
             raise CantSendMessage(
-                u'Cannot fetch API key for this account, is option enabled?'
+                'Cannot fetch API key for this account, is option enabled?'
             )
 
         self.sendAPI.go(

@@ -27,6 +27,8 @@ from weboob.tools.date import parse_french_date
 
 
 class TrackPage(JsonPage):
+    ENCODING = 'utf-8'
+
     def build_doc(self, text):
         doc = super(TrackPage, self).build_doc(text)
 
@@ -47,7 +49,7 @@ class TrackPage(JsonPage):
         obj_info = CleanText('//div[has-class("ch-block-subtitle-content")]//div[has-class("ch-colis-information")]/text()')
         obj_arrival = CleanText('//div[has-class("ch-block-subtitle-content")]//div[has-class("ch-colis-information")]/text()[3]',
                                 replace=[(u'\xe0', '')], default=NotAvailable) \
-                      & DateTime(dayfirst=True, parse_func=parse_french_date, default=NotAvailable)
+                      & DateTime(dayfirst=True, parse_func=parse_french_date, default=NotAvailable, strict=False)
 
         def obj_status(self):
             el = self.el.xpath('//div[has-class("ch-suivi-colis-light-info") and has-class("active")]')[0]
@@ -64,6 +66,6 @@ class TrackPage(JsonPage):
             class item(ItemElement):
                 klass = Event
 
-                obj_date = CleanText('.//td[1]') & DateTime(dayfirst=True, parse_func=parse_french_date)
+                obj_date = CleanText('.//td[1]') & DateTime(dayfirst=True, parse_func=parse_french_date, strict=False)
                 obj_location = CleanText('.//td[2]/text()[following-sibling::br]')
                 obj_activity = CleanText('.//td[2]/text()[preceding-sibling::br]')

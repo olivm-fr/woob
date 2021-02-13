@@ -64,7 +64,9 @@ ACCOUNT_TYPES = {
     'cristalliance vie': Account.TYPE_LIFE_INSURANCE,
     'article 82': Account.TYPE_LIFE_INSURANCE,
     'liberalys retraite': Account.TYPE_PER,
+    'perspective génération': Account.TYPE_PER,
     'perp': Account.TYPE_PERP,
+    'capi': Account.TYPE_CAPITALISATION,
 }
 
 
@@ -115,6 +117,12 @@ class InvestmentPage(LoggedPage, JsonPage):
                 if empty(srri) or srri == 0:
                     return NotAvailable
                 return int(srri)
+
+    def get_opening_date(self):
+        return Date(
+            CleanText(Dict('dateEffet')),
+            default=NotAvailable
+        )(self.doc)
 
 
 class Transaction(FrenchTransaction):

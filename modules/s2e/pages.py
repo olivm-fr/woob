@@ -22,11 +22,11 @@
 from __future__ import unicode_literals
 
 import re
-
-import requests
 from io import BytesIO
 from decimal import Decimal
+
 from lxml import objectify
+import requests
 
 from weboob.browser.pages import (
     HTMLPage, XMLPage, RawPage, LoggedPage, pagination,
@@ -551,6 +551,8 @@ class ItemInvestment(ItemElement):
                     # The AXA website displays performance graphs but everything is calculated using JS scripts.
                     # There is an API but it only contains risk data and performances per year, not 1-3-5 years.
                     'https://epargne-salariale.axa-im.fr/fr/',
+                    # This URL leads to a connection error even on the website
+                    'https://epargneentreprise.axa.fr',
                     # Redirection to the Rothschild Gestion website, which doesn't exist anymore...
                     'https://www.rothschildgestion.com',
                     # URL to the Morningstar website does not contain any useful information

@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# flake8: compatible
+
 # Copyright(C) 2016      Edouard Lambert
 #
 # This file is part of a weboob module.
@@ -19,12 +21,13 @@
 
 from __future__ import unicode_literals
 
-from datetime import date
-from dateutil.relativedelta import relativedelta
 import re
+from datetime import date
+
+from dateutil.relativedelta import relativedelta
 
 from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.browser.exceptions import ClientError, HTTPNotFound
+from weboob.browser.exceptions import ClientError, HTTPNotFound, BrowserUnavailable
 from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.bill import Subscription
 from weboob.capabilities.bank import (
@@ -124,7 +127,7 @@ class AXABanque(AXABrowser, StatesMixin):
         r'/webapp/axabanque/client/sso/connexion\?token=(?P<token>.*)',
         BankAccountsPage
     )
-    iban_pdf = URL(r'http://www.axabanque.fr/webapp/axabanque/formulaire_AXA_Banque/.*\.pdf.*', IbanPage)
+    iban_pdf = URL(r'https://www.axabanque.fr/webapp/axabanque/formulaire_AXA_Banque/.*\.pdf.*', IbanPage)
     cbttransactions = URL(r'/webapp/axabanque/jsp/detailCarteBleu.*.faces', CBTransactionsPage)
     transactions = URL(
         r'/webapp/axabanque/jsp/panorama.faces',
@@ -138,6 +141,7 @@ class AXABanque(AXABrowser, StatesMixin):
         r'.*page-indisponible.html.*',
         r'.*erreur/erreurBanque.faces',
         r'http://www.axabanque.fr/message/maintenance.htm',
+        r'http://www.axabanque.fr/webapp/axabanque/jsp/erreur/erreurIndispoPdf.faces',
         UnavailablePage
     )
 
@@ -151,8 +155,14 @@ class AXABanque(AXABrowser, StatesMixin):
     investment = URL(r'https://espaceclient.axa.fr/.*content/ecc-popin-cards/savings/(\w+)/repartition', InvestmentPage)
     investment_monaxa = URL(r'https://monaxaweb-gp.axa.fr/MonAxa/Contrat/', InvestmentMonAxaPage)
     performance_monaxa = URL(r'https://monaxaweb-gp.axa.fr/MonAxa/ContratPerformance/', PerformanceMonAxaPage)
-    history = URL(r'https://espaceclient.axa.fr/accueil/savings/savings/contract/_jcr_content.eccGetSavingsOperations.json', HistoryPage)
-    history_investments = URL(r'https://espaceclient.axa.fr/accueil/savings/savings/contract/_jcr_content.eccGetSavingOperationDetail.json', HistoryInvestmentsPage)
+    history = URL(
+        r'https://espaceclient.axa.fr/accueil/savings/savings/contract/_jcr_content.eccGetSavingsOperations.json',
+        HistoryPage
+    )
+    history_investments = URL(
+        r'https://espaceclient.axa.fr/accueil/savings/savings/contract/_jcr_content.eccGetSavingOperationDetail.json',
+        HistoryInvestmentsPage
+    )
     details = URL(
         r'https://espaceclient.axa.fr/.*accueil/savings/(\w+)/contract',
         r'https://espaceclient.axa.fr/#',
@@ -170,12 +180,18 @@ class AXABanque(AXABrowser, StatesMixin):
         r'https://bourse.axabanque.fr/netfinca-titres/servlet/com.netfinca.*',
         BoursePage
     )
-    bourse_history = URL(r'https://bourse.axabanque.fr/netfinca-titres/servlet/com.netfinca.frontcr.account.AccountHistory', BoursePage)
+    bourse_history = URL(
+        r'https://bourse.axabanque.fr/netfinca-titres/servlet/com.netfinca.frontcr.account.AccountHistory',
+        BoursePage
+    )
 
     # Transfer
     recipients = URL(r'/transactionnel/client/enregistrer-nouveau-beneficiaire.html', RecipientsPage)
     add_recipient = URL(r'/webapp/axabanque/jsp/beneficiaireSepa/saisieBeneficiaireSepaOTP.faces', AddRecipientPage)
-    recipient_confirmation_page = URL(r'/webapp/axabanque/jsp/beneficiaireSepa/saisieBeneficiaireSepaOTP.faces', RecipientConfirmationPage)
+    recipient_confirmation_page = URL(
+        r'/webapp/axabanque/jsp/beneficiaireSepa/saisieBeneficiaireSepaOTP.faces',
+        RecipientConfirmationPage
+    )
     validate_transfer = URL(r'/webapp/axabanque/jsp/virementSepa/saisieVirementSepa.faces', ValidateTransferPage)
     # also displays recent single transfers
     register_transfer = URL(
@@ -186,7 +202,10 @@ class AXABanque(AXABrowser, StatesMixin):
     confirm_transfer = URL('/webapp/axabanque/jsp/virementSepa/confirmationVirementSepa.faces', ConfirmTransferPage)
     profile_page = URL('/transactionnel/client/coordonnees.html', BankProfilePage)
     scheduled_transfers = URL(r'/transactionnel/client/virements-en-cours.html', ScheduledTransfersPage)
-    scheduled_transfer_details = URL(r'/webapp/axabanque/jsp/virementSepa/virementEnCoursSepa.faces', ScheduledTransferDetailsPage)
+    scheduled_transfer_details = URL(
+        r'/webapp/axabanque/jsp/virementSepa/virementEnCoursSepa.faces',
+        ScheduledTransferDetailsPage
+    )
 
     reload_state = None
 
@@ -234,17 +253,34 @@ class AXABanque(AXABrowser, StatesMixin):
                         args = a._args
                         # Trying to get IBAN for checking accounts
                         if a.type == a.TYPE_CHECKING and 'paramCodeFamille' in args:
-                            iban_params = {'action': 'RIBCC',
-                                           'numCompte': args['paramNumCompte'],
-                                           'codeFamille': args['paramCodeFamille'],
-                                           'codeProduit': args['paramCodeProduit'],
-                                           'codeSousProduit': args['paramCodeSousProduit']
-                                           }
+                            iban_params = {
+                                'action': 'RIBCC',
+                                'numCompte': args['paramNumCompte'],
+                                'codeFamille': args['paramCodeFamille'],
+                                'codeProduit': args['paramCodeProduit'],
+                                'codeSousProduit': args['paramCodeSousProduit'],
+                            }
                             try:
-                                r = self.open('/webapp/axabanque/popupPDF', params=iban_params)
-                                a.iban = r.page.get_iban()
+                                # This request redirect to the iban page, using http protocol, in which we parse the accounts' iban
+                                # This usually works but sometimes we have a second redirection to an unavailable pdf page,
+                                # even if the pdf page is accessible on the website using the exact same request
+                                r = self.open('/webapp/axabanque/popupPDF', params=iban_params, allow_redirects=False)
                             except ClientError:
                                 a.iban = NotAvailable
+                            else:
+                                iban_pdf_url = r.headers.get('location')
+                                if iban_pdf_url:
+                                    # Using https instead of http makes it sure to get the pdf if it's available
+                                    # we replace 'http:' and not 'http' to avoid replacing if we are already using https
+                                    iban_pdf_url = iban_pdf_url.replace('http:', 'https:')
+                                    try:
+                                        r = self.location(iban_pdf_url)
+                                        a.iban = r.page.get_iban()
+                                    except BrowserUnavailable:
+                                        a.iban = NotAvailable
+                                else:
+                                    a.iban = NotAvailable
+
                         # Get parent account for card accounts
                         # The parent account must be created before the card account
                         if a.type == Account.TYPE_CARD:
@@ -278,7 +314,10 @@ class AXABanque(AXABrowser, StatesMixin):
         if not account.ownership:
             if account.parent and account.parent.ownership:
                 account.ownership = account.parent.ownership
-            elif re.search(r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)', account._owner, re.IGNORECASE):
+            elif re.search(
+                r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou (m|mr|me|mme|mlle|mle|ml)\b(.*)',
+                account._owner, re.IGNORECASE
+            ):
                 account.ownership = AccountOwnership.CO_OWNER
             elif all(n in account._owner for n in owner_name.split()):
                 account.ownership = AccountOwnership.OWNER
@@ -290,14 +329,20 @@ class AXABanque(AXABrowser, StatesMixin):
     @need_login
     def go_account_pages(self, account, action):
         # Default to "comptes"
-        tab = "comptes" if not hasattr(account, '_tab') else account._tab
+        tab = account._tab
+        if not hasattr(account, '_tab'):
+            tab = "comptes"
         self.bank_accounts.go(tab=tab)
         args = account._args
         args['javax.faces.ViewState'] = self.page.get_view_state()
 
         # Nav for accounts in tab pages
-        if tab != "comptes" and hasattr(account, '_url') \
-                and hasattr(account, '_purl') and hasattr(account, '_pargs'):
+        if (
+            tab != "comptes"
+            and hasattr(account, '_url')
+            and hasattr(account, '_purl')
+            and hasattr(account, '_pargs')
+        ):
             self.location(account._purl, data=account._pargs)
             self.location(account._url, data=args)
             # Check if we are on the good tab
@@ -389,8 +434,9 @@ class AXABanque(AXABrowser, StatesMixin):
             self.page.go_to_history()
 
             # Pass account investments to try to get isin code for transaction investments
-            for tr in self.page.iter_history(investments=self.cache['invs'][account.id] if account.id in self.cache['invs'] else []):
-                yield tr
+            if account.id in self.cache['invs']:
+                for tr in self.page.iter_history(investments=self.cache['invs'][account.id]):
+                    yield tr
 
         # Side investment's website
         if account._acctype == 'investment':
@@ -420,7 +466,7 @@ class AXABanque(AXABrowser, StatesMixin):
                 # Get investments for each transaction
                 params = {
                     'oid': tr._oid,
-                    'pid': pid
+                    'pid': pid,
                 }
                 self.history_investments.go(params=params)
                 if self.page.has_investments():
@@ -443,7 +489,7 @@ class AXABanque(AXABrowser, StatesMixin):
     def go_to_transactions(self, pid, skip):
         params = {
             'pid': pid,
-            'skip': skip
+            'skip': skip,
         }
         self.history.go(params=params)
 
@@ -667,7 +713,10 @@ class AXABanque(AXABrowser, StatesMixin):
         # between recipient name given with transfer and the recipient, and since the recipient is linked to an
         # emitter account, information about the emitter are found.
         for transfer in self.page.iter_transfers():
-            matched_information = self._find_emitter_and_recipient_from_recipient_name(recipients_by_emitter, transfer._recipient_name)
+            matched_information = self._find_emitter_and_recipient_from_recipient_name(
+                recipients_by_emitter,
+                transfer._recipient_name
+            )
             # keep in mind that if we were not able to find an emitter,
             # there is no way to filter with the account parameter
             if matched_information:
@@ -687,7 +736,10 @@ class AXAAssurance(AXABrowser):
 
     accounts = URL(r'/accueil.html', WealthAccountsPage)
     history = URL(r'/accueil/savings/savings/contract/_jcr_content.eccGetSavingsOperations.json', HistoryPage)
-    history_investments = URL(r'/accueil/savings/savings/contract/_jcr_content.eccGetSavingOperationDetail.json', HistoryInvestmentsPage)
+    history_investments = URL(
+        r'/accueil/savings/savings/contract/_jcr_content.eccGetSavingOperationDetail.json',
+        HistoryInvestmentsPage
+    )
     details = URL(
         r'.*accueil/savings/(\w+)/contract',
         r'/#',
@@ -814,7 +866,7 @@ class AXAAssurance(AXABrowser):
             # Get investments for each transaction
             params = {
                 'oid': tr._oid,
-                'pid': pid
+                'pid': pid,
             }
             self.history_investments.go(params=params)
             if self.page.has_investments():
@@ -826,7 +878,7 @@ class AXAAssurance(AXABrowser):
     def go_to_transactions(self, pid, skip):
         params = {
             'pid': pid,
-            'skip': skip
+            'skip': skip,
         }
         self.history.go(params=params)
 

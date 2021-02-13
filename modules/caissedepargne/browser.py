@@ -45,7 +45,8 @@ from weboob.capabilities.profile import Profile
 from weboob.browser.exceptions import BrowserHTTPNotFound, ClientError, ServerError
 from weboob.exceptions import (
     BrowserIncorrectPassword, BrowserUnavailable, BrowserHTTPError, BrowserPasswordExpired,
-    AuthMethodNotImplemented, AppValidation, AppValidationExpired,
+    AuthMethodNotImplemented, AppValidation, AppValidationExpired, BrowserQuestion,
+    NeedInteractiveFor2FA,
 )
 from weboob.tools.capabilities.bank.transactions import (
     sorted_transactions, FrenchTransaction, keep_only_card_transactions,
@@ -71,10 +72,9 @@ from .pages import (
     CardsPage, CardsComingPage, CardsOldWebsitePage, TransactionPopupPage,
     OldLeviesPage, NewLeviesPage, NewLoginPage, JsFilePage, AuthorizePage,
     AuthenticationMethodPage, VkImagePage, AuthenticationStepPage, LoginTokensPage,
-    AppValidationPage,
+    AppValidationPage, TokenPage, LoginApi, ConfigPage,
 )
 from .transfer_pages import CheckingPage, TransferListPage
-
 from .linebourse_browser import LinebourseAPIBrowser
 
 
@@ -132,23 +132,26 @@ def monkeypatch_for_lowercase_percent(session):
     patch_attr(pm, 'connection_from_host', connection_from_host)
 
 
-class CaisseEpargne(LoginBrowser, StatesMixin):
-    BASEURL = "https://www.caisse-epargne.fr"
+class CaisseEpargneLogin(LoginBrowser, StatesMixin):
+    # This class is also used by cenet browser
     STATE_DURATION = 5
-    HISTORY_MAX_PAGE = 200
-    TIMEOUT = 60
-
-    LINEBOURSE_BROWSER = LinebourseAPIBrowser
-
+    API_LOGIN = True
+    CENET_URL = 'https://www.cenet.caisse-epargne.fr'
     login = URL(
-        r'/authentification/manage\?step=identification&identifiant=(?P<login>.*)',
+        r'https://www.caisse-epargne.fr/authentification/manage\?step=identification&identifiant=(?P<login>.*)',
+        r'https://.*/authentification/manage\?step=identification&identifiant=.*',
         r'https://.*/login.aspx',
         LoginPage
     )
 
-    new_login = URL(r'/se-connecter/sso', NewLoginPage)
-    js_file = URL(r'/se-connecter/main-.*.js$', JsFilePage)
-
+    new_login = URL(r'https://www.caisse-epargne.fr/se-connecter/sso', NewLoginPage)
+    js_file = URL(r'https://www.caisse-epargne.fr/se-connecter/main-.*.js$', JsFilePage)
+    config_page = URL('https://www.caisse-epargne.fr/ria/pas/configuration/config.json', ConfigPage)
+    token_page = URL(r'https://www.as-ex-ano-groupe.caisse-epargne.fr/api/oauth/token', TokenPage)
+    login_api = URL(
+        r'https://www.rs-ex-ano-groupe.caisse-epargne.fr/bapi/user/v1/users/identificationRouting',
+        LoginApi
+    )
     authorize = URL(r'https://www.as-ex-ath-groupe.caisse-epargne.fr/api/oauth/v2/authorize', AuthorizePage)
     login_tokens = URL(r'https://www.as-ex-ath-groupe.caisse-epargne.fr/api/oauth/v2/consume', LoginTokensPage)
 
@@ -181,189 +184,91 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         r'/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)',
         LoginPage
     )
-    loading = URL(r'https://.*/CreditConso/ReroutageCreditConso.aspx', LoadingPage)
-    cons_loan = URL(
-        r'https://www.credit-conso-cr.caisse-epargne.fr/websavcr-web/rest/contrat/getContrat\?datePourIe=(?P<datepourie>)',
-        ConsLoanPage
-    )
-    transaction_detail = URL(r'https://.*/Portail.aspx.*', TransactionsDetailsPage)
-    recipient = URL(r'https://.*/Portail.aspx.*', RecipientPage)
-    checking = URL(r'https://.*/Portail.aspx.*', CheckingPage)
-    transfer_list = URL(r'https://.*/Portail.aspx.*', TransferListPage)
-    transfer = URL(r'https://.*/Portail.aspx.*', TransferPage)
-    transfer_summary = URL(r'https://.*/Portail.aspx.*', TransferSummaryPage)
-    transfer_confirm = URL(r'https://.*/Portail.aspx.*', TransferConfirmPage)
-    pro_transfer = URL(r'https://.*/Portail.aspx.*', ProTransferPage)
-    pro_transfer_confirm = URL(r'https://.*/Portail.aspx.*', ProTransferConfirmPage)
-    pro_transfer_summary = URL(r'https://.*/Portail.aspx.*', ProTransferSummaryPage)
-    pro_add_recipient_otp = URL(r'https://.*/Portail.aspx.*', ProAddRecipientOtpPage)
-    pro_add_recipient = URL(r'https://.*/Portail.aspx.*', ProAddRecipientPage)
-    measure_page = URL(r'https://.*/Portail.aspx.*', MeasurePage)
-    cards_old = URL(r'https://.*/Portail.aspx.*', CardsOldWebsitePage)
-    cards = URL(r'https://.*/Portail.aspx.*', CardsPage)
-    cards_coming = URL(r'https://.*/Portail.aspx.*', CardsComingPage)
-    old_checkings_levies = URL(r'https://.*/Portail.aspx.*', OldLeviesPage)
-    new_checkings_levies = URL(r'https://.*/Portail.aspx.*', NewLeviesPage)
-    authent = URL(r'https://.*/Portail.aspx.*', AuthentPage)
-    subscription = URL(r'https://.*/Portail.aspx\?tache=(?P<tache>).*', SubscriptionPage)
-    transaction_popup = URL(r'https://.*/Portail.aspx.*', TransactionPopupPage)
-    home = URL(r'https://.*/Portail.aspx.*', IndexPage)
-    home_tache = URL(r'https://.*/Portail.aspx\?tache=(?P<tache>).*', IndexPage)
     error = URL(
         r'https://.*/login.aspx',
         r'https://.*/Pages/logout.aspx.*',
         r'https://.*/particuliers/Page_erreur_technique.aspx.*',
         ErrorPage
     )
-    market = URL(
-        r'https://.*/Pages/Bourse.*',
-        r'https://www.caisse-epargne.offrebourse.com/ReroutageSJR',
-        r'https://www.caisse-epargne.offrebourse.com/fr/6CE.*',
-        MarketPage
-    )
-    unavailable_page = URL(r'https://www.caisse-epargne.fr/.*/au-quotidien', UnavailablePage)
-
-    creditcooperatif_market = URL(r'https://www.offrebourse.com/.*', CreditCooperatifMarketPage)  # just to catch the landing page of the Credit Cooperatif's Linebourse
-    natixis_redirect = URL(
-        r'/NaAssuranceRedirect/NaAssuranceRedirect.aspx',
-        r'https://www.espace-assurances.caisse-epargne.fr/espaceinternet-ce/views/common/routage-itce.xhtml\?windowId=automatedEntryPoint',
-        NatixisRedirectPage
-    )
-    life_insurance_history = URL(
-        r'https://www.extranet2.caisse-epargne.fr/cin-front/contrats/evenements',
-        LifeInsuranceHistory
-    )
-    life_insurance_investments = URL(
-        r'https://www.extranet2.caisse-epargne.fr/cin-front/contrats/details',
-        LifeInsuranceInvestments
-    )
-    life_insurance = URL(
-        r'https://.*/Assurance/Pages/Assurance.aspx',
-        r'https://www.extranet2.caisse-epargne.fr.*',
-        LifeInsurance
-    )
-    natixis_life_ins_his = URL(
-        r'https://www.espace-assurances.caisse-epargne.fr/espaceinternet-ce/rest/v2/contratVie/load-operation/(?P<id1>\w+)/(?P<id2>\w+)/(?P<id3>)',
-        NatixisLIHis
-    )
-    natixis_life_ins_inv = URL(
-        r'https://www.espace-assurances.caisse-epargne.fr/espaceinternet-ce/rest/v2/contratVie/load/(?P<id1>\w+)/(?P<id2>\w+)/(?P<id3>)',
-        NatixisLIInv
-    )
-    message = URL(r'https://www.caisse-epargne.offrebourse.com/DetailMessage\?refresh=O', MessagePage)
-    garbage = URL(
-        r'https://www.caisse-epargne.offrebourse.com/Portefeuille',
-        r'https://www.caisse-epargne.fr/particuliers/.*/emprunter.aspx',
-        r'https://.*/particuliers/emprunter.*',
-        r'https://.*/particuliers/epargner.*',
-        GarbagePage
-    )
 
     __states__ = (
-        'BASEURL', 'multi_type', 'typeAccount', 'is_cenet_website', 'recipient_form',
-        'is_send_sms', 'is_app_validation', 'otp_validation',
+        'BASEURL', 'multi_type', 'typeAccount', 'is_cenet_website',
+        'otp_validation', 'continue_url', 'continue_parameters',
+        'login_otp_validation',
     )
 
-    # Accounts managed in life insurance space (not in linebourse)
-
-    insurance_accounts = (
-        'AIKIDO',
-        'ASSURECUREUIL',
-        'ECUREUIL PROJET',
-        'GARANTIE RETRAITE EU',
-        'INITIATIVES PLUS',
-        'INITIATIVES TRANSMIS',
-        'LIVRET ASSURANCE VIE',
-        'OCEOR EVOLUTION',
-        'PATRIMONIO CRESCENTE',
-        'PEP TRANSMISSION',
-        'PERP',
-        'PERSPECTIVES ECUREUI',
-        'POINTS RETRAITE ECUR',
-        'RICOCHET',
-        'SOLUTION PERP',
-        'TENDANCES',
-        'YOGA',
-    )
-
-    def __init__(self, nuser, *args, **kwargs):
-        self.BASEURL = kwargs.pop('domain', self.BASEURL)
-        if not self.BASEURL.startswith('https://'):
-            self.BASEURL = 'https://%s' % self.BASEURL
-
+    def __init__(self, nuser, config, *args, **kwargs):
         self.is_cenet_website = False
-        self.new_website = True
         self.multi_type = False
         self.accounts = None
-        self.loans = None
         self.typeAccount = None
         self.inexttype = 0  # keep track of index in the connection type's list
         self.nuser = nuser
-        self.recipient_form = None
-        self.is_send_sms = None
-        self.otp_validation = None
         self.weboob = kwargs['weboob']
-        self.market_url = kwargs.pop(
-            'market_url',
-            'https://www.caisse-epargne.offrebourse.com',
-        )
-        self.has_subscription = True
+        self.config = config
+        self.browser_switched = False
+        self.need_emv_authentication = False
+        self.request_information = config['request_information'].get()
+        self.connection_type = None
+        self.cdetab = None
+        self.continue_url = None
 
-        super(CaisseEpargne, self).__init__(*args, **kwargs)
-
-        dirname = self.responses_dirname
-        if dirname:
-            dirname += '/bourse'
-
-        self.linebourse = self.LINEBOURSE_BROWSER(
-            self.market_url,
-            logger=self.logger,
-            responses_dirname=dirname,
-            weboob=self.weboob,
-            proxy=self.PROXIES,
-        )
-
-        monkeypatch_for_lowercase_percent(self.session)
-
-    def deleteCTX(self):
-        # For connection to offrebourse and natixis, we need to delete duplicate of CTX cookie
-        if len([k for k in self.session.cookies.keys() if k == 'CTX']) > 1:
-            del self.session.cookies['CTX']
-
-    def load_state(self, state):
-        if state.get('expire') and parser.parse(state['expire']) < datetime.datetime.now():
-            return self.logger.info('State expired, not reloading it from storage')
-
-        transfer_states = ('recipient_form', 'is_app_validation', 'is_send_sms', 'otp_validation')
-
-        for transfer_state in transfer_states:
-            if transfer_state in state and state[transfer_state] is not None:
-                super(CaisseEpargne, self).load_state(state)
-                self.logged = True
-                break
-
-    def locate_browser(self, state):
-        # in case of transfer/add recipient, we shouldn't go back to previous page
-        # site will crash else
-        pass
+        super(CaisseEpargneLogin, self).__init__(*args, **kwargs)
 
     def do_login(self):
-        data = self.get_connection_data()
-        accounts_types = data.get('account')
+        if self.API_LOGIN:
+            # caissedepargne pre login changed but children still have the precedent behaviour
+            self.do_api_pre_login()
+            if self.connection_type == 'ent' and not self.browser_switched:
+                raise SiteSwitch('cenet')
 
-        if data.get('authMode', '') == 'redirect':  # the connection type EU could also be used as a criteria
+            return self.do_new_login()
+
+        authentification_data = self.get_connection_data()
+        accounts_types = authentification_data.get('account')
+
+        if not self.browser_switched and self.CENET_URL in authentification_data['url']:
+            # the connection type EU could also be used as a criteria
+            # We want to avoid to switch again if we are alreay on cenet browser
             raise SiteSwitch('cenet')
 
-        type_account = data['account'][0]
+        type_account = authentification_data['account'][0]
 
         if self.multi_type:
             assert type_account == self.typeAccount
 
-        if 'keyboard' in data:
-            self.do_old_login(data, type_account, accounts_types)
+        if 'keyboard' in authentification_data:
+            self.do_old_login(authentification_data, type_account, accounts_types)
         else:
             # New virtual keyboard
-            self.do_new_login(data)
+            self.do_new_login(authentification_data)
+
+    def do_api_pre_login(self):
+        if not self.cdetab or not self.connection_type:
+            data = {
+                'grant_type': 'client_credentials',
+                'client_id': '8a7e499e-8f67-4377-91d3-74e4cbdd7a42',
+                'scope': "",
+            }
+            self.token_page.go(data=data)
+            data = {
+                'characteristics': {
+                    'iTEntityType': {
+                        'code': '02',  # Not found yet, certainly CE code
+                        'label': 'CE',
+                    },
+                    'userCode': self.username,
+                    'bankId': None,
+                    'subscribeTypeItems': [],
+                },
+            }
+            headers = {
+                'Authorization': 'Bearer %s' % self.page.get_access_token(),
+            }
+
+            self.login_api.go(json=data, headers=headers)
+            self.cdetab = self.page.get_cdetab()
+            self.connection_type = self.page.get_connection_type()
 
     def get_connection_data(self):
         """
@@ -452,10 +357,13 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
 
         return data
 
-    def do_old_login(self, data, type_account, accounts_types):
+    def do_old_login(self, authentification_data, type_account, accounts_types):
         # Old virtual keyboard
-        id_token_clavier = data['keyboard']['Id']
-        vk = CaissedepargneKeyboard(data['keyboard']['ImageClavier'], data['keyboard']['Num']['string'])
+        id_token_clavier = authentification_data['keyboard']['Id']
+        vk = CaissedepargneKeyboard(
+            authentification_data['keyboard']['ImageClavier'],
+            authentification_data['keyboard']['Num']['string'],
+        )
 
         newCodeConf = vk.get_string_code(self.password)
 
@@ -473,7 +381,7 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
         }
 
         try:
-            res = self.location(data['url'], params=payload)
+            res = self.location(authentification_data['url'], params=payload)
         except ValueError:
             raise BrowserUnavailable()
         if not res.page:
@@ -502,7 +410,7 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
                 return
             raise BrowserIncorrectPassword(self.page.get_wrongpass_message())
 
-        self.BASEURL = urljoin(data['url'], '/')
+        self.BASEURL = urljoin(authentification_data['url'], '/')
 
         try:
             self.home.go()
@@ -665,19 +573,113 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             },
         )
 
+    def do_otp_emv_authentication(self, *params):
+        if self.page.is_other_authentication_method() and not self.need_emv_authentication:
+            # EMV authentication is mandatory every 90 days
+            # But by default the authentication mode is EMV
+            # let's check if we can use PASSWORD authentication
+            doc = self.page.doc
+            self.location(
+                self.url + '/step',
+                json={"fallback": {}}
+            )
+
+            if self.page.get_authentication_method_type() == 'PASSWORD':
+                # To use vk_authentication method we merge the two last json
+                # The first one with authentication values and second one with vk values
+                doc['step'] = self.page.doc
+                self.page.doc = doc
+                return self.do_vk_authentication(*params)
+
+            # Need fresh id values to do EMV authentication again
+            self.need_emv_authentication = True
+            return self.do_login()
+
+        if self.request_information is None:
+            raise NeedInteractiveFor2FA()
+
+        self.login_otp_validation = self.page.get_authentication_method_info()
+        self.login_otp_validation['validation_unit_id'] = self.page.validation_unit_id
+        self.login_otp_validation['validation_id'] = self.page.get_validation_id()
+        self.login_otp_validation['domain'] = urlparse(self.url).netloc
+        label = "Veuillez renseigner le code affiché sur le boitier (Lecteur CAP en mode « Code »)"
+        raise BrowserQuestion(Value('emv_otp', label=label))
+
+    def handle_certificate_authentification(self, *params):
+        # We don't handle this authentification mode yet
+        # But we can check if PASSWORD authentification can be done
+        doc = self.page.doc
+        if self.page.is_other_authentication_method():
+            self.location(
+                self.url + '/step',
+                json={"fallback": {}}
+            )
+            if self.page.get_authentication_method_type() != 'PASSWORD' and self.page.is_other_authentication_method():
+                # Can be EMV here
+                self.location(
+                    self.url,
+                    json={"fallback": {}}
+                )
+
+            if self.page.get_authentication_method_type() == 'PASSWORD':
+                # To use vk_authentication method we merge the two last json
+                # The first one with authentication values and second one with vk values
+                doc['step'] = self.page.doc
+                self.page.doc = doc
+                return self.do_vk_authentication(*params)
+
+        raise AuthMethodNotImplemented("L'authentification par certificat n'est pas gérée")
+
+    def handle_emv_otp(self):
+        self.authentication_step.go(
+            domain=self.login_otp_validation['domain'],
+            validation_id=self.login_otp_validation['validation_id'],
+            json={
+                'validate': {
+                    self.login_otp_validation['validation_unit_id']: [{
+                        'id': self.login_otp_validation['id'],
+                        'token': self.config['emv_otp'].get(),
+                        'type': 'EMV',
+                    }],
+                },
+            }
+        )
+
+        assert self.authentication_step.is_here()
+        self.page.check_errors(feature='login')
+
+        redirect_data = self.page.get_redirect_data()
+        assert redirect_data, 'redirect_data must not be empty'
+
+        self.location(
+            redirect_data['action'],
+            data={
+                'SAMLResponse': redirect_data['samlResponse'],
+            },
+            headers={
+                'Referer': self.BASEURL,
+                'Accept': 'application/json, text/plain, */*',
+            },
+        )
+
+        self.login_finalize()
+
     def do_authentication_validation(self, authentication_method, feature, **params):
         """ Handle all sort of authentication with `icgauth`
 
         This method is used for login or transfer/new recipient authentication.
 
         Parameters:
-        authentication_method (str): authentication method in ('SMS', 'CLOUDCARD', 'PASSWORD')
+        authentication_method (str): authentication method in:
+        ('SMS', 'CLOUDCARD', 'PASSWORD', 'EMV', 'TLS_CLIENT_CERTIFICATE')
         feature (str): action that need authentication in ('login', 'transfer', 'recipient')
         """
         AUTHENTICATION_METHODS = {
             'SMS': self.do_otp_sms_authentication,
             'CLOUDCARD': self.do_cloudcard_authentication,
             'PASSWORD': self.do_vk_authentication,
+            'EMV': self.do_otp_emv_authentication,
+            'TLS_CLIENT_CERTIFICATE': self.handle_certificate_authentification,
         }
         AUTHENTICATION_METHODS[authentication_method](**params)
 
@@ -698,39 +700,52 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             },
         )
 
-    def do_new_login(self, data):
-        connection_type = self.page.get_connection_type()
+    def do_new_login(self, authentification_data=''):
+        if self.config['emv_otp'].get():
+            return self.handle_emv_otp()
+
         csid = str(uuid4())
-        redirect_url = data['url']
+        snid = None
 
-        parts = list(urlparse(redirect_url))
-        url_params = parse_qs(urlparse(redirect_url).query)
+        if not self.API_LOGIN:
+            self.connection_type = self.page.get_connection_type()
+            redirect_url = authentification_data['url']
+            parts = list(urlparse(redirect_url))
+            url_params = parse_qs(urlparse(redirect_url).query)
 
-        qs = OrderedDict(parse_qsl(parts[4]))
-        qs.update({'csid': csid})
-        parts[4] = urlencode(qs)
-        url = urlunparse(parts)
+            qs = OrderedDict(parse_qsl(parts[4]))
+            qs['csid'] = csid
+            parts[4] = urlencode(qs)
+            url = urlunparse(parts)
+            self.cdetab = url_params['cdetab'][0]
 
-        continue_url = url_params['continue'][0]
-        continue_parameters = data['continueParameters']
+            self.continue_url = url_params['continue'][0]
+            self.continue_parameters = authentification_data['continueParameters']
 
-        # snid is either present in continue_parameters (creditcooperatif / banquebcp)
-        # or in url_params (caissedepargne / other children)
-        snid = json.loads(continue_parameters).get('snid') or url_params['snid'][0]
+            # snid is either present in continue_parameters (creditcooperatif / banquebcp)
+            # or in url_params (caissedepargne / other children)
+            snid = json.loads(self.continue_parameters).get('snid') or url_params['snid'][0]
 
-        self.location(
-            url,
-            method='POST',
-            params={
-                'continue_parameters': continue_parameters,
-            },
-        )
+            self.location(
+                url,
+                data='',
+                params={
+                    'continue_parameters': self.continue_parameters,
+                },
+            )
+        else:
+            self.new_login.go(params={'service': 'dei'})
 
         main_js_file = self.page.get_main_js_file_url()
         self.location(main_js_file)
+        if not snid:
+            snid = self.page.get_csid()
 
         client_id = self.page.get_client_id()
         nonce = self.page.get_nonce()  # Hardcoded in their js...
+        if not self.continue_url:
+            self.config_page.go()
+            self.continue_url = self.page.get_continue_url(self.cdetab, self.connection_type)
 
         # On the website, this sends back json because of the header
         # 'Accept': 'applcation/json'. If we do not add this header, we
@@ -755,15 +770,15 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             "typ_sp": "out-band",
             "typ_act": "auth",
             "snid": snid,
-            "cdetab": url_params['cdetab'][0],
-            "typ_srv": connection_type,
+            "cdetab": self.cdetab,
+            "typ_srv": self.connection_type,
         }
         params = {
             'nonce': nonce,
             'scope': 'openid readUser',
             'response_type': 'id_token token',
             'response_mode': 'form_post',
-            'cdetab': url_params['cdetab'][0],
+            'cdetab': self.cdetab,
             'login_hint': self.username,
             'display': 'page',
             'client_id': client_id,
@@ -772,7 +787,12 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             'bpcesta': json.dumps(bpcesta, separators=(',', ':')),
         }
         if self.nuser:
-            params['login_hint'] += ' %s' % self.nuser
+            if len(self.username) != 10:
+                params['login_hint'] += ' '
+
+            # We must fill with the missing 0 expected by the caissedepargne server
+            # Some clues are given in js file
+            params['login_hint'] += self.nuser.zfill(6)
 
         self.authorize.go(params=params)
         self.page.send_form()
@@ -792,26 +812,187 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             authentication_method=authentication_method,
             feature='login'
         )
+        self.login_finalize()
 
+    def login_finalize(self):
         access_token = self.page.get_access_token()
         id_token = self.page.get_id_token()
-
-        continue_parameters = json.loads(continue_parameters)
-        self.location(
-            continue_url,
-            data={
-                'id_token': id_token,
-                'access_token': access_token,
+        data = {
+            'id_token': id_token,
+            'access_token': access_token,
+        }
+        if not self.API_LOGIN:
+            continue_parameters = json.loads(self.continue_parameters)
+            data.update({
                 'ctx': continue_parameters['ctx'],
                 'redirectUrl': continue_parameters['redirectUrl'],
                 'ctx_routage': continue_parameters['ctx_routage'],
-            },
-        )
+            })
+
+        self.location(self.continue_url, data=data)
         # Url look like this : https://www.net382.caisse-epargne.fr/Portail.aspx
         # We only want the https://www.net382.caisse-epargne.fr part
         # We start the .find at 8 to get the first `/` after `https://`
         parsed_url = urlparse(self.url)
         self.BASEURL = 'https://' + parsed_url.netloc
+
+
+class CaisseEpargne(CaisseEpargneLogin):
+    BASEURL = "https://www.caisse-epargne.fr"
+    HISTORY_MAX_PAGE = 200
+    TIMEOUT = 60
+
+    LINEBOURSE_BROWSER = LinebourseAPIBrowser
+
+    loading = URL(r'https://.*/CreditConso/ReroutageCreditConso.aspx', LoadingPage)
+    cons_loan = URL(
+        r'https://www.credit-conso-cr.caisse-epargne.fr/websavcr-web/rest/contrat/getContrat\?datePourIe=(?P<datepourie>)',
+        ConsLoanPage
+    )
+    transaction_detail = URL(r'https://.*/Portail.aspx.*', TransactionsDetailsPage)
+    recipient = URL(r'https://.*/Portail.aspx.*', RecipientPage)
+    checking = URL(r'https://.*/Portail.aspx.*', CheckingPage)
+    transfer_list = URL(r'https://.*/Portail.aspx.*', TransferListPage)
+    transfer = URL(r'https://.*/Portail.aspx.*', TransferPage)
+    transfer_summary = URL(r'https://.*/Portail.aspx.*', TransferSummaryPage)
+    transfer_confirm = URL(r'https://.*/Portail.aspx.*', TransferConfirmPage)
+    pro_transfer = URL(r'https://.*/Portail.aspx.*', ProTransferPage)
+    pro_transfer_confirm = URL(r'https://.*/Portail.aspx.*', ProTransferConfirmPage)
+    pro_transfer_summary = URL(r'https://.*/Portail.aspx.*', ProTransferSummaryPage)
+    pro_add_recipient_otp = URL(r'https://.*/Portail.aspx.*', ProAddRecipientOtpPage)
+    pro_add_recipient = URL(r'https://.*/Portail.aspx.*', ProAddRecipientPage)
+    measure_page = URL(r'https://.*/Portail.aspx.*', MeasurePage)
+    cards_old = URL(r'https://.*/Portail.aspx.*', CardsOldWebsitePage)
+    cards = URL(r'https://.*/Portail.aspx.*', CardsPage)
+    cards_coming = URL(r'https://.*/Portail.aspx.*', CardsComingPage)
+    old_checkings_levies = URL(r'https://.*/Portail.aspx.*', OldLeviesPage)
+    new_checkings_levies = URL(r'https://.*/Portail.aspx.*', NewLeviesPage)
+    authent = URL(r'https://.*/Portail.aspx.*', AuthentPage)
+    subscription = URL(r'https://.*/Portail.aspx\?tache=(?P<tache>).*', SubscriptionPage)
+    transaction_popup = URL(r'https://.*/Portail.aspx.*', TransactionPopupPage)
+    market = URL(
+        r'https://.*/Pages/Bourse.*',
+        r'https://www.caisse-epargne.offrebourse.com/ReroutageSJR',
+        r'https://www.caisse-epargne.offrebourse.com/fr/6CE.*',
+        MarketPage
+    )
+    unavailable_page = URL(r'https://www.caisse-epargne.fr/.*/au-quotidien', UnavailablePage)
+
+    creditcooperatif_market = URL(r'https://www.offrebourse.com/.*', CreditCooperatifMarketPage)  # just to catch the landing page of the Credit Cooperatif's Linebourse
+    natixis_redirect = URL(
+        r'/NaAssuranceRedirect/NaAssuranceRedirect.aspx',
+        r'https://www.espace-assurances.caisse-epargne.fr/espaceinternet-ce/views/common/routage-itce.xhtml',
+        NatixisRedirectPage
+    )
+    life_insurance_history = URL(
+        r'https://www.extranet2.caisse-epargne.fr/cin-front/contrats/evenements',
+        LifeInsuranceHistory
+    )
+    life_insurance_investments = URL(
+        r'https://www.extranet2.caisse-epargne.fr/cin-front/contrats/details',
+        LifeInsuranceInvestments
+    )
+    life_insurance = URL(
+        r'https://.*/Assurance/Pages/Assurance.aspx',
+        r'https://www.extranet2.caisse-epargne.fr.*',
+        LifeInsurance
+    )
+    natixis_life_ins_his = URL(
+        r'https://www.espace-assurances.caisse-epargne.fr/espaceinternet-ce/rest/v2/contratVie/load-operation/(?P<id1>\w+)/(?P<id2>\w+)/(?P<id3>)',
+        NatixisLIHis
+    )
+    natixis_life_ins_inv = URL(
+        r'https://www.espace-assurances.caisse-epargne.fr/espaceinternet-ce/rest/v2/contratVie/load/(?P<id1>\w+)/(?P<id2>\w+)/(?P<id3>)',
+        NatixisLIInv
+    )
+    message = URL(r'https://www.caisse-epargne.offrebourse.com/DetailMessage\?refresh=O', MessagePage)
+    home = URL(r'https://.*/Portail.aspx.*', IndexPage)
+    home_tache = URL(r'https://.*/Portail.aspx\?tache=(?P<tache>).*', IndexPage)
+    garbage = URL(
+        r'https://www.caisse-epargne.offrebourse.com/Portefeuille',
+        r'https://www.caisse-epargne.fr/particuliers/.*/emprunter.aspx',
+        r'https://.*/particuliers/emprunter.*',
+        r'https://.*/particuliers/epargner.*',
+        GarbagePage
+    )
+
+    # Accounts managed in life insurance space (not in linebourse)
+
+    insurance_accounts = (
+        'AIKIDO',
+        'ASSURECUREUIL',
+        'ECUREUIL PROJET',
+        'GARANTIE RETRAITE EU',
+        'INITIATIVES PLUS',
+        'INITIATIVES TRANSMIS',
+        'LIVRET ASSURANCE VIE',
+        'OCEOR EVOLUTION',
+        'PATRIMONIO CRESCENTE',
+        'PEP TRANSMISSION',
+        'PERP',
+        'PERSPECTIVES ECUREUI',
+        'POINTS RETRAITE ECUR',
+        'RICOCHET',
+        'SOLUTION PERP',
+        'TENDANCES',
+        'YOGA',
+    )
+
+    def __init__(self, nuser, config, *args, **kwargs):
+        self.loans = None
+        self.typeAccount = None
+        self.inexttype = 0  # keep track of index in the connection type's list
+        self.recipient_form = None
+        self.is_send_sms = None
+        self.market_url = kwargs.pop(
+            'market_url',
+            'https://www.caisse-epargne.offrebourse.com',
+        )
+        self.has_subscription = True
+
+        super(CaisseEpargne, self).__init__(nuser, config, *args, **kwargs)
+
+        self.__states__ += (
+            'recipient_form', 'is_send_sms', 'is_app_validation',
+        )
+        dirname = self.responses_dirname
+        if dirname:
+            dirname += '/bourse'
+
+        self.linebourse = self.LINEBOURSE_BROWSER(
+            self.market_url,
+            logger=self.logger,
+            responses_dirname=dirname,
+            weboob=self.weboob,
+            proxy=self.PROXIES,
+        )
+
+        monkeypatch_for_lowercase_percent(self.session)
+
+    def load_state(self, state):
+        if state.get('expire') and parser.parse(state['expire']) < datetime.datetime.now():
+            return self.logger.info('State expired, not reloading it from storage')
+
+        transfer_states = ('recipient_form', 'is_app_validation', 'is_send_sms', 'otp_validation')
+
+        for transfer_state in transfer_states:
+            if transfer_state in state and state[transfer_state] is not None:
+                super(CaisseEpargne, self).load_state(state)
+                self.logged = True
+                break
+
+        if 'login_otp_validation' in state and state['login_otp_validation'] is not None:
+            return super(CaisseEpargne, self).load_state(state)
+
+    def locate_browser(self, state):
+        # in case of transfer/add recipient, we shouldn't go back to previous page
+        # otherwise the site will crash
+        pass
+
+    def deleteCTX(self):
+        # For connection to offrebourse and natixis, we need to delete duplicate of CTX cookie
+        if len([k for k in self.session.cookies.keys() if k == 'CTX']) > 1:
+            del self.session.cookies['CTX']
 
     def loans_conso(self):
         days = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
@@ -1020,8 +1201,22 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
                 for account in self.page.get_list(owner_name):
                     if account.id not in [acc.id for acc in self.accounts]:
                         self.accounts.append(account)
+            wealth_not_accessible = False
+
         except ServerError:
             self.logger.warning("Could not access wealth accounts page")
+            wealth_not_accessible = True
+
+        if wealth_not_accessible:
+            # The navigation can be broken here
+            # We first check if we are logout
+            # and if it is the case we do login again
+            try:
+                self.home.go()
+            except BrowserUnavailable:
+                if not self.error.is_here():
+                    raise
+                self.do_login()
 
         self.add_linebourse_accounts_data()
         self.add_card_accounts()
@@ -1641,14 +1836,6 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
             self.page.handle_error()
             raise AssertionError('We should not be on this page')
 
-        if self.home.is_here():
-            # If we land here it might be because the user has no 2fa method
-            # enabled, and therefore cannot add a recipient.
-            unavailable_2fa = self.page.get_unavailable_2fa_message()
-            if unavailable_2fa:
-                raise AddRecipientBankError(message=unavailable_2fa)
-            raise AssertionError('Should not be on home page after sending sms when adding new recipient.')
-
         if self.validation_option.is_here():
             self.get_auth_mechanisms_validation_info()
 
@@ -1676,6 +1863,15 @@ class CaisseEpargne(LoginBrowser, StatesMixin):
                 self.get_recipient_obj(recipient),
                 Value('pro_password', label=self.page.get_prompt_text())
             )
+
+        elif self.home.is_here():
+            # If we land here it might be because the user has no 2fa method
+            # enabled, and therefore cannot add a recipient.
+            unavailable_2fa = self.page.get_unavailable_2fa_message()
+            if unavailable_2fa:
+                raise AddRecipientBankError(message=unavailable_2fa)
+            raise AssertionError('Should not be on home page after sending sms when adding new recipient.')
+
         else:
             self.page.check_canceled_auth()
             self.page.set_browser_form()

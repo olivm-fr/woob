@@ -21,13 +21,14 @@ from __future__ import unicode_literals
 
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import groupby
 from operator import attrgetter
 
+from weboob.capabilities.bill import Subscription
 from weboob.exceptions import (
     ActionNeeded, AppValidation, AppValidationExpired, AppValidationCancelled, AuthMethodNotImplemented,
-    BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion, NoAccountsException,
+    BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion, NoAccountsException, NeedInteractiveFor2FA,
 )
 from weboob.tools.compat import basestring
 from weboob.tools.value import Value
@@ -87,8 +88,8 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     twofa_unabled_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', TwoFAUnabledPage)
     mobile_confirmation = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', MobileConfirmationPage)
     safetrans_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', SafeTransPage)
-    decoupled_state = URL(r'/fr/banque/async/otp/SOSD_OTP_GetTransactionState.htm', DecoupledStatePage)
-    cancel_decoupled = URL(r'/fr/banque/async/otp/SOSD_OTP_CancelTransaction.htm', CancelDecoupled)
+    decoupled_state = URL(r'/(?P<subbank>.*)fr/banque/async/otp/SOSD_OTP_GetTransactionState.htm', DecoupledStatePage)
+    cancel_decoupled = URL(r'/(?P<subbank>.*)fr/banque/async/otp/SOSD_OTP_CancelTransaction.htm', CancelDecoupled)
     otp_validation_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', OtpValidationPage)
     otp_blocked_error_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', OtpBlockedErrorPage)
     fiscality = URL(r'/(?P<subbank>.*)fr/banque/residencefiscale.aspx', FiscalityConfirmationPage)
@@ -135,7 +136,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                       r'/(?P<subbank>.*)fr/validation/(?!change_password|verif_code|image_case|infos).*',
                       EmptyPage)
     por = URL(
-        r'/(?P<subbank>.*)fr/banque/PORT_Synthese.aspx\?entete=1',
+        r'/(?P<subbank>.*)fr/banque/SYNT_Synthese.aspx\?entete=1',
         r'/(?P<subbank>.*)fr/banque/PORT_Synthese.aspx',
         r'/(?P<subbank>.*)fr/banque/SYNT_Synthese.aspx',
         PorPage
@@ -200,7 +201,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     recipients_list =   URL(r'/(?P<subbank>.*)fr/banque/virements/vplw_bl.html', RecipientsListPage)
     error = URL(r'/(?P<subbank>.*)validation/infos.cgi', ErrorPage)
 
-    subscription = URL(r'/(?P<subbank>.*)fr/banque/MMU2_LstDoc.aspx', SubscriptionPage)
+    subscription = URL(r'/(?P<subbank>.*)fr/banque/documentinternet.html', SubscriptionPage)
     terms_and_conditions = URL(r'/(?P<subbank>.*)fr/banque/conditions-generales.html',
                                r'/(?P<subbank>.*)fr/banque/coordonnees_personnelles.aspx',
                                r'/(?P<subbank>.*)fr/banque/paci_engine/paci_wsd_pdta.aspx',
@@ -299,10 +300,10 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         """
         # 15' on website, we don't wait that much, but leave sufficient time for the user
         timeout = time.time() + 600.00  # 15' on webview, need not to wait that much
+        data = {'transactionId': transactionId}
 
         while time.time() < timeout:
-            data = {'transactionId': transactionId}
-            self.decoupled_state.go(data=data)
+            self.decoupled_state.go(data=data, subbank=self.currentSubBank)
 
             decoupled_state = self.page.get_decoupled_state()
             if decoupled_state == 'VALIDATED':
@@ -312,10 +313,10 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 raise AppValidationCancelled()
 
             assert decoupled_state == 'PENDING', 'Unhandled polling state: "%s"' % decoupled_state
-            time.sleep(5)  # every second on wbesite, need to slow that down
+            time.sleep(5)  # every second on website, need to slow that down
 
         # manually cancel polling before website max duration for it
-        self.cancel_decoupled.go(data=data)
+        self.cancel_decoupled.go(data=data, subbank=self.currentSubBank)
         raise AppValidationExpired()
 
     def handle_polling(self):
@@ -358,16 +359,41 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         self.otp_data = {}
 
     def check_redirections(self):
-        self.logger.info('Checking redirections')
-        # MobileConfirmationPage or OtpValidationPage is coming but there is no request_information
+        # 2FA pages might be coming, or not,
+        # so we have to guess if interactive mode is needed,
+        # and handle other kinds of redirections.
+
         location = self.response.headers.get('Location', '')
-        if 'validation.aspx' in location and not self.is_interactive:
+
+        if self.twofa_auth_state and self.twofa_auth_state.get('expires'):
+            # 2FA validity date
+            twofa_limit_date = datetime.fromtimestamp(self.twofa_auth_state['expires'])
+        else:
+            # case where 2FA is not done yet
+            twofa_limit_date = datetime.now()
+        twofa_limit_date = twofa_limit_date - timedelta(hours=2)  # 2h safety margin (in case of timezoning in backends)
+
+        if (
+            'validation.aspx' in location
+            and not self.is_interactive
+            and datetime.now() > twofa_limit_date
+        ):
+            # if 2FA not done yet, this ensures that we need user presence;
+            # if it is done but soon to be invalidated, also need user;
+            # if not interactive and 'validation.aspx' in location but still in 2FA validity
+            # means we can skip_redo_twofa()
             self.twofa_auth_state = {}
-            self.check_interactive()
+            raise NeedInteractiveFor2FA()
+
         elif location:
-            self.location(location, allow_redirects=False)
+            allow_redirects = 'conditions-generales' in location
+            # Don't stay on this 302
+            # This URL is still caught by ConditionsPage
+            self.location(location, allow_redirects=allow_redirects)
 
     def check_auth_methods(self):
+        self.getCurrentSubBank()
+
         if self.mobile_confirmation.is_here():
             self.page.check_bypass()
             if self.mobile_confirmation.is_here():
@@ -394,6 +420,10 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         if self.twofa_auth_state:
             self.session.cookies.set('auth_client_state', self.twofa_auth_state['value'])
             self.page.login(self.username, self.password)
+
+            self.check_redirections()
+            # There could be two redirections to arrive to the mobile_confirmation page
+            # Ex.: authentification.html -> pageaccueil.aspx -> validation.aspx
             self.check_redirections()
 
             if self.mobile_confirmation.is_here():
@@ -404,13 +434,18 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             # 302 redirect to catch to know if polling
             if self.login.is_here():
                 self.page.login(self.username, self.password)
+
+                self.check_redirections()
+                # There could be two redirections to arrive to the mobile_confirmation page
+                self.check_redirections()
+
+                if self.mobile_confirmation.is_here():
+                    # website proposes to redo 2FA when approaching end of its validity
+                    self.page.skip_redo_twofa()
+
             else:
                 # in case client went from 90 days to systematic 2FA and self.is_interactive
                 self.check_auth_methods()
-
-            self.check_redirections()
-            # for cic, there is two redirections
-            self.check_redirections()
 
             if self.outage_page.is_here():
                 # The message in this page is informing the user of a service
@@ -640,13 +675,13 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                     # Need to reach the page with all transactions
                     if not self.page.has_more_operations():
                         break
-                    form = self.page.get_form(id="I1:P:F")
+                    form = self.page.get_form(xpath='//form[contains(@action, "_pid=AccountMasterDetail")]')
                     form['_FID_DoLoadMoreTransactions'] = ''
                     form['_wxf2_pseq'] = page
                     form.submit()
             # IndexError when form xpath returns [], StopIteration if next called on empty iterable
             except (StopIteration, FormNotFound):
-                self.logger.warning('Could not get history on new website')
+                self.logger.warning('Could not get more history on new website')
             except IndexError:
                 # 6 months history is not available
                 pass
@@ -979,6 +1014,8 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
             self.key_form = self.page.get_personal_key_card_code_form()
             raise TransferStep(transfer, Value('Clé', label=self.page.get_question()))
+        elif self.page.needs_otp_validation():
+            raise AuthMethodNotImplemented("La validation des transferts avec un code sms n'est pas encore disponible.")
 
         msg = self.page.get_validation_msg()
         if msg:
@@ -1161,27 +1198,48 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
     @need_login
     def iter_subscriptions(self):
-        if self.currentSubBank is None:
-            self.getCurrentSubBank()
-        self.subscription.go(subbank=self.currentSubBank)
-        return self.page.iter_subscriptions()
+        for account in self.get_accounts_list():
+            sub = Subscription()
+            sub.id = account.id
+            sub.label = account.label
+            yield sub
+
 
     @need_login
     def iter_documents(self, subscription):
         if self.currentSubBank is None:
             self.getCurrentSubBank()
         self.subscription.go(subbank=self.currentSubBank, params={'typ': 'doc'})
+        link_to_bank_statements = self.page.get_link_to_bank_statements()
+        self.location(link_to_bank_statements)
 
         security_limit = 10
 
-        for i in range(security_limit):
-            for doc in self.page.iter_documents(sub_id=subscription.id):
-                yield doc
+        internal_account_id = self.page.get_internal_account_id_to_filter_subscription(subscription)
+        if internal_account_id:
+            params = {
+                '_pid': 'SelectDocument',
+                '_tabi': 'C',
+                'k_crit': 'CTRREF={}'.format(internal_account_id),
+                'k_typePageDoc': 'DocsFavoris'
+            }
+            for i in range(security_limit):
+                params['k_numPage'] = i+1
+                # there is no way to match a document to a subscription for sure
+                # so we have to ask the bank only documents for the wanted subscription
 
-            if self.page.is_last_page():
-                break
+                self.subscription.go(params=params, subbank=self.currentSubBank)
+                for doc in self.page.iter_documents(sub_id=subscription.id):
+                    yield doc
 
-            self.page.next_page()
+                if self.page.is_last_page():
+                    break
+        self.iban.go(subbank=self.currentSubBank)
+        iban_document = self.page.get_iban_document(subscription)
+        if iban_document:
+            yield iban_document
+
+
 
     @need_login
     def iter_emitters(self):

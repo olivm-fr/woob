@@ -154,6 +154,12 @@ class FortuneoBrowser(TwoFactorBrowser):
 
         self.page.login(self.username, self.password)
 
+        # By default we are redirected to the '/fr/prive/default.jsp\?ANav=1' accounts_page URL.
+        # It will bear a basic list of accounts, but 2FA will still be triggered
+        # when requesting accounts details in iter_accounts()
+        # So we force go to this other URL to trigger it now if it is needed.
+        self.location('/fr/prive/mes-comptes/synthese-mes-comptes.jsp')
+
         if self.login_page.is_here():
             self.page.check_is_blocked()
             raise BrowserIncorrectPassword()
@@ -238,6 +244,16 @@ class FortuneoBrowser(TwoFactorBrowser):
                     self.page.fill_account(obj=account)
                 else:
                     self.page.fill_account(obj=account)
+
+                    if account.type == account.TYPE_CHECKING:
+                        for _ in range(3):
+                            self.location('/fr/prive/mes-comptes/synthese-mes-comptes.jsp')
+                            if not self.page.is_loading():
+                                break
+                            time.sleep(1)
+                        # TPP can match checking accounts with this id
+                        self.page.fill_tpp_account_id(obj=account)
+
             yield account
 
     @need_login

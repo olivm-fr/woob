@@ -22,12 +22,14 @@
 from __future__ import unicode_literals
 
 from datetime import datetime
+from decimal import Decimal
 
 import requests
-from weboob.browser.pages import LoggedPage, JsonPage, pagination
+
+from weboob.browser.pages import JsonPage, pagination
 from weboob.browser.elements import ItemElement, method, DictElement
 from weboob.browser.filters.standard import (
-    CleanDecimal, CleanText, Date, Format, BrowserURL, Env,
+    CleanDecimal, CleanText, Coalesce, Date, Format, BrowserURL, Env,
     Field, Regexp, Currency as CurrencyFilter,
 )
 from weboob.browser.filters.json import Dict
@@ -36,7 +38,7 @@ from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import Account
 from weboob.capabilities.wealth import Investment
 from weboob.capabilities.bill import Document, Subscription, DocumentTypes
-from weboob.capabilities.profile import Profile
+from weboob.capabilities.profile import Person
 from weboob.exceptions import (
     BrowserUnavailable, NoAccountsException, BrowserPasswordExpired,
     AuthMethodNotImplemented,
@@ -49,7 +51,17 @@ from weboob.tools.compat import quote_plus
 from .pages import Transaction
 
 
-class AccountsJsonPage(LoggedPage, JsonPage):
+class LoggedDetectionMixin(object):
+    @property
+    def logged(self):
+        return Dict('commun/raison', default=None)(self.doc) != "niv_auth_insuff"
+
+
+class SGPEJsonPage(LoggedDetectionMixin, JsonPage):
+    pass
+
+
+class AccountsJsonPage(SGPEJsonPage):
     ENCODING = 'utf-8'
 
     TYPES = {
@@ -62,14 +74,12 @@ class AccountsJsonPage(LoggedPage, JsonPage):
         'Ldd': Account.TYPE_SAVINGS,
         'Livret': Account.TYPE_SAVINGS,
         'PEL': Account.TYPE_SAVINGS,
+        'CPTE TRAVAUX': Account.TYPE_SAVINGS,
+        'EPARGNE': Account.TYPE_SAVINGS,
         'Plan Epargne': Account.TYPE_SAVINGS,
         'PEA': Account.TYPE_PEA,
         'Prêt': Account.TYPE_LOAN,
     }
-
-    @property
-    def logged(self):
-        return Dict('commun/raison', default=None)(self.doc) != "niv_auth_insuff"
 
     def on_load(self):
         if self.doc['commun']['statut'].lower() == 'nok':
@@ -102,7 +112,7 @@ class AccountsJsonPage(LoggedPage, JsonPage):
                 klass = Account
 
                 obj__id = Dict('id')
-                obj_number = CleanText(Dict('iban'), replace=[(' ', '')])
+                obj_number = CleanText(Dict('iban'), replace=[(' ', '')])  # yes, IBAN is presented as number to user
                 obj_iban = Field('number')
                 obj_label = CleanText(Dict('libelle'))
                 obj__agency = Dict('agenceGestionnaire')
@@ -138,7 +148,65 @@ class AccountsJsonPage(LoggedPage, JsonPage):
         return None
 
 
-class BalancesJsonPage(LoggedPage, JsonPage):
+class CardsInformationPage(SGPEJsonPage):
+    def get_card_id(self):
+        return self.response.json()['donnees'][0].get('idPPouPM')
+
+
+class CardsInformation2Page(SGPEJsonPage):
+    def get_number(self):
+        return self.response.json().get('donnees')[0].get('numero')
+
+    def get_due_date(self):
+        return self.response.json().get('donnees')[0].get('dateRegelement')
+
+
+class DeferredCardJsonPage(SGPEJsonPage):
+    def get_account_id(self):
+        return self.response.json().get('donnees')[0].get('idPrestationCompte')
+
+    def get_bank_code(self):
+        return self.response.json().get('donnees')[0].get('entiteJuridiquePDG')
+
+    @method
+    class iter_accounts(DictElement):
+        item_xpath = 'donnees'
+
+        class item(ItemElement):
+            klass = Account
+
+            def condition(self):
+                return (
+                    not Dict('inactivityDate')(self)
+                    and Dict('currentOutstandingAmountDate')(self)  # avoid immediate debit cards
+                )
+
+            obj_id = Dict('numeroCarte')
+            obj_number = Dict('numeroCarte')
+            obj_label = CleanText(Dict('libelle'))
+            obj_type = Account.TYPE_CARD
+            obj_coming = CleanDecimal.French(Dict('encoursToShow'))
+            obj_currency = CleanText(Dict('currentOutstandingAmount/currencyCode'))
+
+
+class DeferredCardHistoryJsonPage(SGPEJsonPage):
+    @method
+    class iter_comings(DictElement):
+        item_xpath = 'donnees'
+
+        class item(ItemElement):
+            klass = Transaction
+
+            obj_date = Date(Env('date'))
+            obj_rdate = Date(CleanText(Dict('date')), dayfirst=True, default=NotAvailable)
+            obj_label = CleanText(Dict('libelle'))
+            obj_type = Transaction.TYPE_DEFERRED_CARD  # card summaries only on parent account side
+
+            def obj_amount(self):
+                return Decimal(Dict('montant/montant')(self)) / (10 ** Decimal(Dict('montant/nbrDecimales')(self)))
+
+
+class BalancesJsonPage(SGPEJsonPage):
     def on_load(self):
         if self.doc['commun']['statut'] == 'NOK':
             reason = self.doc['commun']['raison']
@@ -155,7 +223,7 @@ class BalancesJsonPage(LoggedPage, JsonPage):
             yield account
 
 
-class HistoryJsonPage(LoggedPage, JsonPage):
+class HistoryJsonPage(SGPEJsonPage):
 
     def get_value(self):
         if 'NOK' in self.doc['commun']['statut']:
@@ -275,10 +343,10 @@ class HistoryJsonPage(LoggedPage, JsonPage):
                     self.env['rdate'], self.env['date'] = self.env['date'], self.env['rdate']
 
 
-class ProfileProPage(LoggedPage, JsonPage):
+class ProfilePEPage(SGPEJsonPage):
     @method
     class get_profile(ItemElement):
-        klass = Profile
+        klass = Person
 
         obj_name = Format(
             '%s %s %s',
@@ -287,11 +355,23 @@ class ProfileProPage(LoggedPage, JsonPage):
             Dict('donnees/nom'),
         )
 
-        obj_phone = Dict('donnees/telephoneSecurite', default=NotAvailable)
-        obj_email = Dict('donnees/email', default=NotAvailable)
+        obj_phone = Coalesce(
+            Dict('donnees/telephoneSecurite', default=NotAvailable),
+            Dict('donnees/telephoneMobile', default=NotAvailable),
+            Dict('donnees/telephoneFixe', default=NotAvailable),
+        )
+
+        obj_email = Coalesce(
+            Dict('donnees/email', default=NotAvailable),
+            Dict('donnees/emailAlertes', default=NotAvailable),
+            default=NotAvailable,
+        )
+
+        obj_job = Dict('donnees/fonction/libelle', default=NotAvailable)
+        obj_company_name = Dict('donnees/raisonSocialeEntreprise', default=NotAvailable)
 
 
-class BankStatementPage(LoggedPage, JsonPage):
+class BankStatementPage(SGPEJsonPage):
     def get_min_max_date(self):
         min_date = Date(Dict('donnees/criteres/dateMin'), dayfirst=True, default=None)(self.doc)
         max_date = Date(Dict('donnees/criteres/dateMax'), dayfirst=True, default=None)(self.doc)
@@ -325,7 +405,7 @@ class BankStatementPage(LoggedPage, JsonPage):
             yield d
 
 
-class MarketAccountPage(LoggedPage, JsonPage):
+class MarketAccountPage(SGPEJsonPage):
     @method
     class iter_market_accounts(DictElement):
         item_xpath = 'donnees/comptesTitresByClasseur'
@@ -351,7 +431,7 @@ class MarketAccountPage(LoggedPage, JsonPage):
                 obj_type = Account.TYPE_MARKET
 
 
-class MarketInvestmentPage(LoggedPage, JsonPage):
+class MarketInvestmentPage(SGPEJsonPage):
     @method
     class iter_investment(DictElement):
         item_xpath = 'donnees'

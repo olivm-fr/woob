@@ -17,10 +17,11 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
+import warnings
 
 from .base import (
     BaseObject, StringField, DecimalField, BoolField, UserError, Currency, Field,
-    empty,
+    empty, DeprecatedFieldWarning,
 )
 from .date import DateField
 from .collection import CapCollection
@@ -56,6 +57,9 @@ class DocumentTypes(object):
 
     CONTRACT = u'contract'
     """Contract between organisation and subscriber"""
+
+    CERTIFICATE = u'certificate'
+    """Certificate from the organisation to the subscriber"""
 
     NOTICE = u'notice'
     """Notice from the organisation to the subscriber"""
@@ -124,12 +128,21 @@ class Bill(Document, Currency):
     # compatibility properties
     @property
     def price(self):
+        warnings.warn(
+            'Field "price" is deprecated, use "total_amount" field instead.',
+            DeprecatedFieldWarning, stacklevel=3,
+        )
+
         if empty(self.total_price):
             return self.total_price
         return abs(self.total_price)
 
     @price.setter
     def price(self, value):
+        warnings.warn(
+            'Field "price" is deprecated, use "total_amount" field instead.',
+            DeprecatedFieldWarning, stacklevel=3,
+        )
         if empty(value):
             self.total_price = value
             self._income = None
@@ -144,12 +157,22 @@ class Bill(Document, Currency):
 
     @property
     def income(self):
+        warnings.warn(
+            'Field "income" is deprecated, use "total_amount" field instead.',
+            DeprecatedFieldWarning, stacklevel=3,
+        )
+
         if empty(self.total_price):
             return self._income or False
         return self.total_price <= 0
 
     @income.setter
     def income(self, value):
+        warnings.warn(
+            'Field "income" is deprecated, use "total_amount" field instead.',
+            DeprecatedFieldWarning, stacklevel=3,
+        )
+
         if empty(self.total_price):
             self._income = value
         else:
@@ -323,3 +346,48 @@ class CapDocument(CapCollection):
         if Subscription in objs:
             self._restrict_level(split_path)
             return self.iter_subscription()
+
+
+class CapDocumentMatching(CapDocument):
+    """
+    Capability for matching data between synchronizations.
+
+    This is mostly useful for providers which have to compare states across time.
+    For example, a provider has to compare subscriptions freshly returned to subscriptions
+    returned in a previous sync.
+    """
+
+    def match_subscription(self, subscription, old_subscriptions):
+        """Search a subscription in `old_subscriptions` corresponding to `subscription`.
+
+        `old_subscriptions` is a list of subscriptions found in a previous
+        synchronisation.
+        However, they may not be the exact same objects but only reconstructed
+        objects with the same data, although even it could be partial.
+        For example, they may have been marshalled, sometimes loosely, thus some
+        attributes may be missing (like `_private` attributes) or unset (some
+        providers may choose not to even save all attributes).
+        Also, `old_subscriptions` may not contain all subscriptions from previous state,
+        but only subscriptions which have not been matched yet.
+
+        :param subscription: fresh subscription to search for
+        :type subscription: :class:`Subscription`
+        :param old_subscriptions: candidates subscriptions from previous sync
+        :type old_subscriptions: iter[:class:`Subscription`]
+        :return: the corresponding subscription from `old_subscriptions`, or `None` if none matches
+        :rtype: :class:`Subscription`
+        """
+
+        raise NotImplementedError()
+
+    def match_document(self, document, old_documents):
+        """
+        :param document: fresh document to search for
+        :type document: :class:`Bill`
+        :param old_documents: candidates documents from previous sync
+        :type old_documents: iter[:class:`Bill`]
+        :return: the corresponding document from `old_documents`, or `None` if none matches
+        :rtype: :class:`Bill`
+        """
+
+        raise NotImplementedError()

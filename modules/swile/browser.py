@@ -30,8 +30,8 @@ from weboob.browser.filters.standard import (
 )
 from weboob.capabilities.base import empty
 from weboob.browser.filters.json import Dict
-from weboob.browser.exceptions import ClientError
-from weboob.exceptions import BrowserIncorrectPassword, NocaptchaQuestion
+from weboob.browser.exceptions import ClientError, BrowserTooManyRequests
+from weboob.exceptions import BrowserIncorrectPassword, RecaptchaV2Question
 from weboob.browser.browsers import APIBrowser, OAuth2Mixin
 from weboob.capabilities.bank import Account, Transaction
 
@@ -48,7 +48,7 @@ def need_login(func):
 
 class SwileBrowser(OAuth2Mixin, APIBrowser):
     BASEURL = 'https://customer-api.swile.co'
-    ACCESS_TOKEN_URI = 'https://customer-api.swile.co/oauth/token'
+    ACCESS_TOKEN_URI = 'https://directory.swile.co/oauth/token'
     client_id = '533bf5c8dbd05ef18fd01e2bbbab3d7f69e3511dd08402862b5de63b9a238923'
 
     def __init__(self, config, *args, **kwargs):
@@ -69,21 +69,23 @@ class SwileBrowser(OAuth2Mixin, APIBrowser):
                 self.credentials['recaptcha'] = self.config['captcha_response'].get()
             self.location(self.ACCESS_TOKEN_URI, data=self.credentials)
         except ClientError as e:
-            json = e.response.json()
             # if the captcha's response is not completed the error is
             # 426 Client Error: Upgrade Required
             if e.response.status_code == 426 and not self.config['captcha_response'].get():
-                raise NocaptchaQuestion(website_url='https://app.swile.co/signin', website_key='6LceI-EUAAAAACrBsmKCmllNdk1-H5U7G7NOTzmj')
-            if e.response.status_code == 401:
+                raise RecaptchaV2Question(website_url='https://app.swile.co/signin', website_key='6LceI-EUAAAAACrBsmKCmllNdk1-H5U7G7NOTzmj')
+            if e.response.status_code == 400:
+                json = e.response.json()
                 message = json['error_description']
                 raise BrowserIncorrectPassword(message)
+            if e.response.status_code == 429:
+                raise BrowserTooManyRequests()
             raise e
 
         self.update_token(self.response.json())
 
     @need_login
     def get_me(self):
-        return self.request('/api/v0/users/me')['user']
+        return self.request(self.absurl('/api/v0/users/me', base=self.BASEURL))['user']
 
     @need_login
     def get_account(self):
@@ -124,12 +126,14 @@ class SwileBrowser(OAuth2Mixin, APIBrowser):
             if len(Dict('payments_history')(json)) == 0:
                 break
 
-            transaction = None
+            has_transactions = False
             for payment in Dict('payments_history')(json):
                 if 'refunding_transaction' in payment:
                     refund = self._parse_transaction(payment['refunding_transaction'])
                     refund.type = Transaction.TYPE_CARD
                     yield refund
+
+                    has_transactions = True
 
                 transaction = self._parse_transaction(payment)
                 if transaction:
@@ -140,7 +144,9 @@ class SwileBrowser(OAuth2Mixin, APIBrowser):
 
                     yield transaction
 
-            if transaction is None:
+                    has_transactions = True
+
+            if not has_transactions:
                 break
         else:
             raise Exception("that's a lot of transactions, probable infinite loop?")

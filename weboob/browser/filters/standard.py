@@ -23,11 +23,17 @@ import datetime
 import re
 import unicodedata
 import unidecode
-from collections import Iterator
+try:
+    # Python 3.3 and above
+    from collections.abc import Iterator
+except ImportError:
+    from collections import Iterator
 from decimal import Decimal, InvalidOperation
 from itertools import islice
+from numbers import Number
 
 from dateutil.parser import parse as parse_date
+from dateutil.tz import gettz
 
 from weboob.browser.url import URL
 from weboob.capabilities.base import Currency as BaseCurrency
@@ -256,7 +262,9 @@ class CleanText(Filter):
 
     @debug()
     def filter(self, txt):
-        if isinstance(txt, int):
+        if txt is None:
+            return self.default_or_raise(FilterError('The text cannot be None'))
+        elif isinstance(txt, int):
             txt = str(txt)
         elif isinstance(txt, (tuple, list)):
             txt = u' '.join([self.clean(item, children=self.children) for item in txt])
@@ -594,8 +602,14 @@ class Regexp(Filter):
         if isinstance(txt, (tuple, list)):
             txt = u' '.join([t.strip() for t in txt.itertext()])
 
-        m = self._regex.search(txt) if self.nth == 0 else \
-            nth(self._regex.finditer(txt), self.nth)
+        m = None
+        try:
+            m = self._regex.search(txt) if self.nth == 0 else \
+                nth(self._regex.finditer(txt), self.nth)
+        except TypeError:
+            msg = '%r is not a string or bytes-like object' % txt
+            return self.default_or_raise(RegexpError(msg))
+
         if not m:
             msg = 'Unable to find %s %s in %r' % (ordinal(self.nth), self.pattern, txt)
             return self.default_or_raise(RegexpError(msg))
@@ -656,9 +670,10 @@ class MapIn(Filter):
         """
         :raises: :class:`ItemNotFound` if key pattern does not exist in dict
         """
-        for key in self.map_dict:
-            if key in txt:
-                return self.map_dict[key]
+        if txt is not None:
+            for key in self.map_dict:
+                if key in txt:
+                    return self.map_dict[key]
 
         return self.default_or_raise(ItemNotFound('Unable to handle %r on %r' % (txt, self.map_dict)))
 
@@ -667,13 +682,15 @@ class DateTime(Filter):
     """Parse date and time."""
 
     def __init__(self, selector=None, default=_NO_DEFAULT, translations=None,
-                 parse_func=parse_date, strict=True, **kwargs):
+                 parse_func=parse_date, strict=True, tzinfo=None, **kwargs):
         """
         :param dayfirst: if True, the day is the first element in the string to parse
         :type dayfirst: bool
         :param parse_func: the function to use for parsing the datetime
         :param translations: string replacements from site locale to English
         :type translations: list[tuple[str, str]]
+        :param tzinfo: timezone to set if none was parsed
+        :type tzinfo: :class:`datetime.tzinfo`
         """
 
         super(DateTime, self).__init__(selector, default=default)
@@ -681,6 +698,9 @@ class DateTime(Filter):
         self.translations = translations
         self.parse_func = parse_func
         self.strict = strict
+        if isinstance(tzinfo, basestring):
+            tzinfo = gettz(tzinfo)
+        self.tzinfo = tzinfo
 
     _default_date_1 = datetime.datetime(2100, 10, 10, 1, 1, 1)
     _default_date_2 = datetime.datetime(2120, 12, 12, 2, 2, 2)
@@ -698,9 +718,13 @@ class DateTime(Filter):
                 parse2 = self.parse_func(txt, default=self._default_date_2, **self.kwargs)
                 if parse1 != parse2:
                     raise FilterError('Date is not complete')
-                return parse1
             else:
-                return self.parse_func(txt, **self.kwargs)
+                parse1 = self.parse_func(txt, **self.kwargs)
+
+            if parse1.tzinfo is None and self.tzinfo:
+                parse1 = parse1.replace(tzinfo=self.tzinfo)
+
+            return parse1
         except (ValueError, TypeError) as e:
             return self.default_or_raise(FormatError('Unable to parse %r: %s' % (txt, e)))
 
@@ -1000,7 +1024,8 @@ class Coalesce(MultiFilter):
     @debug()
     def filter(self, values):
         for value in values:
-            if value:
+            # Accept '0.00' as valid value for numeric elements
+            if value or (isinstance(value, Number) and not empty(value)):
                 return value
         return self.default_or_raise(FilterError('All falsy and no default.'))
 
@@ -1019,6 +1044,8 @@ def test_CleanText():
     assert CleanText(normalize='NFD').filter(u'\u3053\u3099') == u'\u3053\u3099'
     assert CleanText(normalize='NFD').filter(u'\u3054') == u'\u3053\u3099'
     assert CleanText(normalize=False).filter(u'\u3053\u3099') == u'\u3053\u3099'
+    # None value
+    assert_raises(FilterError, CleanText().filter, None)
 
 
 def assert_raises(exc_class, func, *args, **kwargs):

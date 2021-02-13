@@ -21,6 +21,7 @@
 
 from __future__ import unicode_literals, division
 
+import re
 from io import BytesIO
 
 from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword, NoAccountsException, ActionNeeded
@@ -39,16 +40,16 @@ class UnavailablePage(MyHTMLPage):
 
 class Keyboard(VirtKeyboard):
     symbols = {
-        '0': 'daa52d75287bea58f505823ef6c8b96c',
-        '1': 'f5da96c2592803a8cdc5a928a2e4a3b0',
-        '2': '9ff78367d5cb89cacae475368a11e3af',
-        '3': '908a0a42a424b95d4d885ce91bc3d920',
-        '4': '3fc069f33b801b3d0cdce6655a65c0ac',
-        '5': '58a2afebf1551d45ccad79fad1600fc3',
-        '6': '7fedfd9e57007f2985c3a1f44fb38ea1',
-        '7': '389b8ef432ae996ac0141a2fcc7b540f',
-        '8': 'bf357ff09cc29ea544991642cd97d453',
-        '9': 'b744015eb89c1b950e13a81364112cd6',
+        '0': ('daa52d75287bea58f505823ef6c8b96c', 'e5d6dc589f00e7ec3ba0e45a1fee1220'),
+        '1': ('f5da96c2592803a8cdc5a928a2e4a3b0', '9732b03ce3bdae7a44df9a7b4e092a07'),
+        '2': ('9ff78367d5cb89cacae475368a11e3af', '3b4387242c42bd39dbc263eac0718a49'),
+        '3': ('908a0a42a424b95d4d885ce91bc3d920', '14fa1e5083fa0a0c0cded72a2139921b'),
+        '4': ('3fc069f33b801b3d0cdce6655a65c0ac', '72792dbef888f1176f1974c86a94a084'),
+        '5': ('58a2afebf1551d45ccad79fad1600fc3', '1e9ddf1e5a12ebaeaea26cca6f752a87'),
+        '6': ('7fedfd9e57007f2985c3a1f44fb38ea1', '4e3a917198e89a2c16b9379f9a33f2a1'),
+        '7': ('389b8ef432ae996ac0141a2fcc7b540f', '33b90787a8014667b2acd5493e5641d2'),
+        '8': ('bf357ff09cc29ea544991642cd97d453', 'e4b30e90bbc2c26c2893120c8adc9d64'),
+        '9': ('b744015eb89c1b950e13a81364112cd6', 'b400c35438960de101233b9c846cd5eb'),
     }
 
     color = (0xff, 0xff, 0xff)
@@ -119,6 +120,12 @@ class repositionnerCheminCourant(LoggedPage, MyHTMLPage):
             raise BrowserUnavailable()
 
 
+class PersonalLoanRoutagePage(LoggedPage, MyHTMLPage):
+    def form_submit(self):
+        form = self.get_form()
+        form.submit()
+
+
 class Initident(LoggedPage, MyHTMLPage):
     def on_load(self):
         self.browser.open("https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/securite/authentification/verifierMotDePasse-identif.ea")
@@ -154,12 +161,24 @@ class TwoFAPage(MyHTMLPage):
 
     def get_auth_method(self):
         status_message = CleanText('//div[@class="textFCK"]')(self.doc)
-        if 'Une authentification forte via Certicode Plus vous' in status_message:
-            return 'cer+'
-        elif 'authentification forte via Certicode vous' in status_message:
-            return 'cer'
-        elif 'avez pas de solution d’authentification forte' in status_message:
+        if re.search(
+                'avez pas de solution d’authentification forte'
+                + "|avez pas encore activé votre service gratuit d'authentification forte",
+                status_message
+        ):
             return 'no2fa'
+        elif re.search(
+                'Une authentification forte via Certicode Plus vous'
+                + '|vous rendre sur l’application mobile La Banque Postale',
+                status_message
+        ):
+            return 'cer+'
+        elif re.search(
+                'authentification forte via Certicode vous'
+                + '|code de sécurité que vous recevrez par SMS',
+                status_message
+        ):
+            return 'cer'
         elif (
             'Nous rencontrons un problème pour valider votre opération. Veuillez reessayer plus tard'
             in status_message
@@ -171,11 +190,18 @@ class TwoFAPage(MyHTMLPage):
         ):
             # Only first sentence explains 'why', the rest is 'how'
             short_message = CleanText('(//div[@class="textFCK"])[1]//p[1]')(self.doc)
-            raise ActionNeeded("Une authentification forte est requise sur votre espace client : %s" % short_message)
+            url = Link('//div[@class="certicode_footer"]/a')(self.doc)
+            if not url:
+                raise ActionNeeded(
+                    "Une authentification forte est requise sur votre espace client : %s" % short_message
+                )
+            else:
+                # raise an error to avoid silencing other no2fa/2fa messages
+                raise AssertionError("No 2FA case to skip, or new 2FA case to trigger")
         raise AssertionError('Unhandled login message: "%s"' % status_message)
 
-    def get_skip_url(self):
-        return Link('//div[@class="certicode_footer"]/a')(self.doc)
+    def get_skip_twofa_url(self):
+        return Link('//div[@class="certicode_footer"]/a[contains(text(), "Poursuivre")]', default=None)(self.doc)
 
 
 class Validated2FAPage(MyHTMLPage):

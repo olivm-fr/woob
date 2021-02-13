@@ -83,13 +83,22 @@ class InvestmentPage(LoggedPage, HTMLPage):
         )
         obj_valuation_diff = CleanDecimal.French('//h3[contains(., "value latente")]/following-sibling::p[1]', default=NotAvailable)
         obj_type = MapIn(Lower(CleanText('//h3[contains(text(), "Type de produit")]/following-sibling::p')), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
+        # Opening date titles may have slightly different names and apostrophe characters
+        obj_opening_date = Coalesce(
+            Date(CleanText('''//h3[contains(text(), "Date d'effet de l'adhésion")]/following-sibling::p'''), dayfirst=True, default=NotAvailable),
+            Date(CleanText('''//h3[contains(text(), "Date d’effet d’adhésion")]/following-sibling::p'''), dayfirst=True, default=NotAvailable),
+            Date(CleanText('''//h3[contains(text(), "Date d’effet fiscale")]/following-sibling::p'''), dayfirst=True, default=NotAvailable),
+            default=NotAvailable
+        )
 
     def get_history_link(self):
         history_link = self.doc.xpath('//li/a[contains(text(), "Historique")]/@href')
         return urljoin(self.browser.BASEURL, history_link[0]) if history_link else ''
 
     def unavailable_details(self):
-        return CleanText('//p[contains(text(), "est pas disponible")]')(self.doc)
+        return CleanText(
+            '//p[contains(text(), "est pas disponible") or contains(text(), "est pas possible")]'
+        )(self.doc)
 
     def is_valuation_available(self):
         return (
@@ -100,7 +109,8 @@ class InvestmentPage(LoggedPage, HTMLPage):
 
     @method
     class iter_investment(ListElement):
-        item_xpath = '(//div[contains(@class, "m-table")])[1]//table/tbody/tr[not(contains(@class, "total"))]'
+        # Specify "count(td) > 3" to skip lines from the "Tableau de Répartition" (only contains percentages)
+        item_xpath = '//div[contains(@class, "m-table")]//table/tbody/tr[not(contains(@class, "total")) and count(td) > 3]'
 
         class item(ItemElement):
             klass = Investment

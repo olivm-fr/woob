@@ -30,8 +30,9 @@ from weboob.capabilities.bank import (
 )
 from weboob.capabilities.base import find_object, empty, NotAvailable
 from weboob.browser.pages import LoggedPage, PartialHTMLPage
-from weboob.browser.filters.standard import CleanText, Env, Regexp, Date, CleanDecimal, Currency
+from weboob.browser.filters.standard import CleanText, Env, Regexp, Date, CleanDecimal, Currency, Format
 from weboob.browser.filters.html import Attr, Link
+from weboob.browser.filters.javascript import JSVar
 from weboob.browser.elements import ListElement, ItemElement, method, SkipItem
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.iban import is_iban_valid
@@ -200,16 +201,29 @@ class CompleteTransfer(LoggedPage, CheckTransferError):
         form['dateVirement'] = transfer.exec_date.strftime('%d/%m/%Y')
         form.submit()
 
-    def has_popin_eligibility(self):
-        return bool(
-            self.doc.xpath("""//script[contains(text(), 'doAfficherPopinEligibite = "debiteur"')]""")
-            or self.doc.xpath('//p[@id="informationVirementEpargneLoi6902"]')
-        )
+    def get_blocage_popin_url_suffix(self):
+        """ Get the popin (popup) url suffix if transfer is not allowed for EpargneLoi6902 reason
+
+        One of the expected value could be: "popinVOEpargneVersInterBancaire"
+        """
+        suffix = JSVar(
+            CleanText("//script[contains(text(), 'doAfficherPopinBlocage =')]"),
+            var='doAfficherPopinBlocage',
+            default=NotAvailable
+        )(self.doc)
+        # When not needed, the var value is an empty string ''
+        if empty(suffix) or not suffix:
+            return None
+        return suffix
 
 
-class HonorTransferPage(LoggedPage, MyHTMLPage):
-    def get_honor_message(self):
-        return CleanText('//div[@id="pop_up_virement_epargne_loi_6902_debiteur_coche"]//p')(self.doc)
+class Loi6902TransferPage(LoggedPage, MyHTMLPage):
+    def get_popup_message(self):
+        return Format(
+            '%s %s',
+            CleanText('//div[@id="pop_up_virement_epargne_loi_6902_inter_haut"]//p'),
+            CleanText('//div[@id="pop_up_virement_epargne_loi_6902_inter_milieu"]//p')
+        )(self.doc)
 
 
 class TransferConfirm(LoggedPage, CheckTransferError):
@@ -223,6 +237,16 @@ class TransferConfirm(LoggedPage, CheckTransferError):
 
     def is_certicode_needed(self):
         return CleanText('//div[contains(text(), "veuillez saisir votre code de validation reçu par SMS")]')(self.doc)
+
+    def is_certicode_plus_needed(self):
+        return CleanText('//script[contains(text(), "popupChoixDevice")]')(self.doc)
+
+    def get_device_choice_url(self):
+        device_choice_popup_js = CleanText('//script[contains(text(), "popupChoixDevice")]')(self.doc)
+        if device_choice_popup_js:
+            device_choice_url = re.search(r'(?<=urlPopin = )\"(.*popUpDeviceChoice\.jsp)\";', device_choice_popup_js)
+            if device_choice_url:
+                return device_choice_url.group(1)
 
     def get_sms_form(self):
         form = self.get_form(name='SaisieOTP')
@@ -414,7 +438,7 @@ class OtpErrorPage(LoggedPage, PartialHTMLPage):
         return CleanText('//form//span[@class="warning" or @class="app_erreur"]')(self.doc)
 
 
-class RecipientSubmitDevicePage(LoggedPage, MyHTMLPage):
+class CerticodePlusSubmitDevicePage(LoggedPage, MyHTMLPage):
     def get_app_validation_message(self):
         # Mobile app message is too long, like this:
         # """ Une notification vous a été envoyée sur l’appareil que vous avez choisi: [PHONE].
@@ -426,7 +450,7 @@ class RecipientSubmitDevicePage(LoggedPage, MyHTMLPage):
         app_validation_message = CleanText(
             '//main[@id="main"]//div[contains(text(), "Une notification vous a")]'
         )(self.doc)
-        assert app_validation_message, 'The notification message for new recipient is missing'
+        assert app_validation_message, 'The notification message is missing'
 
         msg_first_part = re.search(r'(.*)\. Vous pouvez', app_validation_message)
         if msg_first_part:

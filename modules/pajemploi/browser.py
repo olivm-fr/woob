@@ -47,7 +47,8 @@ class PajemploiBrowser(LoginBrowser):
     logout                       = URL(r"/pajeweb/j_spring_security_logout$",
                                        r"/pajeweb/quit.htm$")
 
-    login                        = URL(r"/info/accueil.html$",
+    login                        = URL(r"/pajeweb/logindec\.htm$",
+                                       r"/info/accueil.html$",
                                        r"/portail/accueil.html$",
                                        r"/pajewebinfo/cms/sites/pajewebinfo/accueil.html$",
                                        r"/pajeweb/connect.htm$",
@@ -76,7 +77,7 @@ class PajemploiBrowser(LoginBrowser):
     def do_login(self):
         self.session.cookies.clear()
         self.login.go()
-        self.page.login(self.username, self.password)
+        self.page.login(self.username, self.password, 'XXXXX')
         if not self.page.logged:
             raise BrowserIncorrectPassword()
 
@@ -125,4 +126,7 @@ class PajemploiBrowser(LoginBrowser):
             and document._need_refresh_previous_page
         ):
             document._previous_page.go(data=document._previous_data)
-        return self.open(document.url).content
+        data = {}
+        if hasattr(document, '_ref'):
+            data["ref"] = document._ref
+        return self.open(document.url, data=data).content

@@ -21,13 +21,15 @@
 
 from __future__ import unicode_literals
 
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Coalesce, Currency, Date, Map, Field, Regexp
-from weboob.browser.filters.html import AbsoluteLink, Link
-from weboob.browser.pages import LoggedPage, pagination
+from weboob.tools.compat import parse_qsl, urlparse
+from weboob.browser.elements import DictElement, ItemElement, method
+from weboob.browser.filters.html import Attr
+from weboob.browser.filters.json import Dict
+from weboob.browser.filters.standard import CleanText, CleanDecimal, Date, Map, Field
+from weboob.browser.pages import LoggedPage, JsonPage
 from weboob.capabilities.bank import Account
 from weboob.capabilities.profile import Company
-from weboob.capabilities.base import NotAvailable
+from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword
 
 from .accounthistory import Transaction
 from .base import MyHTMLPage
@@ -45,91 +47,92 @@ class RedirectPage(LoggedPage, MyHTMLPage):
 
 
 ACCOUNT_TYPES = {
-    'Comptes titres': Account.TYPE_MARKET,
-    'Comptes épargne': Account.TYPE_SAVINGS,
-    'Comptes courants': Account.TYPE_CHECKING,
+    'COMPTE_PLACEMENT': Account.TYPE_MARKET,  # seen for a compte titre
+    'COMPTE_EPARGNE': Account.TYPE_SAVINGS,
+    'COMPTE_COURANT': Account.TYPE_CHECKING,
+}
+
+TRANSACTION_TYPES = {
+    # TODO: 12+ categories ? (bank type id is at least up to 12)
+    'Prélèvement': Transaction.TYPE_ORDER,
+    'Achat CB': Transaction.TYPE_CHECK,
+    'Virement': Transaction.TYPE_TRANSFER,
+    'Frais/Taxes/Agios': Transaction.TYPE_BANK,
+    'Versement': Transaction.TYPE_CASH_DEPOSIT,
+    'Chèque': Transaction.TYPE_CHECK,
+    'Retrait': Transaction.TYPE_WITHDRAWAL,
+    'Annul/Régul/Extourn': Transaction.TYPE_PAYBACK,
+    'Remise chèques': Transaction.TYPE_DEPOSIT,
 }
 
 
-class ProAccountsList(LoggedPage, MyHTMLPage):
-    # TODO Be careful about connections with personnalized account groups
-    # According to their presentation video (https://www.labanquepostale.fr/pmo/nouvel-espace-client-business.html),
-    # on the new website people are able to make personnalized groups of account instead of the usual drop-down categories on which to parse to find a match in ACCOUNT_TYPES
-    # If clients use the functionnality we might need to add entries new in ACCOUNT_TYPES
-
-    def get_errors(self):
-        # Full message for the second error is :
-        # Vous êtes uniquement habilité à accéder à OPnet.
-        # Pour toute modification de vos accès, veuillez-vous rapprocher
-        # du Mandataire Principal de votre contrat de banque en ligne.
-        return (
-            CleanText(
-                '//div[@id="erreur_generale"]//p[contains(text(), "Le service est momentanément indisponible")]'
-            )(self.doc)
-            or CleanText(
-                '//p[contains(text(), "veuillez-vous rapprocher du Mandataire Principal de votre contrat")]'
-            )(self.doc)
-        )
-
+class ProAccountsList(LoggedPage, JsonPage):
     @method
-    class iter_accounts(ListElement):
-        item_xpath = '//div[@id="mainContent"]//div[h3/a]'
+    class iter_accounts(DictElement):
+        def find_elements(self):
+            """
+            Structure of json:
+                {
+                    "comptesBancaires": {
+                        "comptes": [{...}],
+                        "...": ...,
+                    },
+                    "comptesEpargnesEtPlacements": {
+                        "comptes": [{...}],
+                        "...": ...,
+                    },
+                    "financements": {
+                        "...": ...,
+                    }
+                    "groupesPersos": ...,
+                    "indicateurCarte": ...,
+                    "numeroCampagne": ...
+                }
+            """
+            for data in self.el.values():
+                if not isinstance(data, dict):
+                    continue
+                for account in data.get('comptes', []):
+                    yield account
 
         class item(ItemElement):
             klass = Account
 
-            obj_id = Regexp(CleanText('./h3/a/@title'), r'([A-Z\d]{4}[A-Z\d\*]{3}[A-Z\d]{4})')
-            obj_balance = CleanDecimal.French('./span/text()[1]')  # This website has the good taste of leaving hard coded HTML comments. This is the way to pin point to the righ text item.
-            obj_currency = Currency('./span')
-            obj_url = AbsoluteLink('./h3/a')
-
-            # account are grouped in /div based on their type, we must fetch the closest one relative to item_xpath
-            obj_type = Map(
-                CleanText('./ancestor::div[1]/preceding-sibling::h2[1]/button/div[@class="title-accordion"]'),
-                ACCOUNT_TYPES,
-                Account.TYPE_UNKNOWN
-            )
+            obj_id = Dict('numero')
+            obj_balance = CleanDecimal.US(Dict('solde'))
+            obj_currency = 'EUR'
+            obj_type = Map(Dict('type'), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
 
             def obj_label(self):
-                """ Need to get rid of the id wherever we find it in account labels like "LIV A 0123456789N MR MOMO" (livret A) as well as "0123456789N MR MOMO" (checking account) """
-                return CleanText('./h3/a/@title')(self).replace('%s ' % Field('id')(self), '')
+                # Comment from code of last pro website:
+                # Need to get rid of the id wherever we find it in account labels
+                # like "LIV A 0123456789N MR MOMO" (livret A) as well as
+                # "0123456789N MR MOMO" (checking account)
+                label = Dict('intituleLong')(self).replace(Field('id')(self), '')
+                return CleanText().filter(label)
 
 
-class ProAccountHistory(LoggedPage, MyHTMLPage):
-    @pagination
+class ProAccountHistory(LoggedPage, JsonPage):
     @method
-    class iter_history(ListElement):
-        item_xpath = '//div[@id="tabReleve"]//tbody/tr'
-
-        def next_page(self):
-            # The next page on the website can return pages already visited without logical mechanism
-            # Nevertheless we can skip these pages with the comparaison of the first transaction of the page
-            next_page_xpath = '//div[@class="pagination"]/a[@title="Aller à la page suivante"]'
-            tr_xpath = '//tbody/tr[1]'
-            self.page.browser.first_transactions.append(CleanText(tr_xpath)(self.el))
-            next_page_link = Link(next_page_xpath)(self.el)
-            next_page = self.page.browser.location(next_page_link)
-            first_transaction = CleanText(tr_xpath)(next_page.page.doc)
-            count = 0  # avoid an infinite loop
-
-            while first_transaction in self.page.browser.first_transactions and count < 30:
-                next_page = self.page.browser.location(next_page_link)
-                next_page_link = Link(next_page_xpath)(next_page.page.doc)
-                first_transaction = CleanText(tr_xpath)(next_page.page.doc)
-                count += 1
-
-            if count < 30:
-                return next_page.page
-
+    class iter_history(DictElement):
         class item(ItemElement):
             klass = Transaction
 
-            obj_date = Date(CleanText('.//td[@headers="date"]'), dayfirst=True)
-            obj_raw = Transaction.Raw('.//td[@headers="libelle"]')
-            obj_amount = Coalesce(
-                CleanDecimal.French('.//td[@headers="debit"]', default=NotAvailable),
-                CleanDecimal.French('.//td[@headers="credit"]', default=NotAvailable),
-            )
+            obj_label = Dict('libelle')
+            obj_date = Date(Dict('date'))  # skip time since it is always 00:00:00. Days last.
+
+            # transaction typing: don't rely on labels as the bank already provides types.
+            obj_type = Map(Dict('libelleNature'), TRANSACTION_TYPES, Transaction.TYPE_UNKNOWN)
+
+            def obj_amount(self):
+                amount = CleanDecimal.US(Dict('montant'))(self)  # absolute value
+                sign = Dict('codeSens')(self)
+                if sign == 'D':  # debit
+                    return - amount
+                elif sign == 'C':  # credit
+                    return amount
+                else:
+                    raise AssertionError('unhandled value for transaction sign')
 
 
 class DownloadRib(LoggedPage, MyHTMLPage):
@@ -157,3 +160,27 @@ class RibPage(LoggedPage, MyHTMLPage):
 
         obj_name = CleanText('//table[@class="datalistecart"]//td[@class="nom"]')
         obj_address = CleanText('//table[@class="datalistecart"]//td[@class="adr"]')
+
+
+class RedirectAfterVKPage(MyHTMLPage):
+    def check_pro_website_or_raise(self):
+        error_message = CleanText('//div[@id="erreur_identifiant_particulier"]//div[has-class("textFCK")]//p')(self.doc)
+        if error_message:
+            website_error = "L'identifiant utilisé est celui d'un compte de Particuliers"
+            if website_error in error_message:
+                raise BrowserIncorrectPassword(website_error)
+            raise AssertionError('Unhandled error message: %s' % error_message)
+
+
+class SwitchQ5CPage(MyHTMLPage):
+    pass
+
+
+class Detect2FAPage(MyHTMLPage):
+    def raise_if_2fa_needed(self):
+        url = Attr('//iframe[@id="iFrame1"]', 'src', default='')(self.doc)
+        if url:
+            twofa_type = dict(parse_qsl(urlparse(url).query)).get('action', '')
+            if twofa_type != 'NULL':  # seen so far: CERTICODE (sms), NULL (no 2fa activated by the user)
+                self.logger.info('A two factor auth is required on this connection')
+                raise ActionNeeded("Une authentification forte est requise sur votre espace client")

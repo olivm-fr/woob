@@ -22,19 +22,18 @@
 from __future__ import unicode_literals
 
 import re
-import requests
 import json
-import datetime as dt
-from hashlib import md5
-
+import datetime
 from collections import OrderedDict
+
+import requests
 
 from weboob.exceptions import BrowserUnavailable
 from weboob.browser.pages import HTMLPage, JsonPage, RawPage, LoggedPage, pagination
 from weboob.browser.elements import DictElement, ItemElement, TableElement, SkipItem, method
 from weboob.browser.filters.standard import (
     CleanText, Upper, Date, Regexp, Format, CleanDecimal, Filter, Env, Slugify,
-    Field, Currency, Map, Base, MapIn,
+    Field, Currency, Map, Base, MapIn, Coalesce, DateTime,
 )
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.html import Attr, Link, TableCell, AbsoluteLink
@@ -48,14 +47,25 @@ from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.exceptions import ParseError
 from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
 from weboob.tools.compat import unicode
+from weboob.tools.date import parse_french_date
+
+from .transfer_pages import get_recipient_id_hash
 
 
-class LoginPage(HTMLPage):
-    pass
+class LoginPage(JsonPage):
+    @property
+    def logged(self):
+        # Just to verify we have the expected keys
+        return 'firstAccess' in self.doc and 'defaultBadContractNumber' in self.doc
 
 
 class LogoutPage(RawPage):
     pass
+
+
+class ConsentPage(JsonPage):
+    def get_consent_date_expire(self):
+        return DateTime(Dict('expirationDate'))(self.doc)
 
 
 class SpacesPage(LoggedPage, JsonPage):
@@ -122,6 +132,19 @@ class AccountsPage(LoggedPage, JsonPage):
             numbers.update({c['index']: c['numeroContratSouscrit'] for c in contracts})
         return numbers
 
+    def get_livret_ibans(self, key):
+        ibans = {}
+        if isinstance(self.doc[key], list):
+            objs = self.doc[key]
+        else:
+            keys = [k for k in self.doc[key]]
+            objs = [dicts for k in keys for dicts in self.doc[key][k]]
+
+        for obj in objs:
+            if obj['accountType'] == 'LIVRET' and 'iban' in obj:
+                ibans.update({obj['numeroContratSouscrit']: obj['iban']})
+        return ibans
+
     @method
     class iter_accounts(DictElement):
         def parse(self, el):
@@ -176,15 +199,14 @@ class AccountsPage(LoggedPage, JsonPage):
                 )(self)
 
             def obj__recipient_id(self):
-                # The owner name is swapped (firstname lastname -> lastname firstname)
-                # between the request in iter_accounts and the requests
-                # listing recipients. Sorting the owner name is a way to
-                # have the same md5 hash in both of those cases.
-                to_hash = '%s %s' % (
-                    Upper(Field('label'))(self),
-                    ''.join(sorted(Field('_owner_name')(self))),
+                iban = Dict('iban', default=None)(self)
+                if not iban:
+                    return NotAvailable
+                return get_recipient_id_hash(
+                    Field('label')(self),
+                    Field('_owner_name')(self),
+                    iban,
                 )
-                return md5(to_hash.encode('utf-8')).hexdigest()
 
             def obj_balance(self):
                 balance = CleanDecimal(Dict('soldeEuro', default="0"))(self)
@@ -261,7 +283,7 @@ class AccountsPage(LoggedPage, JsonPage):
                         if number:
                             return number
                     elif type in (Account.TYPE_PEA, Account.TYPE_MARKET):
-                        number = self.get_market_number()
+                        number = Dict('idTechnique')(self)[5:]  # first 5 characters are the bank id
                         if number:
                             return number
 
@@ -286,14 +308,6 @@ class AccountsPage(LoggedPage, JsonPage):
                     if owner and all(n in owner.upper() for n in self.env['name'].split()):
                         return AccountOwnership.OWNER
                     return AccountOwnership.ATTORNEY
-
-                def get_market_number(self):
-                    label = Field('label')(self)
-                    try:
-                        page = self.page.browser._go_market_history('historiquePortefeuille')
-                        return page.get_account_id(label, Field('_owner')(self))
-                    finally:
-                        self.page.browser._return_from_market()
 
                 def get_lifenumber(self):
                     index = Dict('index')(self)
@@ -324,15 +338,19 @@ class AccountsPage(LoggedPage, JsonPage):
                     return Upper(Field('_owner'))(self)
 
                 def obj__recipient_id(self):
-                    # The owner name is swapped (firstname lastname -> lastname firstname)
-                    # between the request in iter_accounts and the requests
-                    # listing recipients. Sorting the owner name is a way to
-                    # have the same md5 hash in both of those cases.
-                    to_hash = '%s %s' % (
-                        Upper(Field('label'))(self),
-                        ''.join(sorted(Field('_owner_name')(self))),
+                    if Field('type')(self) != Account.TYPE_SAVINGS:
+                        return NotAvailable
+
+                    key = Dict('numeroContratSouscrit')(self)
+                    if key not in Env('livret_ibans')(self):
+                        return NotAvailable
+
+                    iban = Env('livret_ibans')(self)[key]
+                    return get_recipient_id_hash(
+                        Field('label')(self),
+                        Field('_owner_name')(self),
+                        iban,
                     )
-                    return md5(to_hash.encode('utf-8')).hexdigest()
 
     @method
     class iter_loans(DictElement):
@@ -366,14 +384,14 @@ class AccountsPage(LoggedPage, JsonPage):
                 # Key not always available, when revolving credit not yet consummed
                 timestamp = Dict('dateFin', default=None)(self)
                 if timestamp:
-                    return dt.date.fromtimestamp(timestamp / 1000)
+                    return datetime.date.fromtimestamp(timestamp / 1000)
                 return NotAvailable
 
             def obj_next_payment_date(self):
                 # Key not always available, when revolving credit not yet consummed
                 timestamp = Dict('dateProchaineEcheance', default=None)(self)
                 if timestamp:
-                    return dt.date.fromtimestamp(timestamp / 1000)
+                    return datetime.date.fromtimestamp(timestamp / 1000)
                 return NotAvailable
 
             def obj_balance(self):
@@ -417,9 +435,8 @@ class HistoryPage(LoggedPage, JsonPage):
         def next_page(self):
             if len(Env('nbs', default=[])(self)):
                 data = {'index': Env('index')(self)}
-                if Env('nbs')(self)[0] != "SIX_DERNIERES_SEMAINES":
-                    data.update({'filtreOperationsComptabilisees': "MOIS_MOINS_%s" % Env('nbs')(self)[0]})
-                Env('nbs')(self).pop(0)
+                next_month = Env('nbs')(self).pop(0)
+                data.update({'filtreOperationsComptabilisees': "MOIS_MOINS_%s" % next_month})
                 return requests.Request('POST', data=json.dumps(data))
 
         def parse(self, el):
@@ -448,7 +465,7 @@ class HistoryPage(LoggedPage, JsonPage):
             class FromTimestamp(Filter):
                 def filter(self, timestamp):
                     try:
-                        return dt.date.fromtimestamp(int(timestamp[:-3]))
+                        return datetime.date.fromtimestamp(int(timestamp[:-3]))
                     except TypeError:
                         return self.default_or_raise(ParseError('Element %r not found' % self.selector))
 
@@ -469,6 +486,16 @@ class HistoryPage(LoggedPage, JsonPage):
                         if deferred_date:
                             break
                     self.obj._deferred_date = self.FromTimestamp().filter(deferred_date)
+
+            def validate(self, obj):
+                if Env('last_trs', default=None)(self):
+                    # keep only current month transactions
+                    today = datetime.date.today()
+                    return (
+                        obj.date.year == today.year  # needed when changing year
+                        and obj.date.month >= today.month
+                    )
+                return True
 
 
 class RedirectInsurancePage(LoggedPage, JsonPage):
@@ -508,6 +535,12 @@ class LifeinsurancePage(LoggedPage, HTMLPage):
 
     @method
     class fill_account(ItemElement):
+        obj_opening_date = Date(
+            CleanText('//td[contains(text(), "Date d\'adhésion")]/following-sibling::td'),
+            parse_func=parse_french_date,
+            default=NotAvailable,
+        )
+
         def obj_valuation_diff_ratio(self):
             valuation_diff_percent = CleanDecimal.French(
                 '//div[@class="perfContrat"]/span[@class="value"]',
@@ -583,7 +616,7 @@ MARKET_ORDER_TYPES = {
 
 
 class MarketPage(LoggedPage, HTMLPage):
-    def find_account(self, acclabel, accowner):
+    def find_account(self, account_id):
         # Depending on what we're fetching (history, invests or orders),
         # the parameter to choose the account has a different name.
         if 'carnetOrdre' in self.url:
@@ -591,23 +624,24 @@ class MarketPage(LoggedPage, HTMLPage):
         else:
             param_name = 'indiceCompte'
         # first name and last name may not be ordered the same way on market site...
-        accowner = sorted(accowner.lower().split())
 
-        def get_ids(ref, acclabel, accowner, param_name):
-            ids = None
+        def get_ids(ref, account_id, param_name):
+            # Market account IDs contain 3 parts:
+            # - the first 5 and last 2 digits identify the account
+            # - the 9 digits in the middle identify the owner of the account
+            # These info are separated on the page so we need to get them from the id to match the account.
+            owner_id = account_id[5:14]
+            account_number = '%s%s' % (account_id[:5], account_id[-2:])
             for a in self.doc.xpath('//a[contains(@%s, "%s")]' % (ref, param_name)):
                 self.logger.debug("get investment from %s" % ref)
-                label = CleanText('.')(a)
-                owner = CleanText('./ancestor::tr/preceding-sibling::tr[@class="LnMnTiers"][1]')(a)
-                owner = re.sub(r' \(.+', '', owner)
-                owner = sorted(owner.lower().split())
-                if label == acclabel and owner == accowner:
-                    ids = list(
-                        re.search(r'%s[^\d]+(\d+).*idRacine[^\d]+(\d+)' % param_name, Attr('.', ref)(a)).groups()
-                    )
-                    ids.append(CleanText('./ancestor::td/preceding-sibling::td')(a))
-                    self.logger.debug("assign value to ids: {}".format(ids))
-            return ids
+                number = CleanText('./ancestor::td/preceding-sibling::td')(a).replace(' ', '')
+                # Some lines contain the owner of the accounts on the following lines, we use it for matching
+                row_owner = CleanText('(./ancestor::tr/preceding-sibling::tr[@class="LnMnTiers"])[last()]')(a)
+                if owner_id not in row_owner:
+                    continue
+                if number in (account_id, account_number):
+                    index = re.search(r'%s[^\d]+(\d+).*idRacine' % param_name, Attr('.', ref)(a)).group(1)
+                    return [index, owner_id, number]
 
         # Check if history is present
         if CleanText(default=None).filter(self.doc.xpath('//body/p[contains(text(), "indisponible pour le moment")]')):
@@ -615,22 +649,17 @@ class MarketPage(LoggedPage, HTMLPage):
 
         ref = CleanText(self.doc.xpath('//a[contains(@href, "%s")]' % param_name))(self)
         if not ref:
-            return get_ids('onclick', acclabel, accowner, param_name)
+            return get_ids('onclick', account_id, param_name)
         else:
-            return get_ids('href', acclabel, accowner, param_name)
+            return get_ids('href', account_id, param_name)
 
-    def get_account_id(self, acclabel, owner):
-        account = self.find_account(acclabel, owner)
-        if account:
-            return account[2].replace(' ', '')
-
-    def go_account(self, acclabel, owner):
+    def go_account(self, account_id):
         if 'carnetOrdre' in self.url:
             param_name = 'idCompte'
         else:
             param_name = 'indiceCompte'
 
-        ids = self.find_account(acclabel, owner)
+        ids = self.find_account(account_id)
         if not ids:
             return
 
@@ -824,14 +853,20 @@ class ProfilePage(LoggedPage, JsonPage):
     class get_profile(ItemElement):
         klass = Profile
 
-        def obj_id(self):
-            return (
-                Dict('identifiantExterne', default=None)(self)
-                or Dict('login')(self)
-            )
+        obj_id = Coalesce(
+            Dict('idExterne', default=NotAvailable),
+            Dict('login', default=NotAvailable),
+            Dict('infoCapaciteJuridique/identifiantBF', default=NotAvailable),
+        )
 
-        obj_name = Format('%s %s', Dict('firstName'), Dict('lastName'))
-        obj_email = Dict('email', default=NotAvailable)  # can be unavailable on pro website for example
+        def obj_email(self):
+            for info in self.el['contacts']:
+                if info['type'] == 'MAIL':
+                    return Dict('value')(info)
+            # can be unavailable on pro website for example
+            return NotAvailable
+
+        obj_name = Format('%s %s', Dict('infoCivilite/prenom'), Dict('infoCivilite/nom'))
 
     def get_token(self):
         return Dict('loginEncrypted')(self.doc)

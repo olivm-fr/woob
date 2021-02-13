@@ -93,7 +93,7 @@ class HousingTest(object):
         return results
 
     def check_single_housing_all(self, housing,
-                                 type, house_types, advert_type):
+                                 type, house_type, advert_type):
         for field in self.FIELDS_ALL_SINGLE_HOUSING:
             self.assertNotEmpty(housing, field)
         if 'type' in self.FIELDS_ALL_SINGLE_HOUSING:
@@ -106,8 +106,8 @@ class HousingTest(object):
             else:
                 self.assertEqual(housing.type, type)
         if 'house_type' in self.FIELDS_ALL_SINGLE_HOUSING:
-            if not empty(house_types):
-                self.assertEqual(housing.house_type, house_types)
+            if not empty(house_type):
+                self.assertEqual(housing.house_type, house_type)
             else:
                 self.assertNotEmpty(housing, 'house_type')
         if 'advert_type' in self.FIELDS_ALL_SINGLE_HOUSING:
@@ -127,7 +127,8 @@ class HousingTest(object):
 
         # Check mandatory fields in all housings
         housing = self.backend.get_housing(results[0].id)
-        self.backend.fillobj(housing, 'phone')  # Fetch phone
+        if 'phone' in self.FIELDS_ANY_SINGLE_HOUSING + self.FIELDS_ALL_SINGLE_HOUSING:
+            self.backend.fillobj(housing, 'phone')  # Fetch phone
         self.check_single_housing_all(
             housing,
             results[0].type,
@@ -143,7 +144,8 @@ class HousingTest(object):
                    self.FIELDS_ANY_SINGLE_HOUSING):
                 break
             housing = self.backend.get_housing(result.id)
-            self.backend.fillobj(housing, 'phone')  # Fetch phone
+            if 'phone' in self.FIELDS_ANY_SINGLE_HOUSING + self.FIELDS_ALL_SINGLE_HOUSING:
+                self.backend.fillobj(housing, 'phone')  # Fetch phone
             counter = self.check_single_housing_any(housing, counter)
         for field in self.FIELDS_ANY_SINGLE_HOUSING:
             self.assertGreater(

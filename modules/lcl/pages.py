@@ -21,7 +21,6 @@
 from __future__ import unicode_literals, division
 
 import re
-import requests
 import base64
 import math
 import random
@@ -30,11 +29,12 @@ from io import BytesIO
 from datetime import datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
+import requests
 
 from weboob.capabilities.base import empty, find_object, NotAvailable
 from weboob.capabilities.bank import (
     Account, Recipient, TransferError, TransferBankError, Transfer,
-    AccountOwnership, AddRecipientBankError,
+    AccountOwnership,
 )
 from weboob.capabilities.wealth import Investment, MarketOrder, MarketOrderDirection, MarketOrderType
 from weboob.capabilities.bill import Document, Subscription, DocumentTypes
@@ -231,6 +231,11 @@ class ContractsPage(LoginPage, PartialHTMLPage):
                     form['contratId'] = id_contract
                 self.browser.current_contract = form['contratId']
             form.submit()
+
+
+class PasswordExpiredPage(LoggedPage, HTMLPage):
+    def get_message(self):
+        return CleanText('//form[@id="changementCodeForm"]//span[contains(., "nouveau code d’accès")]')(self.doc)
 
 
 class ContractsChoicePage(ContractsPage):
@@ -819,6 +824,11 @@ class CardsPage(LoggedPage, HTMLPage):
                 return True
 
 
+MARKET_TRANSACTION_TYPES = {
+    'VIREMENT': Transaction.TYPE_TRANSFER,
+}
+
+
 class BoursePage(LoggedPage, HTMLPage):
     ENCODING = 'latin-1'
     REFRESH_MAX = 0
@@ -977,7 +987,7 @@ class BoursePage(LoggedPage, HTMLPage):
             klass = Transaction
 
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
-            obj_type = Transaction.TYPE_BANK
+            obj_type = MapIn(Field('label'), MARKET_TRANSACTION_TYPES, Transaction.TYPE_BANK)
             obj_amount = CleanDecimal(TableCell('amount'), replace_dots=True)
             obj_investments = Env('investments')
 
@@ -1182,7 +1192,7 @@ class AVPage(LoggedPage, HTMLPage):
                 owner = CleanText(Field('_owner'))(self)
                 return self.get_ownership(owner)
 
-            def obj_id(self):
+            def parse(self, el):
                 _id = CleanText('.//td/@id')(self)
                 # in old code, we use _id, it seems that is not used anymore
                 # but check if it's the case for all users
@@ -1191,7 +1201,14 @@ class AVPage(LoggedPage, HTMLPage):
                 try:
                     self.page.browser.assurancevie.go()
                     ac_details_page = self.page.browser.open(Link('.//td[has-class("nomContrat")]//a')(self)).page
-                    return CleanText('(//tr[3])/td[2]')(ac_details_page.doc)
+                    self.env['id'] = CleanText(
+                        './/td[contains(text(), "Numéro de contrat")]/following-sibling::td[1]'
+                    )(ac_details_page.doc)
+                    self.env['opening_date'] = Date(
+                        CleanText('.//td[contains(text(), "Date d\'effet")]/following-sibling::td[1]'),
+                        dayfirst=True,
+                        default=NotAvailable,
+                    )(ac_details_page.doc)
                 except ServerError:
                     self.logger.debug("link didn't work, trying with the form instead")
                     # the above server error can cause the form to fail, so we may have to go back on the accounts list before submitting
@@ -1202,7 +1219,11 @@ class AVPage(LoggedPage, HTMLPage):
                     details_page = self.page.browser.open(BrowserURL('av_investments')(self)).page
                     account_id = Dict('situationAdministrativeEpargne/idcntcar')(details_page.doc)
                     page.come_back()
-                    return account_id
+                    self.env['id'] = account_id
+                    self.env['opening_date'] = NotAvailable
+
+            obj_id = Env('id')
+            obj_opening_date = Env('opening_date')
 
             def obj__form(self):
                 # maybe deprecated
@@ -1391,6 +1412,7 @@ class AVListPage(LoggedPage, JsonPage):
             obj_label = Dict('lnpdt')
             obj_type = Account.TYPE_LIFE_INSURANCE
             obj_currency = 'EUR'
+            obj_opening_date = Date(Dict('dbcnt'))
 
             obj__external_website = True
             obj__form = None
@@ -1554,6 +1576,11 @@ class TransferPage(LoggedPage, HTMLPage):
         form['typeVirement'] = 'Programme'
         form.submit()
 
+    def check_transfer_error(self):
+        err_msg = CleanText('//span[@id="virementErrorsTexte"]')(self.doc)
+        if err_msg:
+            raise TransferBankError(message=err_msg)
+
     def get_id_from_response(self, acc):
         id_xpath = '//div[@id="contenuPageVirement"]//div[@class="infoCompte" and not(@title)]'
         acc_ids = [CleanText('.')(acc_id) for acc_id in self.doc.xpath(id_xpath)]
@@ -1571,6 +1598,8 @@ class TransferPage(LoggedPage, HTMLPage):
         return acc_ids[1]
 
     def handle_response(self, account, recipient):
+        self.check_transfer_error()
+
         transfer = Transfer()
 
         transfer._account = account
@@ -1663,7 +1692,7 @@ class TransferPage(LoggedPage, HTMLPage):
                     self.env['iban'] = self.obj_id(self)
                     self.env['bank_name'] = NotAvailable
 
-    def check_error(self):
+    def check_confirmation(self):
         transfer_confirmation_msg = CleanText('//div[@class="alertConfirmationVirement"]')(self.doc)
         assert transfer_confirmation_msg, 'Transfer confirmation message is not found.'
 
@@ -1682,7 +1711,7 @@ class AddRecipientPage(LoggedPage, HTMLPage):
         form.submit()
 
 
-class CheckValuesPage(LoggedPage, HTMLPage):
+class CheckValuesPage(HTMLPage):
     def get_error(self):
         return CleanText('//div[@id="attTxt"]/p')(self.doc)
 
@@ -1705,6 +1734,24 @@ class CheckValuesPage(LoggedPage, HTMLPage):
             return 'otp_sms'
         elif self.doc.xpath('//script[contains(text(), "AuthentForteDesktop")]'):
             return 'app_validation'
+
+    def get_phone_attributes(self):
+        # The number which begin by 06 or 07 is not always referred as MOBILE number
+        # this function parse the html tag of the phone number which begins with 06 or 07
+        # to determine the canal attributed by the website, it can be MOBILE or FIXE
+        phone = {}
+        for phone_tag in self.doc.xpath('//div[@class="choixTel"]//div[@class="selectTel"]'):
+            phone['attr_id'] = Attr('.', 'id')(phone_tag)
+            phone['number'] = CleanText('.//a[@id="fixIpad"]')(phone_tag)
+            if phone['number'].startswith('06') or phone['number'].startswith('07'):
+                # Let's take the first mobile phone
+                # If no mobile phone is available, we take last phone found (ex: 01)
+                break
+        assert phone['attr_id'], 'no phone found for 2FA'
+        canal = re.match('envoi(Fixe|Mobile)', phone['attr_id'])
+        assert canal, 'Canal unknown %s' % phone['attr_id']
+        phone['attr_id'] = canal.group(1).upper()
+        return phone
 
 
 class DocumentsPage(LoggedPage, HTMLPage):
@@ -1762,25 +1809,73 @@ class ClientPage(LoggedPage, HTMLPage):
         obj_subscriber = CleanText('//li[@id="nomClient"]', replace=[('M', ''), ('Mme', '')])
 
 
-class RecipConfirmPage(CheckValuesPage):
-    pass
+class RecipConfirmPage(LoggedPage, CheckValuesPage):
+    def is_here(self):
+        return CleanText(
+            '//div[@id="componentContainer"]//div[contains(text(), "Compte bénéficiaire de virement à ajouter à votre contrat")]',
+            default=None
+        )(self.doc)
+
+
+class TwoFAPage(CheckValuesPage):
+    def is_here(self):
+        return Coalesce(
+            CleanText('''//div[@id="componentContainer"]//h1[contains(text(), "BIENVENUE SUR L'ESPACE DE CONNEXION")]'''),
+            CleanText('//div[span and contains(text(), "Pour votre sécurité, validez votre opération en attente")]'),
+            default=None
+        )(self.doc)
+
+    def get_app_validation_msg(self):
+        return Coalesce(
+            CleanText('//form[@id="formNoSend"]//div[@id="polling"]//div[contains(text(), "application")]'),
+            CleanText('//div[span and contains(text(), "Pour votre sécurité, validez votre opération en attente")]'),
+            default=''
+        )(self.doc)
 
 
 class RecipientPage(LoggedPage, HTMLPage):
     pass
 
 
-class SmsPage(LoggedPage, HTMLPage):
-    def check_error(self, otp_sent=False):
-        # This page contains only 'true' or 'false'
-        result = CleanText('.')(self.doc) == 'true'
+class SmsPage(HTMLPage):
+    def check_otp_error(self, otp_sent=False):
+        # This page just contains a value directly:
+        # * true/false: for normal cases
+        # Or when requesting to trigger the otp (otp_sent==False):
+        # * 'OTP_MAX': otp requested too many times
+        # * "AuthentSimple": no need for the otp finally
+        # Or when sending the otp code:
+        # * -1: Code is already expired
+        # * 12: ???
+        result = CleanText('.', symbols=['"', '\''])(self.doc)
+        result = result.lower()
 
-        if not result and otp_sent:
-            raise AddRecipientBankError(message='Mauvais code sms.')
-        assert result, 'Something went wrong during add new recipient sent otp sms'
+        if result == 'true':
+            return True
+
+        if result == 'authentsimple':
+            # otp is not needed
+            return False
+
+        if result == 'otp_max':
+            raise BrowserIncorrectPassword(
+                "Aucun code supplémentaire ne peut être envoyé par téléphone suite à un trop grand nombre de tentatives. Veuillez réessayer ultérieurement."
+            )
+
+        if result == '-1':
+            raise BrowserIncorrectPassword(
+                "Le code envoyé par téléphone a expiré."
+            )
+
+        if otp_sent:
+            raise BrowserIncorrectPassword(
+                "Le code saisi ne correspond pas à celui qui vient de vous être envoyé par téléphone. Vérifiez votre code et saisissez-le à nouveau."
+            )
+
+        raise AssertionError('Something went wrong with a sent sms otp')
 
 
-class RecipRecapPage(CheckValuesPage):
+class RecipRecapPage(LoggedPage, CheckValuesPage):
     pass
 
 
@@ -1831,3 +1926,12 @@ class DepositPage(LoggedPage, HTMLPage):
 
     def set_deposit_account_id(self, account):
         account.id = CleanText('//td[contains(text(), "N° contrat")]/following::td[1]//b')(self.doc)
+
+
+class AuthentStatusPage(JsonPage):
+    def get_status(self):
+        return self.doc['status']
+
+
+class FinalizeTwoFAPage(HTMLPage):
+    pass

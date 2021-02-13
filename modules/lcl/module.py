@@ -36,7 +36,7 @@ from weboob.capabilities.contact import CapContact
 from weboob.capabilities.profile import CapProfile
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
-from weboob.tools.value import ValueBackendPassword, Value
+from weboob.tools.value import ValueBackendPassword, Value, ValueTransient
 from weboob.capabilities.base import (
     find_object, strict_find_object, NotAvailable, empty,
 )
@@ -82,7 +82,10 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
                 'esp': 'Espace Pro',
             },
             aliases={'elcl': 'par'}
-        )
+        ),
+        ValueTransient('resume'),
+        ValueTransient('request_information'),
+        ValueTransient('code', regexp=r'^\d{6}$'),
     )
     BROWSER = LCLBrowser
 
@@ -104,6 +107,7 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
         )
 
         return self.create_browser(
+            self.config,
             self.config['login'].get(),
             self.config['password'].get()
         )
@@ -129,9 +133,15 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
 
     @only_for_websites('par', 'pro', 'elcl')
     def iter_transfer_recipients(self, origin_account):
-        if not isinstance(origin_account, Account):
-            origin_account = find_object(self.iter_accounts(), id=origin_account, error=AccountNotFound)
-        return self.browser.iter_recipients(origin_account)
+        acc_list = list(self.iter_accounts())
+        if isinstance(origin_account, Account):
+            account = strict_find_object(acc_list, iban=origin_account.iban)
+            if not account:
+                account = strict_find_object(acc_list, id=origin_account.id, error=AccountNotFound)
+        else:
+            account = find_object(acc_list, id=origin_account, error=AccountNotFound)
+
+        return self.browser.iter_recipients(account)
 
     @only_for_websites('par', 'pro', 'elcl')
     def new_recipient(self, recipient, **params):
@@ -185,6 +195,25 @@ class LCLModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, 
         if empty(new):
             return True
         return old == new
+
+    def transfer_check_recipient_iban(self, old, new):
+        # Some recipients' ibans cannot be found anymore on the website. But since we
+        # kept the iban stored on our side, the 'old' transfer.recipient_iban is not
+        # empty when making a transfer. When we do not find the recipient based on its iban,
+        # we search it based on its id. So the recipient is valid, the iban is just empty.
+        # This check allows to not have an assertion error when making a transfer from
+        # an recipient in this situation.
+        # For example, this case can be encountered for internal accounts
+        if empty(new):
+            return True
+        return old == new
+
+    def transfer_check_account_id(self, old, new):
+        # We can't verify here automatically that the account_id has not changed
+        # as it might have changed early if a stet account id was provided instead
+        # of the account id that we use here coming from the website.
+        # The test "account_id not changed" will be performed directly inside init_transfer
+        return True
 
     @only_for_websites('par', 'elcl', 'pro')
     def iter_contacts(self):

@@ -25,11 +25,17 @@ from __future__ import unicode_literals
 
 import re
 
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, CapCurrencyRate
-from weboob.capabilities.wealth import CapBankWealth
+from weboob.capabilities.base import empty, find_object
+from weboob.capabilities.bank import (
+    Account, AccountNotFound, CapCurrencyRate,
+    CapBankTransferAddRecipient, CapBankWealth,
+)
 from weboob.capabilities.profile import CapProfile
 from weboob.capabilities.contact import CapContact
+from weboob.capabilities.bill import (
+    CapDocument, Subscription, SubscriptionNotFound,
+    Document, DocumentNotFound, DocumentTypes,
+)
 from weboob.tools.backend import Module, BackendConfig
 from weboob.tools.value import ValueBackendPassword, ValueTransient
 
@@ -39,13 +45,15 @@ from .browser import BoursoramaBrowser
 __all__ = ['BoursoramaModule']
 
 
-class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapProfile, CapContact, CapCurrencyRate):
+class BoursoramaModule(
+    Module, CapBankWealth, CapBankTransferAddRecipient, CapProfile, CapContact, CapCurrencyRate, CapDocument
+):
     NAME = 'boursorama'
-    MAINTAINER = u'Gabriel Kerneis'
+    MAINTAINER = 'Gabriel Kerneis'
     EMAIL = 'gabriel@kerneis.info'
     VERSION = '2.1'
     LICENSE = 'LGPLv3+'
-    DESCRIPTION = u'Boursorama'
+    DESCRIPTION = 'Boursorama'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant', masked=False, regexp=r'^[0-9]+$'),
         ValueBackendPassword('password', label='Mot de passe', regexp=r'[a-zA-Z0-9]+'),
@@ -53,6 +61,8 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
         ValueTransient('request_information'),
     )
     BROWSER = BoursoramaBrowser
+
+    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.RIB)
 
     def create_default_browser(self):
         return self.create_browser(self.config)
@@ -123,6 +133,14 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
         old = old.replace('\ufffd', '?')
         return super(BoursoramaModule, self).transfer_check_label(old, new)
 
+    def transfer_check_account_id(self, old, new):
+        # We can't verify here automatically that the account_id has not changed
+        # as it might have changed early if a stet account id was provided
+        # instead of the account id that we use here coming from the website.
+        # And in addition, we don't get the account id from the confirmation page
+        # to perform such a check anyway.
+        return True
+
     def iter_currencies(self):
         return self.browser.iter_currencies()
 
@@ -131,3 +149,48 @@ class BoursoramaModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPr
 
     def iter_emitters(self):
         return self.browser.iter_emitters()
+
+    def fill_account(self, account, fields):
+        if (
+            'opening_date' in fields
+            and account.type == Account.TYPE_LIFE_INSURANCE
+            and '/compte/derive' not in account.url
+        ):
+            account.opening_date = self.browser.get_opening_date(account.url)
+
+    def get_document(self, _id):
+        subscription_id = _id.split('_')[0]
+        subscription = self.get_subscription(subscription_id)
+        return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
+
+    def get_subscription(self, _id):
+        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
+
+    def iter_documents(self, subscription):
+        if not isinstance(subscription, Subscription):
+            subscription = self.get_subscription(subscription)
+
+        return self.browser.iter_documents(subscription)
+
+    def iter_subscription(self):
+        return self.browser.iter_subscriptions()
+
+    def download_document(self, document):
+        if not isinstance(document, Document):
+            document = self.get_document(document)
+        if empty(document.url):
+            return
+
+        return self.browser.open(document.url).content
+
+    def iter_resources(self, objs, split_path):
+        if Account in objs:
+            self._restrict_level(split_path)
+            return self.iter_accounts()
+        if Subscription in objs:
+            self._restrict_level(split_path)
+            return self.iter_subscription()
+
+    OBJECTS = {
+        Account: fill_account,
+    }

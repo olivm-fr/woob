@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
+
 from __future__ import unicode_literals
 
 from base64 import b64encode
@@ -24,8 +26,8 @@ from base64 import b64encode
 from weboob.browser.browsers import APIBrowser
 from weboob.exceptions import BrowserIncorrectPassword, BrowserBanned
 from weboob.capabilities.captcha import (
-    ImageCaptchaJob, RecaptchaJob, RecaptchaV3Job, NocaptchaJob, FuncaptchaJob, CaptchaError,
-    InsufficientFunds, UnsolvableCaptcha, InvalidCaptcha,
+    ImageCaptchaJob, RecaptchaJob, RecaptchaV3Job, RecaptchaV2Job, FuncaptchaJob, HcaptchaJob,
+    CaptchaError, InsufficientFunds, UnsolvableCaptcha, InvalidCaptcha,
 )
 
 
@@ -49,7 +51,7 @@ class AnticaptchaBrowser(APIBrowser):
                 "math": 0,
                 "minLength": 0,
                 "maxLength": 0,
-            }
+            },
         }
         r = self.request('/createTask', data=data)
         self.check_reply(r)
@@ -60,6 +62,9 @@ class AnticaptchaBrowser(APIBrowser):
 
     def post_nocaptcha(self, url, key):
         return self.post_gcaptcha(url, key, 'NoCaptcha')
+
+    def post_hcaptcha(self, url, key):
+        return self.post_gcaptcha(url, key, 'HCaptcha')
 
     def post_gcaptcha(self, url, key, prefix):
         data = {
@@ -79,13 +84,13 @@ class AnticaptchaBrowser(APIBrowser):
     def post_gcaptchav3(self, url, key, action):
         data = {
             "clientKey": self.apikey,
-            "task":{
-                "type":"RecaptchaV3TaskProxyless",
+            "task": {
+                "type": "RecaptchaV3TaskProxyless",
                 "websiteURL": url,
                 "websiteKey": key,
                 "minScore": 0.3,
-                "pageAction": action
-            }
+                "pageAction": action,
+            },
         }
         r = self.request('/createTask', data=data)
         self.check_reply(r)
@@ -147,7 +152,7 @@ class AnticaptchaBrowser(APIBrowser):
         elif isinstance(job, RecaptchaJob):
             job.solution = sol['recaptchaResponse']
             job.solution_challenge = sol['recaptchaChallenge']
-        elif isinstance(job, NocaptchaJob) or isinstance(job, RecaptchaV3Job):
+        elif isinstance(job, (RecaptchaV2Job, RecaptchaV3Job, HcaptchaJob)):
             job.solution = sol['gRecaptchaResponse']
         elif isinstance(job, FuncaptchaJob):
             job.solution = sol['token']
@@ -158,7 +163,7 @@ class AnticaptchaBrowser(APIBrowser):
 
     def get_balance(self):
         data = {
-            "clientKey": self.apikey
+            "clientKey": self.apikey,
         }
         r = self.request('/getBalance', data=data)
         self.check_reply(r)
