@@ -117,8 +117,8 @@ class CreditDuNordBrowser(LoginBrowser):
             if location:
                 # still preserve any other redirection that might occur
                 self.location(location)
-            for a in self.page.get_list():
-                yield a
+            #for a in self.page.get_list():
+            #    yield a
 
         self.accounts.go(account_type=self.account_type, accounts_page_label=self.accounts_page_label)
         self.multitype_av.go()

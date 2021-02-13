@@ -435,7 +435,7 @@ class AccountsPage(AccountsPageMixin):
                 a._args = {'_ipc_eventValue':  line[self.COL_ID],
                            '_ipc_fireEvent':   line[self.COL_FIRE_EVENT],
                           }
-                a._link = self.doc.xpath('//form[@name="changePageForm"]')[0].attrib['action']
+                #a._link = self.doc.xpath('//form[@name="changePageForm"]')[0].attrib['action']
 
             if a.type is Account.TYPE_CARD:
                 a.coming = a.balance
