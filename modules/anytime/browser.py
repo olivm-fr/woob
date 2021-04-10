@@ -130,7 +130,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     @need_login
     def get_accounts(self):
         yield self.get_main_account()
-        response = self.request(self.BASEURL + '/api/v1/customer/cards', method='GET').json() #?filter=plastic&limitOffset=0 ou filter=all , status=activated
+        response = self.request(self.BASEURL + '/api/v1/customer/cards', method='GET').json() #?filter=plastic ou filter=all , status=activated
         for card in response['cards']:
             yield self._parse_card(card)
         # single card detail available here : https://secure.anyti.me/api/v1/customer/card/ANYxxxxxxxxx
@@ -168,6 +168,18 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     def get_account(self, _id):
         return find_object(self.get_accounts(), id=_id, error=AccountNotFound)
 
+    def _get_paginated(self, *args, **kwargs):
+        kwargs.setdefault('params', {})['limitNumber'] = 50
+        kwargs.setdefault('params', {})['limitOffset'] = 0
+
+        while True:
+            response = self.request(*args, **kwargs).json()
+            for t in response['transactions']:
+                yield t
+            if not response['hasMoreTransactions']:  # see also 'totalTransactions'
+                break
+            kwargs['params']['limitOffset'] += kwargs['params']['limitNumber']
+
     @need_login
     def get_transactions(self, account):
         if account.type == Account.TYPE_CHECKING:
@@ -175,12 +187,12 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             #self.session.cookies.update({'csrf_token': self.csrf_token})
             #raise SiteSwitch('html')
             # portal v2, nov 2020 :
-            response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/transactions' % account.id.replace('corp-', ''), method='GET').json() # ?limitOffset=0
-            for t in response['transactions']:
+            response = self._get_paginated(self.BASEURL + '/api/v1/customer/corp-accounts/%s/transactions' % account.id.replace('corp-', ''), method='GET')
+            for t in response:
                 yield self._parse_transaction(t, account.id)
         elif account.type == Account.TYPE_CARD:
-            response = self.request(self.BASEURL + '/api/v1/customer/cards/transactions', method='GET').json() # ?limitOffset=0
-            for t in response['transactions']:
+            response = self._get_paginated(self.BASEURL + '/api/v1/customer/cards/transactions', method='GET')
+            for t in response:
                 yield self._parse_transaction(t, account.id)
 
     def _parse_transaction(self, trans, acc_id):
@@ -220,7 +232,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     @need_login
     def iter_documents(self, subscription):
         if subscription._account.type == Account.TYPE_CHECKING:
-            response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/statements' % subscription._account.id.replace('corp-', ''), method='GET').json() # ?limitOffset=0
+            response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/statements' % subscription._account.id.replace('corp-', ''), method='GET').json()
             for s in response:
                 doc = Document()
                 doc.date = datetime.strptime(s['date'], '%Y-%m-%d %H:%M:%S')
