@@ -233,11 +233,12 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     def iter_documents(self, subscription):
         if subscription._account.type == Account.TYPE_CHECKING:
             response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/statements' % subscription._account.id.replace('corp-', ''), method='GET').json()
-            for s in response:
+            #self.logger.debug('%s', response);
+            for s in response['statements']:
                 doc = Document()
-                doc.date = datetime.strptime(s['date'], '%Y-%m-%d %H:%M:%S')
-                doc.id = subscription.id + '/' + s['date'][0:7]  # s['id']
-                doc.url = '%s&cid=%s&month=%s' % (subscription.url, subscription._account.id.replace('corp-', ''), s['date'][0:7])
+                doc.date = datetime.strptime(s, '%Y-%m')
+                doc.id = subscription.id + '/' + s  # s['id']
+                doc.url = '%s&cid=%s&month=%s' % (subscription.url, subscription._account.id.replace('corp-', ''), s)
                 doc.label = "Download the document to get the label"
                 doc.format = 'pdf'
                 yield doc
@@ -245,15 +246,16 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             response = self.request(self.BASEURL + '/api/v1/customer/card/%s/transactions' % subscription._account.id, method='GET').json()
             cid = response['cid']
             done = []
-            for s in response['transactions']:
+            #self.logger.debug('%s', response);
+            for s in response['statements']:
                 doc = Document()
-                doc.date = datetime.strptime(s['date'], '%Y-%m-%d %H:%M:%S')
-                doc.id = subscription.id + '/' + s['date'][0:7]
+                doc.date = datetime.strptime(s, '%Y-%m')
+                doc.id = subscription.id + '/' + s
                 doc.label = "Download the document to get the label"
                 doc.format = 'pdf'
                 if doc.id not in done:
                     done.append(doc.id)
-                    doc.url = '%s&cid=%s&month=%s' % (subscription.url, cid, s['date'][0:7])
+                    doc.url = '%s&cid=%s&month=%s' % (subscription.url, cid, s)
                     yield doc
 
     @need_login
