@@ -24,10 +24,11 @@ from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired, 
 from weboob.capabilities.bank import Account
 from weboob.capabilities.base import find_object
 from weboob.tools.capabilities.bank.investments import create_french_liquidity
+from weboob.tools.compat import urlencode
 from .pages import (
     LoginPage, ProfilePage, AccountTypePage, AccountsPage, ProAccountsPage,
     TransactionsPage, IbanPage, RedirectPage, EntryPage, AVPage, ProIbanPage,
-    ProTransactionsPage, LabelsPage, RgpdPage, LoginConfirmPage,
+    ProTransactionsPage, LabelsPage, RgpdPage, LoginConfirmPage, ZDBPage
 )
 
 
@@ -60,6 +61,9 @@ class CreditDuNordBrowser(LoginBrowser):
     labels_page = URL("/icd/zco/public-data/ws-menu.json", LabelsPage)
     profile_page = URL("/icd/zco/data/public-user.json", ProfilePage)
     bypass_rgpd = URL('/icd/zcd/data/gdpr-get-out-zs-client.json', RgpdPage)
+    zdb = URL('/icd/zdb/index.html', ZDBPage)
+    authsec = URL('/swm/swm-scaw-authsec.html', ZDBPage)
+    connect = URL('/swm/swm-connect.html', ZDBPage)
 
     def __init__(self, *args, **kwargs):
         self.weboob = kwargs['weboob']
@@ -71,6 +75,9 @@ class CreditDuNordBrowser(LoginBrowser):
             not self.page.doc.xpath(u'//b[contains(text(), "vous devez modifier votre code confidentiel")]')
 
     def do_login(self):
+        self.zdb.go()
+        gdareplay = self.page.get_gdareplay_html()
+
         self.login.go()
 
         # Some users are still using their old password, that leads to a virtual keyboard crash.
@@ -90,7 +97,12 @@ class CreditDuNordBrowser(LoginBrowser):
         elif reason == 'SCA':
             raise ActionNeeded("Vous devez réaliser la double authentification sur le portail internet")
         elif reason == 'SCAW':
-            raise ActionNeeded("Vous devez choisir si vous souhaitez dès à présent activer la double authentification sur le portail internet")
+            self.zdb.go()
+            gdareplay2 = self.page.get_gdareplay_form()
+            self.session.cookies.set('SCAW', 'true')
+            self.authsec.go(data=urlencode(gdareplay2), method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'})
+            self.connect.go(data=urlencode(gdareplay), method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'})
+            #raise ActionNeeded("Vous devez choisir si vous souhaitez dès à présent activer la double authentification sur le portail internet")
 
         self.entrypage.go()
 

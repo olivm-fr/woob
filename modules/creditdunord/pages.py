@@ -248,6 +248,14 @@ class CDNBasePage(HTMLPage):
             return None
         return '/vos-comptes/IPT/cdnProxyResource%s' % value_from_js
 
+class ZDBPage(CDNBasePage):
+    def get_gdareplay_html(self):
+        return {'gda_replay_args' : self.get_from_js("swm.commun.setGdaReplay(\"/swm/swm-connect.html\", \"", "\"")}
+
+    def get_gdareplay_form(self):
+        gda_replay_args = self.doc.xpath('//form/input[@id="gda_replay_args"]/@value')[0]
+        gda_nrp = self.doc.xpath('//form/input[@id="gda_nrp"]/@value')[0]
+        return {'gda_replay_args' : gda_replay_args, 'gda_nrp' : gda_nrp};
 
 class ProIbanPage(CDNBasePage):
     pass
@@ -604,7 +612,7 @@ class Transaction(FrenchTransaction):
                                                             FrenchTransaction.TYPE_TRANSFER),
                 (re.compile(r'^PRLV (SEPA )?(DE )?(?P<text>.*?)( Motif :.*)?$'),
                                                             FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'^CB( [0-9]+)? (?P<text>.*) LE (?P<dd>\d{2})\.?(?P<mm>\d{2})$'),
+                (re.compile(r'^(CARTE|CB)( [0-9]+)? (?P<text>.*) LE (?P<dd>\d{2})\.?(?P<mm>\d{2})$'),
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^CHEQUE.*'),                  FrenchTransaction.TYPE_CHECK),
                 (re.compile(r'^(CONVENTION \d+ )?COTISATION (?P<text>.*)'),
