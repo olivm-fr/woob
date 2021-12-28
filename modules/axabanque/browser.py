@@ -33,6 +33,7 @@ from weboob.capabilities.bill import Subscription
 from weboob.capabilities.bank import (
     Account, Transaction, AddRecipientStep, Recipient, AccountOwnership,
 )
+from weboob.capabilities.profile import Person
 from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
 from weboob.tools.value import Value
 from weboob.tools.capabilities.bank.transactions import sorted_transactions
@@ -651,14 +652,15 @@ class AXABanque(AXABrowser, StatesMixin):
 
     @need_login
     def get_profile(self):
-        self.profile_page.go()
-        action_needed_message = self.page.renew_personal_information()
+        # Error 500 on 3 lines here :
+        #self.profile_page.go()
+        action_needed_message = False #self.page.renew_personal_information()
         if action_needed_message:
             # In order to fetch the customer's information, personal data
             # must be updated on the website
             raise ActionNeeded(action_needed_message)
 
-        profile = self.page.get_profile()
+        profile = Person() # self.page.get_profile()
         self.bank_accounts.go()
         profile.name = self.page.get_profile_name()
         return profile
