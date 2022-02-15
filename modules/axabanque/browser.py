@@ -21,12 +21,15 @@
 
 from __future__ import unicode_literals
 
+import base64
+import random
 import re
-from datetime import date
+from datetime import date, datetime, timedelta
+from hashlib import sha256
 
 from dateutil.relativedelta import relativedelta
 
-from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
+from weboob.browser import LoginBrowser, URL, need_login, StatesMixin, OAuth2PKCEMixin, PagesBrowser
 from weboob.browser.exceptions import ClientError, HTTPNotFound, BrowserUnavailable
 from weboob.capabilities.base import NotAvailable
 from weboob.capabilities.bill import Subscription
@@ -45,7 +48,7 @@ from .pages.login import (
 )
 from .pages.bank import (
     AccountsPage as BankAccountsPage, CBTransactionsPage, TransactionsPage,
-    UnavailablePage, IbanPage, LifeInsuranceIframe, BoursePage, BankProfilePage,
+    UnavailablePage, IbanPage, LifeInsuranceIframe, BoursePage, BankProfilePage, BalancesPage,
 )
 from .pages.wealth import (
     AccountsPage as WealthAccountsPage, AccountDetailsPage, InvestmentPage,
@@ -115,7 +118,100 @@ class AXABrowser(LoginBrowser):
         self.location('https://espaceclient.axa.fr/')
 
 
-class AXABanque(AXABrowser, StatesMixin):
+class AXABanque(OAuth2PKCEMixin, PagesBrowser):
+    BASEURL = 'https://banque.axa.fr'
+
+    BALANCE_TYPE = 'WEB'  # or OTHR, AODA, OTHR at end-of-last-month, CLBD, XPCD
+
+    AUTHORIZATION_URI  = 'https://api-banque.axa.fr/oauth/authorize'
+    AUTHORIZATION2_URI = 'https://api-banque.axa.fr/oauth/authorization-code'
+    ACCESS_TOKEN_URI   = 'https://api-banque.axa.fr/oauth/token'
+
+    redirect_uri   = 'https://banque.axa.fr/auth/checkuser'
+    check_user_uri = 'https://api-banque.axa.fr/securityapi/checkuser'
+    js_hashes_uri  = 'https://banque.axa.fr/novatio-core/hash-ref.json?nocache=true'
+
+    app          = URL(r'https://banque.axa.fr/novatio-modules/web-axb/(?P<hash>)/app.js', None)
+    login        = URL(r'https://banque.axa.fr/auth/login', LoginPage)
+    balances     = URL(r'https://api-banque.axa.fr/distri-account-api/api/v1/customers/me/accounts/(?P<id_account>\w+)/balances', BalancesPage)
+    transactions = URL(r'https://api-banque.axa.fr/distri-account-api/api/v1/persons/me/accounts/(?P<id_account>\w+)/transactions', TransactionsPage)
+    accounts     = URL(r'https://api-banque.axa.fr/distri-account-api/api/v1/customers/me/accounts', BankAccountsPage)  # must be after the others
+
+    def __init__(self, login, password, *args, **kwargs):
+        super(AXABanque,self).__init__(*args, **kwargs)
+
+        self.username = login
+        self.password = password
+
+        self._fetch_auth_parameters()
+
+    def _fetch_auth_parameters(self):
+        hashes = self.open(self.js_hashes_uri, headers={'Accept': 'application/json'}).json()
+        app = self.app.go(hash=hashes['web-axb']['hash'])
+        self.client_id = re.search(r'(?<=apigeeUrl:"https://api-banque.axa.fr",client_id:")\w+', app.text).group(0)
+
+    def request_authorization(self):
+        self.session.cookies.clear()
+        self.logger.info('request authorization')
+        url = self.build_authorization_uri()
+        r = self.open(url)
+        if r.status_code != 200:
+            raise BrowserUnavailable("Cannot get pre-authorization")
+        session_id = re.search('(?<=session_id=)[^&]+', r.url.split('#')[1]).group(0)
+        data = {
+            'access_code': self.username,
+            'password': self.password,
+            'space': 'PART'
+        }
+        r = self.open(self.AUTHORIZATION2_URI + '?session_id=' + session_id, data=data)
+        if r.status_code != 200 or r.headers['Location'] is None:
+            raise BrowserIncorrectPassword("Cannot get authorization")
+        self.request_access_token(r.headers['Location'])
+        self.open(self.check_user_uri, json={'espaceApplication':'PART'}, headers={'Content-Type': 'application/json;charset=utf-8', 'Accept': 'application/json'}).json()
+
+
+    def code_challenge(self, verifier):
+        digest = ''.join(random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") for x in range(128))
+        digest = base64.urlsafe_b64encode(bytes(digest, "utf8")).rstrip(b'=').decode('ascii')
+        # override normal behavior !
+        self.pkce_verifier = base64.b64encode(sha256(bytes(digest,"utf8")).digest()).decode('ascii')
+
+        return digest
+
+    def code_verifier(self, bytes_number=64):
+        # override normal behavior !
+        return None
+
+    def build_authorization_parameters(self):
+        params = super(AXABanque, self).build_authorization_parameters()
+        params['error_uri'] = 'https://banque.axa.fr/auth/errorauthn'
+        params['state'] = 'auth_' + ''.join(random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") for x in range(25))
+        params['response_type'] = 'code';
+        return params
+
+    def build_access_token_parameters(self, values):
+        params = super(AXABanque, self).build_access_token_parameters(values)
+        del params['client_secret']
+        return params
+
+    @need_login
+    def iter_accounts(self):
+        self.accounts.go(params={'types':'CHECKING', 'roles':'TIT,COT'}, headers={'Accept': 'application/json'})
+        self.accounts = [acc for acc in self.page.iter_accounts()]
+        for acc in self.accounts:
+            self.balances.go(id_account=acc.id, headers={'Accept': 'application/json'})
+            for b in self.page.iter_balances():
+                if b._balance_type == self.BALANCE_TYPE:
+                    acc.balance = b.balance
+            yield acc
+
+    @need_login
+    def iter_history(self, account):
+        start = datetime.now() - timedelta(days=365)
+        self.transactions.go(id_account=account.id, params={'dateFrom': start.isoformat(timespec='seconds')+'Z'}, headers={'Accept': 'application/json'})
+        return self.page.get_history()
+
+class AXABanque0(AXABrowser, StatesMixin):
     BASEURL = 'https://www.axabanque.fr'
     STATE_DURATION = 5
 

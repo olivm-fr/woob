@@ -1271,7 +1271,7 @@ class OAuth2Mixin(StatesMixin):
                 }
 
     def do_token_request(self, data):
-        return self.open(self.ACCESS_TOKEN_URI, data=data)
+        return self.open(self.ACCESS_TOKEN_URI, json=data, headers={'Content-Type': 'application/json;charset=utf-8', 'Accept': 'application/json'})
 
     def request_access_token(self, auth_uri):
         self.logger.info('requesting access token')

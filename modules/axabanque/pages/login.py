@@ -94,7 +94,7 @@ class KeyboardPage(RawPage):
         return vk_passwd
 
 
-class LoginPage(JsonPage):
+class LoginPage(HTMLPage):
     def check_error(self):
         return (not Dict('errors')(self.doc)) is False
 

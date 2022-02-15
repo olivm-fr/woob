@@ -24,9 +24,10 @@ import re
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 
+from weboob.browser.filters.json import Dict
 from weboob.exceptions import BrowserUnavailable
-from weboob.browser.pages import HTMLPage, PDFPage, LoggedPage, AbstractPage
-from weboob.browser.elements import ItemElement, TableElement, method
+from weboob.browser.pages import HTMLPage, PDFPage, LoggedPage, AbstractPage, JsonPage
+from weboob.browser.elements import ItemElement, TableElement, method, DictElement
 from weboob.browser.filters.standard import CleanText, CleanDecimal, Date, Regexp, Field, Env, Currency
 from weboob.browser.filters.html import Attr, Link, TableCell
 from weboob.capabilities.bank import Account, AccountOwnership
@@ -78,188 +79,74 @@ class MyHTMLPage(HTMLPage):
         return args
 
 
-class AccountsPage(LoggedPage, MyHTMLPage):
-    ACCOUNT_TYPES = OrderedDict((
-        ('visa', Account.TYPE_CARD),
-        ('pea', Account.TYPE_PEA),
-        ('valorisation', Account.TYPE_MARKET),
-        ('courant-titre', Account.TYPE_CHECKING),
-        ('courant', Account.TYPE_CHECKING),
-        ('livret', Account.TYPE_SAVINGS),
-        ('ldd', Account.TYPE_SAVINGS),
-        ('pel', Account.TYPE_SAVINGS),
-        ('cel', Account.TYPE_SAVINGS),
-        ('titres', Account.TYPE_MARKET),
-    ))
+class AccountsPage(LoggedPage, JsonPage):
+    @method
+    class iter_accounts(DictElement):
+        class item(ItemElement):
+            klass = Account
 
-    def get_tabs(self):
-        links = self.doc.xpath('//strong[text()="Mes Comptes"]/following-sibling::ul//a/@href')
-        links.insert(0, "-comptes")
-        return list(set([re.findall('-([a-z]+)', x)[0] for x in links]))
-
-    def has_accounts(self):
-        return self.doc.xpath('//table[not(@id) and contains(@class, "table-produit")]')
-
-    def get_pages(self, tab):
-        pages = []
-        pages_args = []
-        if len(self.has_accounts()) == 0:
-            table_xpath = '//table[contains(@id, "%s")]' % tab
-            links = self.doc.xpath('%s//td[1]/a[@onclick and contains(@onclick, "noDoubleClic")]' % table_xpath)
-            if len(links) > 0:
-                form_xpath = '%s/ancestor::form[1]' % table_xpath
-                form = self.get_form(form_xpath, submit='%s//input[1]' % form_xpath)
-                data = {k: v for k, v in dict(form).items() if v}
-                for link in links:
-                    d = self.js2args(link.attrib['onclick'])
-                    d.update(data)
-                    pages.append(self.browser.location(form.url, data=d).page)
-                    pages_args.append(d)
-        else:
-            pages.append(self)
-            pages_args.append(None)
-        return zip(pages, pages_args)
-
-    def get_list(self):
-        for table in self.has_accounts():
-            tds = table.xpath('./tbody/tr')[0].findall('td')
-            if len(tds) < 3:
-                if tds[0].text_content() == 'Prêt Personnel':
-
-                    account = Account()
-                    args = self.js2args(table.xpath('.//a')[0].attrib['onclick'])
-                    account._args = args
-                    account.label = CleanText().filter(tds[0].xpath('./ancestor::table[has-class("tableaux-pret-personnel")]/caption'))
-                    account.id = account.label.split()[-1] + args['paramNumContrat']
-                    account.number = account.id
-                    loan_details = self.browser.open('/webapp/axabanque/jsp/panorama.faces', data=args).page
-                    # Need to go back on home page after open
-                    self.browser.bank_accounts.open()
-                    account.balance = loan_details.get_loan_balance()
-                    account.currency = loan_details.get_loan_currency()
-                    account.ownership = loan_details.get_loan_ownership()
-                    # Skip loans without any balance (already fully reimbursed)
-                    if empty(account.balance):
-                        continue
-                    account.type = Account.TYPE_LOAN
-                    account._acctype = "bank"
-                    account._hasinv = False
-                    account._is_debit_card = False
-                    yield account
-
-                continue
-
-            boxes = table.xpath('./tbody//tr[not(.//strong[contains(text(), "Total")])]')
-            foot = table.xpath('./tfoot//tr')
-
-            for box in boxes:
-                account = Account()
-                account._url = None
-
-                if len(box.xpath('.//a')) != 0 and 'onclick' in box.xpath('.//a')[0].attrib:
-                    args = self.js2args(box.xpath('.//a')[0].attrib['onclick'])
-                    account.label = '%s %s' % (table.xpath('./caption')[0].text.strip(), box.xpath('.//a')[0].text.strip())
-                elif len(foot[0].xpath('.//a')) != 0 and 'onclick' in foot[0].xpath('.//a')[0].attrib:
-                    args = self.js2args(foot[0].xpath('.//a')[0].attrib['onclick'])
-                    account.label = table.xpath('./caption')[0].text.strip()
-                    # Adding 'Valorisation' to the account label in order to differentiate it
-                    # from the card and checking account associate to the './caption'
-                    if 'Valorisation' not in account.label and len(box.xpath('./td[contains(text(), "Valorisation")]')):
-                        account.label = '%s Valorisation Titres' % CleanText('./caption')(table)
+            def obj_type(self):
+                if CleanText(Dict('type'))(self) == 'CHECKING':
+                    return Account.TYPE_CHECKING
                 else:
-                    continue
+                    return NotAvailable
 
-                self.logger.debug('Args: %r' % args)
-                if 'paramNumCompte' not in args:
-                    # The displaying of life insurances is very different from the other
-                    if args.get('idPanorama:_idcl').split(":")[1] == 'tableaux-direct-solution-vie':
-                        account_details = self.browser.open("#", data=args)
-                        scripts = account_details.page.doc.xpath('//script[@type="text/javascript"]/text()')
-                        script = list(filter(lambda x: "src" in x, scripts))[0]
-                        iframe_url = re.search("src:(.*),", script).group()[6:-2]
-                        account_details_iframe = self.browser.open(iframe_url, data=args)
-                        account.id = CleanText('//span[contains(@id,"NumeroContrat")]/text()')(account_details_iframe.page.doc)
-                        account.number = account.id
-                        account._url = iframe_url
-                        account.type = account.TYPE_LIFE_INSURANCE
-                        account.balance = MyDecimal('//span[contains(@id,"MontantEpargne")]/text()')(account_details_iframe.page.doc)
-                        account._acctype = "bank"
-                        account._is_debit_card = False
-                    else:
-                        try:
-                            label = unicode(table.xpath('./caption')[0].text.strip())
-                        except Exception:
-                            label = 'Unable to determine'
-                        self.logger.warning('Unable to get account ID for %r' % label)
-                        continue
+            obj_backend = "axabanque"
+            obj_bank_name = "AxaBanque"
+            obj_id = obj_number = CleanText(Dict('accountId'))
+            obj_label = CleanText(Dict('label'))
+            obj_currency = Currency(Dict('currency'))
+            obj_iban = CleanText(Dict('offendedIBAN'))
+            obj_owner_type = CleanText(Dict('contractHolder'))
+            #obj_ownership = CleanText(Dict('participants'))
 
-                if account.type != account.TYPE_LIFE_INSURANCE:
-                    # get accounts type
-                    account_type_str = ''
-                    for l in table.attrib['class'].split(' '):
-                        if 'tableaux-comptes-' in l:
-                            account_type_str = l[len('tableaux-comptes-'):].lower()
-                            break
 
-                    account.type = Account.TYPE_UNKNOWN
-                    for pattern, type in self.ACCOUNT_TYPES.items():
-                        if pattern in account_type_str or pattern in account.label.lower():
-                            account.type = type
-                            break
+class BalancesPage(LoggedPage, JsonPage):
+    @method
+    class iter_balances(DictElement):
+        class item(ItemElement):
+            klass = Account
+            def obj_id(self):
+                name = Dict('name')(self)
+                return ("none" if name is None else name) + "_" + CleanText(Dict('balanceType'))(self) + "_" + CleanText(Dict('referenceDate'))(self)
+            obj_balance = CleanDecimal.SI(Dict('balanceAmount/amount'))
+            obj__balance_type = CleanText(Dict('balanceType'))
 
-                    # get accounts id
-                    account.id = args['paramNumCompte'] + args.get('paramNumContrat', '')
 
-                    if 'Visa' in account.label:
-                        account.number = Regexp(CleanText('./td[contains(@class,"libelle")]', replace=[(' ', ''), ('x', 'X')]), r'(X{12}\d{4})')(box)
-                        account.id += Regexp(CleanText('./td[contains(@class,"libelle")]'), r'(\d+)')(box)
+class BankTransaction(FrenchTransaction):
+    PATTERNS = [
+        (re.compile(r'^RET(RAIT) DAB (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^(CARTE|CB ETRANGER|CB) (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
+        (re.compile(r'^(?P<category>VIR(EMEN)?T? (SEPA)?(RECU|FAVEUR)?)( /FRM)?(?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'^PRLV (?P<text>.*)( \d+)?$'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^(CHQ|CHEQUE) .*$'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^(AGIOS /|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(CONVENTION \d+ |F )?COTIS(ATION)? (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(F|R)-(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^REMISE (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^(?P<text>.*)( \d+)? QUITTANCE .*'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'), FrenchTransaction.TYPE_UNKNOWN),
+        (re.compile(r'^ACHATS (CARTE|CB)'), FrenchTransaction.TYPE_CARD_SUMMARY),
+        (re.compile(r'^ANNUL (?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK)
+    ]
 
-                    if 'Valorisation' in account.label or 'Liquidités' in account.label:
-                        account.id += args[next(k for k in args.keys() if '_idcl' in k)].split('Jsp')[-1]
-                        account.number = account.id
 
-                    # get accounts balance
-                    try:
-                        balance_value = CleanText('.//td[has-class("montant")]')(box)
+class TransactionsPage(LoggedPage, JsonPage):
+    def get_history(self):
+        for trans in self.doc:
+            t = BankTransaction()
+            date = Date(Dict('transactionDate'))(trans)
+            vdate = Date(Dict('valueDate'))(trans)
+            label = CleanText(Dict('label'))(trans)
+            raw = CleanText(Dict('longLabel'))(trans)
+            credit = CleanDecimal.SI(Dict('amount'))(trans)
+            id = CleanText(Dict('id'))(trans)
 
-                        # skip debit card
-                        # some cards don't have information in balance tab, skip them
-                        if balance_value == 'Débit immédiat' or balance_value == '':
-                            account._is_debit_card = True
-                        else:
-                            account._is_debit_card = False
-
-                        account.balance = Decimal(FrenchTransaction.clean_amount(self.parse_number(balance_value)))
-                        if account.type == Account.TYPE_CARD:
-                            account.coming = account.balance
-                            account.balance = Decimal(0)
-
-                    except InvalidOperation:
-                        # The account doesn't have a amount
-                        pass
-
-                    account._url = self.doc.xpath('//form[contains(@action, "panorama")]/@action')[0]
-                    account._acctype = "bank"
-                    account._owner = CleanText('./td[has-class("libelle")]')(box)
-
-                # get accounts currency
-                currency_title = table.xpath('./thead//th[@class="montant"]')[0].text.strip()
-                m = re.match('Montant \((\w+)\)', currency_title)
-                if not m:
-                    self.logger.warning('Unable to parse currency %r' % currency_title)
-                else:
-                    account.currency = account.get_currency(m.group(1))
-
-                account._args = args
-                account._hasinv = True if "Valorisation" in account.label else False
-
-                yield account
-
-    def get_form_action(self, form_name):
-        return self.get_form(id=form_name).url
-
-    def get_profile_name(self):
-        return Regexp(CleanText('//div[@id="bloc_identite"]/h5'), r'Bonjour (.*)')(self.doc)
+            t.parse(date, re.sub(r'[ ]+', ' ', label), vdate)
+            t.amount = credit
+            t.id = id
+            t.raw = raw
+            yield t
 
 
 class IbanPage(PDFPage):
@@ -285,25 +172,7 @@ class IbanPage(PDFPage):
         return NotAvailable
 
 
-class BankTransaction(FrenchTransaction):
-    PATTERNS = [
-        (re.compile(r'^RET(RAIT) DAB (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
-        (re.compile(r'^(CARTE|CB ETRANGER|CB) (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
-        (re.compile(r'^(?P<category>VIR(EMEN)?T? (SEPA)?(RECU|FAVEUR)?)( /FRM)?(?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
-        (re.compile(r'^PRLV (?P<text>.*)( \d+)?$'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(r'^(CHQ|CHEQUE) .*$'), FrenchTransaction.TYPE_CHECK),
-        (re.compile(r'^(AGIOS /|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-        (re.compile(r'^(CONVENTION \d+ |F )?COTIS(ATION)? (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-        (re.compile(r'^(F|R)-(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
-        (re.compile(r'^REMISE (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
-        (re.compile(r'^(?P<text>.*)( \d+)? QUITTANCE .*'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(r'^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'), FrenchTransaction.TYPE_UNKNOWN),
-        (re.compile(r'^ACHATS (CARTE|CB)'), FrenchTransaction.TYPE_CARD_SUMMARY),
-        (re.compile(r'^ANNUL (?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK)
-    ]
-
-
-class TransactionsPage(LoggedPage, MyHTMLPage):
+class TransactionsPage0(LoggedPage, MyHTMLPage):
     COL_DATE = 0
     COL_TEXT = 1
     COL_DEBIT = 2
