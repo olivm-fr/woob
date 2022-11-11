@@ -108,9 +108,10 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
     def do_login(self):
         if self.session.cookies.get('dsp2_auth_token') is None:
             self._get_dsp2()
-
+        # 11nov2022 : API has changed. It needs a form-encoded login/pwd, and is not called for a successful SMS-auth
         try:
-            response = self.request(self.BASEURL + '/api/v1/session', method='PUT')
+            data = {"login": self.config['username'].get(), "password": self.config['password'].get()}
+            response = self.request(self.BASEURL + '/api/v1/session', method='POST', data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
         except ClientError as ex:
             if ex.response.status_code == 401:
                 json_response = ex.response.json()
