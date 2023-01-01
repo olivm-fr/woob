@@ -63,7 +63,8 @@ class AnytimeBrowser(PagesBrowser):
 class AnytimeApiBrowser(APIBrowser, StatesMixin):
     BASEURL = 'https://secure.anyti.me'
 
-    #__states__ = ('csrf_token') # TODO remove CSRF token for production, as it generates an additional 403 call at 1st try
+    #__states__ = ['csrf_token'] # TODO remove CSRF token for production, as it generates an additional 401 call at 1st try
+
     csrf_token = None
 
     tokenid = None
@@ -90,6 +91,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
         if self.config['request_information'].get() is None:
             raise NeedInteractiveFor2FA()
 
+        self.csrf_token = None
         if self.config['smscode'].get() is None:
             data = {"email": self.config['username'].get(), "password": self.config['password'].get()}
             self.session.cookies.clear()
@@ -190,11 +192,13 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             # portal v2, nov 2020 :
             response = self._get_paginated(self.BASEURL + '/api/v1/customer/corp-accounts/%s/transactions' % account.id.replace('corp-', ''), method='GET')
             for t in response:
-                yield self._parse_transaction(t, account.id)
+                trans = self._parse_transaction(t, account.id)
+                if trans is not None: yield trans
         elif account.type == Account.TYPE_CARD:
             response = self._get_paginated(self.BASEURL + '/api/v1/customer/cards/transactions', method='GET')
             for t in response:
-                yield self._parse_transaction(t, account.id)
+                trans = self._parse_transaction(t, account.id)
+                if trans is not None: yield trans
 
     def _parse_transaction(self, trans, acc_id):
         # id, icon, canAddFiles, nbFiles, files, isCashTx, currency : ignored

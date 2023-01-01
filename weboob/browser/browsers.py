@@ -995,6 +995,8 @@ class LoginBrowser(PagesBrowser):
         super(LoginBrowser, self).__init__(*args, **kwargs)
         self.username = username
         self.password = password
+        if browser.logger.settings.get('export_session'):
+            browser.logger.debug('starting browser with session: %s', json.dumps(browser.export_session()))
 
     def do_login(self):
         """
@@ -1068,6 +1070,10 @@ class StatesMixin(object):
 
         if 'url' in state:
             self.locate_browser(state)
+
+        if self.logger.settings.get('export_session'):
+            self.logger.debug('Loading with session: %s', json.dumps(self.export_session()))
+
 
     def get_expire(self):
         return unicode((datetime.now() + timedelta(minutes=self.STATE_DURATION)).replace(microsecond=0))
