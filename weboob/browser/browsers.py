@@ -995,8 +995,8 @@ class LoginBrowser(PagesBrowser):
         super(LoginBrowser, self).__init__(*args, **kwargs)
         self.username = username
         self.password = password
-        if browser.logger.settings.get('export_session'):
-            browser.logger.debug('starting browser with session: %s', json.dumps(browser.export_session()))
+        if self.logger.settings.get('export_session'):
+            self.logger.debug('starting browser with session: %s', json.dumps(self.export_session()))
 
     def do_login(self):
         """
