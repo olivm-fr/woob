@@ -67,6 +67,9 @@ class DocumentsPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Document
 
+            def condition(self):
+                return self.el["idTechniquePrestation"] == self.env["tech_id"]
+
             def obj_id(self):
                 """Generate ID for the document.
 

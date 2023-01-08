@@ -1016,7 +1016,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
                 "dt10_dateFin": end_date.strftime("%d/%m/%Y"),
             }
             self.documents.go(params=params)
-            for d in self.page.iter_documents(subid=subscription.id):
+            for d in self.page.iter_documents(subid=subscription.id, tech_id=subscription._internal_id):
                 is_empty = False
                 yield d
 
