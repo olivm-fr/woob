@@ -93,7 +93,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
         self.csrf_token = None
         if self.config['smscode'].get() is None:
-            data = {"email": self.config['username'].get(), "password": self.config['password'].get()}
+            data = {"email": self.config['username'].get(), "password": self.config['password'].get(), "nbSmsRequest": 1}
             self.session.cookies.clear()
             response = self.request(self.BASEURL + '/api/v1/customer/auth-sms', method='POST', data=data)
             self.tokenid = response.json()['tokenId']
