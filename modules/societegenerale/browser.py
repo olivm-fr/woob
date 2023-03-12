@@ -158,9 +158,9 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
             elif reason in ("err_is", "err_tech"):
                 # there is message "Service momentanément indisponible. Veuillez réessayer."
                 # in SG website in that case ...
-                raise BrowserUnavailable()
+                raise BrowserUnavailable(f"Website is unavailable ({reason})")
 
-            raise AssertionError("Unhandled error reason: %s" % reason)
+            raise AssertionError(f"Unhandled error reason: {reason}")
 
     def check_auth_method(self):
         auth_method = self.page.get_auth_method()
