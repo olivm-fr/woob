@@ -2,29 +2,27 @@
 
 # Copyright(C) 2018      Sylvie Ye
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import json
 from datetime import date
 
-from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage
+from weboob.browser.pages import HTMLPage, JsonPage
 from weboob.browser.elements import method, DictElement, ItemElement, ListElement
 from weboob.browser.filters.standard import CleanText, CleanDecimal
 from weboob.browser.filters.html import Attr
@@ -34,19 +32,28 @@ from weboob.capabilities.bank import (
     Emitter, EmitterNumberType, Recipient, Transfer, TransferBankError,
     TransferError, TransferInvalidAmount,
 )
+from weboob.exceptions import BrowserUnavailable
 
 from .pages import MainPEPage
 from ..pages.accounts_list import eval_decimal_amount
 
 
 class ErrorCheckedJsonPage(JsonPage):
-    def on_load(self):
-        assert Dict('commun/statut')(self.doc) == 'ok', (
-            'Something went wrong: %s' % Dict('commun/raison')(self.doc)
-        )
+    def check_error(self):
+        if self.doc['commun']['statut'] == 'ok':
+            return
+        if self.doc['commun']['raison'] == 'err_tech':
+            raise BrowserUnavailable()
+        raise AssertionError('Something went wrong: %s' % self.doc['commun']['raison'])
 
 
-class RecipientsJsonPage(LoggedPage, ErrorCheckedJsonPage):
+class LoggedDetectionMixin(object):
+    @property
+    def logged(self):
+        return Dict('commun/raison', default=None)(self.doc) != "niv_auth_insuff"
+
+
+class RecipientsJsonPage(LoggedDetectionMixin, ErrorCheckedJsonPage):
     def is_external_recipients(self):
         return Dict('donnees/items')(self.doc)
 
@@ -79,14 +86,23 @@ class RecipientsJsonPage(LoggedPage, ErrorCheckedJsonPage):
             obj__created_date = Dict('dateCreationDest')
 
 
-class TransferDatesPage(LoggedPage, ErrorCheckedJsonPage):
+class TransferDatesPage(LoggedDetectionMixin, ErrorCheckedJsonPage):
     def is_date_valid(self, exec_date):
         transfer_dates_list = Dict('donnees/listeDatesExecution')(self.doc)
         assert transfer_dates_list
         return exec_date.strftime('%d/%m/%Y') in transfer_dates_list
 
 
-class EasyTransferPage(LoggedPage, HTMLPage):
+class EasyTransferPage(HTMLPage):
+    @property
+    def logged(self):
+        # If logged out, that page is a JSON instead of the regular HTML,
+        # and bears 'niv_auth_insuff' status, as for all other JSON pages from the website.
+        if 'application/json' in self.response.headers.get('content-type', ''):
+            json_data = json.loads(self.text)
+            return Dict('commun/raison', default=None)(json_data) != 'niv_auth_insuff'
+        return True
+
     def update_origin_account(self, origin_account):
         for account in self.doc.xpath('//ul[@id="idCptFrom"]//li'):
             # get all account data
@@ -170,7 +186,7 @@ class EasyTransferPage(LoggedPage, HTMLPage):
                 return Dict('ibanCompte')(self.data)
 
 
-class TransferPage(LoggedPage, ErrorCheckedJsonPage):
+class TransferPage(LoggedDetectionMixin, ErrorCheckedJsonPage):
     def handle_response(self, origin, recipient, amount, reason, exec_date):
         account_data = Dict('donnees/detailOrdre/compteEmetteur')(self.doc)
         recipient_data = Dict('donnees/listOperations/0/compteBeneficiaire')(self.doc)
@@ -200,7 +216,7 @@ class TransferPage(LoggedPage, ErrorCheckedJsonPage):
         return transfer
 
 
-class ConfirmTransferPage(LoggedPage, ErrorCheckedJsonPage):
+class ConfirmTransferPage(LoggedDetectionMixin, ErrorCheckedJsonPage):
     def on_load(self):
         try:
             super(ConfirmTransferPage, self).on_load()
@@ -227,7 +243,7 @@ class ConfirmTransferPage(LoggedPage, ErrorCheckedJsonPage):
             raise TransferError(description=status)
 
 
-class SignTransferPage(LoggedPage, MainPEPage):
+class SignTransferPage(LoggedDetectionMixin, MainPEPage):
     def get_confirm_transfer_data(self, password):
         keyboard_data = self.get_keyboard_data()
         return {
@@ -237,7 +253,7 @@ class SignTransferPage(LoggedPage, MainPEPage):
         }
 
 
-class AddRecipientPage(LoggedPage, HTMLPage):
+class AddRecipientPage(LoggedDetectionMixin, HTMLPage):
     def get_countries(self):
         countries = {}
         for country in self.doc.xpath('//div[@id="div-pays-tiers"]//li[not(@data-codepays="")]'):
@@ -245,12 +261,12 @@ class AddRecipientPage(LoggedPage, HTMLPage):
         return countries
 
 
-class AddRecipientStepPage(LoggedPage, ErrorCheckedJsonPage):
+class AddRecipientStepPage(LoggedDetectionMixin, ErrorCheckedJsonPage):
     def get_response_data(self):
         return self.doc['donnees']
 
 
-class ConfirmRecipientPage(LoggedPage, ErrorCheckedJsonPage):
+class ConfirmRecipientPage(LoggedDetectionMixin, ErrorCheckedJsonPage):
     def rcpt_after_sms(self, recipient):
         rcpt_data = self.doc['donnees']
 

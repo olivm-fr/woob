@@ -2,51 +2,52 @@
 
 # Copyright(C) 2016     Baptiste Delpey
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
+import re
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import quote_plus
 
 import requests
 
 from weboob.browser.pages import JsonPage, pagination
 from weboob.browser.elements import ItemElement, method, DictElement
 from weboob.browser.filters.standard import (
-    CleanDecimal, CleanText, Coalesce, Date, Format, BrowserURL, Env,
-    Field, Regexp, Currency as CurrencyFilter,
+    CleanDecimal, CleanText, Coalesce, Date, Eval, Format, BrowserURL, Env,
+    Field, MapIn, Regexp, Currency as CurrencyFilter,
 )
 from weboob.browser.filters.json import Dict
+from weboob.capabilities.bank.base import Loan
 from weboob.capabilities.base import Currency, empty
 from weboob.capabilities import NotAvailable
 from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
+from weboob.capabilities.bank.wealth import Investment
 from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.capabilities.profile import Person
 from weboob.exceptions import (
-    BrowserUnavailable, NoAccountsException, BrowserPasswordExpired,
-    AuthMethodNotImplemented,
+    ActionNeeded, AuthMethodNotImplemented,
+    BrowserPasswordExpired, BrowserUnavailable, NoAccountsException,
 )
+from weboob.capabilities.bank import AccountOwnerType
 from weboob.tools.capabilities.bank.iban import is_iban_valid
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.investments import is_isin_valid
-from weboob.tools.compat import quote_plus
 
 from .pages import Transaction
 
@@ -61,37 +62,45 @@ class SGPEJsonPage(LoggedDetectionMixin, JsonPage):
     pass
 
 
+ACCOUNT_TYPES = {
+    'COMPTE COURANT': Account.TYPE_CHECKING,
+    'COMPTE PERSONNEL': Account.TYPE_CHECKING,
+    'CPTE PRO': Account.TYPE_CHECKING,
+    'CPTE PERSO': Account.TYPE_CHECKING,
+    'CODEVI': Account.TYPE_SAVINGS,
+    'CEL': Account.TYPE_SAVINGS,
+    'Ldd': Account.TYPE_SAVINGS,
+    'Livret': Account.TYPE_SAVINGS,
+    'PEL': Account.TYPE_SAVINGS,
+    'CPTE TRAVAUX': Account.TYPE_SAVINGS,
+    'EPARGNE': Account.TYPE_SAVINGS,
+    'Plan Epargne': Account.TYPE_SAVINGS,
+    'PEA': Account.TYPE_PEA,
+    'Prêt': Account.TYPE_LOAN,
+    'VIE': Account.TYPE_LIFE_INSURANCE,
+}
+
+
 class AccountsJsonPage(SGPEJsonPage):
     ENCODING = 'utf-8'
 
-    TYPES = {
-        'COMPTE COURANT': Account.TYPE_CHECKING,
-        'COMPTE PERSONNEL': Account.TYPE_CHECKING,
-        'CPTE PRO': Account.TYPE_CHECKING,
-        'CPTE PERSO': Account.TYPE_CHECKING,
-        'CODEVI': Account.TYPE_SAVINGS,
-        'CEL': Account.TYPE_SAVINGS,
-        'Ldd': Account.TYPE_SAVINGS,
-        'Livret': Account.TYPE_SAVINGS,
-        'PEL': Account.TYPE_SAVINGS,
-        'CPTE TRAVAUX': Account.TYPE_SAVINGS,
-        'EPARGNE': Account.TYPE_SAVINGS,
-        'Plan Epargne': Account.TYPE_SAVINGS,
-        'PEA': Account.TYPE_PEA,
-        'Prêt': Account.TYPE_LOAN,
-    }
-
-    def on_load(self):
+    def check_error(self):
         if self.doc['commun']['statut'].lower() == 'nok':
             reason = self.doc['commun']['raison']
             if reason == 'SYD-COMPTES-UNAUTHORIZED-ACCESS':
                 raise NoAccountsException("Vous n'avez pas l'autorisation de consulter : {}".format(reason))
             elif reason == 'niv_auth_insuff':
-                return
+                raise AssertionError(reason)
             elif reason in ('chgt_mdp_oblig', 'chgt_mdp_init'):
                 raise BrowserPasswordExpired('Veuillez vous rendre sur le site de la banque pour renouveler votre mot de passe')
             elif reason == 'oob_insc_oblig':
                 raise AuthMethodNotImplemented("L'authentification par Secure Access n'est pas prise en charge")
+            elif reason in ('err_is', 'err_tech'):
+                raise BrowserUnavailable()
+            elif reason in ('ENCADREMENT_KYC_PREAVIS', 'ENCADREMENT_KYC_POST_PREAVIS'):
+                raise ActionNeeded("Votre banque requiert des informations complémentaires pour mettre à jour votre dossier client.")
+            elif reason in ('INSCRIP_OBL', 'FIABILISATION_COORDONNEES'):
+                raise ActionNeeded("Veuillez vous rendre sur le site de votre banque pour completer vos informations.")
             else:
                 # the BrowserUnavailable was raised for every unknown error, and was masking the real error.
                 # So users and developers didn't know what kind of error it was.
@@ -102,11 +111,11 @@ class AccountsJsonPage(SGPEJsonPage):
         item_xpath = 'donnees/classeurs'
 
         class iter_accounts(DictElement):
-            @property
-            def item_xpath(self):
-                if 'intradayComptes' in self.el:
-                    return 'intradayComptes'
-                return 'comptes'
+            def find_elements(self):
+                element = self.el.get('intradayComptes') or self.el.get('comptes')
+                if element:
+                    return element
+                return []
 
             class item(ItemElement):
                 klass = Account
@@ -135,7 +144,7 @@ class AccountsJsonPage(SGPEJsonPage):
                     return self.page.acc_type(Field('label')(self))
 
     def acc_type(self, label):
-        for wording, acc_type in self.TYPES.items():
+        for wording, acc_type in ACCOUNT_TYPES.items():
             if wording.lower() in label.lower():
                 return acc_type
         return Account.TYPE_CHECKING
@@ -154,11 +163,38 @@ class CardsInformationPage(SGPEJsonPage):
 
 
 class CardsInformation2Page(SGPEJsonPage):
-    def get_number(self):
-        return self.response.json().get('donnees')[0].get('numero')
+    def get_number(self, masked_number):
+        def match(card, masked_number):
+            """
+            masked number : 949021XXXXXX9429000
+            striped masked number : 949021XXXXXX9429
+            masked number regex : 949021.*9429
+            number: 000009490219329019429
+            striped_number: 9490219329019429
+            """
+            number = card['numero']
+            striped_number = number.lstrip('0')
+            striped_masked_number = masked_number.rstrip('0')
+            masked_number_regex = re.sub(r'X+', '.*', striped_masked_number)
+            return re.match(masked_number_regex, striped_number)
+
+        cards = self.response.json().get('donnees')
+        for card in cards:
+            if match(card, masked_number):
+                return card['numero']
+        return ''
 
     def get_due_date(self):
-        return self.response.json().get('donnees')[0].get('dateRegelement')
+        """
+        Sometimes we get several cards even though we asked for one,
+        and they have the same number but some may not have a date.
+        """
+        data = self.doc['donnees']
+
+        for element in data:
+            freeze_date = element.get('dateRegelement')
+            if freeze_date and freeze_date != "Non définie":
+                return freeze_date
 
 
 class DeferredCardJsonPage(SGPEJsonPage):
@@ -177,16 +213,25 @@ class DeferredCardJsonPage(SGPEJsonPage):
 
             def condition(self):
                 return (
-                    not Dict('inactivityDate')(self)
+                    not Dict('inactivityDate', default='')(self)  # Is not always present in json
                     and Dict('currentOutstandingAmountDate')(self)  # avoid immediate debit cards
                 )
 
-            obj_id = Dict('numeroCarte')
-            obj_number = Dict('numeroCarte')
+            obj_id = Coalesce(
+                Dict('numeroCarte', default=NotAvailable),
+                Dict('numeroCarteHash', default=NotAvailable)
+            )
+            obj_number = Coalesce(
+                Dict('numeroCarte', default=NotAvailable),
+                Dict('maskedCardNumber', default=NotAvailable),
+                default=NotAvailable
+            )
             obj_label = CleanText(Dict('libelle'))
             obj_type = Account.TYPE_CARD
             obj_coming = CleanDecimal.French(Dict('encoursToShow'))
-            obj_currency = CleanText(Dict('currentOutstandingAmount/currencyCode'))
+            obj_currency = CurrencyFilter(Dict('currentOutstandingAmount/devise'))
+            obj__parent_id = Dict('idPrestationCompte', default=NotAvailable)
+            obj__masked_card_number = Dict('maskedCardNumber', default=NotAvailable)
 
 
 class DeferredCardHistoryJsonPage(SGPEJsonPage):
@@ -197,7 +242,7 @@ class DeferredCardHistoryJsonPage(SGPEJsonPage):
         class item(ItemElement):
             klass = Transaction
 
-            obj_date = Date(Env('date'))
+            obj_date = Date(Env('date'), dayfirst=True)
             obj_rdate = Date(CleanText(Dict('date')), dayfirst=True, default=NotAvailable)
             obj_label = CleanText(Dict('libelle'))
             obj_type = Transaction.TYPE_DEFERRED_CARD  # card summaries only on parent account side
@@ -344,6 +389,10 @@ class HistoryJsonPage(SGPEJsonPage):
 
 
 class ProfilePEPage(SGPEJsonPage):
+    def get_error_msg(self):
+        if self.doc['commun']['statut'].lower() == 'nok':
+            return self.doc['commun']['raison']
+
     @method
     class get_profile(ItemElement):
         klass = Person
@@ -359,6 +408,7 @@ class ProfilePEPage(SGPEJsonPage):
             Dict('donnees/telephoneSecurite', default=NotAvailable),
             Dict('donnees/telephoneMobile', default=NotAvailable),
             Dict('donnees/telephoneFixe', default=NotAvailable),
+            default=NotAvailable,
         )
 
         obj_email = Coalesce(
@@ -372,6 +422,23 @@ class ProfilePEPage(SGPEJsonPage):
 
 
 class BankStatementPage(SGPEJsonPage):
+    def is_document_disabled(self):
+        # If e-document is not activated by the account owner, we have this specific response.
+        # So, if Bank statements are not available we don't want to break the run.
+        if self.doc.get('commun', {}).get('statut').lower() == 'nok':
+            reason = self.doc.get('commun', {}).get('raison')
+            if reason == 'SYD-RCE-UNAUTHORIZED-ACCESS':
+                self.logger.warning('No subscriptions access rights granted: %s', reason)
+                return True
+        return False
+
+    def check_error(self):
+        if self.doc.get('commun', {}).get('statut').lower() == 'nok':
+            reason = self.doc.get('commun', {}).get('raison')
+            if reason == 'oob_insc_oblig':
+                raise AuthMethodNotImplemented("L'authentification par Secure Access n'est pas prise en charge")
+            raise AssertionError(f'Error {reason} is not handled yet')
+
     def get_min_max_date(self):
         min_date = Date(Dict('donnees/criteres/dateMin'), dayfirst=True, default=None)(self.doc)
         max_date = Date(Dict('donnees/criteres/dateMax'), dayfirst=True, default=None)(self.doc)
@@ -454,3 +521,88 @@ class MarketInvestmentPage(SGPEJsonPage):
                 if empty(Field('code')(self)):
                     return NotAvailable
                 return Investment.CODE_TYPE_ISIN
+
+
+class WealthAccountsPage(SGPEJsonPage):
+    @method
+    class iter_accounts(DictElement):
+        item_xpath = 'donnees'
+
+        class item(ItemElement):
+            klass = Account
+
+            def condition(self):
+                # At least some PER have no balance and no information at all except
+                # a label and a contract number. Clicking on those PER on the website
+                # leads to an error page so we skip them for the moment
+                return Dict('soldeAfficher')(self)
+
+            obj_number = obj_id = CleanText(Dict('numeroContrat'))
+            obj_label = CleanText(Dict('intitule'))
+            obj_balance = CleanDecimal.French(Dict('soldeAfficher'))
+            obj_currency = CurrencyFilter(Dict('devise'))
+            obj_type = MapIn(Dict('typeProduit'), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
+            obj__prestation_number = None
+
+
+class CorpListPage(SGPEJsonPage):
+    def get_corps_list(self):
+        for corp in Dict('donnees/listFilterPms')(self.doc):
+            yield corp['id']
+
+
+class ProLoansPage(SGPEJsonPage):
+    @method
+    class iter_loans(DictElement):
+        item_xpath = 'donnees/listeCredits/*'
+
+        class item(ItemElement):
+            klass = Loan
+
+            def condition(self):
+                # This is needed to avoid fetching some short-term credits that are not regular
+                # credits (only information for them are an iban and some sort of maximum amount).
+                # We also skip some almost empty mid-term credits called "Crédit-Bail-Mobilier"
+                # or "Location avec Option d'Achat"
+                if Dict('typeCredit')(self) not in ('CLASSIQUE', 'LOA', 'CBM'):
+                    self.logger.warning('Unknown type of loan: %s', Dict('typeCredit')(self))
+                return (
+                    Dict('libelleLong')(self) != 'Autorisation de découvert (Convention de Trésorerie Courante)'
+                    and Dict('typeCredit')(self) == 'CLASSIQUE'
+                )
+
+            obj_number = obj_id = CleanText(Dict('numContract'))
+            obj_label = Format(
+                '%s n°%s%s',
+                CleanText(Dict('libelleCourt')),
+                Field('number'),
+                CleanText(Dict('informationFacultative'), default=''),  # Value looks like " : Matériel"
+            )
+            obj_type = Account.TYPE_LOAN
+            obj_owner_type = AccountOwnerType.ORGANIZATION
+            obj__prestation = CleanText(Dict('idPrestation'))
+
+
+class ProLoanDetailsPage(SGPEJsonPage):
+    def get_loan_status(self):
+        return Dict('commun/statut')(self.doc)
+
+    def get_error_message(self):
+        return Dict('commun/raison')(self.doc)
+
+    @method
+    class fill_loan(ItemElement):
+        klass = Loan
+
+        reroot_xpath = 'donnees'
+
+        obj_balance = CleanDecimal.French(Dict('montantRestantDu'), sign='-')
+        obj_currency = CurrencyFilter(Dict('montantRestantDu'))
+        obj_total_amount = CleanDecimal.French(Dict('capitalEmprunte'))
+        obj_duration = Eval(int, CleanDecimal(Dict('dureeCredit')))
+        obj_subscription_date = Date(CleanText(Dict('dateDebutCreditTime')))
+        obj_maturity_date = Date(CleanText(Dict('dateFinCreditTime')))
+        obj_last_payment_amount = CleanDecimal.French(Dict('montantDerniereEcheance'), default=NotAvailable)
+        obj_last_payment_date = Date(CleanText(Dict('dateDerniereEcheanceTime'), default=''), default=NotAvailable)
+        obj_next_payment_amount = CleanDecimal.French(Dict('montantProchaineEcheance'), default=NotAvailable)
+        obj_next_payment_date = Date(CleanText(Dict('dateProchaineEcheanceTime'), default=''), default=NotAvailable)

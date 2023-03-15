@@ -1,41 +1,37 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2013      Laurent Bachelier
+# Copyright(C) 2013-2021      Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from logging import error
 import re
 from io import BytesIO
 
+from weboob.browser.elements import ItemElement, SkipItem, TableElement, method
 from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.standard import (
-    CleanText, Date,
-    Env, Regexp, Field, Format,
-)
-from weboob.browser.filters.html import Attr, Link
+from weboob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Field, Format, Base, Regexp
+from weboob.browser.filters.html import Link, TableCell
+from weboob.capabilities.bank.wealth import Investment
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.capabilities.bill import Document, Subscription, DocumentTypes
 from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 from weboob.tools.json import json
+from weboob.capabilities.bank import Account
 from weboob.capabilities.base import NotAvailable
 
 from ..captcha import Captcha, TileError
@@ -114,7 +110,7 @@ class ChangePassPage(SGPEPage):
             or CleanText('//div[@class="ngo_gao_intro"]')(self.doc)
             or u'Informations manquantes sur le site Société Générale'
         )
-        raise ActionNeeded(message)
+        raise ActionNeeded(locale="fr-FR", message=message)
 
 
 class MainPEPage(SGPEPage, PasswordPage):
@@ -189,36 +185,6 @@ class LoginPEPage(LoginParPage):
     pass
 
 
-class SubscriptionPage(LoggedPage, SGPEPage):
-    def iter_subscription(self):
-        for account in self.doc.xpath('//select[@name="compteSelected"]/option'):
-            s = Subscription()
-            s.id = CleanText('.', replace=[(' ', '')])(account)
-
-            yield s
-
-    @method
-    class iter_documents(ListElement):
-        item_xpath = '//table[@id="tab-arretes"]/tbody/tr[td[@class="foncel1-grand"]]'
-
-        class item(ItemElement):
-            klass = Document
-
-            obj_label = CleanText('./td[1]')
-            obj_date = Date(Regexp(Field('label'), r'au (\d{4}\-\d{2}\-\d{2})'))
-            obj_id = Format(
-                '%s_%s',
-                Env('sub_id'),
-                CleanText(Regexp(Field('label'), r'au (\d{4}\-\d{2}\-\d{2})'), replace=[('-', '')])
-            )
-            obj_format = 'pdf'
-            obj_type = DocumentTypes.STATEMENT
-            obj_url = Format(
-                '/Pgn/PrintServlet?PageID=ReleveRIE&MenuID=BANRELRIE&urlTypeTransfert=ipdf&REPORTNAME=ReleveInteretElectronique.sgi&numeroRie=%s',
-                Regexp(Attr('./td[2]/a', 'onclick'), r"impression\('(.*)'\);")
-            )
-
-
 class IncorrectLoginPage(SGPEPage):
     def on_load(self):
         if self.doc.xpath('//div[@class="ngo_mu_message" and contains(text(), "saisies sont incorrectes")]'):
@@ -253,3 +219,88 @@ class MainPage(LoggedPage, SGPEPage):
             return NotAvailable
         # return None when we don't know if there are market accounts or not
         # it will be handled in `browser.py`
+
+
+class UnavailablePage(LoggedPage, SGPEPage):
+    pass
+
+
+class MarketAccountsPage(LoggedPage, HTMLPage):
+    @method
+    class iter_accounts(TableElement):
+        def __init__(self, *args, **kwargs):
+            super(). __init__(*args, **kwargs)
+            # the rows contain one more `td` to the left that tells the account's type
+            # we need to offset the id column, and can use the type when the label is missing
+            self._cols['id'] = 1
+            self._cols['type'] = 0
+
+        head_xpath = (
+            '//table[//tr/td[text()="Référence du compte"]]//tr[4]/td|'
+            + '//table[//tr/td[text()="Référence du compte"]]//tr[3]/td[@rowspan=2]'
+        )
+        item_xpath = '//table[//tr/td[text()="Référence du compte"]]//tr[position()>=5]'
+
+        col_id = 'Référence du compte'
+        col_label = 'Libellé'
+        col_balance = 'Evaluation'
+        col_cash = 'Disponible espèces'
+
+        class item(ItemElement):
+            klass = Account
+
+            obj_number = obj_id = CleanText(TableCell('id'), replace=[(' ', '')])
+            obj_label = Coalesce(
+                CleanText(TableCell('label')),
+                Format(
+                    '%s %s',
+                    CleanText(TableCell('type')),  # the coolumn `type` is defined in the `__init__`
+                    Field('id'),
+                )
+            )
+            obj_balance = CleanDecimal.French(TableCell('balance'))
+            obj_currency = Currency(TableCell('balance'))
+            obj_type = Account.TYPE_MARKET
+            obj__prestation_number = None
+
+
+class MarketAccountsDetailsPage(LoggedPage, HTMLPage):
+    def get_account_number(self):
+        account_number = Regexp(CleanText('//select[@name="idCptSelect"]'), r'(\d[\d ]+)')(self.doc)
+        return account_number.replace(' ', '')
+
+    @method
+    class iter_investment(TableElement):
+
+        head_xpath = '//table[tr/td[text()="Valeur"]]/tr[position()=1]/td'
+        item_xpath = '//table[tr/td[text()="Valeur"]]/tr[position()>1]'
+
+        col_label = 'Valeur'
+        col_quantity = 'Quantité'
+        col_unitvalue = 'Cours'
+        col_date = 'Date'
+        col_valuation = 'Evaluation'
+
+        class item(ItemElement):
+            klass = Investment
+
+            def parse(self, el):
+                messages = re.compile(
+                    "En dépôt à l'étranger"
+                    + "|Dont indisponible"
+                    + "|PAS DE VALEURS"
+                )
+                if messages.search(el.text_content()):
+                    raise SkipItem()
+
+            obj_label = CleanText(Base(TableCell('label'), 'span'))
+            obj_quantity = CleanDecimal.French(TableCell('quantity'))
+            obj_unitvalue = CleanDecimal.French(TableCell('unitvalue'))
+            obj_valuation = CleanDecimal.French(TableCell('valuation'))
+
+            def obj_vdate(self):
+                date = CleanText(TableCell('date'))(self)
+                # sometimes it's '02/11/2022 à 00:00' and sometimes '02/11/2022'
+                date = re.sub('( à .+)', '', date)
+                date = Date(dayfirst=True).filter(date)
+                return date

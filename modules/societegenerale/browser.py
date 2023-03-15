@@ -2,24 +2,22 @@
 
 # Copyright(C) 2010-2011 Jocelyn Jaubert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import time
 from datetime import datetime
@@ -28,15 +26,18 @@ from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 
 from weboob.browser import URL, need_login
-from weboob.browser.browsers import TwoFactorBrowser
+from weboob.browser import TwoFactorBrowser
 from weboob.capabilities.bill import Document, DocumentTypes
 from weboob.exceptions import (
     BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable,
     AppValidation, BrowserQuestion, AppValidationError, AppValidationCancelled,
-    AppValidationExpired,
+    AppValidationExpired, BrowserPasswordExpired
 )
-from weboob.capabilities.bank import Account, TransferBankError, AddRecipientStep, TransactionType, AccountOwnerType
-from weboob.capabilities.base import find_object, NotAvailable
+from weboob.capabilities.bank import (
+    Account, TransferBankError, AddRecipientStep,
+    TransactionType, AccountOwnerType, Loan,
+)
+from weboob.capabilities.base import NotAvailable
 from weboob.browser.exceptions import BrowserHTTPNotFound, ClientError
 from weboob.capabilities.profile import ProfileMissing
 from weboob.tools.value import Value, ValueBool
@@ -47,11 +48,14 @@ from .pages.accounts_list import (
     CardHistoryPage, PeaLiquidityPage, MarketOrderPage, MarketOrderDetailPage,
     AdvisorPage, HTMLProfilePage, CreditPage, CreditHistoryPage, OldHistoryPage,
     MarketPage, LifeInsurance, LifeInsuranceHistory, LifeInsuranceInvest, LifeInsuranceInvest2,
-    UnavailableServicePage, LoanDetailsPage, TemporaryBrowserUnavailable,
+    UnavailableServicePage, TemporaryBrowserUnavailable, RevolvingDetailsPage,
 )
 from .pages.transfer import AddRecipientPage, SignRecipientPage, TransferJson, SignTransferPage
-from .pages.login import MainPage, LoginPage, BadLoginPage, ReinitPasswordPage, ActionNeededPage, ErrorPage
-from .pages.subscription import BankStatementPage, RibPdfPage
+from .pages.login import (
+    MainPage, LoginPage, BadLoginPage, ReinitPasswordPage,
+    ActionNeededPage, ErrorPage, VkImage, SkippableActionNeededPage,
+)
+from .pages.subscription import DocumentsPage, RibPdfPage
 
 
 __all__ = ['SocieteGenerale']
@@ -63,6 +67,10 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
     polling_transaction = None
     polling_duration = 300  # default to 5 minutes
     __states__ = ('polling_transaction',)
+    skippable_action_needed_page = URL(
+        r'/icd/gax/data/users/administration/out-of-remedy-security-security-zone.json',
+        SkippableActionNeededPage
+    )
 
     def __init__(self, config, *args, **kwargs):
         super(SocieteGeneraleTwoFactorBrowser, self).__init__(config, *args, **kwargs)
@@ -88,38 +96,36 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
     def check_login_reason(self):
         reason = self.page.get_reason()
         if reason is not None:
-            self.logger.info('Bad login for reason: %s', reason)  # logger to catch and survey different cases
+            # 'reason' doesn't bear a user-friendly message.
+            # The messages related to each 'reason' can be found in 'swm.main.js'
+            if reason == 'echec_authent':
+                raise BrowserIncorrectPassword()
+            elif reason == 'mdptmp_expire':
+                raise BrowserPasswordExpired()
+            elif reason == 'acces_bloq':
+                raise BrowserUnavailable(
+                    "Suite à trois saisies erronées de vos codes, l'accès à vos comptes est bloqué jusqu'à demain pour des raisons de sécurité."
+                )
+            elif reason in ('acces_susp', 'pas_acces_bad'):
+                # These codes are not related to any valuable messages,
+                # just "Votre accès est suspendu. Vous n'êtes pas autorisé à accéder à l'application."
+                raise BrowserUnavailable()
+            elif reason in ('err_is', 'err_tech'):
+                # there is message "Service momentanément indisponible. Veuillez réessayer."
+                # in SG website in that case ...
+                raise BrowserUnavailable()
 
-        if reason == 'echec_authent':
-            raise BrowserIncorrectPassword()
-        elif reason in ('acces_bloq', 'acces_susp', 'pas_acces_bad', ):
-            # 'reason' doesn't bear a user-friendly message, so
-            # those messages were collected from the website since they are JavaScript-forged
-            action_needed_messages = {
-                'acces_bloq': '''Suite à trois saisies erronées de vos codes, l'accès à vos comptes est bloqué jusqu'à demain pour des raisons de sécurité.''',
-                'acces_susp': '''Votre accès est suspendu. Vous n'êtes pas autorisé à accéder à l'application.''',
-                # yes, same message
-                'pas_acces_bad': '''Votre accès est suspendu. Vous n'êtes pas autorisé à accéder à l'application.''',
-            }
-            raise ActionNeeded(action_needed_messages[reason])
-        elif reason == 'err_tech':
-            # there is message "Service momentanément indisponible. Veuillez réessayer."
-            # in SG website in that case ...
-            raise BrowserUnavailable()
+            raise AssertionError('Unhandled error reason: %s' % reason)
 
     def check_auth_method(self):
         auth_method = self.page.get_auth_method()
 
         if not auth_method:
             self.logger.warning('No auth method available !')
-            raise ActionNeeded(
-                'Veuillez ajouter un numéro de téléphone sur votre banque et/ou activer votre Pass Sécurité'
-            )
+            raise ActionNeeded("Veuillez ajouter un numéro de téléphone sur votre banque et/ou activer votre Pass Sécurité.")
 
         if auth_method['unavailability_reason'] == "ts_non_enrole":
-            raise ActionNeeded(
-                'Veuillez ajouter un numéro de téléphone sur votre banque'
-            )
+            raise ActionNeeded("Veuillez ajouter un numéro de téléphone sur votre banque.")
 
         elif auth_method['unavailability_reason']:
             raise AssertionError('Unknown unavailability reason "%s" found' % auth_method['unavailability_reason'])
@@ -174,11 +180,14 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
 
         reason = self.page.get_skippable_action_needed()
         if reason == 'FIABILISATION_TS':
-            self.open(
-                '/icd/gax/data/users/administration/out-of-remedy-security-security-zone.json',
+            self.skippable_action_needed_page.go(
                 headers={'Content-Type': 'application/json;charset=UTF-8'},
                 data='',
             )
+            # Sometimes it is not possible to skip this step without SCA
+            if self.page.has_twofactor():
+                self.check_interactive()
+                self.check_auth_method()
 
     def init_login(self):
         self.check_password()
@@ -207,7 +216,7 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
 
         if status == "aborted":
             raise AppValidationExpired(
-                "L'opération dans votre application a expirée"
+                "L'opération dans votre application a expiré"
             )
 
         if status != "available":
@@ -264,8 +273,15 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
 
 
 class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
-    BASEURL = 'https://particuliers.societegenerale.fr'
+    BASEURL = 'https://particuliers.sg.fr'
     STATE_DURATION = 10
+
+    # documents
+    documents = URL(r'/icd/cbo-edocument/data/get-all-prestations-edocument-authsec.json', DocumentsPage)
+    pdf_page = URL(
+        r'/icd/cbo-edocument/pdf/rce-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)'
+    )
+    rib_pdf_page = URL(r'/com/icd-web/cbo/pdf/rib-authsec.pdf', RibPdfPage)
 
     # Bank
     accounts_main_page = URL(
@@ -277,8 +293,8 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     account_details_page = URL(r'/restitution/cns_detailPrestation.html', AccountDetailsPage)
     accounts = URL(r'/icd/cbo/data/liste-prestations-authsec.json\?n10_avecMontant=1', AccountsPage)
     history = URL(r'/icd/cbo/data/liste-operations-authsec.json', HistoryPage)
-    loans = URL(r'/abm/restit/listeRestitutionPretsNET.json\?a100_isPretConso=(?P<conso>\w+)', LoansPage)
-    loan_details_page = URL(r'icd/cbo/data/recapitulatif-prestation-authsec.json', LoanDetailsPage)
+    loans = URL(r'/icd/espaces-thematiques/data/getLoansRecovery.json', LoansPage)
+    revolving_rate = URL(r'icd/cbo/data/recapitulatif-prestation-authsec.json', RevolvingDetailsPage)
 
     card_history = URL(r'/restitution/cns_listeReleveCarteDd.xml', CardHistoryPage)
     credit = URL(r'/restitution/cns_detailAVPAT.html', CreditPage)
@@ -332,15 +348,6 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     advisor = URL(r'/icd/pon/data/get-contacts.xml', AdvisorPage)
     html_profile_page = URL(r'/com/dcr-web/dcr/dcr-coordonnees.html', HTMLProfilePage)
 
-    # Document
-    bank_statement = URL(r'/restitution/rce_derniers_releves.html', BankStatementPage)
-    bank_statement_search = URL(
-        r'/restitution/rce_recherche.html\?noRedirect=1',
-        r'/restitution/rce_recherche_resultat.html',
-        BankStatementPage
-    )
-    rib_pdf_page = URL(r'/com/icd-web/cbo/pdf/rib-authsec.pdf', RibPdfPage)
-
     bad_login = URL(r'/acces/authlgn.html', r'/error403.html', BadLoginPage)
     reinit = URL(
         r'/acces/changecodeobligatoire.html',
@@ -357,22 +364,24 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         r'/com/service-indisponible.html',
         r'.*/Technical-pages/503-error-page/unavailable.html',
         r'.*/Technical-pages/service-indisponible/service-indisponible.html',
+        r'/fonction-indisponible',
         UnavailableServicePage
     )
     error = URL(
-        r'https://static.societegenerale.fr/pri/erreur.html',
+        r'https://static.sg.fr/pri/erreur.html',
         r'https://.*/pri/erreur.html',
         ErrorPage
     )
     login = URL(
-        r'https://particuliers.societegenerale.fr//sec/vk/',  # yes, it works only with double slash
+        r'https://particuliers.sg.fr//sec/vk/',  # yes, it works only with double slash
         r'/sec/oob_sendooba.json',
         r'/sec/oob_pollingooba.json',
         r'/sec/oob_auth.json',
         r'/sec/csa/check.json',
         LoginPage
     )
-    main_page = URL(r'https://particuliers.societegenerale.fr', MainPage)
+    vk_image = URL(r'/?/sec/vkm/gen_ui', VkImage)
+    main_page = URL(r'https://particuliers.sg.fr', MainPage)
 
     context = None
     dup = None
@@ -389,14 +398,18 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     def locate_browser(self, state):
         if self.transfer_condition(state):
             self.location('/com/icd-web/cbo/index.html')
-        elif all(url not in state['url'] for url in self.login.urls):
-            super(SocieteGenerale, self).locate_browser(state)
+        elif all(url in state['url'] for url in self.login.urls):
+            return
+        elif self.json_recipient.match(state['url']):
+            return
+        super(SocieteGenerale, self).locate_browser(state)
 
     def iter_cards(self, account):
         for el in account._cards:
             if el['carteDebitDiffere']:
                 card = Account()
-                card.id = card.number = el['numeroCompteFormate'].replace(' ', '')
+                card.id = el['id']
+                card.number = el['numeroCompteFormate'].replace(' ', '')
                 card.label = el['labelToDisplay']
                 card.balance = Decimal('0')
                 card.coming = Decimal(str(el['montantProchaineEcheance']))
@@ -406,6 +419,18 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
                 card._prestation_id = el['id']
                 card.owner_type = AccountOwnerType.PRIVATE
                 yield card
+
+    def switch_account_to_loan(self, account):
+        loan = Loan()
+        copy_attrs = (
+            'id', 'number', 'label', 'type', 'ownership', 'owner_type',
+            'coming', '_internal_id', '_prestation_id', '_loan_type',
+            '_is_json_histo',
+        )
+        for attr in copy_attrs:
+            setattr(loan, attr, getattr(account, attr))
+
+        return loan
 
     @need_login
     def get_accounts_list(self):
@@ -428,33 +453,63 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
 
         accounts = {}
         for account in self.page.iter_accounts():
-            account._parent_id = None
+            account._loan_parent_id = None
+            account.owner_type = AccountOwnerType.PRIVATE
             for card in self.iter_cards(account):
                 card.parent = account
                 card.ownership = account.ownership
                 card.owner_type = AccountOwnerType.PRIVATE
                 yield card
 
-            account.owner_type = AccountOwnerType.PRIVATE
+            if account.type in (
+                account.TYPE_LOAN,
+                account.TYPE_CONSUMER_CREDIT,
+                account.TYPE_REVOLVING_CREDIT,
+                account.TYPE_MORTGAGE,
+            ):
+                loan = self.switch_account_to_loan(account)
+                self.loans.stay_or_go()
+                self.page.get_loan_details(loan)
 
-            if account.type in (account.TYPE_LOAN, account.TYPE_CONSUMER_CREDIT, ):
-                self.loans.stay_or_go(conso=(account._loan_type == 'PR_CONSO'))
-                account = self.page.get_loan_account(account)
+                # The revolving rate is missing on this page.
+                # We have to go to the revolving details page for each revolving.
+                if loan.type == account.TYPE_REVOLVING_CREDIT:
+                    self.revolving_rate.go(params={'b64e200_prestationIdTechnique': account._internal_id})
+                    self.page.get_revolving_rate(loan)
 
-            if account.type == account.TYPE_REVOLVING_CREDIT:
-                self.loans.stay_or_go(conso=(account._loan_type == 'PR_CONSO'))
-                account = self.page.get_revolving_account(account)
-                self.loan_details_page.go(params={'b64e200_prestationIdTechnique': account._internal_id})
-                self.page.set_loan_details(account)
+                accounts[account.id] = loan
 
-            accounts[account.id] = account
+            else:
+                accounts[account.id] = account
 
         # Adding parent account to LOAN account
         for account in accounts.values():
-            if account._parent_id:
-                account.parent = accounts.get(account._parent_id, NotAvailable)
+            if account._loan_parent_id:
+                account.parent = accounts.get(account._loan_parent_id, NotAvailable)
 
             yield account
+
+    def fill_loan_insurance(self, loan):
+        if not loan.parent:
+            self.logger.info('Loan: %s has no parent account. Could not find insurance amount', loan)
+            return
+
+        for transaction in self.iter_history(loan.parent):
+            insurance_amount = transaction._insurance_amount
+            insurance_loan_id = transaction._insurance_loan_id
+            if insurance_loan_id and insurance_loan_id in loan.id:
+                if insurance_amount:
+                    loan.insurance_amount = insurance_amount
+                    break
+                else:
+                    self.logger.info(
+                        'A transaction related to the loan %s was found, but has no amount. transaction raw: %s',
+                        loan,
+                        transaction.raw,
+                    )
+                    break
+        else:
+            self.logger.info('No transaction related to the loan %s was found.', loan)
 
     def next_page_retry(self, condition):
         next_page = self.page.hist_pagination(condition)
@@ -466,7 +521,12 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
 
     @need_login
     def iter_history(self, account):
-        if account.type in (account.TYPE_LOAN, account.TYPE_MARKET, account.TYPE_CONSUMER_CREDIT, ):
+        if account.type in (
+            account.TYPE_LOAN,
+            account.TYPE_MARKET,
+            account.TYPE_CONSUMER_CREDIT,
+            account.TYPE_MORTGAGE,
+        ):
             return
 
         if account.type == Account.TYPE_PEA and not ('Espèces' in account.label or 'ESPECE' in account.label):
@@ -478,12 +538,15 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         # get history for account on old website
         # request to get json is not available yet, old request to get html response
         if any((
-                account.type in (account.TYPE_LIFE_INSURANCE, account.TYPE_PERP),
+                account.type in (account.TYPE_LIFE_INSURANCE, account.TYPE_PERP, account.TYPE_PER),
                 account.type == account.TYPE_REVOLVING_CREDIT and account._loan_type != 'PR_CONSO',
                 account.type in (account.TYPE_REVOLVING_CREDIT, account.TYPE_SAVINGS) and not account._is_json_histo,
         )):
             go = retry(TemporaryBrowserUnavailable)(self.account_details_page.go)
             go(params={'idprest': account._prestation_id})
+
+            if self.unavailable_service_page.is_here():
+                raise BrowserUnavailable()
 
             history_url = self.page.get_history_url()
 
@@ -536,6 +599,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
             Account.TYPE_LIFE_INSURANCE,
             Account.TYPE_REVOLVING_CREDIT,
             Account.TYPE_CONSUMER_CREDIT,
+            Account.TYPE_MORTGAGE,
             Account.TYPE_PERP,
         )
         if account.type in skipped_types:
@@ -672,11 +736,13 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
                 yield order
 
     @need_login
-    def iter_recipients(self, account):
+    def iter_recipients(self, account, ignore_errors=True):
         try:
             self.json_transfer.go()
         except TransferBankError:
-            return []
+            if ignore_errors:
+                return []
+            raise
         if not self.page.is_able_to_transfer(account):
             return []
         return self.page.iter_recipients(account_id=account.id)
@@ -764,6 +830,11 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         self.id_transaction = r.page.get_transaction_id()
         raise AddRecipientStep(recipient, ValueBool('pass', label='Valider cette opération sur votre applicaton société générale'))
 
+    @retry(BrowserUnavailable)
+    def get_sign_method(self, data):
+        r = self.open(self.absurl('/sec/getsigninfo.json'), data=data)
+        return r.page.get_sign_method()
+
     @need_login
     def new_recipient(self, recipient, **params):
         if 'code' in params:
@@ -783,8 +854,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         self.page.update_browser_recipient_state()
         data = self.page.get_signinfo_data()
 
-        r = self.open(self.absurl('/sec/getsigninfo.json'), data=data)
-        sign_method = r.page.get_sign_method()
+        sign_method = self.get_sign_method(data)
 
         # WARNING: this send validation request to user
         if sign_method == 'CSA':
@@ -812,19 +882,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
             subscriber = NotAvailable
 
         self.accounts.go()
-        subscriptions_list = list(self.page.iter_subscription(subscriber=subscriber))
-
-        self.bank_statement_search.go()
-        searchable_subscription_list = list(self.page.iter_searchable_subscription())
-        for sub in subscriptions_list:
-            found_sub = find_object(searchable_subscription_list, id=sub.id)
-            if found_sub:
-                # we need it to get bank statement, but not all subscription have it
-                sub._rad_button_id = found_sub._rad_button_id
-            else:
-                # even without bank statement we still can get RIB document, so we yield subscription anyway
-                sub._rad_button_id = NotAvailable
-            yield sub
+        return self.page.iter_subscription(subscriber=subscriber)
 
     def _fetch_rib_document(self, subscription):
         d = Document()
@@ -838,31 +896,33 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     def _iter_statements(self, subscription):
         # we need _rad_button_id for post_form function
         # if not present it means this subscription doesn't have any bank statement
-        if subscription._rad_button_id is NotAvailable:
-            return
 
         end_date = datetime.today()
-        empty_pages = 0
+        begin_date = (end_date - relativedelta(months=+2)).replace(day=1)
+        empty_page = 0
         stop_after_empty_limit = 4
         for _ in range(60):
-            self.bank_statement_search.go()
-            self.page.post_form(subscription, end_date)
-
-            # No more documents
-            if self.page.has_error_msg():
-                self.logger.debug('no documents on %s', end_date)
-                empty_pages += 1
-                if empty_pages >= stop_after_empty_limit:
-                    break
-            else:
-                empty_pages = 0
-
-            for d in self.page.iter_documents(subscription):
+            is_empty = True
+            params = {
+                'b64e200_prestationIdTechnique': subscription._internal_id,
+                'dt10_dateDebut': begin_date.strftime('%d/%m/%Y'),
+                'dt10_dateFin': end_date.strftime('%d/%m/%Y'),
+            }
+            self.documents.go(params=params)
+            for d in self.page.iter_documents(subid=subscription.id):
+                is_empty = False
                 yield d
 
-            # 3 months step because the documents list is inclusive
-            # from the 08 to the 06, the 06 statement is included
-            end_date = end_date - relativedelta(months=+3)
+            if is_empty:
+                self.logger.debug('no documents on %s', end_date)
+                empty_page += 1
+
+            if empty_page >= stop_after_empty_limit:
+                # No more documents
+                return
+
+            end_date = begin_date - relativedelta(day=1)
+            begin_date = end_date - relativedelta(months=3)
 
     @need_login
     def iter_documents(self, subscription):

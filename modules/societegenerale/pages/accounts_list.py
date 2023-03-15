@@ -2,31 +2,30 @@
 
 # Copyright(C) 2010-2011 Jocelyn Jaubert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-import requests
 import datetime
 import re
+from urllib.parse import urlsplit, urlunsplit, urlencode
 
-from dateutil.relativedelta import relativedelta
+import requests
+
 from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Loan, AccountOwnership
-from weboob.capabilities.wealth import (
+from weboob.capabilities.bank import Account, AccountOwnership
+from weboob.capabilities.bank.wealth import (
     Investment, MarketOrder, MarketOrderDirection,
     MarketOrderType, MarketOrderPayment,
 )
@@ -35,16 +34,17 @@ from weboob.capabilities.contact import Advisor
 from weboob.capabilities.profile import Person, ProfileMissing
 from weboob.tools.capabilities.bank.transactions import FrenchTransaction
 from weboob.tools.capabilities.bank.investments import create_french_liquidity, IsinCode, IsinType
-from weboob.tools.compat import urlsplit, urlunsplit, urlencode
 from weboob.browser.elements import DictElement, ItemElement, TableElement, method, ListElement
 from weboob.browser.filters.json import Dict
 from weboob.browser.filters.standard import (
     CleanText, CleanDecimal, Lower, Regexp, Currency, Eval, Field,
-    Format, Date, Env, Map, MapIn, Coalesce, Base, empty,
+    Format, Date, Env, Map, MapIn, Coalesce, Base,
 )
 from weboob.browser.filters.html import Link, TableCell, Attr
 from weboob.browser.pages import HTMLPage, XMLPage, JsonPage, LoggedPage, pagination
-from weboob.exceptions import BrowserUnavailable, ActionNeeded, NoAccountsException
+from weboob.exceptions import (
+    BrowserUnavailable, NoAccountsException,
+)
 
 
 class TemporaryBrowserUnavailable(BrowserUnavailable):
@@ -75,7 +75,7 @@ class JsonBasePage(LoggedPage, JsonPage):
             action = Dict('commun/action')(self.doc)
 
             if action and 'BLOCAGE' in action:
-                raise ActionNeeded()
+                raise BrowserUnavailable()
 
             if reason and 'err_tech' in reason:
                 # This error is temporary and usually do not happens on the next try
@@ -192,6 +192,8 @@ class AccountsPage(JsonBasePage):
                 'EBENE_CAPITALISATION': Account.TYPE_LIFE_INSURANCE,
                 'ASSURANCE_VIE_GENERALE': Account.TYPE_LIFE_INSURANCE,
                 'ASSURANCE_VIE_SOGECAP_GENERAL': Account.TYPE_LIFE_INSURANCE,
+                'VIE_AXA': Account.TYPE_LIFE_INSURANCE,
+                'CAPI_AGF': Account.TYPE_LIFE_INSURANCE,
                 'RESERVEA': Account.TYPE_REVOLVING_CREDIT,
                 'COMPTE_ALTERNA': Account.TYPE_REVOLVING_CREDIT,
                 'CREDIT_CONFIANCE': Account.TYPE_REVOLVING_CREDIT,
@@ -199,6 +201,7 @@ class AccountsPage(JsonBasePage):
                 'PRET_EXPRESSO': Account.TYPE_CONSUMER_CREDIT,
                 'PRET_EVOLUTIF': Account.TYPE_CONSUMER_CREDIT,
                 'PERP_EPICEA': Account.TYPE_PERP,
+                'PERIN_ACACIA_C1': Account.TYPE_PER,
             }
 
             ACCOUNTS_OWNERSHIP = {
@@ -216,8 +219,19 @@ class AccountsPage(JsonBasePage):
             obj_currency = Currency(Dict('soldes/devise'))
             obj__cards = Dict('cartes', default=[])
 
+            # Crédit de trésorerie can have codeFamille==PR_IMMO but their details are available
+            # using the param a100_isPretConso=True.
+            obj__is_tresorerie = Eval(lambda x: x == 'Crédit de trésorerie', Dict('libelleOriginal'))
+
             def obj_type(self):
-                return self.TYPES.get(Dict('produit')(self), Account.TYPE_UNKNOWN)
+                _type = self.TYPES.get(Dict('produit')(self), Account.TYPE_UNKNOWN)
+                if not _type:
+                    self.logger.warning('Account %s untyped, please type it.', Field('label')(self))
+                elif Dict('codeFamille')(self) == 'PR_IMMO':
+                    # Mortgage are typed like a standard loan
+                    # Must use "codeFamille" to correctly type it.
+                    return Account.TYPE_MORTGAGE
+                return _type
 
             def obj_ownership(self):
                 # 'groupeRoleDTO' can contains 'TITULAIRE', 'MANDATAIRE' or 'REPRESENTATION'
@@ -233,8 +247,12 @@ class AccountsPage(JsonBasePage):
             obj__prestation_id = Dict('id')
 
             def obj__loan_type(self):
-                if Field('type')(self) in (Account.TYPE_LOAN, Account.TYPE_CONSUMER_CREDIT,
-                                           Account.TYPE_REVOLVING_CREDIT, ):
+                if Field('type')(self) in (
+                    Account.TYPE_LOAN,
+                    Account.TYPE_CONSUMER_CREDIT,
+                    Account.TYPE_REVOLVING_CREDIT,
+                    Account.TYPE_MORTGAGE,
+                ):
                     return Dict('codeFamille')(self)
                 return None
 
@@ -259,10 +277,23 @@ class AccountsPage(JsonBasePage):
             obj_subscriber = Env('subscriber')
             obj_label = Format('%s %s', Dict('labelToDisplay'), Field('id'))
             obj__internal_id = Dict('idTechnique')
+            obj__is_card = False
 
+    @method
+    class iter_subscription_cards(DictElement):
+        item_xpath = 'donnees/syntheseParGroupeProduit/*/prestations/*/cartes'
 
-class LoanDetailsPage(LoggedPage, JsonPage):
-    def set_loan_details(self, account):
+        class item(ItemElement):
+            klass = Subscription
+
+            obj_id = CleanText(Dict('numeroCompteFormate'), replace=[(' ', '')])
+            obj_subscriber = Env('subscriber')
+            obj_label = Format('%s %s', Dict('labelToDisplay'), Field('id'))
+            obj__internal_id = Dict('idTechnique')
+            obj__is_card = True
+
+class RevolvingDetailsPage(LoggedPage, JsonPage):
+    def get_revolving_rate(self, account):
         # If there are no available details for the loan, the statut will be "NOK"
         if Dict('commun/statut')(self.doc) == 'NOK':
             return
@@ -277,138 +308,59 @@ class LoanDetailsPage(LoggedPage, JsonPage):
             account.rate = CleanDecimal().filter(rate)
 
 
-class LoansPage(JsonBasePage):
+class LoansPage(LoggedPage, JsonPage):
+    def get_loan_details(self, loan):
+        loan_types_fields = ('creditImmo', 'creditConsoAmortissable', 'creditConsoRenouvelable')
 
-    def set_parent_account_id(self, loan, acc):
-        account_parent = Coalesce(
-            Dict('prestationCAV', default=NotAvailable),
-            Dict('comptePrelevement1', default=NotAvailable),
-            default=NotAvailable
-        )(acc)
+        for loan_type in loan_types_fields:
+            for acc in Dict(f'donnees/{loan_type}')(self.doc):
+                if CleanText(Dict('detailPret/idPrestation'))(acc) == loan._prestation_id:
+                    loan.currency = Currency(Dict('currency'))(acc)
+                    loan.next_payment_amount = CleanDecimal.French(Dict('montantProchaineEcheance'))(acc)
+                    loan.next_payment_date = Date(CleanText(Dict('detailPret/dateProchaineEcheance'), default=NotAvailable), default=NotAvailable)(acc)
+                    loan.used_amount = CleanDecimal.French(Dict('montantUtilise', default=None), default=NotAvailable)(acc)
+                    loan.opening_date = Date(CleanText(Dict('detailPret/dateOuverture'), default=''), default=NotAvailable)(acc)
+                    loan.available_amount = CleanDecimal.French(Dict('soldeReserveOuCapital', default=None), default=NotAvailable)(acc)
+                    loan.balance = CleanDecimal.French(
+                        Coalesce(
+                            Dict('capitalRestantDu', default=NotAvailable),
+                            Dict('montantUtilise', default=NotAvailable),
+                        ),
+                        sign='-',
+                    )(acc)
 
-        loan._parent_id = None
-        if not empty(account_parent):
-            loan._parent_id = account_parent.replace(' ', '')
+                    loan.total_amount = CleanDecimal.French(
+                        Coalesce(
+                            Dict('montantPret', default=NotAvailable),
+                            Dict('plafond', default=NotAvailable),
+                    ))(acc)
 
-    def guess_loan_monthly_repayment(self, loan):
-        # We only know the next payment day (without the month or the year).
-        # But since we know that's a monthly repayment, we can guess it.
+                    loan.duration = Eval(int, CleanText(
+                        Dict('detailPret/dureeInitialePret'),
+                     ))(acc)
 
-        periodicity = CleanText(Dict('periodicite'))(loan)
-        if periodicity != 'MENSUELLE':
-            self.logger.warning('Not handled periodicity: %s', periodicity)
+                    loan.maturity_date = Date(
+                        CleanText(
+                            Dict('detailPret/dateFinPret', default=''),
+                            default=NotAvailable,
+                        ),
+                        default=NotAvailable,
+                    )(acc)
 
-        repayment_day = CleanDecimal(Dict('jourEcheanceMensuelle'))(loan)
-        if not repayment_day:
-            return NotAvailable
+                    loan.rate = CleanDecimal.French(
+                        Dict("tauxClient", default=NotAvailable),
+                        default=NotAvailable,
+                    )(acc)
 
-        now = datetime.date.today()
-        try:
-            next_payment_date = now.replace(day=repayment_day)
-        except ValueError:
-            # When the repayment day is 30, there is a value error
-            # because February 30th will never exist.
-            # It's also the 30 on the website ...
-            return NotAvailable
-
-        if repayment_day < now.day:
-            next_payment_date += relativedelta(months=1)
-        return next_payment_date
-
-    def get_loan_account(self, account):
-        assert account._prestation_id in Dict('donnees/tabIdAllPrestations')(self.doc), \
-            'Loan with prestation id %s should be on this page ...' % account._prestation_id
-
-        for acc in Dict('donnees/tabPrestations')(self.doc):
-            if CleanText(Dict('idPrestation'))(acc) == account._prestation_id:
-                loan = Loan()
-                loan.id = loan.number = account.id
-                loan.label = account.label
-                loan.type = account.type
-                loan.ownership = account.ownership
-
-                loan.currency = Currency(Dict('capitalRestantDu/devise'))(acc)
-                loan.balance = Eval(lambda x: x / 100, CleanDecimal(Dict('capitalRestantDu/valeur')))(acc)
-                loan.coming = account.coming
-
-                loan.total_amount = Eval(lambda x: x / 100, CleanDecimal(Dict('montantPret/valeur')))(acc)
-                loan.next_payment_amount = Eval(lambda x: x / 100, CleanDecimal(Dict('montantEcheance/valeur')))(acc)
-                loan.next_payment_date = self.guess_loan_monthly_repayment(acc)
-
-                loan.duration = Dict('dureeNbMois')(acc)
-                loan.maturity_date = datetime.datetime.strptime(Dict('dateFin')(acc), '%Y%m%d')
-
-                self.set_parent_account_id(loan, acc)
-
-                loan._internal_id = account._internal_id
-                loan._prestation_id = account._prestation_id
-                loan._loan_type = account._loan_type
-                return loan
-
-    def get_revolving_account(self, account):
-        loan = Loan()
-        loan.id = loan.number = account.id
-        loan.label = account.label
-        loan.type = account.type
-        loan.ownership = account.ownership
-
-        loan.currency = account.currency
-        loan.balance = account.balance
-        loan.coming = account.coming
-
-        loan._internal_id = account._internal_id
-        loan._prestation_id = account._prestation_id
-        loan._loan_type = account._loan_type
-        loan._is_json_histo = account._is_json_histo
-        loan._parent_id = None
-
-        if Dict('donnees/tabIdAllPrestations')(self.doc):
-            for acc in Dict('donnees/tabPrestations')(self.doc):
-                if CleanText(Dict('idPrestation'))(acc) == account._prestation_id:
-
-                    # coming
-                    if Dict('encoursFinMois', default=NotAvailable)(acc):
-                        loan.coming = eval_decimal_amount('encoursFinMois/valeur', 'encoursFinMois/posDecimale')(acc)
-
-                    # total amount
-                    if Dict('reserveAutorisee', default=NotAvailable)(acc):
-                        loan.total_amount = eval_decimal_amount('reserveAutorisee/valeur', 'reserveAutorisee/posDecimale')(acc)
-                    elif Dict('montantAutorise', default=NotAvailable)(acc):
-                        loan.total_amount = eval_decimal_amount('montantAutorise/valeur', 'montantAutorise/posDecimale')(acc)
-                    else:
-                        loan.total_amount = eval_decimal_amount('reserveMaximum/valeur', 'reserveMaximum/posDecimale')(acc)
-
-                    # available amount
-                    if Dict('montantDisponible', default=NotAvailable)(acc):
-                        loan.available_amount = eval_decimal_amount('montantDisponible/valeur', 'montantDisponible/posDecimale')(acc)
-                    else:
-                        loan.available_amount = eval_decimal_amount('reserveDispo/valeur', 'reserveDispo/posDecimale')(acc)
-
-                    # used amount
-                    if Dict('reserveUtilisee', default=NotAvailable)(acc):
-                        loan.used_amount = eval_decimal_amount('reserveUtilisee/valeur', 'reserveUtilisee/posDecimale')(acc)
-                        # in some cases, the displayed balance is the available amount and must be overriden
-                        loan.balance = loan.used_amount
-                    elif Dict('montantUtilise', default=NotAvailable)(acc):
-                        loan.used_amount = eval_decimal_amount('montantUtilise/valeur', 'montantUtilise/posDecimale')(acc)
-                        loan.balance = loan.used_amount
-
-                    # next payment amount
-                    if Dict('prochaineEcheance', default=NotAvailable)(acc):
-                        loan.next_payment_amount = eval_decimal_amount('prochaineEcheance/valeur', 'prochaineEcheance/posDecimale')(acc)
-                    elif Dict('montantMensualite', default=NotAvailable)(acc):
-                        loan.next_payment_amount = eval_decimal_amount('montantMensualite/valeur', 'montantMensualite/posDecimale')(acc)
-                        loan.last_payment_amount = loan.next_payment_amount
-
-                    loan.duration = Dict('dureeNbMois')(acc)
-
-                    if Dict('dateMensualite', default=NotAvailable)(acc):
-                        loan.next_payment_date = datetime.datetime.strptime(Dict('dateMensualite')(acc), '%Y%m%d')
-
-                    self.set_parent_account_id(loan, acc)
-
-                    return loan
-        return loan
+                    loan._loan_parent_id = Regexp(
+                        Coalesce(
+                            CleanText(Dict('detailPret/comptePrelevement1', default=''), default=NotAvailable),
+                            CleanText(Dict('detailPret/comptePrelevement2', default=''), default=NotAvailable),
+                            default=NotAvailable,
+                        ),
+                        r'^.{5}(\d+)',
+                        default=NotAvailable,
+                    )(acc)
 
 
 class Transaction(FrenchTransaction):
@@ -459,8 +411,8 @@ class TransactionItemElement(ItemElement):
         # <transaction_id>/DDMMYYYY/<internal_id>
         if not Dict('idOpe')(self) or Regexp(CleanText(Dict('idOpe')), r'^(\d+)$', default=NotAvailable)(self):
             return ''
-        id_op = Regexp(CleanText(Dict('idOpe')), r'(\d+)/')(self)
-        if id_op != '0':
+        id_op = Regexp(CleanText(Dict('idOpe')), r'(\w+)/')(self)
+        if id_op not in ['0', 'null']:
             # card summary has transaction id '0'
             return id_op
 
@@ -471,6 +423,30 @@ class TransactionItemElement(ItemElement):
     obj_date = Eval(lambda t: datetime.date.fromtimestamp(int(t)/1000), Dict('dateOpe'))
     obj_amount = CleanDecimal(Dict('mnt'))
     obj_raw = Transaction.Raw(Dict('libOpe'))
+
+    def obj__insurance_amount(self):
+        insurance_amount = Regexp(
+            pattern=r'^ECHEANCE PRET N°\d+(?: CAPITAL AMORTI : .*)?(?: INTERETS : .*)? ASSURANCE : ((\d|\,)+)' +
+                    r'(?: CAPITAL RESTANT : .*)?(?: DATE PREVISIONNELLE DE FIN : .*)?',
+            default=NotAvailable
+        ).filter(Field('raw')(self))
+
+        if insurance_amount:
+            return CleanDecimal.French().filter(insurance_amount)
+
+        return NotAvailable
+
+    def obj__insurance_loan_id(self):
+        insurance_loan_id = Regexp(
+            pattern=r'^ECHEANCE PRET N°(\d+)( ?:CAPITAL AMORTI : .*)?(?: INTERETS : .*)?( ?:ASSURANCE : .*)?' +
+                    r'(?: CAPITAL RESTANT : .*)?(?: DATE PREVISIONNELLE DE FIN : .*)?',
+            default=NotAvailable
+        ).filter(Field('raw')(self))
+
+        if insurance_loan_id:
+            return CleanText().filter(insurance_loan_id)
+
+        return NotAvailable
 
 
 class HistoryPage(JsonBasePage):
@@ -483,19 +459,19 @@ class HistoryPage(JsonBasePage):
     def hist_pagination(self, condition):
         all_conditions = {
             'history': (
-                not Dict('donnees/listeOperations')(self.doc),
-                not Dict('donnees/recapitulatifCompte/chargerPlusOperations')(self.doc)
+                not Dict('donnees/listeOperations', default=None)(self.doc),
+                not Dict('donnees/recapitulatifCompte/chargerPlusOperations', default=None)(self.doc)
             ),
             'future': (
-                not Dict('donnees/listeOperationsFutures')(self.doc),
-                not Dict('donnees/recapitulatifCompte/chargerPlusOperations')(self.doc)
+                not Dict('donnees/listeOperationsFutures', default=None)(self.doc),
+                not Dict('donnees/recapitulatifCompte/chargerPlusOperations', default=None)(self.doc)
             ),
             'intraday': (
-                not Dict('donnees/listeOperations')(self.doc),
-                Dict('donnees/listeOperations')(self.doc) and \
-                    not Dict('donnees/listeOperations/0/statutOperation')(self.doc) == 'INTRADAY',
-                not Dict('donnees/recapitulatifCompte/chargerPlusOperations')(self.doc),
-                not Dict('donnees/recapitulatifCompte/encours')(self.doc),
+                not Dict('donnees/listeOperations', default=None)(self.doc),
+                Dict('donnees/listeOperations', default=None)(self.doc) and \
+                    not Dict('donnees/listeOperations/0/statutOperation', default=None)(self.doc) == 'INTRADAY',
+                not Dict('donnees/recapitulatifCompte/chargerPlusOperations', default=None)(self.doc),
+                not Dict('donnees/recapitulatifCompte/encours', default=None)(self.doc),
             ),
         }
 
@@ -531,7 +507,7 @@ class HistoryPage(JsonBasePage):
                 # 0/DDMMYYYY/<internal_id>
                 conditions = (
                     Dict('idOpe')(self) and \
-                        Regexp(CleanText(Dict('idOpe')), r'(\d+)/', default=NotAvailable)(self) == '0',
+                        Regexp(CleanText(Dict('idOpe')), r'(\w+)/', default=NotAvailable)(self) in ['0', 'null'],
                     Env('card_number')(self) in Dict('libOpe')(self),
                     Dict('statutOperation')(self) == 'COMPTABILISE',
                 )
@@ -715,7 +691,13 @@ class LifeInsurance(LoggedPage, HTMLPage):
         return Link('//a[@href="asvcns20a.html"]', default=NotAvailable)(self.doc)
 
     def get_history_url(self):
-        return Link('//a[img[@alt="Suivi des opérations"]]', default=None)(self.doc)
+        # The HTML div in which we get this "Suivi des opérations" link has all of its
+        # text parts double encoded with latin-1 and utf-8. The rest of the page is utf-8
+        # encoded only. Coalesce here in case they fix this bad encoding.
+        return Coalesce(
+            Link('//a[img[@alt="Suivi des opÃ©rations"]]', default=None),
+            Link('//a[img[@alt="Suivi des opérations"]]', default=None),
+        )(self.doc)
 
     def get_error_msg(self):
         # to be consistent with other iter_history from old website
@@ -886,7 +868,7 @@ class MarketPage(LoggedPage, HTMLPage):
 
         class item(ItemElement):
             def condition(self):
-                return self.xpath('./td[contains(@class, "TabCelLeft")]')
+                return self.xpath('./td[not(@colspan) and contains(@class, "TabCelLeft")]')
 
             klass = Investment
 
@@ -996,14 +978,15 @@ class MarketOrderDetailPage(LoggedPage, HTMLPage):
             default=NotAvailable
         )
         obj_quantity = CleanDecimal.French(
-            '//td[contains(text(), "Quantité demandée")]//following-sibling::td[1]'
+            '//td[contains(text(), "Quantité demandée")]//following-sibling::td[1]',
+            default=NotAvailable
         )
         obj_ordervalue = CleanDecimal.French(
             '//td[contains(text(), "Cours limite")]//following-sibling::td[1]',
             default=NotAvailable
         )
         obj_amount = CleanDecimal.French(
-            '//td[contains(text(), "Montant net")]//following-sibling::td[1]',
+            '//td[contains(text(), "Montant")]//following-sibling::td[1]',
             default=NotAvailable
         )
         obj_unitprice = CleanDecimal.French(
@@ -1077,6 +1060,7 @@ class UnavailableServicePage(LoggedPage, HTMLPage):
         conditions = (
             self.doc.xpath('//div[contains(@class, "erreur_404_content")]'),
             'Site momentanément indisponible' in CleanText('//h2[contains(@class, "error-page")]')(self.doc),
+            'momentanément indisponible' in CleanText('//div[@class="hero_container"]//h1')(self.doc),
         )
 
         if any(conditions):

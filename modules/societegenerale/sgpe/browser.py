@@ -1,51 +1,53 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2013      Laurent Bachelier
+# Copyright(C) 2013-2021      Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 from datetime import date
 from base64 import b64encode
+from urllib.parse import quote_plus
 
 from dateutil.relativedelta import relativedelta
 
 from weboob.browser.browsers import need_login
 from weboob.browser.url import URL
 from weboob.browser.exceptions import ClientError
-from weboob.exceptions import NoAccountsException
 from weboob.capabilities.base import find_object
 from weboob.capabilities.bank import (
-    AccountNotFound, RecipientNotFound, AddRecipientStep, AddRecipientBankError,
+    RecipientNotFound, AddRecipientStep, AddRecipientBankError,
     Recipient, TransferBankError, AccountOwnerType,
 )
+from weboob.exceptions import (
+    BrowserPasswordExpired, BrowserUnavailable, NoAccountsException,
+)
+from weboob.tools.decorators import retry
 from weboob.tools.value import Value
 from weboob.tools.json import json
 
 from .pages import (
-    ChangePassPage, SubscriptionPage, InscriptionPage,
-    ErrorPage, UselessPage, MainPage, MainPEPage, LoginPEPage,
+    ChangePassPage, InscriptionPage, ErrorPage, MarketAccountsDetailsPage, MarketAccountsPage, UselessPage,
+    MainPage, MainPEPage, LoginPEPage, UnavailablePage,
 )
 from .json_pages import (
-    AccountsJsonPage, BalancesJsonPage, HistoryJsonPage, BankStatementPage,
-    MarketAccountPage, MarketInvestmentPage, ProfilePEPage, DeferredCardJsonPage,
-    DeferredCardHistoryJsonPage, CardsInformationPage, CardsInformation2Page,
+    AccountsJsonPage, BalancesJsonPage, CorpListPage, HistoryJsonPage, BankStatementPage,
+    MarketAccountPage, MarketInvestmentPage, ProLoanDetailsPage, ProLoansPage, WealthAccountsPage, ProfilePEPage,
+    DeferredCardJsonPage, DeferredCardHistoryJsonPage, CardsInformationPage, CardsInformation2Page,
 )
 from .transfer_pages import (
     EasyTransferPage, RecipientsJsonPage, TransferPage, SignTransferPage, TransferDatesPage,
@@ -86,12 +88,13 @@ class SGPEBrowser(SocieteGeneraleLogin):
     deferred_card_history = URL(
         '/icd/npe/data/operationFuture/getDetailCarteAVenir-authsec.json', DeferredCardHistoryJsonPage
     )
-    cards_information = URL('/icd/crtes/data/crtes-all-pms.json', CardsInformationPage)
+    cards_information = URL(r'/icd/gkb/data/getPms-authsec.json', CardsInformationPage)
     cards_information2 = URL(
         '/icd/npe/data/operationFuture/getListeDesCartesAvecOperationsAVenir-authsec.json', CardsInformation2Page
     )
     deferred_card = URL(
-        r'/icd/crtes/data/crtes-carte-for-pm.json\?an200_idPPouPM=(?P<card_id>\w+)', DeferredCardJsonPage
+        r'/icd/gkb/data/getCartesPourPm-authsec.json\?b64e200_idPPouPM=(?P<card_id>\w+)',
+        DeferredCardJsonPage
     )
 
     change_pass = URL(
@@ -115,6 +118,7 @@ class SGPEBrowser(SocieteGeneraleLogin):
         try:
             # get standard accounts
             self.accounts.go()
+            self.page.check_error()
             accounts = list(self.page.iter_class_accounts())
             self.balances.go()
         except NoAccountsException:
@@ -137,15 +141,22 @@ class SGPEBrowser(SocieteGeneraleLogin):
                 self.deferred_card.go(card_id=card_id)
                 if self.page.response.json()['commun']['statut'] == 'OK':
                     for acc in self.page.iter_accounts():
+                        acc.owner_type = AccountOwnerType.ORGANIZATION
+                        if acc._parent_id:
+                            acc.parent = find_object(accounts, _id=acc._parent_id)
                         yield acc
 
         # retrieve market accounts if exist
         for market_account in self.iter_market_accounts():
+            acc.owner_type = AccountOwnerType.ORGANIZATION
             yield market_account
 
     @need_login
     def iter_history(self, account):
-        if account.type in (account.TYPE_MARKET, account.TYPE_CARD):
+        if account.type in (
+            account.TYPE_MARKET, account.TYPE_PER, account.TYPE_LIFE_INSURANCE, account.TYPE_CARD,
+            account.TYPE_LOAN,
+        ):
             # market account transactions are in checking account
             return
 
@@ -192,7 +203,11 @@ class SGPEBrowser(SocieteGeneraleLogin):
         }
 
         self.cards_information2.go(data=data)
-        number = self.page.get_number()
+        # Cards without a number are not activated yet: (no history available)
+        if not self.response.json()['donnees']:
+            return []
+
+        number = self.page.get_number(masked_number=account._masked_card_number)
         date_reglement = self.page.get_due_date()
 
         information_compte['alias'] = self.encode_b64(number)
@@ -214,27 +229,33 @@ class SGPEBrowser(SocieteGeneraleLogin):
 
     @need_login
     def get_profile(self):
-        return self.profile.stay_or_go().get_profile()
+        self.profile.stay_or_go()
+        # It seems we encounter the same error as on AccountsJsonPage about expired password here
+        reason = self.page.get_error_msg()
+        if reason:
+            if reason in ('chgt_mdp_oblig', 'chgt_mdp_init'):
+                raise BrowserPasswordExpired('Veuillez vous rendre sur le site de la banque pour renouveler votre mot de passe')
+            raise AssertionError('Error %s is not handled yet' % reason)
+        return self.page.get_profile()
 
 
 class SGEnterpriseBrowser(SGPEBrowser):
-    BASEURL = 'https://entreprises.societegenerale.fr'
+    BASEURL = 'https://entreprises.sg.fr'
     MENUID = 'BANREL'
     CERTHASH = '2231d5ddb97d2950d5e6fc4d986c23be4cd231c31ad530942343a8fdcc44bb99'
     HAS_CREDENTIALS_ONLY = False  # systematic 2FA on Ent
 
     # * Ent specific URLs
 
+    unavailable = URL(r'/page-indisponible', UnavailablePage)
+
     # Bill
-    subscription = URL(
-        r'/Pgn/NavigationServlet\?MenuID=BANRELRIE&PageID=ReleveRIE&NumeroPage=1&Origine=Menu',
-        SubscriptionPage
-    )
-    subscription_form = URL(r'Pgn/NavigationServlet', SubscriptionPage)
+    subscription = URL(r'/icd/syd-front/data/syd-rce-accederDepuisMenu.json', BankStatementPage)
+    subscription_search = URL(r'/icd/syd-front/data/syd-rce-lancerRecherche.json', BankStatementPage)
 
     # * Ent adapted URLs
     main_page = URL(
-        r'https://entreprises.societegenerale.fr',
+        r'https://entreprises.sg.fr',
         r'/sec/vk/gen_',
         MainPEPage
     )
@@ -262,31 +283,57 @@ class SGEnterpriseBrowser(SGPEBrowser):
 
     @need_login
     def iter_subscription(self):
-        subscriber = self.get_profile()
+        subscriber = self.get_profile().name
 
         self.subscription.go()
+        if self.page.is_document_disabled():
+            return []
 
-        for sub in self.page.iter_subscription():
-            sub.subscriber = subscriber.name
-            account = find_object(self.get_accounts_list(), id=sub.id, error=AccountNotFound)
-            sub.label = account.label
+        self.page.check_error()
 
-            yield sub
+        # set the max/min date to use them in iter_documents
+        self.date_min, self.date_max = self.page.get_min_max_date()
+        return self.page.iter_subscription(subscriber=subscriber)
 
     @need_login
-    def iter_documents(self, subscription):
-        data = {
-            'PageID': 'ReleveRIE',
-            'MenuID': 'BANRELRIE',
-            'Origine': 'Menu',
-            'compteSelected': subscription.id,
-        }
-        self.subscription_form.go(data=data)
-        return self.page.iter_documents(sub_id=subscription.id)
+    def iter_documents(self, subscribtion):
+        # This quality website can only fetch documents through a form, looking for dates
+        # with a range of 3 months maximum
+        search_date_max = self.date_max
+        search_date_min = None
+        is_end = False
+
+        # to avoid infinite loop
+        counter = 0
+
+        while not is_end and counter < 50:
+            # search for every 2 months
+            search_date_min = search_date_max - relativedelta(months=2)
+
+            if search_date_min < self.date_min:
+                search_date_min = self.date_min
+                is_end = True
+
+            if search_date_max <= self.date_min:
+                break
+
+            data = {
+                'dt10_dateDebut': search_date_min.strftime('%d/%m/%Y'),
+                'dt10_dateFin': search_date_max.strftime('%d/%m/%Y'),
+                'cl2000_comptes': '["%s"]' % subscribtion.id,
+                'cl200_typeRecherche': 'ADVANCED',
+            }
+            self.subscription_search.go(data=data)
+
+            for doc in self.page.iter_documents():
+                yield doc
+
+            search_date_max = search_date_min - relativedelta(days=1)
+            counter += 1
 
 
 class SGProfessionalBrowser(SGPEBrowser):
-    BASEURL = 'https://professionnels.societegenerale.fr'
+    BASEURL = 'https://professionnels.sg.fr'
     MENUID = 'SBOREL'
     CERTHASH = '9f5232c9b2283814976608bfd5bba9d8030247f44c8493d8d205e574ea75148e'
 
@@ -321,20 +368,34 @@ class SGProfessionalBrowser(SGPEBrowser):
     bank_statement_search = URL(r'/icd/syd-front/data/syd-rce-lancerRecherche.json', BankStatementPage)
 
     # Wealth
+    market_accounts = URL(r'/brs/cct/comti10.html', MarketAccountsPage)
+    market_accounts_details = URL(r'/brs/cct/comti20.html', MarketAccountsDetailsPage)
+    wealth_accounts = URL(
+        r'/icd/npe/data/paramcomptes/getPrestationsEpargneByProfilByPage-authsec.json',
+        WealthAccountsPage  # Contains LifeInsurances and PER accounts
+    )
     markets_page = URL(r'/icd/npe/data/comptes-titres/findComptesTitresClasseurs-authsec.json', MarketAccountPage)
     investments_page = URL(r'/icd/npe/data/comptes-titres/findLignesCompteTitre-authsec.json', MarketInvestmentPage)
+
+    # Loans
+    corp_list = URL(r'/icd/eko/data/eko-getListePms-authsec.json', CorpListPage)
+    pro_loans = URL(
+        r'/icd/eko/data/eko-getListeCredits-authsec.json\?cl200_marche=PRO&cl200_duree=(?P<duration>.+)&b64e200_idPppm=(?P<corp_id>.+)',
+        ProLoansPage
+    )
+    pro_loan_details = URL(r'/icd/eko/data/eko-getCredit-CLASSIQUE-authsec.json', ProLoanDetailsPage)
 
     # Others
     useless_page = URL(r'/icd-web/syd-front/index-comptes.html', UselessPage)
     error_page = URL(
-        r'https://static.societegenerale.fr/pro/erreur.html',
+        r'https://static.sg.fr/pro/erreur.html',
         r'https://.*/pro/erreur.html',
         ErrorPage
     )
 
     # * Pro adapted URLs
     main_page = URL(
-        r'https://professionnels.societegenerale.fr',
+        r'https://professionnels.sg.fr',
         r'/sec/vk/gen_',
         MainPEPage
     )
@@ -348,14 +409,64 @@ class SGProfessionalBrowser(SGPEBrowser):
     __states__ = ('new_rcpt_token', 'new_rcpt_validate_form', 'polling_transaction',)
 
     @need_login
+    def get_accounts_list(self):
+        yield from super().get_accounts_list()
+
+        # retrieve pro loans
+        yield from self.iter_pro_loans()
+
+    @need_login
     def iter_market_accounts(self):
         self.markets_page.go()
-        return self.page.iter_market_accounts()
+        yield from self.page.iter_market_accounts()
+
+        self.wealth_accounts.go()
+        yield from self.page.iter_accounts()
+
+        self.market_accounts.go()
+        yield from self.page.iter_accounts()
+
+    @need_login
+    def iter_pro_loans(self):
+        self.corp_list.go()
+        for corp_id in self.page.get_corps_list():
+            for duration in ('CT', 'MLT'):  # court terme && moyen long terme
+                self.pro_loans.go(
+                    duration=duration,
+                    corp_id=quote_plus(corp_id),
+                )
+                for loan in self.page.iter_loans():
+                    self.pro_loan_details.go(
+                        params={
+                            'b64e200_agence_Gest': '',
+                            'b64e200_compte': '',
+                            'b64e200_companyId': '',
+                            'b64e200_contractId': '',
+                            'b64e200_idPrestation': loan._prestation,
+                            'b64e200_idPppm': corp_id,
+                        }
+                    )
+                    if self.page.get_loan_status() != 'OK':
+                        error_message = self.page.get_error_message()
+                        if 'Détail indisponible' in error_message:
+                            continue
+                        else:
+                            raise AssertionError(
+                                f'Unhandled error on pro_loan_details page: {error_message}'
+                            )
+                    self.page.fill_loan(loan)
+                    yield loan
 
     @need_login
     def iter_investment(self, account):
         if account.type not in (account.TYPE_MARKET,):
             return []
+
+        if not account._prestation_number:
+            self.market_accounts_details.go()
+            if account.number != self.page.get_account_number():
+                raise AssertionError('Multiple accounts to choose from. Needs to be developped')
+            return self.page.iter_investment()
 
         self.investments_page.go(data={'cl2000_numeroPrestation': account._prestation_number})
         return self.page.iter_investment()
@@ -467,12 +578,17 @@ class SGProfessionalBrowser(SGPEBrowser):
         rcpt = self.copy_recipient_obj(recipient)
         raise AddRecipientStep(rcpt, Value('code', label='Veuillez entrer le code reçu par SMS.'))
 
+    @retry(BrowserUnavailable)
+    def go_confirm_new_recipient(self, data):
+        page = self.confirm_new_recipient.go(data=data)
+        page.check_error()
+
     @need_login
     def validate_rcpt_with_sms(self, code):
         assert self.new_rcpt_validate_form, 'There should have recipient validate form in states'
         self.new_rcpt_validate_form['code'] = code
         try:
-            self.confirm_new_recipient.go(data=self.new_rcpt_validate_form)
+            self.go_confirm_new_recipient(data=self.new_rcpt_validate_form)
         except ClientError as e:
             assert e.response.status_code == 403, (
                 'Something went wrong in add recipient, response status code is %s' % e.response.status_code
@@ -480,7 +596,7 @@ class SGProfessionalBrowser(SGPEBrowser):
             raise AddRecipientBankError(message='Le code entré est incorrect.')
 
     @need_login
-    def iter_recipients(self, origin_account):
+    def iter_recipients(self, origin_account, ignore_errors=True):
         self.easy_transfer.go()
         self.page.update_origin_account(origin_account)
 
@@ -509,6 +625,7 @@ class SGProfessionalBrowser(SGPEBrowser):
             'n_nbOccurences': '10000',
         }
         self.external_recipients.go(data=data)
+        self.page.check_error()
 
         if self.page.is_external_recipients():
             assert self.page.is_all_external_recipient(), "Some recipients are missing"
@@ -518,12 +635,13 @@ class SGProfessionalBrowser(SGPEBrowser):
     @need_login
     def init_transfer(self, account, recipient, transfer):
         self.transfer_dates.go()
+        self.page.check_error()
         if not self.page.is_date_valid(transfer.exec_date):
             raise TransferBankError(message="La date d'exécution du virement est invalide. Elle doit correspondre aux horaires et aux dates d'ouvertures d'agence.")
 
         # update account and recipient info
         recipient = find_object(
-            self.iter_recipients(account),
+            self.iter_recipients(account, ignore_errors=False),
             iban=recipient.iban, id=recipient.id, error=RecipientNotFound
         )
 
@@ -563,6 +681,7 @@ class SGProfessionalBrowser(SGPEBrowser):
         ]
         # WARNING: this save transfer information on user account
         self.init_transfer_page.go(data=data)
+        self.page.check_error()
         return self.page.handle_response(account, recipient, transfer.amount, transfer.label, transfer.exec_date)
 
     @need_login
@@ -576,6 +695,7 @@ class SGProfessionalBrowser(SGPEBrowser):
 
         data.update(self.page.get_confirm_transfer_data(self.password))
         self.confirm_transfer.go(data=data)
+        self.page.check_error()
 
         assert self.confirm_transfer.is_here(), (
             'An error occurred, we should be on confirm transfer page.'
@@ -586,6 +706,7 @@ class SGProfessionalBrowser(SGPEBrowser):
         # Go on the accounts page to avoid reloading the confirm_transfer
         # url in locate_browser.
         self.accounts.go()
+        self.page.check_error()
         return transfer
 
     @need_login
@@ -594,6 +715,11 @@ class SGProfessionalBrowser(SGPEBrowser):
         subscriber = profile.name
 
         self.bank_statement_menu.go()
+        if self.page.is_document_disabled():
+            return []
+
+        self.page.check_error()
+
         self.date_min, self.date_max = self.page.get_min_max_date()
         return self.page.iter_subscription(subscriber=subscriber)
 

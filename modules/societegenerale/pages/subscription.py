@@ -2,110 +2,65 @@
 
 # Copyright(C) 2010-2011 Jocelyn Jaubert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
+from datetime import datetime
 
-import re
-
-from dateutil.relativedelta import relativedelta
-
-from weboob.capabilities.bill import Document, Subscription, DocumentTypes
-from weboob.browser.elements import TableElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, Regexp, Date, Format, Field
-from weboob.browser.filters.html import Link, TableCell, Attr
-from weboob.browser.pages import LoggedPage, RawPage
-
-from .base import BasePage
+from weboob.capabilities.bill import Document, DocumentTypes
+from weboob.browser.elements import DictElement, ItemElement, method
+from weboob.browser.filters.standard import CleanText, Date, Format, Field, BrowserURL, Env, Eval
+from weboob.browser.filters.json import Dict
+from weboob.browser.pages import LoggedPage, RawPage, JsonPage
 
 
-class BankStatementPage(LoggedPage, BasePage):
+def parse_from_timestamp(date, **kwargs):
+    # divide by 1000 because given value is a millisecond timestamp
+    return datetime.fromtimestamp(int(date)/1000)
+
+
+class DocumentsPage(LoggedPage, JsonPage):
+    def has_documents(self):
+        return bool(self.doc['donnees']['eDocumentDto']['listCleReleveDto'])
+
     @method
-    class iter_searchable_subscription(TableElement):
-        item_xpath = '//table//tr[@class="fond_ligne"]'
-        head_xpath = '//table//td[contains(@class, "titre_tab") and div[@align="center"]]'
-
-        col_id = 'Numéro de Compte'
-        col_label = 'Libellé'
-        col_rad_button = 'Sélection'
-        col_type = 'Type de Compte'
+    class iter_documents(DictElement):
+        item_xpath = 'donnees/eDocumentDto/listCleReleveDto'
 
         class item(ItemElement):
-            klass = Subscription
+            klass = Document
 
-            obj_id = CleanText(TableCell('id'), replace=[(' ', '')])
-
-            def obj_label(self):
-                label = CleanText(TableCell('label'))(self)
-                if not label:
-                    return Format('%s %s', CleanText(TableCell('type')), Field('id'))(self)
-                return label
-
-            def obj__rad_button_id(self):
-                return Attr('.//div/input', 'name')(TableCell('rad_button')(self)[0])
-
-            def condition(self):
-                # has the same id as the main account it depends on
-                return 'Points de fidélité' not in Field('label')(self)
-
-    def post_form(self, subscription, date):
-        form = self.get_form(name='abo_rce')
-        form[subscription._rad_button_id] = 'on'
-
-        # 2 months step
-        begin = date - relativedelta(months=+2)
-
-        form['rechDebMM'] = '%s' % begin.month
-        form['rechDebYY'] = '%s' % begin.year
-        form['rechFinMM'] = '%s' % date.month
-        form['rechFinYY'] = '%s' % date.year
-
-        m = re.search(r"surl='src=(.*)&sign=(.*)'", CleanText('//script[contains(text(), "surl")]')(self.doc))
-        form['src'] = m.group(1)
-        form['sign'] = m.group(2)
-
-        form.submit()
-
-    def iter_documents(self, subscription):
-        for a in self.doc.xpath('//a[contains(@href, "pdf")]'):
-            d = Document()
-
-            d.format = 'pdf'
-            d.label = CleanText('.')(a)
-
-            if 'Récapitulatif annuel' in d.label:
-                continue
-
-            date_filter = Regexp(CleanText('.'), r'(\d{2}/\d{2}/\d{4})')
-            d.date = Date(date_filter, dayfirst=True)(a)
-
-            d.url = Regexp(Link('.'), r"= '(.*)';")(a)
-            d.id = '%s_%s' % (subscription.id, date_filter(a).replace('/', ''))
-            d.type = DocumentTypes.STATEMENT
-
-            yield d
-
-    def has_error_msg(self):
-        return any((
-            CleanText('//div[@class="MessageErreur"]')(self.doc),
-            CleanText('//span[@class="error_msg"]')(self.doc),
-            self.doc.xpath('//div[contains(@class, "error_page")]'),
-        ))
+            obj_id = Format('%s_%s', Env('subid'), Dict('referenceTechniqueEncode'))
+            obj_label = Format(
+                '%s au %s',
+                CleanText(Dict('labelReleve')),
+                Eval(lambda x: x.strftime('%d/%m/%Y'), Field('date'))
+            )
+            obj_date = Date(CleanText(Dict('dateArrete')), parse_func=parse_from_timestamp)
+            obj_type = DocumentTypes.STATEMENT
+            obj_format = 'pdf'
+            # this url is stateful and has to be called when we are on
+            # the right page with the right range of 3 months
+            # else we get a 302 to /page-indisponible
+            obj_url = BrowserURL(
+                'pdf_page',
+                id_tech=Dict('idTechniquePrestation'),
+                ref_tech=Dict('referenceTechniqueEncode')
+            )
 
 
 class RibPdfPage(LoggedPage, RawPage):
