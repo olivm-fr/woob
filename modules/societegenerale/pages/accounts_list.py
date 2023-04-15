@@ -376,7 +376,7 @@ class Transaction(FrenchTransaction):
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^(SOU \d+ )?(?P<category>(COTISATION|PRELEVEMENT|TELEREGLEMENT|TIP)) (EUROPEEN )?(POUR CPTE )?(DE:)? ?(?P<text>.*)'),
                                                             FrenchTransaction.TYPE_ORDER),
-                (re.compile(r'^(\d+ )?VIR (PERM )?POUR: (.*?) (REF: \d+ )?MOTIF: (?P<text>.*)'),
+                (re.compile(r'^(\d+ )?VIR (PERM )?POUR: (?P<text>.*?) (REF: \d+ )?MOTIF:(.*)'),
                                                             FrenchTransaction.TYPE_TRANSFER),
                 (re.compile(r'^(?P<category>VIR(EMEN)?T? \w+) (DE: )?(POUR: )?(?P<text>.*)'),
                                                             FrenchTransaction.TYPE_TRANSFER),
@@ -422,7 +422,12 @@ class TransactionItemElement(ItemElement):
 
     obj_date = Eval(lambda t: datetime.date.fromtimestamp(int(t)/1000), Dict('dateOpe'))
     obj_amount = CleanDecimal(Dict('mnt'))
-    obj_raw = Transaction.Raw(Dict('libOpe'))
+    def obj_raw(self):
+        raw = Transaction.Raw(Dict('libOpe'))(self)
+        motif = Dict('libMotifVirementOuPrelevement', None)(self)
+        if motif:
+            raw += " MOTIF:" + motif
+        return raw
 
     def obj__insurance_amount(self):
         insurance_amount = Regexp(
