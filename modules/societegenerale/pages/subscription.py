@@ -142,7 +142,7 @@ class DocumentsPage(LoggedPage, JsonPage):
             )
 
 
-class RibPdfPage(LoggedPage, RawPage):
+class PdfPage(LoggedPage, RawPage):
     pass
 
 

@@ -88,7 +88,7 @@ from .pages.login import (
     SkippableActionNeededPage,
     VkImage,
 )
-from .pages.subscription import DocumentsPage, RibPdfPage, SubscriptionsPage
+from .pages.subscription import DocumentsPage, PdfPage, SubscriptionsPage
 from .pages.transfer import AddRecipientPage, SignRecipientPage, SignTransferPage, TransferHistoryPage, TransferJson
 
 
@@ -339,9 +339,10 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     # documents
     documents = URL(r"/icd/epe/data/get-all-releves-authsec.json", DocumentsPage)
     pdf_page = URL(
-        r"/icd/epe/pdf/edocument-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)"
+        r"/icd/epe/pdf/edocument-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)",
+        PdfPage,
     )
-    rib_pdf_page = URL(r"/com/icd-web/cbo/pdf/rib-authsec.pdf", RibPdfPage)
+    rib_pdf_page = URL(r"/com/icd-web/cbo/pdf/rib-authsec.pdf", PdfPage)
     subscriptions = URL(r"/icd/epe/data/get-all-abonnements-authsec.json", SubscriptionsPage)
 
     # Bank
