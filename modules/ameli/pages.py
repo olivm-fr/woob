@@ -230,7 +230,9 @@ class DocumentsFirstSummaryPage(LoggedPage, HTMLPage):
                 year = Regexp(CleanText('.//span[@class="mois"]'), r"(\d+)")(self)
                 month = Regexp(CleanText('.//span[@class="mois"]'), r"(\D+)")(self)
 
-                return parse_french_date(month + " " + year)
+                dt = parse_french_date(month + " " + year)
+                last_day_of_month = calendar.monthrange(dt.year, dt.month)[1]
+                return dt.replace(day=last_day_of_month)
 
             def obj_id(self):
                 year = Regexp(CleanText('.//span[@class="mois"]'), r"(\d+)")(self)
@@ -261,7 +263,9 @@ class DocumentsLastSummaryPage(LoggedPage, JsonPage):
                 year = Regexp(CleanText(Dict("mois")), r"(\d+)")(self)
                 month = Regexp(CleanText(Dict("mois")), r"(\D+)")(self)
 
-                return parse_french_date(month + " " + year)
+                dt = parse_french_date(month + " " + year)
+                last_day_of_month = calendar.monthrange(dt.year, dt.month)[1]
+                return dt.replace(day=last_day_of_month)
 
             def obj_id(self):
                 year = Regexp(CleanText(Dict("mois")), r"(\d+)")(self)
