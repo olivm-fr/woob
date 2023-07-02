@@ -60,21 +60,48 @@ class AmeliModule(Module, CapDocument, CapProfile):
     def create_default_browser(self):
         return self.create_browser(self.config, self.config["login"].get(), self.config["password"].get())
 
+    # CapDocument
     def iter_subscription(self):
+        """
+        Iter subscriptions.
+
+        :rtype: iter[:class:`Subscription`]
+        """
         return self.browser.iter_subscription()
 
     def iter_documents(self, subscription):
+        """
+        Iter documents.
+
+        :param subscription: subscription to get documents
+        :type subscription: :class:`Subscription`
+        :rtype: iter[:class:`Document`]
+        """
         if not isinstance(subscription, Subscription):
             subscription = self.get_subscription(subscription)
 
         return self.browser.iter_documents(subscription)
 
     def get_document(self, _id):
+        """
+        Get a document.
+
+        :param id: ID of document
+        :rtype: :class:`Document`
+        :raises: :class:`DocumentNotFound`
+        """
         subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 
     def download_document(self, document):
+        """
+        Download a document.
+
+        :param id: ID of document
+        :rtype: bytes
+        :raises: :class:`DocumentNotFound`
+        """
         if not isinstance(document, Document):
             document = self.get_document(document)
 
@@ -83,5 +110,11 @@ class AmeliModule(Module, CapDocument, CapProfile):
 
         return self.browser.open(document.url).content
 
+    # CapProfile
     def get_profile(self):
+        """
+        Get profile.
+
+        :rtype: :class:`Person` or :class:`Company`
+        """
         return self.browser.get_profile()
