@@ -37,6 +37,7 @@ __all__ = ['AnytimeBrowser']
 
 class AnytimeBrowser(PagesBrowser):
     BASEURL = 'https://secure.anyti.me'
+    TIMEOUT = 30
     
     transactions_page = URL(r'/fr/mon-compte/transactions', TransactionsPage)
 
@@ -62,6 +63,7 @@ class AnytimeBrowser(PagesBrowser):
 
 class AnytimeApiBrowser(APIBrowser, StatesMixin):
     BASEURL = 'https://secure.anyti.me'
+    TIMEOUT = 30
 
     #__states__ = ['csrf_token'] # TODO remove CSRF token for production, as it generates an additional 401 call at 1st try
 
