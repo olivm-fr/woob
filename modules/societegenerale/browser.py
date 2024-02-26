@@ -88,7 +88,7 @@ from .pages.login import (
     SkippableActionNeededPage,
     VkImage,
 )
-from .pages.subscription import DocumentsPage, RibPdfPage
+from .pages.subscription import DocumentsPage, RibPdfPage, SubscriptionsPage
 from .pages.transfer import AddRecipientPage, SignRecipientPage, SignTransferPage, TransferHistoryPage, TransferJson
 
 
@@ -342,6 +342,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         r"/icd/epe/pdf/edocument-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)"
     )
     rib_pdf_page = URL(r"/com/icd-web/cbo/pdf/rib-authsec.pdf", RibPdfPage)
+    subscriptions = URL(r"/icd/epe/data/get-all-abonnements-authsec.json", SubscriptionsPage)
 
     # Bank
     accounts_main_page = URL(
@@ -985,7 +986,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         except (ProfileMissing, BrowserUnavailable):
             subscriber = NotAvailable
 
-        self.accounts.go()
+        self.subscriptions.go()
         return self.page.iter_subscription(subscriber=subscriber)
 
     def _fetch_rib_document(self, subscription):
@@ -1018,6 +1019,11 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
                 is_empty = False
                 yield d
 
+            self.documents.go(params=params)
+            for d in self.page.iter_yearly_documents(subid=subscription.id):
+                is_empty = False
+                yield d
+
             if is_empty:
                 self.logger.debug("no documents on %s", end_date)
                 empty_page += 1
@@ -1032,15 +1038,17 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     @need_login
     def iter_documents(self, subscription):
         iterables = ()
-        iterables += ([self._fetch_rib_document(subscription)],)
+        if subscription._has_rib:
+            iterables += ([self._fetch_rib_document(subscription)],)
         iterables += (self._iter_statements(subscription),)
 
         yield from merge_iterators(*iterables)
 
     @need_login
     def iter_documents_by_types(self, subscription, accepted_types):
-        if DocumentTypes.RIB in accepted_types:
-            yield self._fetch_rib_document(subscription)
+        if subscription._has_rib:
+            if DocumentTypes.RIB in accepted_types:
+                yield self._fetch_rib_document(subscription)
 
         if DocumentTypes.STATEMENT not in accepted_types:
             return

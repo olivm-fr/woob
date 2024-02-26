@@ -17,13 +17,17 @@
 
 # flake8: compatible
 
+import hashlib
 from datetime import datetime
 
 from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import BrowserURL, CleanText, DateTime, Env, Eval, Field, Format
+from woob.browser.filters.standard import BrowserURL, CleanText, DateTime, Env, Eval, Field, Format, Regexp
 from woob.browser.pages import JsonPage, LoggedPage, RawPage
-from woob.capabilities.bill import Document, DocumentTypes
+from woob.capabilities.bill import Document, DocumentTypes, Subscription
+from woob.tools.date import parse_french_date
+
+from .accounts_list import JsonBasePage
 
 
 def parse_from_timestamp(date, **kwargs):
@@ -33,7 +37,9 @@ def parse_from_timestamp(date, **kwargs):
 
 class DocumentsPage(LoggedPage, JsonPage):
     def has_documents(self):
-        return bool(self.doc["donnees"]["edocumentDto"]["listCleReleveDto"])
+        return bool(self.doc["donnees"]["edocumentDto"]["listCleReleveDto"]) or bool(
+            self.doc["donnees"]["edocumentDto"]["listCleRelevesAnnuellesDto"]
+        )
 
     @method
     class iter_documents(DictElement):
@@ -42,12 +48,69 @@ class DocumentsPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Document
 
-            obj_id = Format("%s_%s", Env("subid"), Dict("referenceTechniqueEncode"))
+            def obj_id(self):
+                """Generate ID for the document.
+
+                In the case of `docs-transverses`, the field `referenceTechniqueEncode` is always different
+                from one request to the other.
+                In that case, we use the hash(sha1) of the document label to have a stable, fixed `id`.
+                """
+                subid = Env("subid")(self)
+                if subid == "docs-transverses":
+                    hash_label = hashlib.sha1(Field("label")(self).encode("utf-8")).hexdigest()
+                    return "%s_%s" % (subid, hash_label)
+                else:
+                    return Format("%s_%s", Env("subid"), Dict("referenceTechniqueEncode"))(self)
+
+            def obj_type(self):
+                label = Field("label")(self)
+                if label.startswith("Rapport"):
+                    return DocumentTypes.REPORT
+                else:
+                    return DocumentTypes.STATEMENT
+
             obj_label = Format(
                 "%s au %s", CleanText(Dict("labelReleve")), Eval(lambda x: x.strftime("%d/%m/%Y"), Field("date"))
             )
             obj_date = DateTime(CleanText(Dict("dateArrete")), parse_func=parse_from_timestamp, strict=False)
-            obj_type = DocumentTypes.STATEMENT
+            obj_format = "pdf"
+            # this url is stateful and has to be called when we are on
+            # the right page with the right range of 3 months
+            # else we get a 302 to /page-indisponible
+            obj_url = BrowserURL(
+                "pdf_page", id_tech=Dict("idTechniquePrestation"), ref_tech=Dict("referenceTechniqueEncode")
+            )
+
+    @method
+    class iter_yearly_documents(DictElement):
+        item_xpath = "donnees/edocumentDto/listCleRelevesAnnuellesDto"
+
+        class item(ItemElement):
+            klass = Document
+
+            def obj_id(self):
+                """Generate ID for the document.
+
+                In the case of `docs-transverses`, the field `referenceTechniqueEncode` is always different
+                from one request to the other.
+                In that case, we use the hash(sha1) of the document label to have a stable, fixed `id`.
+                """
+                hash_label = hashlib.sha1(Field("label")(self).encode("utf-8")).hexdigest()
+                return "{}_{}".format(Env("subid")(self), hash_label)
+
+            def obj_type(self):
+                label = Field("label")(self)
+                if label.startswith("Imprimé Fiscal Unique"):
+                    return DocumentTypes.CERTIFICATE
+                else:
+                    return DocumentTypes.STATEMENT
+
+            obj_label = CleanText(Dict("labelReleve"))
+            obj_date = DateTime(
+                Regexp(CleanText(Dict("labelReleve")), r"(?:au|le) (\d{2}/\d{2}/\d{4})"),
+                parse_func=parse_french_date,
+                strict=False,
+            )
             obj_format = "pdf"
             # this url is stateful and has to be called when we are on
             # the right page with the right range of 3 months
@@ -59,3 +122,32 @@ class DocumentsPage(LoggedPage, JsonPage):
 
 class RibPdfPage(LoggedPage, RawPage):
     pass
+
+
+class SubscriptionsPage(JsonBasePage):
+    @method
+    class iter_subscription(DictElement):
+        item_xpath = "donnees/listAbonnementEDocumentDto"
+
+        class item(ItemElement):
+            klass = Subscription
+
+            obj__is_doc_transverse = Dict("infosProduitPrestation/documentTransverse", default=False)
+
+            def obj__has_rib(self):
+                return not Field("_is_doc_transverse")(self)
+
+            def obj_label(self):
+                if Field("_is_doc_transverse")(self):
+                    return Dict("libellePrestation")(self)
+                else:
+                    return Format("%s %s", Dict("libellePrestation"), Field("id"))(self)
+
+            def obj_id(self):
+                if Field("_is_doc_transverse")(self):
+                    return "docs-transverses"
+                else:
+                    return CleanText(Dict("numeroCompteFormate", default="NOTFOUND"), replace=[(" ", "")])(self)
+
+            obj_subscriber = Env("subscriber")
+            obj__internal_id = Dict("prestationIdTechnique", default="NOTFOUND")
