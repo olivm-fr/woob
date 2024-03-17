@@ -55,10 +55,9 @@ class DocumentsPage(LoggedPage, JsonPage):
                 from one request to the other.
                 In that case, we use the hash(sha1) of the document label to have a stable, fixed `id`.
                 """
-                subid = Env("subid")(self)
-                if subid == "docs-transverses":
+                if Dict("codeGroupeProduit")(self) == "":
                     hash_label = hashlib.sha1(Field("label")(self).encode("utf-8")).hexdigest()
-                    return "%s_%s" % (subid, hash_label)
+                    return "{}_{}".format(Env("subid")(self), hash_label)
                 else:
                     return Format("%s_%s", Env("subid"), Dict("referenceTechniqueEncode"))(self)
 
