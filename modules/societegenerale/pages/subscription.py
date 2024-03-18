@@ -45,6 +45,25 @@ class DocumentsPage(LoggedPage, JsonPage):
     class iter_documents(DictElement):
         item_xpath = "donnees/edocumentDto/listCleReleveDto"
 
+        def store(self, obj):
+            """Ensure unicity of `obj_id`.
+
+            This code enables `obj_id` to be unique when there
+            are several docs with the exact same id.
+            Sometimes we have two docs on the same date, so they have the same
+            `label` thus the same `id`.
+            (Note: there is another id in the document url that is unique but it is inconsistent, it
+            changes on each session.)
+            """
+            _id = obj.id
+            n = 1
+            while _id in self.objects:
+                n += 1
+                _id = f"{obj.id}-{n}"
+            obj.id = _id
+            self.objects[obj.id] = obj
+            return obj
+
         class item(ItemElement):
             klass = Document
 
