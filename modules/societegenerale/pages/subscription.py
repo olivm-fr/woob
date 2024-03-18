@@ -87,9 +87,13 @@ class DocumentsPage(LoggedPage, JsonPage):
                 else:
                     return DocumentTypes.STATEMENT
 
-            obj_label = Format(
-                "%s au %s", CleanText(Dict("labelReleve")), Eval(lambda x: x.strftime("%d/%m/%Y"), Field("date"))
-            )
+            def obj_label(self):
+                result = CleanText(Dict("labelReleve"))(self)
+                dt = Eval(lambda x: x.strftime("%d/%m/%Y"), Field("date"))(self)
+                if dt not in result:
+                    result += " au %s" % (dt)
+                return result
+
             obj_date = DateTime(CleanText(Dict("dateArrete")), parse_func=parse_from_timestamp, strict=False)
             obj_format = "pdf"
             # this url is stateful and has to be called when we are on
