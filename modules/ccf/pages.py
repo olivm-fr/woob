@@ -33,6 +33,7 @@ from woob.browser.filters.standard import (
     Regexp,
 )
 from woob.browser.pages import JsonPage, LoggedPage
+from woob.capabilities.bank import Account, AccountType, AccountOwnerType, AccountOwnership
 from woob.capabilities.bill import Document, DocumentTypes, Subscription
 from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
@@ -40,6 +41,49 @@ from woob.tools.capabilities.bank.transactions import FrenchTransaction
 class RibPage(LoggedPage, JsonPage):
     def get_iban(self):
         return Dict("iban")(self.doc)
+
+
+ACCOUNT_TYPES = {
+        "CHECKING": AccountType.CHECKING,
+        "STOCK": AccountType.PEA,
+        "HAV": AccountType.LIFE_INSURANCE,
+}
+
+class AccountsPage(LoggedPage, JsonPage):
+    @method
+    class iter_accounts(DictElement):
+        class item(ItemElement):
+            klass = Account
+
+            obj_id = Dict("accountId")
+            obj_label = Dict("label")
+
+            obj_type = Map(Dict("type"), ACCOUNT_TYPES, AccountType.UNKNOWN)
+            obj_ownership = AccountOwnership.OWNER
+            obj_owner_type = AccountOwnerType.PRIVATE
+
+            obj__type = Dict("type")
+            obj__iban_encrypted = Dict("iban")
+
+
+class Balance: pass
+
+class BalancePage(LoggedPage, JsonPage):
+    @method
+    class iter_balances(DictElement):
+        def store(self, obj):
+            obj.id = f"balance-{len(self.objects)}"
+            self.objects[obj.id] = obj
+            return obj
+
+        class item(ItemElement):
+            klass = Balance
+
+            obj_amount = CleanDecimal.SI(Dict('balanceAmount/amount'))
+            obj_currency = Dict('balanceAmount/currency')
+
+            obj_refDate = Date(Dict('referenceDate'))
+            obj_balType = Dict("balanceType")
 
 
 class SubscriptionsPage(LoggedPage, JsonPage):

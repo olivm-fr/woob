@@ -26,7 +26,7 @@ from woob.capabilities.bill import Subscription
 from woob.tools.decorators import retry
 from woob_modules.cmso.par.browser import CmsoParBrowser
 
-from .pages import DocumentsPage, RibPage, SubscriptionsPage, TransactionsPage
+from .pages import AccountsPage, BalancePage, DocumentsPage, RibPage, SubscriptionsPage, TransactionsPage
 
 
 __all__ = ["CCFParBrowser", "CCFProBrowser"]
@@ -37,7 +37,17 @@ class CCFBrowser(CmsoParBrowser):
     arkea_si = None
     AUTH_CLIENT_ID = "S4dgkKwTA7FQzWxGRHPXe6xNvihEATOY"
 
-    subscriptions = URL(r"/distri-account-api/api/v1/customers/me/accounts", SubscriptionsPage)
+    # accounts_: note the trailing underscore
+    # don't override super.accounts, used indirectly by get_ibans_from_ribs
+    accounts_ = URL(
+        r"/distri-account-api/api/v1/persons/me/accounts", AccountsPage
+    )
+    balance = URL(
+        r"/distri-account-api/api/v1/customers/me/accounts/(?P<account_id>.*)/balances", BalancePage
+    )
+    subscriptions = URL(
+        r"/distri-account-api/api/v1/customers/me/accounts", SubscriptionsPage
+    )
     documents = URL(r"/documentapi/api/v2/documents\?type=RELEVE$", DocumentsPage)
     document_pdf = URL(r"/documentapi/api/v2/documents/(?P<document_id>.*)/content\?database=(?P<database>.*)")
     rib_details = URL(r"/domiapi/oauth/json/accounts/recupererRib$", RibPage)
@@ -127,11 +137,27 @@ class CCFBrowser(CmsoParBrowser):
         if not account.iban:
             account.iban = iban_number
 
-    def iter_accounts(self):
+    def get_ibans_from_ribs(self):
         accounts_list = super().iter_accounts()
         for account in accounts_list:
             account._original_id = account.id
             self.update_iban(account)
+        return { account.id: account.iban for account in accounts_list }
+
+    @need_login
+    def iter_accounts(self):
+        ibans = self.get_ibans_from_ribs()
+
+        go_accounts = retry(ClientError, tries=5)(self.accounts_.go)
+        go_accounts(params={'types': 'CHECKING,SAVING'})
+
+        accounts_list = list(self.page.iter_accounts())
+        for account in accounts_list:
+            self.balance.go(account_id=account.id)
+            balance = list(self.page.iter_balances())[0]
+            account.balance = balance.amount
+            account.iban = ibans.get(account.id)
+
         return accounts_list
 
     @need_login
