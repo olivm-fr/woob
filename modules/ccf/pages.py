@@ -40,7 +40,7 @@ from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
 class RibPage(LoggedPage, JsonPage):
     def get_iban(self):
-        return Dict("iban")(self.doc)
+        return Dict("iban", default=None)(self.doc)
 
 
 ACCOUNT_TYPES = {
