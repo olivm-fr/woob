@@ -37,6 +37,11 @@ class CCFBrowser(CmsoParBrowser):
     arkea_si = None
     AUTH_CLIENT_ID = "S4dgkKwTA7FQzWxGRHPXe6xNvihEATOY"
 
+    # Use CmsoParBrowser as base, but rely on /distri-account-api/api
+    # for accounts list & balance. Like modules/allianzbanque/browser.py
+    # We should probably extract a common browser.
+
+
     # accounts_: note the trailing underscore
     # don't override super.accounts, used indirectly by get_ibans_from_ribs
     accounts_ = URL(
