@@ -101,16 +101,29 @@ class SubscriptionsPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Subscription
 
-            obj_id = Dict("sourceContractId")
+            obj_id = Dict("accountId")
+            obj_label = Dict("label")
 
             # there can be several "participants" but no matter what _contract_id is,
             # list of related documents will be the same, so we can simply take the first one
             obj__contract_id = Dict("participants/0/id")  # CAUTION non persistant
-            obj_subscriber = Format(
-                "%s %s",
-                CleanText(Dict("participants/0/firstName")),
-                CleanText(Dict("participants/0/lastName")),
-            )
+            def obj_subscriber(self):
+                def key_participants(participant):
+                    role = participant.get("role", None)
+                    if role == "TIT":
+                        role_idx = 0
+                    else:
+                        role_idx = 1
+                    return '%s-%s-%s' % (role_idx, participant.get("lastName"), participant.get("firstName"))
+
+                result = ""
+                for participant in sorted(Dict("participants")(self), key=key_participants):
+                    result += Format(
+                        "%s %s / ",
+                        CleanText(Dict("lastName")),
+                        CleanText(Dict("firstName")),
+                    )(participant)
+                return result.strip("/ ")
 
 
 DOCUMENT_TYPES = {

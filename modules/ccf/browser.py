@@ -114,17 +114,12 @@ class CCFBrowser(CmsoParBrowser):
 
     @need_login
     def get_subscription_list(self):
-        accounts_list = self.iter_accounts()
-        subscriptions = []
-        for account in accounts_list:
-            s = Subscription()
-            s.label = account._lib
-            if account.number:
-                s.label = f"{s.label} {account.number}"
-            s.subscriber = account._owner_name
-            s.id = account.id
-            subscriptions.append(s)
-        return subscriptions
+        params = {
+            'types': 'CHECKING',
+            'roles': 'TIT,COT',
+        }
+        self.subscriptions.go(params=params)
+        return self.page.iter_subscriptions()
 
     @need_login
     def iter_documents(self, subscription):
