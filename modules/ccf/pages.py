@@ -65,6 +65,11 @@ class AccountsPage(LoggedPage, JsonPage):
             obj__type = Dict("type")
             obj__iban_encrypted = Dict("iban")
 
+            # woob bill ls compat
+            obj__lib = Field("label")
+            obj__owner = Dict('nomTitulaire', "me")
+            obj__owner_name = Field("_owner")
+
 
 class Balance: pass
 
