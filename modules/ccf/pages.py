@@ -57,6 +57,7 @@ class AccountsPage(LoggedPage, JsonPage):
 
             obj_id = Dict("accountId")
             obj_label = Dict("label")
+            obj_currency = Dict("currency")
 
             obj_type = Map(Dict("type"), ACCOUNT_TYPES, AccountType.UNKNOWN)
             obj_ownership = AccountOwnership.OWNER
@@ -67,7 +68,10 @@ class AccountsPage(LoggedPage, JsonPage):
 
             # woob bill ls compat
             obj__lib = Field("label")
-            obj__owner = Dict('nomTitulaire', "me")
+            obj__owner = Format("%s %s",
+                    Dict('participants/0/firstName'),
+                    Dict('participants/0/lastName'),
+            )
             obj__owner_name = Field("_owner")
 
 
