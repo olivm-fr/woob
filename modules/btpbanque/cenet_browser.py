@@ -1,41 +1,45 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.browser import AbstractBrowser, URL
+# flake8: compatible
 
-from .pages import JsFilePage, LoginPage, NewLoginPage, ConfigPage
+from woob_modules.caissedepargne.cenet.browser import CenetBrowser as _CenetBrowser
 
 
 __all__ = ['CenetBrowser']
 
 
-class CenetBrowser(AbstractBrowser):
-    PARENT = 'caissedepargne'
-    PARENT_ATTR = 'package.cenet.browser.CenetBrowser'
-    BASEURL = 'https://www.entreprises.btp-banque.fr'
+class CenetBrowser(_CenetBrowser):
+    BASEURL = CENET_URL = 'https://www.entreprises.btp-banque.fr'
+    enseigne = 'btp'
 
-    login = URL(
-        r'https://www.btp-banque.fr/authentification/manage\?step=identification&identifiant=(?P<login>.*)',
-        r'https://.*/login.aspx',
-        LoginPage
+    login = _CenetBrowser.login.with_urls(
+        r'https://www.icgauth.btp-banque.fr/se-connecter/sso'
     )
-
-    new_login = URL(r'https://www.btp-banque.fr/se-connecter/sso', NewLoginPage)
-    js_file = URL(r'https://www.btp-banque.fr/se-connecter/main-.*.js$', JsFilePage)
-    config_page = URL('https://www.btp-banque.fr/ria/pas/configuration/config.json', ConfigPage)
+    home_page = _CenetBrowser.home_page.with_urls(
+        r'https://www.btp-banque.fr/espace-entreprise/web-b2b/callback'
+    )
+    js_file = _CenetBrowser.js_file.with_urls(
+        r'https://www.btp-banque.fr/espace-entreprise/web-b2b/(?P<js_file_name>[^/]+)',
+        r'https://www.icgauth.btp-banque.fr/se-connecter/main\..*.js$',
+        r'https://www.caisse-epargne.fr/espace-client/main\..*\.js',
+        r'https://www.caisse-epargne.fr/gestion-client/credit-immobilier/main\..*\.js',
+        r'https://www.caisse-epargne.fr/espace-gestion/pret-personnel/main\..*\.js',
+    )
+    config_page = _CenetBrowser.config_page.with_urls(
+        r'https://www.btp-banque.fr/ria/pas/configuration/config.json\?ts=(?P<timestamp>.*)'
+    )

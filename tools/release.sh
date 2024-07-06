@@ -6,7 +6,8 @@ cd "$(dirname $0)/.."
 
 function set_version {
 	echo -n "Replacing version in source files to $1... "
-	 sed -i "s/^\(\s*\)\(VERSION\|version\|release\|__version__\)\( *\)=\( *\)\([\"']\?\)[0-9]\+\.[0-9a-z]\+\([\"']\?\)\(,\?\)$/\1\2\3=\4\5$1\6\7/g" $(git ls-files -x contrib | grep -v "\.svg$")
+	sed -i "s/^\(\s*\)\(VERSION\|version\|release\|__version__\)\( *\)=\( *\)\([\"']\?\)[0-9]\+\.[0-9a-z]\+\(\.[0-9a-z]\+\)\?\([\"']\?\)\(,\?\)$/\1\2\3=\4\5$1\7\8/g" $(git ls-files -x contrib | grep -v "\.svg$")
+
 	echo -e "done.\n"
 }
 
@@ -38,11 +39,11 @@ echo -e "done!\n"
 git add man/*
 
 echo "Release commit:"
-git commit -a -m "Weboob $VERSION released"
+git commit -a -m "Woob $VERSION released"
 echo -ne "\n"
 
 echo "Release tag:"
-git tag $VERSION -s -m "Weboob $VERSION"
+git tag $VERSION -s -m "Woob $VERSION"
 echo -ne "\n"
 
 tools/release.py tarball $VERSION

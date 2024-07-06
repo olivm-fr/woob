@@ -2,31 +2,31 @@
 
 # Copyright(C) 2014-2015      Oleg Plakhotniuk
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.bank import Account, Transaction
-from weboob.browser.exceptions import ServerError
-from weboob.browser.pages import HTMLPage, RawPage
-from weboob.tools.capabilities.bank.transactions import \
+from woob.capabilities.bank import Account, Transaction
+from woob.browser.exceptions import ServerError
+from woob.browser.pages import HTMLPage, RawPage
+from woob.tools.capabilities.bank.transactions import \
     AmericanTransaction as AmTr
-from weboob.tools.date import closest_date
-from weboob.tools.pdf import decompress_pdf
-from weboob.tools.tokenizer import ReTokenizer
+from woob.tools.date import closest_date
+from woob.tools.pdf import decompress_pdf
+from woob.tools.tokenizer import ReTokenizer
+
 from datetime import datetime, timedelta
-from weboob.tools.compat import unicode
 import re
 import json
 
@@ -209,7 +209,7 @@ class StatementPage(RawPage):
     def read_text(self, pos):
         t = self._tok.tok(pos)
         # TODO: handle PDF encodings properly.
-        return (pos+1, unicode(t.value(), errors='ignore')) \
+        return (pos+1, str(t.value(), errors='ignore')) \
             if t.is_text() else (pos, None)
 
     def read_full_date(self, pos):

@@ -2,26 +2,25 @@
 
 # Copyright(C) 2015      Baptiste Delpey
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.tools.capabilities.bank.transactions import sorted_transactions
-from weboob.tools.compat import basestring
+from woob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired
+from woob.browser import LoginBrowser, URL, need_login
+from woob.tools.capabilities.bank.transactions import sorted_transactions
 
 from .pages import LoginPage, ErrorPage, AccountsPage, TransactionsPage
 
@@ -72,8 +71,8 @@ class BnpcartesentrepriseCorporateBrowser(LoginBrowser):
         self.accounts = []
 
     def do_login(self):
-        assert isinstance(self.username, basestring)
-        assert isinstance(self.password, basestring)
+        assert isinstance(self.username, str)
+        assert isinstance(self.password, str)
         self.login.stay_or_go()
         assert self.login.is_here()
         self.page.login(self.username, self.password)

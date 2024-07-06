@@ -2,34 +2,33 @@
 
 # Copyright(C) 2010-2011 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import timedelta
 
-from weboob.capabilities.image import Thumbnail
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.collection import Collection
-from weboob.capabilities.base import empty
-from weboob.capabilities.video import BaseVideo
-from weboob.browser.pages import HTMLPage, JsonPage, pagination
-from weboob.browser.elements import DictElement, ItemElement, ListElement, method
-from weboob.browser.filters.standard import Date, Env, CleanText, Field, ItemNotFound, BrowserURL
-from weboob.browser.filters.json import Dict
-from weboob.tools.date import parse_french_date
-from weboob.tools.compat import basestring
+from woob.capabilities.image import Thumbnail
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.collection import Collection
+from woob.capabilities.base import empty
+from woob.capabilities.video import BaseVideo
+from woob.browser.pages import HTMLPage, JsonPage, pagination
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
+from woob.browser.filters.standard import Date, Env, CleanText, Field, ItemNotFound, BrowserURL
+from woob.browser.filters.json import Dict
+from woob.tools.date import parse_french_date
 
 
 class ArteItemElement(ItemElement):
@@ -62,7 +61,7 @@ class ArteItemElement(ItemElement):
         seconds = Dict('videoDurationSeconds', default=NotAvailable)(self)
         if empty(seconds):
             return seconds
-        elif isinstance(seconds, basestring):
+        elif isinstance(seconds, str):
             seconds = int(seconds)
 
         return timedelta(seconds=seconds)

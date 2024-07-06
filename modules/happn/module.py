@@ -2,20 +2,20 @@
 
 # Copyright(C) 2014      Roger Philibert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from collections import OrderedDict
 import datetime
@@ -27,14 +27,14 @@ from dateutil.tz import tzlocal
 import geopy
 import geopy.distance
 
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.messages import CapMessages, CapMessagesPost, Thread, Message
-from weboob.capabilities.dating import CapDating, Optimization
-from weboob.capabilities.contact import CapContact, Contact, ProfileNode
-from weboob.exceptions import BrowserHTTPError
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
-from weboob.tools.log import getLogger
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.messages import CapMessages, CapMessagesPost, Thread, Message
+from woob.capabilities.dating import CapDating, Optimization
+from woob.capabilities.contact import CapContact, Contact, ProfileNode
+from woob.exceptions import BrowserHTTPError
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword
+from woob.tools.log import getLogger
 
 from .browser import HappnBrowser, FacebookBrowser
 
@@ -90,8 +90,8 @@ class ProfilesWalker(Optimization):
             if n == 0 and (self._last_position_update is None or self._last_position_update + datetime.timedelta(minutes=20) < datetime.datetime.now()):
                 self._logger.info('No more new profiles, updating position...')
 
-                d = geopy.distance.VincentyDistance(kilometers=random()*self._max_distance)
-                pos = d.destination(point=self._location, bearing=randint(0,360))
+                d = geopy.distance.geodesic(kilometers=random()*self._max_distance)
+                pos = d.destination(point=self._location, bearing=randint(0, 360))
                 try:
                     pos = self._browser.set_position(pos.latitude, pos.longitude)
                 except BrowserHTTPError:
@@ -186,7 +186,7 @@ class HappnModule(Module, CapMessages, CapMessagesPost, CapDating, CapContact):
     MAINTAINER = u'Roger Philibert'
     EMAIL = 'roger.philibert@gmail.com'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
     CONFIG = BackendConfig(Value('username',                label='Facebook email'),
                            ValueBackendPassword('password', label='Facebook password'),
                            Value('location',                label='Location (example: 49.6008457,6.129709)'),
@@ -205,7 +205,7 @@ class HappnModule(Module, CapMessages, CapMessagesPost, CapDating, CapContact):
     # ---- CapDating methods -----------------------
 
     def init_optimizations(self):
-        self.add_optimization('PROFILE_WALKER', ProfilesWalker(self.weboob.scheduler, self.storage, self.browser,
+        self.add_optimization('PROFILE_WALKER', ProfilesWalker(self.woob.scheduler, self.storage, self.browser,
                                                                self.config['location'].get(),
                                                                self.config['distance'].get()))
 

@@ -1,0 +1,2 @@
+woob ~= 3.2
+openai

@@ -1,45 +1,70 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-from weboob.browser.browsers import AbstractBrowser
-from weboob.browser.profiles import Wget
-from weboob.browser.url import URL
-from weboob.browser.browsers import need_login
+from woob.browser.browsers import need_login
+from woob.browser.url import URL
+from woob.exceptions import BrowserIncorrectPassword
+from woob_modules.creditmutuel.browser import CreditMutuelBrowser
 
-from .pages import AdvisorPage, LoginPage, DecoupledStatePage, CancelDecoupled
-
+from .pages import AdvisorPage
 
 __all__ = ['BECMBrowser']
 
 
-class BECMBrowser(AbstractBrowser):
-    PROFILE = Wget()
-    TIMEOUT = 30
-    BASEURL = 'https://www.becm.fr'
-    PARENT = 'creditmutuel'
+class BECMBrowser(CreditMutuelBrowser):
+    HAS_MULTI_BASEURL = True  # Some of the users will use CreditMutuel's BASEURL when others will use becm.fr
 
-    login = URL('/fr/authentification.html', LoginPage)
-    advisor = URL('/fr/banques/Details.aspx\?banque=.*', AdvisorPage)
-    decoupled_state = URL(r'/(?P<subbank>.*)fr/otp/SOSD_OTP_GetTransactionState.htm', DecoupledStatePage)
-    cancel_decoupled = URL(r'/(?P<subbank>.*)fr/otp/SOSD_OTP_CancelTransaction.htm', CancelDecoupled)
+    login = CreditMutuelBrowser.login.with_urls(r'/fr/authentification.html')
+    advisor = URL(r'/fr/banques/Details.aspx\?banque=.*', AdvisorPage)
+
+    alternative_decoupled_state = CreditMutuelBrowser.decoupled_state.with_urls(
+        r'/(?P<subbank>.*)fr/otp/SOSD_OTP_GetTransactionState.htm'
+    )
+    alternative_cancel_decoupled = CreditMutuelBrowser.cancel_decoupled.with_urls(
+        r'/(?P<subbank>.*)fr/otp/SOSD_OTP_CancelTransaction.htm'
+    )
+
+    def init_login(self):
+        # We use by default the creditmutuel's BASEURL, with the 'currentSubBank' logic.
+        # But it's not always the correct one for all users.
+        # If we hit WRONG_BROWSER_EXCEPTION, we change the BASEURL and some URLs and retry the login.
+        try:
+            super().init_login()
+        except self.WRONG_BROWSER_EXCEPTION:
+            self.BASEURL = 'https://www.becm.fr'
+
+            if self.decoupled_state == self.alternative_decoupled_state:
+                # to avoid infinite loops
+                # if the if is True it means that this isn't the first time we get the exception
+                # there's no point in continuing
+                raise BrowserIncorrectPassword()
+
+            # We keep the (?P<subbank>.*) and setcurrentSubBank to an empty string
+            # to minimize changes to the parents module code and avoid UrlNotResolvable errors
+            self.currentSubBank = ''
+
+            # switching the parents urls to this domains (https://www.becm.fr) specific urls
+            self.decoupled_state = self.alternative_decoupled_state
+            self.cancel_decoupled = self.alternative_cancel_decoupled
+
+            # redo login
+            super().init_login()
 
     @need_login
     def get_advisor(self):
@@ -55,4 +80,6 @@ class BECMBrowser(AbstractBrowser):
             if link:
                 self.location(link)
                 self.page.update_advisor(advisor)
-        return iter([advisor]) if advisor else iter([])
+        if advisor:
+            return iter([advisor])
+        return iter([])

@@ -2,25 +2,65 @@
 
 # Copyright(C) 2012 Lucien Loiseau
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
+
+import re
+import json
+
+from woob.capabilities import NotAvailable
+from woob.browser.pages import RawPage
 
 
-from weboob.browser.pages import JsonPage
+class TranslatePage(RawPage):
+
+    def build_doc(self, content):
+        encoding = self.encoding
+        if encoding == u'latin-1':
+            encoding = u'latin1'
+        if encoding:
+            encoding = encoding.replace(u'iso8859_', u'iso8859-')
+
+        return content.decode(encoding)
+
+    def get_translation(self, result_handler):
+        m = re.search(r'^(\[\[.*\]\]$)', self.doc, re.MULTILINE)
+        if m:
+            try:
+                subdata = json.loads(json.loads(m.group(1))[0][2])
+                subdata = result_handler(subdata)
+                assert isinstance(subdata, str)
+                return subdata
+            except (IndexError, TypeError, ValueError):
+                self.logger.warning("can't handle data %r", m.group(1))
+
+        return NotAvailable
 
 
-class TranslatePage(JsonPage):
-    def get_translation(self):
-        return self.doc[0][0][0]
+class SupportedLanguagesPage(RawPage):
+    def build_doc(self, content):
+        encoding = self.encoding
+        if encoding == u'latin-1':
+            encoding = u'latin1'
+        if encoding:
+            encoding = encoding.replace(u'iso8859_', u'iso8859-')
+
+        m = re.search(r'.*({.*}).*', content.decode(encoding).replace("\'", "\""))
+        if m:
+            return json.loads(m.group(1))
+        return {}
+
+    def get_supported_languages(self):
+        return self.doc

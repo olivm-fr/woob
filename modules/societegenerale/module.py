@@ -26,21 +26,21 @@ from datetime import timedelta
 
 from unidecode import unidecode
 
-from weboob.capabilities.bank import (
+from woob.capabilities.bank import (
     CapBankTransferAddRecipient, AccountNotFound,
     Account, RecipientNotFound,
 )
-from weboob.capabilities.bank.pfm import CapBankMatching
-from weboob.capabilities.bill import (
+from woob.capabilities.bank.pfm import CapBankMatching
+from woob.capabilities.bill import (
     CapDocument, Subscription, Document, DocumentNotFound, DocumentTypes,
 )
-from weboob.capabilities.bank.wealth import CapBankWealth
-from weboob.capabilities.contact import CapContact
-from weboob.capabilities.profile import CapProfile
-from weboob.tools.capabilities.bank.transactions import sorted_transactions
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
-from weboob.capabilities.base import empty, find_object, NotAvailable, strict_find_object
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.contact import CapContact
+from woob.capabilities.profile import CapProfile
+from woob.tools.capabilities.bank.transactions import sorted_transactions
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
+from woob.capabilities.base import empty, find_object, NotAvailable, strict_find_object
 
 from .browser import SocieteGenerale
 from .sgpe.browser import SGEnterpriseBrowser, SGProfessionalBrowser
@@ -55,7 +55,6 @@ class SocieteGeneraleModule(
     NAME = 'societegenerale'
     MAINTAINER = u'Jocelyn Jaubert'
     EMAIL = 'jocelyn.jaubert@gmail.com'
-    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'Société Générale'
     CONFIG = BackendConfig(
@@ -89,9 +88,6 @@ class SocieteGeneraleModule(
     def iter_accounts(self):
         for account in self.browser.get_accounts_list():
             yield account
-
-    def get_account(self, _id):
-        return find_object(self.browser.get_accounts_list(), id=_id, error=AccountNotFound)
 
     def fill_account(self, account, fields):
         if all((

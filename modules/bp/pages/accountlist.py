@@ -1,43 +1,40 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011  Nicolas Duhamel
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 from decimal import Decimal
+from urllib.parse import urljoin
 
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.capabilities.bank import Account, Loan, AccountOwnership
-from weboob.capabilities.contact import Advisor
-from weboob.capabilities.profile import Person
-from weboob.browser.elements import ListElement, ItemElement, method, TableElement
-from weboob.browser.pages import LoggedPage, RawPage, PartialHTMLPage, HTMLPage
-from weboob.browser.filters.html import Link, TableCell, Attr
-from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Regexp, Env, Field, Currency,
-    Async, Date, Format, Coalesce, Lower, Upper,
+from woob.browser.elements import ItemElement, ListElement, TableElement, method
+from woob.browser.filters.html import AbsoluteLink, Link, TableCell
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
+    Async, CleanDecimal, CleanText, Coalesce, Currency, Date, Env, Field, Format,
+    Lower, MapIn, Regexp, Upper,
 )
-from weboob.exceptions import BrowserUnavailable
-from weboob.tools.compat import urljoin, unicode
-from weboob.tools.pdf import extract_text
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, PartialHTMLPage, RawPage
+from woob.capabilities.bank import Account, AccountOwnerType, Loan
+from woob.capabilities.base import NotAvailable, empty
+from woob.capabilities.contact import Advisor
+from woob.capabilities.profile import Person
+from woob.exceptions import BrowserUnavailable
+from woob.tools.pdf import extract_text
 
 from .base import MyHTMLPage
 
@@ -52,6 +49,34 @@ def MyDate(*args, **kwargs):
     return Date(*args, **kwargs)
 
 
+ACCOUNTS_TYPES = {
+    'comptes? bancaires?': Account.TYPE_CHECKING,
+    'ccp': Account.TYPE_CHECKING,
+    'compte courant postal': Account.TYPE_CHECKING,
+    "plan d'epargne populaire": Account.TYPE_SAVINGS,
+    'livrets?': Account.TYPE_SAVINGS,
+    'epargnes? logement': Account.TYPE_SAVINGS,
+    "autres produits d'epargne": Account.TYPE_SAVINGS,
+    'compte relais': Account.TYPE_SAVINGS,
+    'comptes? titres? et pea': Account.TYPE_MARKET,
+    'compte-titres': Account.TYPE_MARKET,
+    'assurances? vie': Account.TYPE_LIFE_INSURANCE,
+    'pret immobilier': Account.TYPE_MORTGAGE,
+    'pret': Account.TYPE_LOAN,
+    'renouvelable': Account.TYPE_REVOLVING_CREDIT,
+    'credits?': Account.TYPE_LOAN,
+    "plan d'epargne en actions": Account.TYPE_PEA,
+    'comptes? attente': Account.TYPE_CHECKING,
+    'perp': Account.TYPE_PERP,
+    'assurances? retraite': Account.TYPE_PERP,
+    'cachemire': Account.TYPE_LIFE_INSURANCE,
+    'tonifia': Account.TYPE_LIFE_INSURANCE,
+    'vivaccio': Account.TYPE_LIFE_INSURANCE,
+    'gmo': Account.TYPE_LIFE_INSURANCE,
+    'solesio vie': Account.TYPE_LIFE_INSURANCE,
+}
+
+
 class item_account_generic(ItemElement):
     klass = Account
 
@@ -61,11 +86,11 @@ class item_account_generic(ItemElement):
         return (
             Coalesce(
                 CleanDecimal.French('.//span[@class="number"]', default=None),
-                CleanDecimal.French('.//div[@class="amount-euro"]', default=None),
+                CleanDecimal.French('.//*[@class="amount-euro"]', default=None),
                 default=None,
             )(self.el)
             or (
-                Field('type')(self) == Account.TYPE_LOAN
+                Field('type')(self) in (Account.TYPE_LOAN, Account.TYPE_MORTGAGE)
                 and not any((
                     self.el.xpath('.//div//*[contains(text(),"pas la restitution de ces données.")]'),
                     self.el.xpath('.//div[contains(@class, "amount")]//span[contains(text(), "Contrat résilié")]'),
@@ -75,55 +100,32 @@ class item_account_generic(ItemElement):
             )
         )
 
-    obj_id = obj_number = CleanText('.//abbr/following-sibling::text()')
+    obj_id = obj_number = Regexp(CleanText('./div/h3/a/span[contains(text(), "N°")]'), r'N° (\w+)')
     obj_currency = Coalesce(
-        Currency('.//div[@class="amount-euro"]'),
+        Currency('.//*[@class="amount-euro"]'),
         Currency('.//span[@class="number"]'),
         Currency('.//span[@class="thick"]'),
+        Currency('.//span[@class="amount"]'),
     )
+    obj_owner_type = AccountOwnerType.PRIVATE
+    obj__account_holder = Lower('./div/h3/a/span[2]')
 
     def obj_url(self):
-        url = Coalesce(
-            Attr('.', 'data-href', default=NotAvailable),
-            Regexp(Attr('.', 'onclick', default=''), r'event, \'(.*)\'', default=NotAvailable),
-            Link('./a', default=NotAvailable),
-            Regexp(Attr('./span', 'onclick', default=''), r'event, \'(.*)\'', default=NotAvailable),
-            default=NotAvailable,
-        )(self)
-        if url:
-            if 'CreditRenouvelable' in url:
-                url = Coalesce(
-                    Link('../ul//a[contains(.//span/text(), "Espace")]', default=None),
-                    Link('.//a[contains(text(), "espace de gestion crédit renouvelable")]', default=None),
-                )(self.el)
-            return urljoin(self.page.url, url)
-        return url
+        if Field('type')(self) in (Account.TYPE_LOAN, Account.TYPE_REVOLVING_CREDIT, Account.TYPE_MORTGAGE):
+            return AbsoluteLink('./div/h3/a')(self)
+        return Link('./div/h3/a')(self)
 
-    def obj_label(self):
-        return Upper('.//div[@class="title"]/h3')(self)
-
-    def obj_ownership(self):
-        account_holder = Lower('.//div[@class="title"]/span')(self)
-        pattern = re.compile(
-            r'(m|mr|me|mme|mlle|mle|ml)\.? (.*)\bou ?(m|mr|me|mme|mlle|mle|ml)?\b(.*)',
-            re.IGNORECASE
-        )
-        if pattern.search(account_holder):
-            return AccountOwnership.CO_OWNER
-        elif all(n in account_holder for n in self.env['name'].lower().split(' ')):
-            return AccountOwnership.OWNER
-        else:
-            return AccountOwnership.ATTORNEY
+    obj_label = CleanText('.//h3/a/span[@class="pseudo-h3"]')
 
     def obj_balance(self):
-        if Field('type')(self) == Account.TYPE_LOAN:
-            balance = CleanDecimal.French('.//div[@class="amount-euro"]', default=NotAvailable)(self)
+        if Field('type')(self) in (Account.TYPE_LOAN, Account.TYPE_MORTGAGE):
+            balance = CleanDecimal.French('.//p[@class="amount-euro"]', default=NotAvailable)(self)
             if empty(balance):
                 balance = CleanDecimal.French('.//span[@class="number"]', default=NotAvailable)(self)
             if balance:
                 balance = -abs(balance)
             return balance
-        balance = CleanDecimal.French('.//div[@class="amount-euro"]', default=NotAvailable)(self)
+        balance = CleanDecimal.French('.//p[@class="amount-euro"]', default=NotAvailable)(self)
         if empty(balance):
             balance = CleanDecimal.French('.//span[@class="number"]')(self)
         return balance
@@ -207,63 +209,47 @@ class item_account_generic(ItemElement):
         return NotAvailable
 
     def obj_type(self):
-        types = {
-            'comptes? bancaires?': Account.TYPE_CHECKING,
-            "plan d'epargne populaire": Account.TYPE_SAVINGS,
-            'livrets?': Account.TYPE_SAVINGS,
-            'epargnes? logement': Account.TYPE_SAVINGS,
-            "autres produits d'epargne": Account.TYPE_SAVINGS,
-            'compte relais': Account.TYPE_SAVINGS,
-            'comptes? titres? et pea': Account.TYPE_MARKET,
-            'compte-titres': Account.TYPE_MARKET,
-            'assurances? vie': Account.TYPE_LIFE_INSURANCE,
-            'pret': Account.TYPE_LOAN,
-            'credits?': Account.TYPE_LOAN,
-            "plan d'epargne en actions": Account.TYPE_PEA,
-            'comptes? attente': Account.TYPE_CHECKING,
-            'perp': Account.TYPE_PERP,
-            'assurances? retraite': Account.TYPE_PERP,
-        }
-
         # first trying to match with label
         label = Lower(Field('label'), transliterate=True)(self)
-        for atypetxt, atype in types.items():
-            if re.findall(atypetxt, label):  # match with/without plural in type
-                return atype
         # then by type (not on the loans page)
         type_ = Regexp(
             Lower(
-                './ancestor::ul/preceding-sibling::div[@class="assets" or @class="avoirs"][1]//span[1]',
+                './ancestor::ul/preceding-sibling::div[@class="assets" or @class="avoirs"][1]//h2[1]',
                 transliterate=True,
             ),
             r'(\d+) (.*)',
             '\\2',
             default=None,
         )(self)
-        if type_:
-            for atypetxt, atype in types.items():
-                if re.findall(atypetxt, type_):  # match with/without plural in type
-                    return atype
-
+        # Finally match with the element's title
+        for data in (label, type_):
+            if data:
+                for acc_type_key, acc_type in ACCOUNTS_TYPES.items():
+                    if re.findall(acc_type_key, data):  # match with/without plural in type
+                        return acc_type
         return Account.TYPE_UNKNOWN
 
-    def obj__has_cards(self):
-        return Link('.//a[contains(@href, "consultationCarte")]', default=None)(self)
+    obj__has_cards = Link('../ul//a[contains(@href, "consultationCarte")]', default=None)
+    obj__has_deferred_history = Link(
+        './/div[contains(@class, "additional-data")]//a[contains(@href, init-mouvementsCarteDD)]',
+        default=False
+    )
+
+    def obj__has_transfer(self):
+        return bool(self.xpath(
+            '//ul[@class="cartridge-links"]//a/span[contains(text(), "Virement")]'
+        ))
 
 
 class AccountList(LoggedPage, MyHTMLPage):
     def on_load(self):
-        MyHTMLPage.on_load(self)
+        super().on_load()
 
         # website sometimes crash
         if CleanText('//h2[text()="ERREUR"]')(self.doc):
             self.browser.location('https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/securite/authentification/initialiser-identif.ea')
 
             raise BrowserUnavailable()
-
-    def go_revolving(self):
-        form = self.get_form()
-        form.submit()
 
     @property
     def no_accounts(self):
@@ -283,6 +269,12 @@ class AccountList(LoggedPage, MyHTMLPage):
     def mandate_management_space_link(self):
         return Link('//a[@title="Accéder aux Comptes Gérés Sous Mandat"]')(self.doc)
 
+    def get_error(self):
+        return (
+            CleanText('//div[contains(text(), "momentanément indisponible.")]')(self.doc)
+            and not CleanText('//div[text()="Montant emprunté"]')(self.doc)
+        )
+
     @method
     class iter_accounts(ListElement):
         @property
@@ -296,32 +288,23 @@ class AccountList(LoggedPage, MyHTMLPage):
             def condition(self):
                 return item_account_generic.condition(self)
 
-    @method
-    class iter_revolving_loans(ListElement):
-        item_xpath = '//div[@class="bloc Tmargin"]//dl'
-
-        class item_account(ItemElement):
-            klass = Loan
-
-            obj_id = CleanText('./dd[1]//em')
-            obj_label = 'Crédit renouvelable'
-            obj_total_amount = MyDecimal('./dd[2]/span')
-            obj_used_amount = MyDecimal('./dd[3]/span')
-            obj_available_amount = MyDecimal('./dd[4]//em')
-            obj_insurance_label = CleanText('./dd[5]//em', children=False)
-            obj__has_cards = False
-            obj_type = Account.TYPE_LOAN
-
-            def obj_url(self):
-                return self.page.url
+    def get_mandate_accounts_urls(self):
+        return self.doc.xpath('//ul/li//a[contains(@class, "cartridge")]/@href')
 
     @method
     class get_personal_loan(ItemElement):
         klass = Loan
 
+        def condition(self):
+            loan_state = CleanText('//div[div[contains(text(), "Détail de votre")]]/div[4]')(self)
+            return loan_state != 'Prêt soldé'
+
         obj_balance = CleanDecimal.French('//div[div[contains(text(), "Montant du capital restant")]]/div[4]', sign='-')
         obj_total_amount = CleanDecimal.French('//div[div[contains(text(), "Montant emprunté")]]/div[2]')
-        obj_nb_payments_left = CleanDecimal('//div[div[contains(text(), "mensualités restant à rembourser")]]/div[2]')
+        obj_nb_payments_left = CleanDecimal(
+            CleanText('//div[div[contains(text(), "restant à rembourser")]]/div[2]'),
+            default=NotAvailable
+        )
         obj_next_payment_date = Date(
             CleanText(
                 '//div[div[contains(text(), "prochaine échéance")]]/div[2]'
@@ -329,13 +312,33 @@ class AccountList(LoggedPage, MyHTMLPage):
             dayfirst=True,
             default=NotAvailable,
         )
+        obj_rate = CleanDecimal.French(
+            '//div[div[text()="TAEG fixe :"]]/div[2]',
+            default=NotAvailable,
+        )
         obj_type = Account.TYPE_LOAN
+        obj_owner_type = AccountOwnerType.PRIVATE
+        obj__account_holder = NotAvailable
 
         def obj_next_payment_amount(self):
             if Field('next_payment_date')(self):
-                return CleanDecimal.French('//div[div[contains(text(), "Mensualité")]]/div[2]')(self)
+                return CleanDecimal.French(
+                    CleanText('//div[div[contains(text(), "Mensualité") or contains(text(), "Echéance :")]]/div[2]'),
+                    default=NotAvailable
+                )(self)
             else:
                 return NotAvailable
+
+        def obj_insurance_label(self):
+            label = CleanText('//div[div[contains(text(), "Assurance")]]/div[2]', default='Sans assurance')(self)
+            if label == 'Sans assurance':
+                return NotAvailable
+            return label
+
+        def obj_insurance_amount(self):
+            if Field('insurance_label')(self):
+                return CleanDecimal.French('//div[div[contains(text(), "Dont assurance")]]/div[2]')(self)
+            return NotAvailable
 
     @method
     class iter_loans(TableElement):
@@ -357,6 +360,8 @@ class AccountList(LoggedPage, MyHTMLPage):
             # if 1 table, item_loans is used for student loan
             # if 2 tables, get_student_loan is used
             klass = Loan
+
+            obj_owner_type = AccountOwnerType.PRIVATE
 
             def condition(self):
                 if CleanText(TableCell('balance'))(self) != 'Prêt non débloqué':
@@ -386,7 +391,14 @@ class AccountList(LoggedPage, MyHTMLPage):
                     '//form[contains(@action, "detaillerOffre") or contains(@action, "detaillerPretPartenaireListe-encoursPrets.ea")]/div[@class="bloc Tmargin"]/div[@class="formline"][2]/span/strong'
                 )(self)
 
-            obj_type = Account.TYPE_LOAN
+            def obj_type(self):
+                label = Lower(Field('label'), transliterate=True)
+                _type = MapIn(label, ACCOUNTS_TYPES, Account.TYPE_UNKNOWN)(self)
+                if not _type:
+                    self.logger.warning('Account %s untyped, please type it.', Field('label')(self))
+                return _type
+
+            obj_number = Field('id')
 
             def obj_label(self):
                 cell = TableCell('label', default=None)(self)
@@ -458,6 +470,7 @@ class AccountList(LoggedPage, MyHTMLPage):
                 return self.page.url
 
             obj__has_cards = False
+            obj__account_holder = NotAvailable
 
     @method
     class get_student_loan(ItemElement):
@@ -485,6 +498,8 @@ class AccountList(LoggedPage, MyHTMLPage):
 
         obj_id = Regexp(CleanText('//select[@id="numOffrePretSelection"]/option[@selected="selected"]'), r'(\d+)')
         obj_type = Account.TYPE_LOAN
+        obj_owner_type = AccountOwnerType.PRIVATE
+        obj__account_holder = NotAvailable
         obj__has_cards = False
 
         def obj_total_amount(self):
@@ -572,7 +587,7 @@ class AccountRIB(LoggedPage, RawPage):
 
         m = re.search(self.iban_regexp, content)
         if m:
-            return unicode(m.group(0))
+            return m.group(0)
         return None
 
 
@@ -586,54 +601,71 @@ class MarketLoginPage(LoggedPage, PartialHTMLPage):
 
 
 class MarketCheckPage(LoggedPage, HTMLPage):
-    def on_load(self):
-        self.browser.market_login.go()
-
-
-class UselessPage(LoggedPage, RawPage):
     pass
 
 
-class ProfilePage(LoggedPage, HTMLPage):
-    def get_profile(self):
-        profile = Person()
+class UserTransactionIDPage(LoggedPage, JsonPage):
+    def get_transaction_id(self):
+        return self.doc['transactionId']
 
-        profile.name = Format(
+
+class ProfilePage(LoggedPage, JsonPage):
+    @method
+    class get_profile(ItemElement):
+        klass = Person
+
+        obj_name = Format(
             '%s %s',
-            CleanText('//div[@id="persoIdentiteDetail"]//dd[3]'),
-            CleanText('//div[@id="persoIdentiteDetail"]//dd[2]')
-        )(self.doc)
-        profile.address = CleanText('//div[@id="persoAdresseDetail"]//dd')(self.doc)
-        profile.email = CleanText('//div[@id="persoEmailDetail"]//td[2]')(self.doc)
-        profile.job = CleanText('//div[@id="persoIdentiteDetail"]//dd[4]')(self.doc)
-
-        return profile
+            CleanText(Dict('identite/prenomUsuel')),
+            CleanText(Dict('identite/nomUsuel')),
+        )
+        obj_email = CleanText(Dict('contacts/courriel/adresse'), default=NotAvailable)
+        obj_job = CleanText(Dict('activiteProfessionnelle/libelleProfession'), default=NotAvailable)
 
 
-class RevolvingAttributesPage(LoggedPage, HTMLPage):
-    def on_load(self):
-        if CleanText('//h1[contains(text(), "Erreur")]')(self.doc):
-            raise BrowserUnavailable()
+class RevolvingPage(LoggedPage, HTMLPage):
+    @method
+    class fill_revolving(ItemElement):
+        obj_total_amount = CleanDecimal.French(
+            '//span[text()="Montant maximum autorisé"]/following-sibling::span/text()',
+            default=NotAvailable
+        )
+        obj_available_amount = CleanDecimal.French(
+            '//span[text()="Montant disponible"]/following-sibling::span/text()',
+            default=NotAvailable
+        )
+        obj_next_payment_date = Date(
+            CleanText('//span[text()="Date du prélèvement"]/following-sibling::span/text()'),
+            dayfirst=True
+        )
+        obj_last_payment_amount = CleanDecimal.French(
+            '//span[text()="Montant dernière mensualité prélevée"]/following-sibling::span/text()'
+        )
+        obj_used_amount = CleanDecimal.French('//span[text()="Montant utilisé"]/following-sibling::span/text()')
 
-    def get_revolving_attributes(self, account):
-        loan = Loan()
-        loan.id = account.id
-        loan.label = '%s - %s' % (account.label, account.id)
-        loan.currency = account.currency
-        loan.url = account.url
+        def obj_balance(self):
+            return -abs(Field('used_amount')(self))
 
-        loan.used_amount = CleanDecimal.US(
-            '//tr[td[contains(text(), "Montant Utilisé") or contains(text(), "Montant utilisé")]]/td[2]'
-        )(self.doc)
+        def obj_insurance_label(self):
+            label = CleanText(
+                '//span[contains(text(), "Assurance")]/following-sibling::span/text()',
+                default='Aucune Assurance'
+            )(self)
+            if label == 'Aucune Assurance':
+                return NotAvailable
+            return label
 
-        loan.available_amount = CleanDecimal.US(
-            Regexp(
-                CleanText('//tr[td[contains(text(), "Montant Disponible") or contains(text(), "Montant disponible")]]/td[2]'),
-                r'(.*) au'
-            )
-        )(self.doc)
+        def obj_insurance_amount(self):
+            # page can have the label insurance but not the amount
+            if (empty(Field('insurance_label')(self))
+                    or empty(CleanText(
+                        '//span[contains(text(), "Dont assurance au titre")]',
+                        default=None
+                    )(self))):
+                return NotAvailable
+            amount = 0
+            for elem in self.xpath('//span[contains(text(), "Dont assurance au titre")]'):
+                amount += CleanDecimal.French('following-sibling::span/text()')(elem)
+            return amount
 
-        loan.balance = -loan.used_amount
-        loan._has_cards = False
-        loan.type = Account.TYPE_REVOLVING_CREDIT
-        return loan
+        obj__account_holder = NotAvailable

@@ -1,41 +1,38 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2019 Sylvie Ye
+# Copyright(C) 2023 Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
+# This woob module is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
+# GNU Lesser General Public License for more details.
 #
-# You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU Lesser General Public License
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 from datetime import date
 
-from weboob.browser.pages import (
+from woob.browser.pages import (
     LoggedPage, JsonPage, RawPage, HTMLPage,
     PartialHTMLPage,
 )
-from weboob.browser.elements import method, ItemElement, DictElement
-from weboob.capabilities.base import empty, NotAvailable
-from weboob.capabilities.bank import (
+from woob.browser.elements import method, ItemElement, DictElement
+from woob.capabilities.base import empty, NotAvailable
+from woob.capabilities.bank import (
     Account, Recipient, Transfer, TransferBankError, Emitter, EmitterNumberType,
 )
-from weboob.browser.filters.standard import (
+from woob.browser.filters.standard import (
     CleanDecimal, Date, CleanText, Coalesce, Format,
+    Upper,
 )
-from weboob.browser.filters.json import Dict
+from woob.browser.filters.json import Dict
 
 
 class NewRecipientPage(LoggedPage, PartialHTMLPage):
@@ -105,7 +102,7 @@ class RecipientsPage(LoggedPage, JsonPage):
                 Dict('accountNatureLongLabel', default=''),
                 Dict('accountNatureShortLabel', default=''),
             )
-            obj_iban = Dict('ibanCode')
+            obj_iban = Upper(Dict('ibanCode'))
             obj_currency = Dict('currencyCode')
 
             def obj_balance(self):
@@ -133,7 +130,7 @@ class RecipientsPage(LoggedPage, JsonPage):
                     Dict('accountNatureShortLabel', default=''),
                 )
             )
-            obj_iban = Dict('ibanCode')
+            obj_iban = Upper(Dict('ibanCode'))
             obj_category = 'Interne'
             obj_enabled_at = date.today()
             obj__is_recipient = Dict('recipientOfTransfert', default=False)
@@ -150,7 +147,8 @@ class RecipientsPage(LoggedPage, JsonPage):
 
             klass = Recipient
 
-            obj_id = obj_iban = Dict('ibanCode')
+            obj_id = Dict('ibanCode')
+            obj_iban = Upper(Dict('ibanCode'))
             obj_label = CleanText(Dict('recipientName'))
             obj_category = 'Externe'
             obj_enabled_at = date.today()

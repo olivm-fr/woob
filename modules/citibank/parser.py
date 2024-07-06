@@ -2,32 +2,29 @@
 
 # Copyright(C) 2014      Oleg Plakhotniuk
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import datetime
 import re
 
-from weboob.capabilities.bank import Transaction
-from weboob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
-from weboob.tools.compat import unicode
-from weboob.tools.date import closest_date
-from weboob.tools.pdf import decompress_pdf
-from weboob.tools.tokenizer import ReTokenizer
+from woob.capabilities.bank import Transaction
+from woob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
+from woob.tools.date import closest_date
+from woob.tools.pdf import decompress_pdf
+from woob.tools.tokenizer import ReTokenizer
 
 
 def clean_label(text):
@@ -216,7 +213,7 @@ class StatementParser(object):
         pos, tf = self.read_layout_tf(pos)
         pos, tm = self.read_layout_tm(pos)
         pos, text = self._tok.simple_read('text', pos,
-            lambda v: unicode(v, errors='ignore'))
+            lambda v: str(v, errors='ignore'))
         pos, et = self.read_layout_et(pos)
         if ws is None or bt is None or tf is None \
            or tm is None or text is None or et is None:

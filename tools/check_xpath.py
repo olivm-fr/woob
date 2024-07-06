@@ -2,22 +2,20 @@
 
 # Copyright(C) 2017  Vincent A
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import print_function
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 import ast
 import fnmatch
@@ -25,7 +23,7 @@ import os
 import traceback
 
 import lxml.etree
-from weboob.browser.filters import standard
+from woob.browser.filters import standard
 
 
 class Error(SyntaxError):
@@ -141,7 +139,7 @@ if __name__ == '__main__':
     parser.add_argument('-w', '--warnings', action='store_true')
     args = parser.parse_args()
 
-    modpath = os.getenv('WEBOOB_MODULES', os.path.normpath(os.path.dirname(__file__) + '/../modules'))
+    modpath = os.getenv('WOOB_MODULES', os.path.normpath(os.path.dirname(__file__) + '/../modules'))
     for fn in search_py(modpath):
         with open(fn) as fd:
             try:

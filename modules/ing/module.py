@@ -1,40 +1,36 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2010-2014 Romain Bignon, Florent Fourcot
+# Copyright(C) 2010 Romain Bignon, Florent Fourcot
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from decimal import Decimal
 from datetime import timedelta
 import re
 
-from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.bill import (
+from woob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.bill import (
     CapDocument, Document, Subscription,
-    SubscriptionNotFound, DocumentNotFound, DocumentTypes,
+    DocumentNotFound, DocumentTypes,
 )
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.base import find_object, strict_find_object, empty
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, ValueDate
+from woob.capabilities.profile import CapProfile
+from woob.capabilities.base import find_object, strict_find_object, empty
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword, ValueDate
 
 from .api_browser import IngAPIBrowser
 
@@ -45,13 +41,14 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
     NAME = 'ing'
     MAINTAINER = 'Florent Fourcot'
     EMAIL = 'weboob@flo.fourcot.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    DEPENDENCIES = ('boursedirect',)
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'ING France'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Numéro client', masked=False, regexp=r'^(\d{1,10})$'),
         ValueBackendPassword('password', label='Code secret', regexp=r'^(\d{6})$'),
-        ValueDate('birthday', required=False, label='Date de naissance', formats=('%d%m%Y', '%d/%m/%Y', '%d-%m-%Y'))
+        ValueDate('birthday', required=True, label='Date de naissance', formats=('%d%m%Y', '%d/%m/%Y', '%d-%m-%Y'))
     )
     BROWSER = IngAPIBrowser
 
@@ -62,7 +59,6 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
             self.config['login'].get(),
             self.config['password'].get(),
             birthday=self.config['birthday'].get(),
-            weboob=self.weboob,
         )
 
     def iter_resources(self, objs, split_path):
@@ -75,13 +71,7 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
 
     ############# CapBank #############
     def iter_accounts(self):
-        ignored_types = (Account.TYPE_LOAN,)
-        for account in self.browser.iter_accounts():
-            if account.type not in ignored_types:
-                yield account
-
-    def get_account(self, _id):
-        return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
+        return self.browser.iter_accounts()
 
     def iter_history(self, account):
         if not isinstance(account, Account):
@@ -166,9 +156,6 @@ class INGModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
     ############# CapDocument #############
     def iter_subscription(self):
         return self.browser.get_subscriptions()
-
-    def get_subscription(self, _id):
-        return find_object(self.browser.get_subscriptions(), id=_id, error=SubscriptionNotFound)
 
     def get_document(self, _id):
         subscription = self.get_subscription(_id.split('.')[0])

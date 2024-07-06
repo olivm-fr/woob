@@ -2,46 +2,46 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import time
 import os
 import base64
 from datetime import date
+from decimal import Decimal
 from functools import wraps
 from hashlib import sha256
+from urllib.parse import urlparse, parse_qsl
 
-from weboob.browser.browsers import TwoFactorBrowser, URL, need_login
-from weboob.browser.exceptions import ClientError, ServerError
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion
-from weboob.capabilities.bank import Account, Transaction, AccountNotFound
-from weboob.capabilities.base import find_object, empty
-from weboob.tools.capabilities.bank.transactions import sorted_transactions
-from weboob.tools.compat import urlparse, parse_qsl
-from weboob.tools.value import Value
-from weboob.tools.json import json
+from woob.browser.browsers import URL, need_login
+from woob.browser.mfa import TwoFactorBrowser
+from woob.browser.exceptions import ClientError, ServerError, HTTPNotFound
+from woob.exceptions import AuthMethodNotImplemented, BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion
+from woob.capabilities.bank import Account, Transaction, AccountNotFound
+from woob.capabilities.base import find_object, empty
+from woob.tools.capabilities.bank.transactions import sorted_transactions
+from woob.tools.value import Value
+from woob.tools.json import json
 
 from .pages import (
     LogoutPage, AccountsPage, HistoryPage, LifeinsurancePage, MarketPage,
     AdvisorPage, LoginPage, ProfilePage, RedirectInsurancePage, SpacesPage,
-    ChangeSpacePage, ConsentPage,
+    ChangeSpacePage, AccessTokenPage, ConsentPage, TriggerSMSPage,
 )
 from .transfer_pages import TransferInfoPage, RecipientsListPage, TransferPage, AllowedRecipientsPage
 
@@ -72,7 +72,7 @@ def retry(exc_check, tries=4):
                     browser.logger.info('%s raised, retrying', exc)
                     continue
 
-                if not hasattr(ret, 'next'):
+                if not hasattr(ret, 'next') and not hasattr(ret, '__next__'):
                     return ret  # simple value, no need to retry on items
                 return iter_retry(cb, browser, value=ret, remaining=i, exc_check=exc_check, logger=browser.logger)
 
@@ -82,7 +82,7 @@ def retry(exc_check, tries=4):
     return decorator
 
 
-class CmsoParBrowser(TwoFactorBrowser):
+class CmsoLoginBrowser(TwoFactorBrowser):
     __states__ = ('login_session_id', 'login_verifier', )
     STATE_DURATION = 5  # SMS validity
     headers = None
@@ -102,12 +102,226 @@ class CmsoParBrowser(TwoFactorBrowser):
         LogoutPage
     )
 
-    spaces = URL(r'/domiapi/oauth/json/accesAbonnement', SpacesPage)
-    change_space = URL(r'/securityapi/changeSpace', ChangeSpacePage)
-    consent = URL(r'/consentapi/tpp/consents', ConsentPage)
+    json_headers = {'Content-Type': 'application/json'}
 
+    authorization_uri = URL(r'/oauth/authorize')
+    authorization_codegen_uri = URL(r'/oauth/authorization-code')
+    trigger_sms = URL(r'/securityapi/otp/generate', TriggerSMSPage)
+    redirect_uri = 'https://mon.cmso.com/auth/checkuser'
+    error_uri = 'https://mon.cmso.com/auth/errorauthn'
+    client_uri = 'com.arkea.cmso.siteaccessible'
+
+    spaces = URL(r'/domiapi/oauth/json/accesAbonnement', SpacesPage)
+    consent = URL(r'/consentapi/tpp/consents', ConsentPage)
+    change_space = URL(r'/securityapi/changeSpace', ChangeSpacePage)
+    access_token = URL(r'/oauth/token', AccessTokenPage)
+
+    # Values needed for login which are specific to each Arkea child.
+    name = 'cmso'
+    arkea = '03'
+    arkea_si = '003'
+    arkea_client_id = 'RGY7rjEcGXkHe3NufA93HTUDkjnMUqrm'
+    space = 'PART'
+
+    # Need for redirect_uri
+    original_site = 'https://mon.cmso.com'
+
+    def __init__(self, config, *args, **kwargs):
+        origin = kwargs.pop('origin', None)
+        self.website = kwargs.pop('website', None)
+        super(CmsoLoginBrowser, self).__init__(config, *args, **kwargs)
+
+        if origin:
+            self.session.headers['origin'] = origin
+
+        self.config = config
+
+        self.accounts_list = []
+        self.login_session_id = None
+        self.login_verifier = None
+        self.login_challenge = None
+
+        self.AUTHENTICATION_METHODS = {
+            'code': self.handle_sms,
+        }
+
+    def code_challenge(self, verifier):
+        digest = sha256(verifier.encode('utf8')).digest()
+        return base64.b64encode(digest).decode('ascii')
+
+    def code_verifier(self):
+        return base64.b64encode(os.urandom(128)).decode('ascii')
+
+    def get_pkce_codes(self):
+        verifier = self.code_verifier()
+        return verifier, self.code_challenge(verifier)
+
+    def build_authorization_uri_params(self):
+        return {
+            'redirect_uri': self.redirect_uri,
+            'client_id': self.arkea_client_id,
+            'response_type': 'code',
+            'error_uri': self.error_uri,
+            'code_challenge_method': 'S256',
+            'code_challenge': self.login_challenge,
+        }
+
+    def prepare_browser_question(self, response):
+        for method in response['sca_medias']:
+            if method.get('type_media') != 'SMS_MFA2':
+                continue
+            label = 'Saisissez le code reçu par SMS'
+            phone = method.get('numero_masque')
+            if phone:
+                label += f' envoyé au {phone}'
+            numero_crypte = method['numero_crypte']
+            data = {
+                'typeMedia': 'SMS_MFA2',
+                'valueMedia': numero_crypte,
+            }
+            token = response.get('sca_tmp_token')
+            headers = {'Authorization': f'Bearer {token}'}
+            self.trigger_sms.go(json=data, headers=headers)
+            raise BrowserQuestion(Value('code', label=label))
+
+        self.logger.warning(f'Available SCA methods: {response["sca_medias"]}')
+        raise AuthMethodNotImplemented()
+
+    def init_login(self):
+        self.location(self.original_site)
+        self.login_verifier, self.login_challenge = self.get_pkce_codes()
+        params = self.build_authorization_uri_params()
+        response = self.authorization_uri.go(params=params)
+
+        # get session_id in param location url
+        location_params = dict(parse_qsl(urlparse(self.url).fragment))
+        self.login_session_id = location_params['session_id']
+
+        origin = self.session.headers.get('origin', None)
+        self.set_profile(self.PROFILE)  # reset headers but don't clear them
+        if origin:
+            # keep origin if present
+            self.session.headers['origin'] = origin
+
+        # authorization-code generation
+        data = self.get_authcode_data()
+        headers = self.get_tpp_headers(data)
+
+        try:
+            response = self.authorization_codegen_uri.go(
+                data=data,
+                params={'session_id': self.login_session_id},
+                headers=headers
+            )
+        except ClientError as e:
+            if e.response.status_code == 403:
+                response = e.response.json()
+                if response.get('error_code') == 'SCA_REQUIRED':
+                    self.check_interactive()
+                    self.prepare_browser_question(response)
+            raise
+
+        location_params = dict(parse_qsl(urlparse(response.headers['Location']).fragment))
+
+        if location_params.get('error'):
+            if location_params.get('error_description') == 'authentication-failed':
+                raise BrowserIncorrectPassword()
+            # we encounter this case when an error comes from the website
+            elif location_params['error'] == 'server_error':
+                raise BrowserUnavailable()
+
+        # authentication token generation
+        data = self.get_tokengen_data(location_params['code'])
+        self.access_token.go(json=data)
+        self.update_authentication_headers()
+
+        self.login.go(json={'espaceApplication': self.space})
+        self.setup_space_after_login()
+
+    def handle_sms(self):
+        data = {
+            'access_code': self.username,
+            'password': self.code,
+            'authenticationMethod': 'SMS_MFA2',
+        }
+        headers = self.get_tpp_headers(data)
+        self.authorization_codegen_uri.go(
+            params={'session_id': self.login_session_id},
+            data=data,
+            headers=headers
+        )
+        location_params = dict(parse_qsl(urlparse(self.response.headers['Location']).fragment))
+
+        if location_params.get('error'):
+            if location_params.get('error_description') == 'authentication-failed':
+                raise BrowserIncorrectPassword()
+            # we encounter this case when an error comes from the website
+            elif location_params['error'] == 'server_error':
+                raise BrowserUnavailable()
+
+        data = {
+            'code': location_params['code'],
+            'grant_type': 'authorization_code',
+            'client_id': self.arkea_client_id,
+            'redirect_uri': self.redirect_uri,
+            'code_verifier': self.login_verifier,
+        }
+
+        self.access_token.go(json=data)
+        self.update_authentication_headers()
+        self.login.go(json={'espaceApplication': self.space})
+        self.setup_space_after_login()
+
+    def setup_space_after_login(self):
+        self.spaces.go(json={'includePart': True})
+        part_space = self.page.get_part_space()
+        if part_space is None:
+            # If there is no PAR space, then the PAR browser returns no account.
+            # Also, if part_space is None, `self.change_space.go()` will crash
+            # because `Object numContractDestination must not be null`
+            # So we just finish the login and return
+            self.accounts_list = None
+            return
+        self.change_space.go(json={
+            'clientIdSource': self.arkea_client_id,
+            'espaceDestination': self.space,
+            'fromMobile': False,
+            'numContractDestination': part_space,
+        })
+        self.update_authentication_headers()
+
+    def get_authcode_data(self):
+        return {
+            'access_code': self.username,
+            'password': self.password,
+            'space': self.space,
+        }
+
+    def get_tokengen_data(self, code):
+        return {
+            'client_id': self.arkea_client_id,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'code_verifier': self.login_verifier,
+            'redirect_uri': self.redirect_uri,
+        }
+
+    def get_tpp_headers(self, data=''):
+        # This method can be overload by a TPP
+        # to add specific headers and be recognize by the bank
+        return {}
+
+    def update_authentication_headers(self):
+        token = self.page.get_access_token()
+        self.session.headers['Authorization'] = "Bearer %s" % token
+        self.session.headers['X-ARKEA-EFS'] = self.arkea
+        self.session.headers['X-Csrf-Token'] = token
+        self.session.headers['X-REFERER-TOKEN'] = 'RWDPART'
+
+
+class CmsoParBrowser(CmsoLoginBrowser):
     accounts = URL(r'/domiapi/oauth/json/accounts/synthese(?P<type>.*)', AccountsPage)
-    history = URL(r'/domiapi/oauth/json/accounts/(?P<page>.*)', HistoryPage)
+    history = URL(r'/domiapi/oauth/json/accounts/(?!recupererRib)(?P<page>.*)', HistoryPage)
     loans = URL(r'/creditapi/rest/oauth/v1/synthese', AccountsPage)
     redirect_insurance = URL(
         r'assuranceapi/v1/oauth/sso/suravenir/SYNTHESE_ASSURANCEVIE',
@@ -139,175 +353,16 @@ class CmsoParBrowser(TwoFactorBrowser):
 
     profile = URL(r'/personapi/api/v2/clients/me/infos', ProfilePage)
 
-    json_headers = {'Content-Type': 'application/json'}
-
-    authorization_uri = URL(r'/oauth/authorize')
-    access_token_uri = URL(r'/oauth/token')
-    authorization_codegen_uri = URL(r'/oauth/authorization-code')
-    redirect_uri = 'https://mon.cmso.com/auth/checkuser'
-    error_uri = 'https://mon.cmso.com/auth/errorauthn'
-    client_uri = 'com.arkea.cmso.siteaccessible'
-
-    # Values needed for login which are specific for each arkea child
-    name = 'cmso'
-    arkea = '03'
-    arkea_si = '003'
-    arkea_client_id = 'RGY7rjEcGXkHe3NufA93HTUDkjnMUqrm'
-
-    # Need for redirect_uri
-    original_site = 'https://mon.cmso.com'
-
-    def __init__(self, website, config, *args, **kwargs):
-        super(CmsoParBrowser, self).__init__(config, *args, **kwargs)
-
-        self.config = config
-
-        self.website = website
-        self.accounts_list = []
-        self.login_session_id = None
-        self.login_verifier = None
-        self.login_challenge = None
-
-        self.AUTHENTICATION_METHODS = {
-            'code': self.handle_sms,
-        }
-
-    def code_challenge(self, verifier):
-        digest = sha256(verifier.encode('utf8')).digest()
-        return base64.b64encode(digest).decode('ascii')
-
-    def code_verifier(self):
-        return base64.b64encode(os.urandom(128)).decode('ascii')
-
-    def get_pkce_codes(self):
-        verifier = self.code_verifier()
-        return verifier, self.code_challenge(verifier)
-
-    def init_login(self):
-        self.location(self.original_site)
-        self.login_verifier, self.login_challenge = self.get_pkce_codes()
-        params = {
-            'redirect_uri': self.redirect_uri,
-            'client_id': self.arkea_client_id,
-            'response_type': 'code',
-            'error_uri': self.error_uri,
-            'code_challenge_method': 'S256',
-            'code_challenge': self.login_challenge,
-        }
-        response = self.authorization_uri.go(params=params)
-
-        # get session_id in param location url
-        location_params = dict(parse_qsl(urlparse(self.url).fragment))
-        self.login_session_id = location_params['session_id']
-
-        self.set_profile(self.PROFILE)  # reset headers but don't clear them
-
-        # authorization-code generation
-        data = self.get_authcode_data()
-        headers = self.get_tpp_headers(data)
-
-        try:
-            response = self.authorization_codegen_uri.go(
-                data=data,
-                params={'session_id': self.login_session_id},
-                headers=headers
-            )
-        except ClientError as e:
-            if e.response.status_code == 403:
-                response = e.response.json()
-
-                if response.get('error_code') == 'SCA_REQUIRED':
-                    label = 'Saisissez le code reçu par SMS'
-                    phone = response['sca_medias'][0].get('numero_masque')
-                    if phone:
-                        label += ' envoyé au %s' % phone
-                    raise BrowserQuestion(Value('code', label=label))
-            raise
-
-        location_params = dict(parse_qsl(urlparse(response.headers['Location']).fragment))
-
-        if location_params.get('error'):
-            if location_params.get('error_description') == 'authentication-failed':
-                raise BrowserIncorrectPassword()
-            # we encounter this case when an error comes from the website
-            elif location_params['error'] == 'server_error':
-                raise BrowserUnavailable()
-
-        # authentication token generation
-        data = self.get_tokengen_data(location_params['code'])
-        response = self.access_token_uri.go(json=data)
-        self.update_authentication_headers(response.json())
-
-        self.login.go(json={'espaceApplication': 'PART'})
-
-    def handle_sms(self):
-        data = {
-            'access_code': self.username,
-            'password': self.code,
-            'authenticationMethod': 'SMS_MFA2',
-        }
-        headers = self.get_tpp_headers(data)
-        self.authorization_codegen_uri.go(
-            params={'session_id': self.login_session_id},
-            data=data,
-            headers=headers
-        )
-        location_params = dict(parse_qsl(urlparse(self.response.headers['Location']).fragment))
-
-        if location_params.get('error'):
-            if location_params.get('error_description') == 'authentication-failed':
-                raise BrowserIncorrectPassword()
-            # we encounter this case when an error comes from the website
-            elif location_params['error'] == 'server_error':
-                raise BrowserUnavailable()
-
-        data = {
-            'code': location_params['code'],
-            'grant_type': 'authorization_code',
-            'client_id': self.arkea_client_id,
-            'redirect_uri': self.redirect_uri,
-            'code_verifier': self.login_verifier,
-        }
-
-        access_token = self.access_token_uri.go(json=data).json()
-        self.session.headers['Authorization'] = 'Bearer %s' % access_token['access_token']
-        self.update_authentication_headers(access_token)
-        self.login.go(json={'espaceApplication': 'PART'})
-
-    def get_authcode_data(self):
-        return {
-            'access_code': self.username,
-            'password': self.password,
-            'space': 'PART',
-        }
-
-    def get_tokengen_data(self, code):
-        return {
-            'client_id': self.arkea_client_id,
-            'code': code,
-            'grant_type': 'authorization_code',
-            'code_verifier': self.login_verifier,
-            'redirect_uri': self.redirect_uri,
-        }
-
-    def get_tpp_headers(self, data=''):
-        # This method can be overload by a TPP
-        # to add specific headers and be recognize by the bank
-        return {}
-
-    def update_authentication_headers(self, params):
-        self.session.headers['Authorization'] = "Bearer %s" % params['access_token']
-        self.session.headers['X-ARKEA-EFS'] = self.arkea
-        self.session.headers['X-Csrf-Token'] = params['access_token']
-        self.session.headers['X-REFERER-TOKEN'] = 'RWDPART'
-
     def get_account(self, _id):
         return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
 
     @retry((ClientError, ServerError))
     @need_login
     def iter_accounts(self):
-        if self.accounts_list:
+        if self.accounts_list is None:
+            # No PAR space available
+            return []
+        elif self.accounts_list:
             return self.accounts_list
 
         seen = {}
@@ -319,19 +374,6 @@ class CmsoParBrowser(TwoFactorBrowser):
         numbers = self.page.get_numbers()
         # to know if account can do transfer
         accounts_eligibilite_debit = self.page.get_eligibilite_debit()
-
-        self.spaces.go(json={'includePart': True})
-        part_space = self.page.get_part_space()
-        if part_space is None:
-            # no par account for this connection
-            return []
-        self.change_space.go(json={
-            'clientIdSource': self.arkea_client_id,
-            'espaceDestination': 'PART',
-            'fromMobile': False,
-            'numContractDestination': part_space,
-        })
-        self.session.headers['Authorization'] = 'Bearer %s' % self.page.get_access_token()
 
         # First get all checking accounts...
         # We might have some savings accounts here for special cases such as mandated accounts
@@ -360,47 +402,54 @@ class CmsoParBrowser(TwoFactorBrowser):
                     self.logger.warning('replace %s because it seems to be a duplicate of %s', seen[a._index], a)
                 self.accounts_list.append(a)
 
-        # Some saving accounts are not on the same page
-        # In this case we have no _index, we have the details url directly
-        url = self.redirect_insurance.go().get_url()
-        self.location(url)
-        for a in self.page.iter_accounts():
-            # Accounts can be on both pages. Info are slightly out-of-sync on both sites (balances are different).
-            # We keep this one because it's more coherent with invests data.
-            if a.id in seen_savings:
-                acc = seen_savings[a.id]
-                # We keep the _index because it's not available on the other website
-                a._index = acc._index
-                self.accounts_list.remove(acc)
-                self.logger.warning('replace %s because it seems to be a duplicate of %s', seen_savings[a.id], a)
-            url = a.url or self.redirect_insurance.go(accid=a._index).get_url()
+        try:
+            # Some saving accounts are not on the same page
+            # In this case we have no _index, we have the details url directly
+            url = self.redirect_insurance.go().get_url()
             self.location(url)
-            if self.lifeinsurance.is_here():
-                self.page.fill_account(obj=a)
-            self.accounts_list.append(a)
-
-        # Then, get loans
-        for key in self.loans.go().get_keys():
-            for a in self.page.iter_loans(key=key):
-                if a.id in seen:
-                    self.logger.warning('skipping %s because it seems to be a duplicate of %s', seen[a.id], a)
-
-                    account_found = False
-                    for account in list(self.accounts_list):
-                        # Loan id can be not unique when it also appears in json account page
-                        if a.id == account._index:
-                            account_found = True
-                            # Merge information from account to loan
-                            a.id = account.id
-                            a.currency = account.currency
-                            a.coming = account.coming
-                            a.total_amount = account._total_amount
-                            a._index = account._index
-                            self.accounts_list.remove(account)
-                            break
-                    assert account_found
-
+            for a in self.page.iter_accounts():
+                # Accounts can be on both pages. Info are slightly out-of-sync on both sites (balances are different).
+                # We keep this one because it's more coherent with invests data.
+                if a.id in seen_savings:
+                    acc = seen_savings[a.id]
+                    # We keep the _index because it's not available on the other website
+                    a._index = acc._index
+                    self.accounts_list.remove(acc)
+                    self.logger.warning('replace %s because it seems to be a duplicate of %s', seen_savings[a.id], a)
+                url = a.url or self.redirect_insurance.go(accid=a._index).get_url()
+                self.location(url)
+                if self.lifeinsurance.is_here():
+                    self.page.fill_account(obj=a)
                 self.accounts_list.append(a)
+        except HTTPNotFound:  # in case of 404
+            pass
+
+        try:
+            # Then, get loans
+            for key in self.loans.go().get_keys():
+                for a in self.page.iter_loans(key=key):
+                    if a.id in seen:
+                        self.logger.warning('skipping %s because it seems to be a duplicate of %s', seen[a.id], a)
+
+                        account_found = False
+                        for account in list(self.accounts_list):
+                            # Loan id can be not unique when it also appears in json account page
+                            if a.id == account._index:
+                                account_found = True
+                                # Merge information from account to loan
+                                a.id = account.id
+                                a.currency = account.currency
+                                a.coming = account.coming
+                                a.total_amount = account._total_amount
+                                a._index = account._index
+                                self.accounts_list.remove(account)
+                                break
+                        assert account_found
+
+                    self.accounts_list.append(a)
+        except HTTPNotFound:  # in case of 404
+            pass
+
         return self.accounts_list
 
     def _go_market_history(self, action):
@@ -409,6 +458,8 @@ class CmsoParBrowser(TwoFactorBrowser):
         except KeyError:
             raise AssertionError('unable to get url to reach to be able to go on market page')
         self.location(url_before_market_history)
+        # netloc may include 'www.', we want to skip it. eg. 'www.cmso.fr'
+        self.website = urlparse(self.url).netloc.replace('www.', '')
         return self.market.go(website=self.website, action=action)
 
     def _return_from_market(self):
@@ -425,7 +476,7 @@ class CmsoParBrowser(TwoFactorBrowser):
             return
 
         if account.type == Account.TYPE_LIFE_INSURANCE:
-            if not account.url and not hasattr(account, '_index'):
+            if not account.url and not account._index:
                 # No url and no _index, we can't get history
                 return
             url = account.url or self.redirect_insurance.go(accid=account._index).get_url()
@@ -437,7 +488,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         elif account.type in (Account.TYPE_PEA, Account.TYPE_MARKET):
             try:
                 self._go_market_history('historiquePortefeuille')
-                if not self.page.go_account(account.id):
+                if not self.page.go_account(account):
                     return
 
                 if not self.page.go_account_full():
@@ -458,7 +509,25 @@ class CmsoParBrowser(TwoFactorBrowser):
             finally:
                 self._return_from_market()
 
+        if not account._index:
+            # no _index attribute, can't continue
+            return
+
         self.history.go(json={"index": account._index}, page="pendingListOperations")
+        exception_code = self.page.get_exception_code()
+
+        if exception_code == 300:
+            # When this request returns an exception code, the request to get
+            # the details will return a ServerError(500) with message "account ID not found"
+            # Try a workaround of loading the account list page.
+            # It seems to help the server "find" the account.
+
+            self.accounts.go(json={'typeListeCompte': 'COMPTE_SOLDE_COMPTES_CHEQUES'}, type='comptes')
+
+            self.history.go(json={"index": account._index}, page="pendingListOperations")
+        elif exception_code is not None:
+            raise AssertionError("Unknown exception_code: %s" % exception_code)
+
         has_deferred_cards = self.page.has_deferred_cards()
 
         # 1.fetch the last 6 weeks transactions but keep only the current month ones
@@ -511,7 +580,7 @@ class CmsoParBrowser(TwoFactorBrowser):
             return []
 
         comings = []
-        if not hasattr(account, '_index'):
+        if not account._index:
             # No _index, we can't get coming
             return []
         self.history.go(json={"index": account._index}, page="pendingListOperations")
@@ -534,7 +603,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         account = self.get_account(account.id)
 
         if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP):
-            if not account.url and not hasattr(account, '_index'):
+            if not account.url and not account._index:
                 # No url and no _index, we can't get investments
                 return []
             url = account.url or self.redirect_insurance.go(accid=account._index).get_url()
@@ -545,7 +614,7 @@ class CmsoParBrowser(TwoFactorBrowser):
         elif account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
             try:
                 self._go_market_history('situationPortefeuille')
-                if self.page.go_account(account.id):
+                if self.page.go_account(account):
                     return self.page.iter_investment()
                 return []
             finally:
@@ -560,7 +629,7 @@ class CmsoParBrowser(TwoFactorBrowser):
 
         try:
             self._go_market_history('carnetOrdre')
-            if self.page.go_account(account.id):
+            if self.page.go_account(account):
                 orders_list_url = self.url
                 error_message = self.page.get_error_message()
                 if error_message:
@@ -662,13 +731,7 @@ class CmsoParBrowser(TwoFactorBrowser):
                 break
 
         transfer_data = {
-            'amount': {
-                'value': amount,
-                'currencyCode': account.currency,
-                'paymentCurrencyCode': account.currency,
-                'exchangeValue': 1,
-                'paymentValue': amount,
-            },
+            'amount': self._init_transfer_amount_data(amount, account),
             'creditAccount': {
                 'bic': recipient._bic,
                 'cipheredBban': None,
@@ -714,6 +777,26 @@ class CmsoParBrowser(TwoFactorBrowser):
         # transfer_data is used in execute_transfer
         transfer._transfer_data = transfer_data
         return transfer
+
+    @staticmethod
+    def _init_transfer_amount_data(amount, account):
+        """
+        Decimal instances should be converted to a format serializable to
+        json using the built-in Python json module.
+
+        amount.value should be a string similar to "10.00"
+        amount.paymentValue should be a float
+        amount.exchangeValue should be equal to amount.paymentValue
+        """
+        amount_string = str(amount.quantize(Decimal('0.00')))
+        amount_float = float(amount)
+        return {
+            'value': amount_string,
+            'currencyCode': account.currency,
+            'paymentCurrencyCode': account.currency,
+            'exchangeValue': amount_float,
+            'paymentValue': amount_float,
+        }
 
     @need_login
     def execute_transfer(self, transfer, **params):

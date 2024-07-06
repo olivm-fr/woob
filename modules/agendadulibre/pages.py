@@ -2,31 +2,31 @@
 
 # Copyright(C) 2014      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 import re
 
 from datetime import time, datetime, date
 
-from weboob.browser.pages import HTMLPage, pagination
-from weboob.browser.elements import ItemElement, ListElement, method
-from weboob.browser.filters.standard import Regexp, CleanText, DateTime, Env, Format, BrowserURL
-from weboob.browser.filters.html import Link, XPath, CleanHTML
-from weboob.tools.date import parse_french_date
+from woob.browser.pages import HTMLPage, pagination
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import Regexp, CleanText, DateTime, Env, Format, BrowserURL
+from woob.browser.filters.html import Link, XPath, CleanHTML
+from woob.tools.date import parse_french_date
 
 from .calendar import AgendaDuLibreCalendarEvent
 
@@ -52,7 +52,8 @@ class EventPage(HTMLPage):
                                        '\w* \w* (\d?\d \w* \d{4}) \w* (\d{2}h\d{2}).*',
                                        '\\1 \\2',
                                        flags=re.UNICODE),
-                                parse_func=parse_french_date)(self)
+                                parse_func=parse_french_date,
+                                strict=False)(self)
 
         def obj_end_date(self):
             m = re.findall(r'\w* \w* \d?\d \w* \d{4} \w* \d{2}h\d{2}', CleanText('(//p)[1]')(self), re.UNICODE)
@@ -62,14 +63,16 @@ class EventPage(HTMLPage):
                                            r'\w* \w* (\d?\d \w* \d{4}) \w* \d{2}h\d{2} \w* (\d{2}h\d{2})',
                                            '\\1 \\2',
                                            flags=re.UNICODE),
-                                    parse_func=parse_french_date)(self)
+                                    parse_func=parse_french_date,
+                                    strict=False)(self)
                 else:
                     return DateTime(Regexp(CleanText('(//p)[1]'),
                                            r'\w* \w* (\d?\d \w* \d{4}) \w* (\d{2}h\d{2})',
                                            '\\1 \\2',
                                            nth=-1,
                                            flags=re.UNICODE),
-                                    parse_func=parse_french_date)(self)
+                                    parse_func=parse_french_date,
+                                    strict=False)(self)
 
 
 class EventListPage(HTMLPage):
@@ -115,7 +118,8 @@ class EventListPage(HTMLPage):
                                            '\w* \w* (\d?\d \w* \d{4}) \w* (\d{2}h\d{2}).*',
                                            '\\1 \\2',
                                            flags=re.UNICODE),
-                                    parse_func=parse_french_date)(self)
+                                    parse_func=parse_french_date,
+                                    strict=False)(self)
 
             def obj_end_date(self):
                 m = re.findall(r'\w* \w* \d?\d \w* \d{4} \w* \d{2}h\d{2}', CleanText('./@title')(self), re.UNICODE)
@@ -125,14 +129,16 @@ class EventListPage(HTMLPage):
                                                r'\w* \w* (\d?\d \w* \d{4}) \w* \d{2}h\d{2} \w* (\d{2}h\d{2})',
                                                '\\1 \\2',
                                                flags=re.UNICODE),
-                                        parse_func=parse_french_date)(self)
+                                        parse_func=parse_french_date,
+                                        strict=False)(self)
                     else:
                         return DateTime(Regexp(CleanText('./@title'),
                                                r'\w* \w* (\d?\d \w* \d{4}) \w* (\d{2}h\d{2})',
                                                '\\1 \\2',
                                                nth=-1,
                                                flags=re.UNICODE),
-                                        parse_func=parse_french_date)(self)
+                                        parse_func=parse_french_date,
+                                        strict=False)(self)
 
             def validate(self, obj):
                 return (self.is_valid_event(obj, self.env['city'], self.env['categories']) and

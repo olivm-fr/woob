@@ -2,28 +2,28 @@
 
 # Copyright(C) 2015      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+from html import unescape
 import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import method, ListElement, ItemElement, SkipItem
-from weboob.capabilities.collection import Collection
-from weboob.browser.filters.standard import CleanText
-from weboob.tools.compat import html_unescape
+from woob.browser.pages import HTMLPage, LoggedPage
+from woob.browser.elements import method, ListElement, ItemElement, SkipItem
+from woob.capabilities.collection import Collection
+from woob.browser.filters.standard import CleanText
 
 
 class PageLogin(HTMLPage):
@@ -117,7 +117,7 @@ class PageSection(LoggedPage, HTMLPage):
             except IndexError:
                 thumb = None
             try:
-                title = html_unescape(html_unescape(list(self.video_title.finditer(beforetext))[-1].group(1)))
+                title = unescape(unescape(list(self.video_title.finditer(beforetext))[-1].group(1)))
             except IndexError:
                 title = u'%s - %s' % (match.group('id'), n)
 

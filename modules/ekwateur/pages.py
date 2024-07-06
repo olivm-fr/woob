@@ -1,35 +1,33 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Phyks (Lucas Verney)
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
+import re
 
-from weboob.browser.elements import (
-    ItemElement, ListElement, TableElement, method
-)
-from weboob.browser.pages import HTMLPage
-from weboob.browser.filters.standard import (
-    Date, CleanDecimal, CleanText, Currency, Env, Format, Regexp, Slugify,
-)
-from weboob.browser.filters.html import AbsoluteLink, Attr, Link, XPath, TableCell
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bill import DocumentTypes, Subscription, Bill, Document
+from woob.browser.elements import ItemElement, ListElement, TableElement, method
+from woob.browser.filters.html import AbsoluteLink, Attr, Link, TableCell, XPath
+from woob.browser.filters.standard import CleanDecimal, CleanText, Currency, Date, Env, Format, Regexp, Slugify
+from woob.browser.pages import HTMLPage
+from woob.capabilities.address import PostalAddress
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bill import Bill, Document, DocumentTypes, Subscription
+from woob.capabilities.profile import Person
+from woob.tools.date import parse_french_date
 
 
 class LoginPage(HTMLPage):
@@ -126,6 +124,8 @@ class DocumentsPage(EkwateurPage):
         col_date = 'Date'
         col_type = 'Type'
 
+        ignore_duplicate = True
+
         class item(ItemElement):
             klass = Document
 
@@ -162,3 +162,58 @@ class DocumentsPage(EkwateurPage):
             if 'CGV' in item.text:
                 CGV.url = item.attrib['href']
         yield CGV
+
+
+class ProfilePage(EkwateurPage):
+    @method
+    class get_profile(ItemElement):
+        klass = Person
+
+        obj_name = Env('name', default=NotAvailable)
+        obj_gender = Env('gender', default=NotAvailable)
+        obj_company_name = CleanText('//p[contains(text(),"Raison sociale")]/b', default=NotAvailable)
+        obj_birth_date = Date(
+            CleanText(
+                '//span[div/span/text()="Contact de facturation"]/following-sibling::p[contains(text(),"Date de naissance")]/b',
+            ),
+            parse_func=parse_french_date
+        )
+
+        obj_phone = CleanText(
+            '//span[div/span/text()="Contact de facturation"]/following-sibling::p[contains(text(),"Tél. port")]/b',
+            default=NotAvailable
+        )
+        obj_email = CleanText('//p[contains(text(),"email de connexion")]/b', default=NotAvailable)
+
+        def parse(self, obj):
+            full_name = CleanText(
+                '//span[div/span/text()="Contact de facturation"]/following-sibling::p[1]/b[1]'
+            )(self)
+            m = re.search(r'(M\.|Mme) ([\w \-]+)', full_name)
+            if not m:
+                self.env['name'] = full_name
+            else:
+                gender, name = m.groups()
+                self.env['gender'] = gender
+                self.env['name'] = name
+
+        class obj_postal_address(ItemElement):
+            klass = PostalAddress
+
+            def parse(self, obj):
+                full_address = CleanText(
+                    '//span[div/span/text()="Adresse de facturation"]/following-sibling::p[2]'
+                )(self)
+                self.env['full_address'] = full_address
+                m = re.search(r'(\d{1,4}.*) (\d{5}) (.*)', full_address)
+                if m:
+                    street, postal_code, city = m.groups()
+                    self.env['street'] = street
+                    self.env['postal_code'] = postal_code
+                    self.env['city'] = city
+
+            obj_full_address = Env('full_address', default=NotAvailable)
+            obj_street = Env('street', default=NotAvailable)
+            obj_postal_code = Env('postal_code', default=NotAvailable)
+            obj_city = Env('city', default=NotAvailable)
+            obj_country = Env('country', default=NotAvailable)

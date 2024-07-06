@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016     Baptiste Delpey
 #
 # This file is part of a woob module.
@@ -26,28 +24,28 @@ from urllib.parse import quote_plus
 
 import requests
 
-from weboob.browser.pages import JsonPage, pagination
-from weboob.browser.elements import ItemElement, method, DictElement
-from weboob.browser.filters.standard import (
+from woob.browser.pages import JsonPage, pagination
+from woob.browser.elements import ItemElement, method, DictElement
+from woob.browser.filters.standard import (
     CleanDecimal, CleanText, Coalesce, Date, Eval, Format, BrowserURL, Env,
     Field, MapIn, Regexp, Currency as CurrencyFilter,
 )
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bank.base import Loan
-from weboob.capabilities.base import Currency, empty
-from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account
-from weboob.capabilities.bank.wealth import Investment
-from weboob.capabilities.bill import Document, Subscription, DocumentTypes
-from weboob.capabilities.profile import Person
-from weboob.exceptions import (
-    ActionNeeded, AuthMethodNotImplemented,
-    BrowserPasswordExpired, BrowserUnavailable, NoAccountsException,
+from woob.browser.filters.json import Dict
+from woob.capabilities.bank.base import Loan
+from woob.capabilities.base import Currency, empty
+from woob.capabilities import NotAvailable
+from woob.capabilities.bank import Account, NoAccountsException
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.bill import Document, Subscription, DocumentTypes
+from woob.capabilities.profile import Person
+from woob.exceptions import (
+    ActionNeeded, ActionType, AuthMethodNotImplemented, BrowserPasswordExpired,
+    BrowserUnavailable,
 )
-from weboob.capabilities.bank import AccountOwnerType
-from weboob.tools.capabilities.bank.iban import is_iban_valid
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.capabilities.bank.investments import is_isin_valid
+from woob.capabilities.bank import AccountOwnerType
+from woob.tools.capabilities.bank.iban import is_iban_valid
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.capabilities.bank.investments import is_isin_valid
 
 from .pages import Transaction
 
@@ -98,9 +96,15 @@ class AccountsJsonPage(SGPEJsonPage):
             elif reason in ('err_is', 'err_tech'):
                 raise BrowserUnavailable()
             elif reason in ('ENCADREMENT_KYC_PREAVIS', 'ENCADREMENT_KYC_POST_PREAVIS'):
-                raise ActionNeeded("Votre banque requiert des informations complémentaires pour mettre à jour votre dossier client.")
+                raise ActionNeeded(
+                    locale="fr-FR", message="Votre banque requiert des informations complémentaires pour mettre à jour votre dossier client.",
+                    action_type=ActionType.FILL_KYC,
+                )
             elif reason in ('INSCRIP_OBL', 'FIABILISATION_COORDONNEES'):
-                raise ActionNeeded("Veuillez vous rendre sur le site de votre banque pour completer vos informations.")
+                raise ActionNeeded(
+                    locale="fr-FR", message="Veuillez vous rendre sur le site de votre banque pour completer vos informations.",
+                    action_type=ActionType.FILL_KYC,
+                )
             else:
                 # the BrowserUnavailable was raised for every unknown error, and was masking the real error.
                 # So users and developers didn't know what kind of error it was.
@@ -594,7 +598,7 @@ class ProLoanDetailsPage(SGPEJsonPage):
     class fill_loan(ItemElement):
         klass = Loan
 
-        reroot_xpath = 'donnees'
+        item_xpath = 'donnees'
 
         obj_balance = CleanDecimal.French(Dict('montantRestantDu'), sign='-')
         obj_currency = CurrencyFilter(Dict('montantRestantDu'))

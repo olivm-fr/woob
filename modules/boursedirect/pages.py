@@ -1,75 +1,94 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2020  Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.wealth import (
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.bank.wealth import (
     Investment, MarketOrder, MarketOrderDirection,
     MarketOrderType, MarketOrderPayment,
 )
-from weboob.exceptions import (
-    BrowserIncorrectPassword, BrowserPasswordExpired, ActionNeeded,
-    BrowserHTTPNotFound, BrowserUnavailable,
+from woob.exceptions import BrowserHTTPNotFound
+from woob.browser.pages import HTMLPage, JsonPage, RawPage
+from woob.browser.filters.html import Attr, TableCell, ReplaceEntities
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
+    Base, CleanDecimal, CleanText, Coalesce, Currency, Date,
+    Eval, Field, Format, Lower, MapIn, QueryValue, Regexp,
 )
-from weboob.browser.pages import HTMLPage, RawPage
-from weboob.browser.filters.html import Attr, TableCell, ReplaceEntities
-from weboob.browser.filters.standard import (
-    CleanText, Currency, Regexp, Field, CleanDecimal,
-    Date, Eval, Format, MapIn, Base, Lower, QueryValue,
-)
-from weboob.browser.filters.html import Link
-from weboob.browser.elements import method, ListElement, ItemElement, TableElement
-from weboob.tools.capabilities.bank.investments import (
+from woob.browser.filters.html import Link
+from woob.browser.elements import method, ListElement, ItemElement, TableElement
+from woob.tools.capabilities.bank.investments import (
     is_isin_valid, create_french_liquidity, IsinCode, IsinType,
 )
 
 
-class LoginPage(HTMLPage):
-    def do_login(self, username, password):
-        form = self.get_form(id='authentication')
-        form['bd_auth_login_type[login]'] = username
-        form['bd_auth_login_type[password]'] = password
-        form.submit()
+class LoginPage(JsonPage):
+    def get_error_401_message(self):
+        # Detailed error message that allows us to filter out the error
+        # should be in 'fields/errors/1' but this key sometimes does not
+        # exist and value is in 0 instead.
+        return Coalesce(
+            Dict('fields/errors/1', default=''),
+            Dict('fields/errors/0', default=''),
+            default=''
+        )(self.doc)
 
-    def check_error(self):
-        msg = CleanText('//div[@class="auth-alert-message"]')(self.doc)
+    def get_error_403_message(self):
+        return Dict('error')(self.doc)
 
-        if "votre mot de passe doit être réinitialisé" in msg:
-            raise BrowserPasswordExpired()
 
-        if "Couple login mot de passe incorrect" in msg:
-            raise BrowserIncorrectPassword()
+class TwofaStatePage(JsonPage):
+    def is_device_trusted(self):
+        return Dict('device_state')(self.doc) == 'trusted'
 
-        if "Erreur d'authentification" in msg:
-            raise BrowserUnavailable(msg)
+    def is_totp_twofa(self):
+        # Available twfo methods are TOTP or SMS OTP.
+        # Both can be active on one account. If that's
+        # the case, the website default behavior seems
+        # to be using TOTP (but the user can always
+        # click on "changer de méthode"). We follow
+        # the same rule. Plus, chosing TOTP first exempts
+        # us from using the request to generate and send
+        # the OTP, unlike the SMS method.
+        for twofa in self.doc['systems']:
+            if twofa['enabled'] is True and twofa['type'] == 'totp':
+                return True
 
-        if "votre compte a été bloqué" in msg:
-            raise ActionNeeded(msg)
+    def get_mobile_number(self):
+        for twofa in self.doc['systems']:
+            if twofa['type'] == 'sms':
+                return twofa['mobile']
 
-        if msg:
-            raise AssertionError('There seems to be an unhandled error message: %s' % msg)
+
+class ValidateTOTPPage(JsonPage):
+    def get_error_message(self):
+        return Dict('error')(self.doc)
+
+
+class SendOTPSMSPage(JsonPage):
+    pass
+
+
+class ValidateOTPSMSPage(ValidateTOTPPage):
+    pass
 
 
 class PasswordRenewalPage(HTMLPage):
@@ -81,13 +100,39 @@ class BasePage(HTMLPage):
     @property
     def logged(self):
         return (
-            '''function setTop(){top.location="/fr/actualites"}''' not in self.text
+            'function setTop(){top.location="/fr/actualites"}' not in self.text
             or CleanText('//body')(self.doc)
         )
 
+    def detect_encoding(self):
+        """
+        We need to ignore the charset in the HTML document itself,
+        as it is lying. And instead, just trust the response content type encoding
+        """
+        encoding = self.encoding
+
+        if encoding == u'iso-8859-1' or not encoding:
+            encoding = u'windows-1252'
+
+        return encoding
+
 
 class HomePage(BasePage):
-    pass
+    @property
+    def logged(self):
+        """Check that the content of the page is related to a "Client" and not to a "Visitor"
+
+        Sometimes, the login fails but we are still redirected to the "actualite" home page.
+        If the user is properly connected, there will be the client menu on the page.
+        So, we can detect if we are logged in based on the existence of the log out link.
+        """
+
+        if not super(HomePage, self).logged:
+            return False
+
+        if not self.doc.xpath('//a[@href="/fr/deconnexion"][has-class("btn-logout")]'):
+            return False
+        return True
 
 
 class AccountsPage(BasePage):
@@ -115,7 +160,7 @@ class AccountsPage(BasePage):
 
     @method
     class fill_account(ItemElement):
-        obj_balance = CleanDecimal.French('//table[contains(@class,"compteInventaire")]//tr[td[b[text()="TOTAL"]]]/td[2]')
+        obj_balance = CleanDecimal.French('//b[text()="TOTAL"]/ancestor::*[position()=1]/following-sibling::td[1]')
 
 
 class InvestPage(RawPage):
@@ -166,13 +211,36 @@ class InvestPage(RawPage):
 
             inv.quantity = CleanDecimal.French().filter(info[2])
 
-            inv.original_currency = Currency().filter(info[4])
+            # we need to check if the investment's currency is GBX
+            # GBX is not part of the ISO4217, to handle it, we need to hardcode it
+            # first, we check there is a currency string after the unitvalue
+            unitvalue_currency = info[4].split()
+            if len(unitvalue_currency) > 1:
+                # we retrieve the currency string
+                currency = unitvalue_currency[1]
+                # we check if the currency notation match the Penny Sterling(GBX)
+                # example : 1234,5 p
+                if currency == 'p':
+                    inv.original_currency = 'GBP'
+                # if not, we can use the regular Currency filter
+                else:
+                    inv.original_currency = Currency().filter(info[4])
+
             # info[4] = '123,45 &euro;' for investments made in euro, so this filter will return None
             if inv.original_currency:
-                inv.original_unitvalue = CleanDecimal.French().filter(info[4])
+                # if the currency string is Penny Sterling
+                # we need to adjust the unitvalue to convert it to GBP
+                if currency == 'p':
+                    inv.original_unitvalue = CleanDecimal.French().filter(info[4]) / 100
+                else:
+                    inv.original_unitvalue = CleanDecimal.French().filter(info[4])
             else:
-                # info[4] may be empty so we must handle the default value
-                inv.unitvalue = CleanDecimal.French(default=NotAvailable).filter(info[4])
+                # if the unitvalue is a percentage we don't fetch it
+                if '%' in info[4]:
+                    inv.unitvalue = NotAvailable
+                else:
+                    # info[4] may be empty so we must handle the default value
+                    inv.unitvalue = CleanDecimal.French(default=NotAvailable).filter(info[4])
 
             inv.unitprice = CleanDecimal.French().filter(info[3])
             inv.diff = CleanDecimal.French().filter(info[6])
@@ -243,8 +311,6 @@ MARKET_ORDER_PAYMENTS = {
 
 
 class MarketOrdersPage(BasePage):
-    ENCODING = 'iso-8859-1'
-
     @method
     class iter_market_orders(TableElement):
         head_xpath = '//div[div[h6[text()="Ordres en carnet"]]]//table//th'
@@ -305,8 +371,6 @@ class MarketOrdersPage(BasePage):
 
 
 class MarketOrderDetailsPage(BasePage):
-    ENCODING = 'iso-8859-1'
-
     @method
     class fill_market_order(ItemElement):
         obj_date = Date(
@@ -379,112 +443,9 @@ class IsinPage(HTMLPage):
             CleanText('//div[@class="instrument-isin"]/span')(self.doc)
             or Regexp(
                 CleanText('//div[contains(@class, "visible-lg")]//a[contains(@href, "?isin=")]/@href'),
-                r'isin=([^&]+)'
+                r'isin=([^&]*)'
             )(self.doc)
         )
-
-
-class LifeInsurancePage(BasePage):
-    def has_account(self):
-        message = CleanText('//fieldset[legend[text()="Message"]]')(self.doc)
-        if 'Vous n´avez pas de contrat. Ce service ne vous est pas accessible.' in message:
-            return False
-        return True
-
-    @method
-    class get_account(ItemElement):
-        klass = Account
-
-        obj_balance = CleanDecimal.French('''//label[text()="Valorisation de l'encours"]/following-sibling::b[1]''')
-        obj_currency = 'EUR'
-        obj_id = obj_number = CleanText('''//label[text()="N° d'adhésion"]/following-sibling::b[1]''')
-        obj_label = Format(
-            '%s (%s)',
-            CleanText('//label[text()="Nom"]/following-sibling::b[1]'),
-            CleanText('//label[text()="Produit"]/following-sibling::b[1]'),
-        )
-        obj_type = Account.TYPE_LIFE_INSURANCE
-
-    @method
-    class iter_investment(TableElement):
-        head_xpath = '//fieldset[legend[text()="Répartition de l´encours"]]/table/tr[@class="place"]/th'
-        item_xpath = '//fieldset[legend[text()="Répartition de l´encours"]]/table/tr[@class!="place"]'
-
-        col_label = 'Nom des supports'
-        col_quantity = 'Nombre de parts'
-        col_unitprice = 'Prix Moyen d´Achat'
-        col_valuation = 'Valorisation des supports'
-        col_vdate = 'Date de valorisation'
-        col_portfolio_share = '(%)'
-
-        class item(ItemElement):
-            klass = Investment
-
-            obj_label = CleanText(TableCell('label'))
-            obj_quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)
-            obj_unitprice = CleanDecimal.French(TableCell('unitprice'), default=NotAvailable)
-            obj_valuation = CleanDecimal.French(TableCell('valuation'), default=NotAvailable)
-            obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True)
-            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal.French(TableCell('portfolio_share')))
-
-            def obj_code(self):
-                # 'href', 'alt' & 'title' attributes all contain the ISIN
-                isin = Attr(TableCell('label')(self)[0], 'title', default=NotAvailable)(self)
-                return IsinCode(default=NotAvailable).filter(isin)
-
-            obj_code_type = IsinType(Field('code'), default=NotAvailable)
-
-    @method
-    class iter_history(ListElement):
-        # Historique des versements:
-        class iter_versements(ListElement):
-            item_xpath = '//fieldset[legend[text()="Historique des versements"]]/table/tr[@class!="place"]'
-
-            class item(ItemElement):
-                klass = Transaction
-
-                obj_date = Date(CleanText('.//td[3]'), dayfirst=True)
-                obj_label = Format('Versement %s', CleanText('.//td[4]'))
-                obj_amount = CleanDecimal.French('.//td[6]')
-
-        # Historique des Rachats partiels:
-        class iter_partial_repurchase(ListElement):
-            item_xpath = '//fieldset[legend[text()="Historique des Rachats partiels"]]/table/tr[@class!="place"]'
-
-            class item(ItemElement):
-                klass = Transaction
-
-                obj_date = Date(CleanText('.//td[3]'), dayfirst=True)
-                obj_label = Format('Rachat %s', CleanText('.//td[4]'))
-                obj_amount = CleanDecimal.French('.//td[5]')
-
-        # Historique des demandes d´avance:
-        class iter_advances(ListElement):
-            item_xpath = '//fieldset[legend[text()="Historique des demandes d´avance"]]/table/tr[@class!="place"]'
-
-            class item(ItemElement):
-                klass = Transaction
-
-                obj_date = Date(CleanText('.//td[3]'), dayfirst=True)
-                obj_label = Format('Demande d\'avance %s', CleanText('.//td[4]'))
-                obj_amount = CleanDecimal.French('.//td[5]')
-
-        '''
-        - We do not fetch the "Historique des arbitrages" category
-          because the transactions have no available amount.
-        - The part below will crash if the remaining table is not empty:
-          it will be the occasion to implement the scraping of these transactions.
-        '''
-        class iter_other(ListElement):
-            def parse(self, el):
-                texts = [
-                    'Sécurisation des plus values',
-                ]
-                for text in texts:
-                    assert CleanText('.')(self.page.doc.xpath(
-                        '//fieldset[legend[text()=$text]]//div[@class="noRecord"]',
-                        text=text,
-                    )[0]), '%s is not handled' % text
 
 
 class PortfolioPage(BasePage):

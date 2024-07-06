@@ -2,25 +2,25 @@
 
 # Copyright(C) 2013      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 import re
 
-from weboob.tools.backend import Module
-from weboob.capabilities.base import find_object
-from weboob.capabilities.gauge import CapGauge, GaugeSensor, Gauge, SensorNotFound
+from woob.tools.backend import Module
+from woob.capabilities.base import find_object
+from woob.capabilities.gauge import CapGauge, GaugeSensor, Gauge, SensorNotFound
 
 from .browser import VlilleBrowser
 
@@ -32,7 +32,8 @@ class VlilleModule(Module, CapGauge):
     DESCRIPTION = u'Lille bike renting availability information'
     MAINTAINER = u'Bezleputh'
     EMAIL = 'carton_ben@yahoo.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    LICENSE = 'AGPLv3+'
 
     BROWSER = VlilleBrowser
 
@@ -66,16 +67,8 @@ class VlilleModule(Module, CapGauge):
             raise SensorNotFound()
         return sensor.lastvalue
 
-    """
-    def _get_gauge_by_id(self, id):
-        for gauge in self.browser.get_station_list():
-            if id == gauge.id:
-                return gauge
-        return None
-    """
-
     def _get_sensor_by_id(self, _id):
-        re_sensor_id = re.search(r'(\d+)-((bikes|attach|status))', _id, re.IGNORECASE)
+        re_sensor_id = re.search(r'(\d+)-(bikes|attach|status)', _id, re.IGNORECASE)
         if re_sensor_id:
             gauge = re_sensor_id.group(1)
             pattern = re_sensor_id.group(2)

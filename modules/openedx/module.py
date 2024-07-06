@@ -1,29 +1,27 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Simon Lipp
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import dateutil.parser
 
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE  # nosec
 
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
-from weboob.capabilities.messages import CapMessages, Thread, Message
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword
+from woob.capabilities.messages import CapMessages, Thread, Message
 
 from .browser import OpenEDXBrowser
 
@@ -31,16 +29,18 @@ __all__ = ['OpenEDXModule']
 
 class OpenEDXModule(Module, CapMessages):
     NAME = 'openedx'
-    DESCRIPTION = u'Discussions on OpenEDX-powered coursewares'
-    MAINTAINER = u'Simon Lipp'
+    DESCRIPTION = 'Discussions on OpenEDX-powered coursewares'
+    MAINTAINER = 'Simon Lipp'
     EMAIL = 'laiquo@hwold.net'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
-    CONFIG = BackendConfig(Value('username',                label='Username', default=''),
-                           ValueBackendPassword('password', label='Password', default=''),
-                           Value('url',                     label='Site URL', default='https://courses.edx.org/'),
-                           Value('course',                  label='Course ID', default='edX/DemoX.1/2014'))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('username',label='Username', default=''),
+        ValueBackendPassword('password', label='Password', default=''),
+        Value('url', label='Site URL', default='https://courses.edx.org/'),
+        Value('course', label='Course ID', default='edX/DemoX.1/2014'),
+    )
 
     BROWSER = OpenEDXBrowser
 
@@ -50,8 +50,11 @@ class OpenEDXModule(Module, CapMessages):
         Module.__init__(self, *args, **kwargs)
 
         def pandoc_formatter(text):
-            return Popen(["pandoc", "-f", "markdown", "-t", "html", "--mathml", "-"],
-                    stdin=PIPE, stdout=PIPE).communicate(text.encode('utf-8'))[0].decode('utf-8')
+            return Popen(  # nosec
+                ["pandoc", "-f", "markdown", "-t", "html", "--mathml", "-"],
+                stdin=PIPE,
+                stdout=PIPE
+            ).communicate(text.encode('utf-8'))[0].decode('utf-8')
 
         try:
             from markdown import Markdown
@@ -60,7 +63,11 @@ class OpenEDXModule(Module, CapMessages):
 
         self.default_flags = Message.IS_HTML
         try:
-            Popen(["pandoc", "-v"], stdout=PIPE, stderr=PIPE).communicate()
+            Popen(  # nosec
+                ["pandoc", "-v"],
+                stdout=PIPE,
+                stderr=PIPE
+            ).communicate()
             self.formatter = pandoc_formatter
         except OSError:
             if Markdown:

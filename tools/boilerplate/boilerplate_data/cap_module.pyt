@@ -1,7 +1,7 @@
 <%inherit file="layout.pyt"/>
-from weboob.tools.backend import Module${', BackendConfig' if r.login else ''}
+from woob.tools.backend import Module${', BackendConfig' if r.login else ''}
 % if login:
-from weboob.tools.value import Value, ValueBackendPassword
+from woob.tools.value import Value, ValueBackendPassword
 % endif
 from ${r.capmodulename} import ${r.capname}
 
@@ -13,11 +13,10 @@ __all__ = ['${r.classname}Module']
 
 class ${r.classname}Module(Module, ${r.capname}):
     NAME = '${r.name}'
-    DESCRIPTION = '${r.name} website'
+    DESCRIPTION = '${r.description}'
     MAINTAINER = '${r.author}'
     EMAIL = '${r.email}'
     LICENSE = 'LGPLv3+'
-    VERSION = '${r.version}'
 
     BROWSER = ${r.classname}Browser
 % if login:

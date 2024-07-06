@@ -2,93 +2,118 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from time import sleep
-from datetime import date
+from requests import ReadTimeout
 
-from dateutil.relativedelta import relativedelta
+from woob.browser import URL
+from woob.browser.browsers import LoginBrowser, need_login
+from woob.exceptions import BrowserIncorrectPassword
+from woob.browser.exceptions import ClientError
 
-from weboob.browser import URL
-from weboob.browser.browsers import LoginBrowser, need_login
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.browser.exceptions import ClientError
+from woob.tools.decorators import retry
 
-from .pages import SigninPage, UserPage, DocumentsPage
+from .akamai import AkamaiMixin
+from .pages import HomePage, SigninPage, UserPage, DocumentsPage
+
+SENSOR_DATA = (
+    "7a74G7m23Vrp0o5c9361761.75"
+    "-1,2,-94,-100,{user_agent},uaend,11059,20100101,fr,Gecko,0,0,0,0,409191,9985678,"
+    "1920,1018,1920,1080,1920,880,1920,,cpen:0,i1:0,dm:0,cwen:0,non:1,opc:0,fc:1,sc:0,"
+    "wrc:1,isc:169,vib:1,bat:0,x11:0,x12:1,4843,0.984818677492,831529992838.5,0,loc:"
+    "-1,2,-94,-131,"
+    "-1,2,-94,-101,do_en,dm_en,t_dis"
+    "-1,2,-94,-105,0,0,0,0,1885,1885,0;0,0,0,0,1676,1676,0;0,0,0,0,"
+    "3006,3006,0;0,-1,0,0,3759,3759,1;0,-1,0,0,3630,3630,0;"
+    "-1,2,-94,-102,0,0,0,0,1885,1885,0;0,0,0,0,1676,1676,0;0,0,0,0,"
+    "3006,3006,0;0,-1,0,0,3759,3759,1;0,-1,0,0,3630,3630,0;"
+    "-1,2,-94,-108,"
+    "-1,2,-94,-110,"
+    "-1,2,-94,-117,"
+    "-1,2,-94,-111,"
+    "-1,2,-94,-109,"
+    "-1,2,-94,-114,"
+    "-1,2,-94,-103,"
+    "-1,2,-94,-112,https://www.thetrainline.com/"
+    "-1,2,-94,-115,1,32,32,0,0,0,0,2215,0,1663059985677,7,17790,0,0,2965,0,0,2215,0,0,{_abck}"
+    ",38263,546,1956719195,25543097,PiZtE,91983,92,0,-1"
+    "-1,2,-94,-106,9,1"
+    "-1,2,-94,-119,-1"
+    "-1,2,-94,-122,0,0,0,0,1,0,0"
+    "-1,2,-94,-123,"
+    "-1,2,-94,-124,"
+    "-1,2,-94,-126,"
+    "-1,2,-94,-127,11133333331333333333"
+    "-1,2,-94,-70,-1279939100;-324940575;dis;;true;true;true;-120;true;24;24;true;false;1"
+    "-1,2,-94,-80,5377"
+    "-1,2,-94,-116,2426519511"
+    "-1,2,-94,-118,93260"
+    "-1,2,-94,-129,,,0,,,,0"
+    "-1,2,-94,-121,;3;240;0"
+)
 
 
-class TrainlineBrowser(LoginBrowser):
-    BASEURL = 'https://www.trainline.fr'
+class TrainlineBrowser(LoginBrowser, AkamaiMixin):
+    BASEURL = 'https://www.thetrainline.com'
 
-    signin = URL(r'/api/v5/account/signin', SigninPage)
-    user_page = URL(r'/api/v5/user', UserPage)
-    documents_page = URL(r'/api/v5/pnrs', DocumentsPage)
+    home = URL(r'/$', HomePage)
+    signin = URL(r'/login-service/api/login', SigninPage)
+    user_page = URL(r'/login-service/v5/user', UserPage)
+    documents_page = URL(r'/my-account/api/bookings/past', DocumentsPage)
 
-    def __init__(self, login, password, *args, **kwargs):
-        super(TrainlineBrowser, self).__init__(login, password, *args, **kwargs)
+    @retry(ReadTimeout)
+    def do_login(self):
+        # set some cookies
+        self.go_home()
+
+        # set X-Requested-With AFTER go_home(), to get the akamai url in html
+        # else it is missing
+        # this url is used by AkamaiMixin to resolve challenge
         self.session.headers['X-Requested-With'] = 'XMLHttpRequest'
 
-    def do_login(self):
-        try:
-            self.signin.go(data={'email': self.username, 'password': self.password})
-        except ClientError as error:
-            json_response = error.response.json()
-            error_list = json_response.get('errors', {}).get('email', [])
-            error_message = error_list[0] if error_list else None
-            raise BrowserIncorrectPassword(error_message)
+        if self.session.cookies.get('_abck'):
+            akamai_url = self.page.get_akamai_url()
+            if akamai_url:
+                # because sometimes this url is missing
+                # in that case, we simply don't resolve challenge
+                self.open(akamai_url)  # call this url to let akamai think we have resolved its challenge
+                sensor_data = SENSOR_DATA.replace('{user_agent}', self.session.headers['User-Agent'])
+                sensor_data = sensor_data.replace('{_abck}', self.session.cookies['_abck'])
+                data = {
+                    "sensor_data": sensor_data
+                }
+                self.open(akamai_url, json=data)
 
-        self.session.headers['Authorization'] = 'Token token="%s"' % self.page.get_token()
+        try:
+            self.signin.go(json={'email': self.username, 'password': self.password})
+        except ClientError as e:
+            if e.response.status_code in (400, 403):
+                error = e.response.json().get('message')
+                if 'invalid_grant' in error:
+                    raise BrowserIncorrectPassword(error)
+            raise
+
+        self.user_page.go()
 
     @need_login
     def get_subscription_list(self):
-        yield self.user_page.go().get_subscription()
+        self.user_page.stay_or_go()
+        yield self.page.get_subscription()
 
     @need_login
     def iter_documents(self, subscription):
-        min_date = date.today()
-        docs = {}
-
-        i = 0
-        while i < 10:
-            params = {'date': min_date.strftime('%Y-%m-01')}
-            # date params has a very silly behavior
-            # * day seems to be useless, (but we have to put it anyway)
-            # * server return last 3 months from date (including month we give)
-            #     ex: date = 2019-09-01 => return bills from 2019-07-01 to 2019-09-30
-            # * this date range behavior seems to not apply for old bills,
-            #     it can happens we get bill for 2017 even if we put date=2019-06-01
-            #     it is possible maybe because it's the last ones and server doesn't want to
-            new_doc = False
-            try:
-                self.documents_page.go(params=params)
-            except ClientError as error:
-                # CAUTION: if we perform too many request we can get a 429 response status code
-                if error.response.status_code != 429:
-                    raise
-                # wait 2 seconds and retry, it should work
-                sleep(2)
-            for doc in self.page.iter_documents(subid=subscription.id):
-                if doc.id not in docs.keys():
-                    new_doc = True
-                    docs[doc.id] = doc
-
-                if min_date is None or min_date > doc.date:
-                    min_date = doc.date
-            if not new_doc:
-                min_date -= relativedelta(months=3)
-            i += 1
-
-        return sorted(docs.values(), key=lambda doc: doc.date, reverse=True)
+        self.documents_page.go()
+        return self.page.iter_documents(subid=subscription.id)

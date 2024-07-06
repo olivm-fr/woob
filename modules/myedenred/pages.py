@@ -2,41 +2,38 @@
 
 # Copyright(C) 2017      Théo Dorée
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import ast
 import re
-import sys
 
-from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage, RawPage
-from weboob.browser.elements import ItemElement, method, DictElement
-from weboob.browser.filters.standard import (
+from woob.browser.pages import HTMLPage, LoggedPage, JsonPage, RawPage
+from woob.browser.elements import ItemElement, method, DictElement
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Currency, Field, Eval,
     Date, Regexp,
 )
-from weboob.browser.exceptions import BrowserUnavailable
-from weboob.browser.filters.html import Attr
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.tools.json import json
+from woob.browser.exceptions import BrowserUnavailable
+from woob.browser.filters.html import Attr
+from woob.browser.filters.json import Dict
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.base import NotAvailable, empty
+from woob.tools.json import json
 
 
 class RejectableHTMLPage(HTMLPage):
@@ -184,7 +181,7 @@ class TransactionsPage(LoggedPage, JsonPage):
 # If node, an AST node, contains a string or a number, return
 # that. Otherwise, return the node itself.
 def get_ast_val(node):
-    if sys.version_info >= (3, 6) and isinstance(node, ast.Constant):
+    if isinstance(node, ast.Constant):
         return node.value
     elif isinstance(node, ast.Name):
         return node.id

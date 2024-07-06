@@ -2,128 +2,146 @@
 
 # Copyright(C) 2019      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-from weboob.browser.pages import LoggedPage, HTMLPage
-from weboob.browser.filters.html import TableCell
-from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Regexp, Coalesce,
-)
-from weboob.browser.elements import method, ItemElement, TableElement
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.wealth import Investment
-from weboob.tools.capabilities.bank.investments import create_french_liquidity
+from decimal import Decimal
 
-
-class LoginPage(HTMLPage):
-    def do_login(self, login, password):
-        form = self.get_form(id='recaptcha')  # wtf
-        form['emailConnexion'] = login
-        form['motDePasseConnexion'] = password
-        form.submit()
-
-    def raise_error(self):
-        msg = CleanText('//div[has-class("alert-danger")]')(self.doc)
-        if 'Email ou mot de passe invalide' in msg:
-            raise BrowserIncorrectPassword(msg)
-        assert False, 'unhandled message %r' % msg
+from woob.browser.pages import LoggedPage, JsonPage, RawPage
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanText, Date, Format, Regexp, Eval, Coalesce
+from woob.browser.elements import method, ItemElement, DictElement
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bank import Account
+from woob.capabilities.profile import Person
+from woob.capabilities.address import PostalAddress
+from woob.capabilities.bank.wealth import Investment
+from woob.tools.capabilities.bank.investments import create_french_liquidity
 
 
-class LandPage(LoggedPage, HTMLPage):
-    pass
+def float_to_decimal(f):
+    return Decimal(str(f))
 
 
-class InvestPage(LoggedPage, HTMLPage):
-    def get_user_id(self):
+class WebsiteKeyPage(RawPage):
+    def get_website_key(self):
+        # the website key is present between js variables defined in this file
         return Regexp(
-            CleanText('//span[contains(text(), "ID Client")]'),
-            r'ID Client : (\d+)'
-        )(self.doc)
+            pattern=r'\[.{1},.{1},.{1},"([^"].+)",.{1},.{1},\(\)=>{grecaptcha\.execute'
+        ).filter(self.doc.decode('utf-8'))
 
+
+class WalletPage(LoggedPage, JsonPage):
     def get_liquidities(self):
-        value = Coalesce(
-            CleanDecimal.French('//a[starts-with(text(),"Compte de paiement")]', default=NotAvailable),
-            CleanDecimal.US('//a[starts-with(text(),"Compte de paiement")]', default=NotAvailable),
-        )(self.doc)
+        value = float_to_decimal(Dict('solde')(self.doc))
         return create_french_liquidity(value)
 
-    @method
-    class iter_funded_stock(TableElement):
-        item_xpath = '//table[@id="portefeuilleAction"]/tbody/tr'
 
-        head_xpath = '//table[@id="portefeuilleAction"]/thead//th'
-        col_bought = 'Vous avez investi'
-        col_label = 'Investissement dans'
-        col_valuation = 'Valeur estimée à date'
-        col_diff_ratio = 'Coef. de performance intermediaire'
-
-        class item(ItemElement):
-            klass = Investment
-
-            obj_label = CleanText(TableCell('label'))
-
-            # text is "0000000000000100 100,00 €", wtf
-            obj_valuation = CleanDecimal.SI(
-                Regexp(CleanText(TableCell('valuation')), r'^000(\d+)\b')
-            )
-
-            obj_diff_ratio = CleanDecimal.SI(
-                Regexp(CleanText(TableCell('diff_ratio')), r'^000(\d+)\b')
-            )
+class ProfilePage(LoggedPage, JsonPage):
+    def get_wallet_status(self):
+        return Dict('statuts/walletOk')(self.doc)
 
     @method
-    class iter_funded_bond(TableElement):
-        item_xpath = '//div[@id="panel-OBLIGATIONS"]//table[has-class("portefeuille-liste")]/tbody/tr'
+    class get_account(ItemElement):
+        klass = Account
 
-        head_xpath = '//div[@id="panel-OBLIGATIONS"]//table[has-class("portefeuille-liste")]/thead//th'
-        col_bought = 'Vous avez investi'
-        col_label = 'Investissement dans'
-
-        class item(ItemElement):
-            klass = Investment
-
-            obj_label = CleanText(TableCell('label'))
-
-            obj_valuation = CleanDecimal.SI(
-                Regexp(CleanText(TableCell('bought')), r'^000(\d+)\b')
-            )
+        obj_id = '_wiseed_'
+        obj_type = Account.TYPE_CROWDLENDING
+        obj_number = CleanText(Dict('id'))
+        obj_label = 'WiSEED'
+        obj_currency = 'EUR'
 
     @method
-    class iter_funding(TableElement):
-        def find_elements(self):
-            for el in self.page.doc.xpath('//div[has-class("panel")]'):
-                if 'souscription(s) en cours' in CleanText('.')(el):
-                    for sub in el.xpath('.//table[has-class("portefeuille-liste") and not(@id)]/tbody/tr'):
-                        yield sub
-                    return
+    class get_profile(ItemElement):
+        klass = Person
 
-        head_xpath = '//table[has-class("portefeuille-liste") and not(@id)]/thead//th'
-        col_label = 'Opération / Cible'
-        col_details = 'Détails'
+        obj_email = Dict('email')
+        # On freshly created accounts, 'identite/dateNaissance' may not exist.
+        obj_birth_date = Date(
+            CleanText(Dict('identite/dateNaissance', default=None), default=NotAvailable),
+            default=NotAvailable
+        )
+        obj_firstname = CleanText(Dict('identite/prenom'))
+        obj_lastname = CleanText(Dict('identite/nomDeNaissance'))
+        obj_nationality = Dict('identite/nationalite', default=NotAvailable)
 
-        class item(ItemElement):
-            klass = Investment
+        class obj_postal_address(ItemElement):
+            klass = PostalAddress
 
-            obj_label = CleanText(TableCell('label'))
-
-            # Can be "100,00 € + Frais de 0,90 €" or "€100.00"
-            obj_valuation = Coalesce(
-                CleanDecimal.French(Regexp(CleanText(TableCell('details')), r'^(.*?) €', default=None), default=None),
-                CleanDecimal.US(Regexp(CleanText(TableCell('details')), r'^€([^ ]+)', default=None), default=None),
+            # "adresseDeCorrespondance" might be empty, use "adresseFiscale" instead
+            obj_street = Coalesce(
+                CleanText(Dict('coordonnees/adresseDeCorrespondance/adresse'), default=NotAvailable),
+                CleanText(Dict('coordonnees/adresseFiscale/adresse'), default=NotAvailable),
+                default=NotAvailable,
             )
+            obj_city = Coalesce(
+                CleanText(Dict('coordonnees/adresseDeCorrespondance/ville'), default=NotAvailable),
+                CleanText(Dict('coordonnees/adresseFiscale/ville'), default=NotAvailable),
+                default=NotAvailable,
+            )
+            obj_postal_code = Coalesce(
+                CleanText(Dict('coordonnees/adresseDeCorrespondance/codePostal'), default=NotAvailable),
+                CleanText(Dict('coordonnees/adresseFiscale/codePostal'), default=NotAvailable),
+                default=NotAvailable,
+            )
+            obj_country = Coalesce(
+                CleanText(Dict('coordonnees/adresseDeCorrespondance/pays'), default=NotAvailable),
+                CleanText(Dict('coordonnees/adresseFiscale/pays'), default=NotAvailable),
+                default=NotAvailable,
+            )
+
+
+class BaseInvestElement(ItemElement):
+    klass = Investment
+    # There is another id (cibleId) but it's not unique.
+    # The PSU can invest at different time on the same
+    # stock and we must not aggregate them to match website display
+    obj_id = Format("%s_%s", Dict('operationId'), Dict('cibleId'))
+
+    obj_label = Format(
+        '%s (%s)',
+        CleanText(Dict('operationNom')),
+        CleanText(Dict('cibleNom')),
+    )
+
+    obj_valuation = Eval(float_to_decimal, Dict('montantInvesti'))
+
+
+class InvestmentsPage(LoggedPage, JsonPage):
+    def get_invest_list(self, invest_type):
+        return Dict(invest_type, default=None)(self.doc)
+
+    @method
+    class iter_stocks(DictElement):
+        item_xpath = 'actions'
+
+        class item(BaseInvestElement):
+            obj_diff_ratio = Eval(float_to_decimal, Dict('coeffPerformanceIntermediaire'))
+
+    @method
+    class iter_bonds(DictElement):
+        item_xpath = 'obligations'
+
+        class item(BaseInvestElement):
+            pass
+
+    @method
+    class iter_equities(DictElement):
+        item_xpath = 'titresParticipatifs'
+
+        class item(BaseInvestElement):
+            pass

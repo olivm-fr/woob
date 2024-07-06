@@ -2,47 +2,51 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
+import re
 
-from weboob.browser.exceptions import BrowserHTTPNotFound
-from weboob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import RecipePage, ResultsPage, CommentsPage
-
+from .pages import CommentsPage, RecipePage, ResultsPage
 
 __all__ = ['MarmitonBrowser']
 
 
 class MarmitonBrowser(PagesBrowser):
     BASEURL = 'https://www.marmiton.org'
-    search = URL('/recettes/recherche.aspx\?aqt=(?P<pattern>.*)&start=(?P<start>\d*)',
-                 '/recettes/recherche.aspx\?aqt=.*',
+    search = URL(r'/recettes/recherche.aspx\?aqt=(?P<pattern>.*)&start=(?P<start>\d*)&page=(?P<page>\d*)',
+                 r'/recettes/recherche.aspx\?aqt=.*',
                  ResultsPage)
-    recipe = URL('/recettes/recette_(?P<id>.*).aspx', RecipePage)
-    comment = URL('/recettes/recette-avis_(?P<id>.*).aspx', CommentsPage)
+    recipe = URL(r'/recettes/recette_(?P<id>.*).aspx', RecipePage)
+    comment = URL(r'https://api-uno.marmiton.org/origin/(?P<_id>\d*)/top-reviews\?originType=RECIPE', CommentsPage)
 
     def iter_recipes(self, pattern):
-        return self.search.go(pattern=pattern, start=0).iter_recipes(pattern=pattern)
+        return self.search.go(pattern=pattern, start=0, page=0).iter_recipes(pattern=pattern)
 
-    def get_recipe(self, id, recipe=None):
-        try:
-            recipe = self.recipe.go(id=id).get_recipe(obj=recipe)
-            comments = list(self.comment.go(id=id).get_comments())
+    @recipe.id2url
+    def get_recipe(self, url, recipe=None):
+        self.location(url)
+        assert self.recipe.is_here()
+        recipe = self.page.get_recipe(obj=recipe)
+
+        m = re.match(r'.*_(\d*)$', recipe.id, re.DOTALL)
+        if m:
+            _id = m.group(1)
+            self.session.headers['x-site-id'] = '13'
+            comments = list(self.comment.go(_id=_id).get_comments())
             if comments:
                 recipe.comments = comments
             return recipe
-        except BrowserHTTPNotFound:
-            return

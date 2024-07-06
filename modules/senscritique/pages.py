@@ -2,30 +2,30 @@
 
 # Copyright(C) 2014      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 import re
 
 from .calendar import SensCritiquenCalendarEvent
 
 from datetime import date, datetime, timedelta
-from weboob.capabilities.base import empty
-from weboob.browser.pages import HTMLPage, JsonPage
-from weboob.browser.elements import ItemElement, ListElement, method
-from weboob.browser.filters.standard import Filter, CleanText, Regexp, Join, Format, BrowserURL, Env
-from weboob.browser.filters.html import Link
+from woob.capabilities.base import empty
+from woob.browser.pages import HTMLPage, JsonPage
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import Filter, CleanText, Regexp, Join, Format, BrowserURL, Env
+from woob.browser.filters.html import Link
 
 
 class Description(Filter):

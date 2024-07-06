@@ -1,45 +1,47 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import re
 
 from requests.exceptions import ConnectionError
 from urllib3.exceptions import ReadTimeoutError
 
-from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.browser.exceptions import ServerError, HTTPNotFound
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, NoAccountsException
-from weboob.capabilities.wealth import Investment
-from weboob.tools.capabilities.bank.investments import is_isin_valid
+from woob.browser import LoginBrowser, URL, need_login, StatesMixin
+from woob.browser.exceptions import ServerError, HTTPNotFound
+from woob.exceptions import (
+    BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable,
+    NeedInteractiveFor2FA, SentOTPQuestion,
+)
+from woob.capabilities.bank import Investment, NoAccountsException
+from woob.tools.value import Value
+from woob.tools.capabilities.bank.investments import is_isin_valid
+from woob.tools.decorators import retry
 
 from .pages import (
-    LoginPage, AccountsPage, AMFHSBCPage, AMFAmundiPage, AMFSGPage, HistoryPage, ErrorPage,
+    LoginPage, AccountsPage, AMFHSBCPage, AmundiPage, AMFSGPage, HistoryPage, ErrorPage,
     LyxorfcpePage, EcofiPage, EcofiDummyPage, LandingPage, SwissLifePage, LoginErrorPage,
     EtoileGestionPage, EtoileGestionCharacteristicsPage, EtoileGestionDetailsPage,
     BNPInvestmentsPage, BNPInvestmentDetailsPage, LyxorFundsPage, EsaliaDetailsPage,
     EsaliaPerformancePage, AmundiDetailsPage, AmundiPerformancePage, ProfilePage,
     HsbcVideoPage, CprInvestmentPage, CprPerformancePage, CmCicInvestmentPage,
-    HsbcInvestmentPage, EServicePage,
+    HsbcInvestmentPage, EServicePage, HsbcTokenPage, AccountsInfoPage, StockOptionsPage,
+    TemporarilyUnavailablePage, SetCookiePage, CreditdunordPeePage,
 )
 
 
@@ -50,17 +52,26 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         r'/portal/j_security_check', LoginPage
     )
     login_error = URL(r'/portal/login', LoginErrorPage)
+    logout = URL(r'/portal/salarie-(?P<slug>\w+)/\?portal:action=Logout&portal:componentId=UIPortal')
+    temporarily_unavailable = URL(r'/pagesdedelestage/(\w+)/index.html', TemporarilyUnavailablePage)
+    set_cookies = URL(r'/portal/setcontrolcookie', SetCookiePage)
     landing = URL(r'(.*)portal/salarie-bnp/accueil', LandingPage)
     accounts = URL(
         r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs\?language=(?P<lang>)',
         r'/portal/salarie-(?P<slug>\w+)/monepargne/mesavoirs',
         AccountsPage
     )
+    accounts_info = URL(r'/portal/salarie-(?P<slug>\w+)/monepargne/mesdispositifs', AccountsInfoPage)
+    stock_options = URL(r'/portal/salarie-(?P<slug>\w+)/monepargne/mesblocages', StockOptionsPage)
     history = URL(r'/portal/salarie-(?P<slug>\w+)/operations/consulteroperations', HistoryPage)
     error = URL(r'/maintenance/.+/', ErrorPage)
-    profile = URL(r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP', ProfilePage)
+    profile = URL(
+        r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP',
+        r'/portal/salarie-(?P<slug>\w+)/mesdonnees/coordperso\?scenario=ConsulterCP&language=(?P<lang>)',
+        ProfilePage
+    )
     # Amundi pages
-    amfcode_amundi = URL(r'https://www.amundi-ee.com/entr/product', AMFAmundiPage)
+    isincode_amundi = URL(r'https://www.amundi-ee.com/entr/product', AmundiPage)
     performance_details = URL(r'https://www.amundi-ee.com/entr/ezjscore/call(.*)_tab_2', AmundiPerformancePage)
     investment_details = URL(r'https://www.amundi-ee.com/entr/ezjscore/call(.*)_tab_5', AmundiDetailsPage)
     # SG Gestion pages
@@ -81,7 +92,16 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     )
     etoile_gestion_details = URL(r'https?://www.etoile-gestion.com/productsheet/.*', EtoileGestionDetailsPage)
     # BNP pages
-    bnp_investments = URL(r'https://optimisermon.epargne-retraite-entreprises.bnpparibas.com', BNPInvestmentsPage)
+    bnp_investments = URL(
+        r'https://optimisermon.epargne-retraite-entreprises.bnpparibas.com',
+        BNPInvestmentsPage
+    )
+    # Unused for the moment but this URL has to be handled to avoid the module thinking
+    # we're not logged in after calling investments due to "personeo.erpagne..." being not matched
+    new_bnp_investments = URL(
+        r'https://personeo.epargne-retraite-entreprises.bnpparibas.com/portal/salarie-bnp',
+        BNPInvestmentsPage
+    )
     bnp_investment_details = URL(
         r'https://funds-api.bnpparibas.com/api/performances/(?P<id>\w+)',
         BNPInvestmentDetailsPage
@@ -93,22 +113,31 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         EsaliaPerformancePage
     )
     # HSBC pages
-    hsbc_video = URL(r'https://(.*)videos-pedagogiques/fonds-hsbc-ee-dynamique', HsbcVideoPage)
-    amfcode_hsbc = URL(r'https://www.assetmanagement.hsbc.com/feedRequest', AMFHSBCPage)
-    hsbc_investments = URL(r'https://www.assetmanagement.hsbc.com/fr/fcpe-closed', HsbcInvestmentPage)
+    hsbc_video = URL(r'https://(.*)videos-pedagogiques/fonds-hsbc-', HsbcVideoPage)
+    hsbc_token_page = URL(r'https://www.epargne-salariale-retraite.hsbc.fr/api/v1/token/issue', HsbcTokenPage)
+    amfcode_search_hsbc = URL(r'https://www.epargne-salariale-retraite.hsbc.fr/api/v1/nav/funds', AMFHSBCPage)
+    amfcode_hsbc = URL(r'https://www.epargne-salariale-retraite.hsbc.fr/api/v1/detail/primary-identifier', AMFHSBCPage)
+    hsbc_investments = URL(
+        r'https://www.epargne-salariale-retraite.hsbc.fr/fr/epargnants/fund-centre',
+        r'https://www.assetmanagement.hsbc.com/fr/fcpe-closed',
+        r'https://www.assetmanagement.hsbc.com/fr/fcpe-open',
+        r'https://www.epargne-salariale-retraite.hsbc.fr/fr/epargnants/fund-centre/priv/(?P<fund_id>.*)',
+        HsbcInvestmentPage
+    )
     # CPR Asset Management pages
     cpr_investments = URL(r'https://www.cpr-am.fr/particuliers/product/view', CprInvestmentPage)
     cpr_performance = URL(r'https://www.cpr-am.fr/particuliers/ezjscore', CprPerformancePage)
-    # CM-CIC investments
+    # CreditMutuel-AM (Former: CM-CIC) investments
     cm_cic_investments = URL(
+        r'https://www.creditmutuel-am.eu/fr/particuliers/nos-fonds/VALE_FicheSynthese.aspx',
+        r'https://www.creditmutuel-am.eu/fr/particuliers/nos-fonds/VALE_Fiche',
         r'https://www.cmcic-am.fr/fr/particuliers/nos-fonds/VALE_FicheSynthese.aspx',
         r'https://www.cmcic-am.fr/fr/particuliers/nos-fonds/VALE_Fiche',
         CmCicInvestmentPage
     )
 
     e_service_page = URL(
-        r'/portal/salarie-(?P<slug>\w+)/mesdonnees/eservice\?scenario=ConsulterEService',
-        r'/portal/salarie-(?P<slug>\w+)/mesdonnees/eservice',
+        r'/portal/salarie-(?P<slug>\w+)/documents/eservice',
         EServicePage,
     )
 
@@ -117,6 +146,8 @@ class S2eBrowser(LoginBrowser, StatesMixin):
 
     def __init__(self, config=None, *args, **kwargs):
         self.config = config
+        self.is_interactive = self.config.get('request_information', Value()).get() is not None
+
         kwargs['username'] = self.config['login'].get()
         kwargs['password'] = self.config['password'].get()
 
@@ -143,18 +174,75 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         self.cache['pockets'] = {}
         self.cache['details'] = {}
 
+    def dump_state(self):
+        state = super(S2eBrowser, self).dump_state()
+        state.pop('url', None)  # after deinit, we get LoggedOut exception on the next sync by trying to load the url from the state.
+        return state
+
+    def deinit(self):
+        if self.page and self.page.logged:
+            self.logout.go(slug=self.SLUG)
+        super(S2eBrowser, self).deinit()
+
+    @retry((BrowserUnavailable), tries=4)
+    def initiate_login_page(self):
+        # It looks like that there are transitive issues for loading the login
+        # page, so we retry send_login at least once.
+        try:
+            self.login.go(slug=self.SLUG)
+        except HTTPNotFound as error:
+            if error.response.status_code == 404 and self.set_cookies.match(error.response.url):
+                # sometimes we get redirected here, a retry is enough. that's why we raise BrowserUnavailable
+                raise BrowserUnavailable()
+            raise
+
+        if self.temporarily_unavailable.is_here():
+            # a retry should solve this
+            raise BrowserUnavailable(self.page.get_unavailability_message())
+
+        assert self.login.is_here(), 'We are not on the expected login page'
+        self.page.check_error()
+
+    def send_login(self):
+        self.initiate_login_page()
+        if not self.page.is_login_form_available() and not self.page.is_otp_form_available():
+            # If the login form cannot be found, we re-initiate the login page.
+            self.initiate_login_page()
+            assert self.page.is_login_form_available(), 'Unable to find the login form during login.'
+
+        if not self.page.is_otp_form_available():
+            self.page.login(self.username, self.password, self.secret)
+
+        # check whether to send OTP
+        if self.login.is_here():
+            form = self.page.get_form_send_otp()
+            if form:
+                if not self.is_interactive:
+                    raise NeedInteractiveFor2FA
+                else:
+                    form.submit()
+                    raise SentOTPQuestion(
+                        'otp',
+                        message='Veuillez saisir votre code de sécurité (reçu par mail ou par sms)',
+                    )
+
+    def handle_otp(self, otp):
+        self.page.check_error()
+        self.page.send_otp(otp)
+        if self.login.is_here():
+            self.page.check_error()
+
     def do_login(self):
         otp = None
         if 'otp' in self.config:
             otp = self.config['otp'].get()
 
         if self.login.is_here() and otp:
-            self.page.check_error()
-            self.page.send_otp(otp)
-            if self.login.is_here():
-                self.page.check_error()
+            self.handle_otp(otp)
         else:
-            self.login.go(slug=self.SLUG).login(self.username, self.password, self.secret)
+            self.send_login()
+            if self.login.is_here() and otp:
+                self.handle_otp(otp)
 
             if self.login_error.is_here():
                 raise BrowserIncorrectPassword()
@@ -166,50 +254,95 @@ class S2eBrowser(LoginBrowser, StatesMixin):
     @need_login
     def iter_accounts(self):
         if 'accs' not in self.cache.keys():
+            tab_changed = False
             no_accounts_message = None
-            self.accounts.stay_or_go(slug=self.SLUG, lang=self.LANG)
+            self.accounts.go(slug=self.SLUG, lang=self.LANG)
             # weird wrongpass
             if not self.accounts.is_here():
                 raise BrowserIncorrectPassword()
+
+            # Handle multi entreprise accounts
             multi_space = self.page.get_multi()
-            if len(multi_space):
-                # Handle multi entreprise accounts
-                accs = []
-                for space in multi_space:
-                    space_accs = []
+            if not multi_space:
+                multi_space = [None]
+
+            accs = []
+            for space in multi_space:
+                if space is not None:
                     self.page.go_multi(space)
-                    self.accounts.go(slug=self.SLUG)
-                    if not no_accounts_message:
-                        no_accounts_message = self.page.get_no_accounts_message()
-                    for acc in self.page.iter_accounts():
-                        acc._space = space
-                        space_accs.append(acc)
-                    company_name = self.profile.go(slug=self.SLUG).get_company_name()
-                    for acc in space_accs:
-                        acc.company_name = company_name
-                    accs.extend(space_accs)
-            else:
-                no_accounts_message = self.page.get_no_accounts_message()
-                accs = [a for a in self.page.iter_accounts()]
+
+                self.accounts_info.go(slug=self.SLUG)
+                # since IDs are not available anymore on AccountPage
+                # I retrieve all those accounts information here.
+                accounts_info = self.page.get_account_info()
                 company_name = self.profile.go(slug=self.SLUG).get_company_name()
-                for acc in accs:
-                    acc.company_name = company_name
-            if not len(accs) and no_accounts_message:
-                # Accounts list is empty and we found the
-                # message on at least one of the spaces:
-                raise NoAccountsException(no_accounts_message)
+                self.accounts.go(slug=self.SLUG, lang=self.LANG)
+                no_accounts_in_space_message = self.page.get_no_accounts_message()
+                if no_accounts_in_space_message:
+                    if not no_accounts_message:
+                        no_accounts_message = no_accounts_in_space_message
+                    continue
+
+                # If no accounts are available or the website unavailable
+                # there won't be any form on page and cause a bug
+                if not tab_changed and self.page.has_form():
+                    # force the page to be on the good tab the first time
+                    self.page.change_tab('account')
+                    tab_changed = True
+
+                space_accs = []
+                seen_account_ids = []
+                for account in self.page.iter_accounts():
+                    self.page.fill_account(
+                        obj=account,
+                        account_info=accounts_info,
+                        seen_account_ids=seen_account_ids,
+                        company_name=company_name,
+                        space=space,
+                        # Can't use an existing Field from account obj, so pass the "label" as Env
+                        label=account.label
+                    )
+                    if account.id:
+                        seen_account_ids.append(account.id)
+                        # in order to associate properly the accounts with their account ids,
+                        # we need to get all the accounts and filter them after.
+                        if account.balance:
+                            space_accs.append(account)
+                # each space can have multiple accounts
+                # for each account we will add the attribute _len_space_accs
+                # which is the number of accounts in the current space.
+                # (if a space has 1 account then account._len_space_accs=1)
+                # this will be helpful in iter_history, since we know that all transactions
+                # belong to a unique account, we won't need to visit the details page.
+                len_space_accs = len(space_accs)
+                for account in space_accs:
+                    account._len_space_accs = len_space_accs
+                accs.extend(space_accs)
+
+            if not accs:
+                if no_accounts_message:
+                    # Accounts list is empty and we found the
+                    # message on at least one of the spaces:
+                    raise NoAccountsException(no_accounts_message)
+
+                # Some accounts are bugged and the website displays an error message
+                error_message = self.page.get_error_message()
+                if error_message:
+                    raise BrowserUnavailable()
             self.cache['accs'] = accs
         return self.cache['accs']
 
     @need_login
     def iter_investment(self, account):
         if account.id not in self.cache['invs']:
-            self.accounts.stay_or_go(slug=self.SLUG)
+            self.accounts.go(slug=self.SLUG)
             # Handle multi entreprise accounts
-            if hasattr(account, '_space'):
+            if account._space:
                 self.page.go_multi(account._space)
                 self.accounts.go(slug=self.SLUG)
             # Select account
+            # force the page to be on the good tab
+            self.page.change_tab('investment')
             self.page.get_investment_pages(account.id)
             investments_without_quantity = [i for i in self.page.iter_investment()]
             # Get page with quantity
@@ -227,15 +360,22 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                     # Although we don't fetch anything on BNPInvestmentsPage, this request is
                     # necessary otherwise the calls to the BNP API will return a 401 error
                     try:
-                        self.location(inv._link)
-                    except ServerError:
+                        self.location(inv._link, timeout=30)
+                    except (ServerError, ConnectionError):
                         # For some connections, this request returns a 503 even on the website
+                        # Timeout is set at 60 but on the website this can take up to ~120
+                        # seconds before the website answers with a 503. Retrying three times
+                        # with a timeout at 60 would make a synchronization a bit too long,
+                        # reducing it to 30 might be more acceptable.
                         self.logger.warning('Server returned a Server Error when trying to fetch investment performances.')
                         continue
 
-                    if not self.bnp_investments.is_here():
+                    if not self.bnp_investments.match(self.url):
                         # BNPInvestmentsPage was not accessible, trying the next request
-                        # would lead to a 401 error.
+                        # would lead to a 401 error. This happens utterly randomly
+                        # but this can be detected if inv._link is redirecting us to
+                        # https://personeo.epargne-retraite-entreprises.bnpparibas.com/portal/salarie-bnp
+                        # rather than https://optimisermon.epargne-retraite-entreprises.bnpparibas.com
                         self.logger.warning('Could not access BNP investments page, no investment details will be fetched.')
                         continue
 
@@ -250,22 +390,27 @@ class S2eBrowser(LoginBrowser, StatesMixin):
                             self.logger.warning('Could not connect to the BNP API, no investment details will be fetched.')
                             continue
                         else:
-                            if self.page.text == 'null':
-                                self.logger.warning('Empty page on BNP API, no investment details will be fetched.')
-                            else:
+                            if not self.bnp_investment_details.is_here():
+                                self.logger.warning('We got redirected when going to bnp_investment_details')
+                            elif self.page.is_content_valid():
                                 self.page.fill_investment(obj=inv)
+                            else:
+                                self.logger.warning('Empty page on BNP API, no investment details will be fetched.')
                     else:
                         self.logger.warning('Could not fetch BNP investment ID in its label, no investment details will be fetched.')
 
-                elif self.amfcode_amundi.match(inv._link):
+                elif self.isincode_amundi.match(inv._link):
                     try:
                         self.location(inv._link)
                     except HTTPNotFound:
-                        self.logger.warning('Details on AMF Amundi page are not available for this investment.')
+                        self.logger.warning('Details on ISIN Amundi page are not available for this investment.')
                         continue
                     details_url = self.page.get_details_url()
                     performance_url = self.page.get_performance_url()
                     if details_url:
+                        if 'None' in details_url:
+                            self.logger.warning('Invest %s skipped, investment details is unavaible', inv.code)
+                            continue
                         self.location(details_url)
                         if self.investment_details.is_here():
                             inv.recommended_period = self.page.get_recommended_period()
@@ -321,21 +466,69 @@ class S2eBrowser(LoginBrowser, StatesMixin):
 
                 elif self.hsbc_investments.match(inv._link):
                     # Handle investment detail as for erehsbc subsite
-                    m = re.search(r'id=(\w+).+SH=(\w+)', inv._link)
+                    m = re.search(r'id=(\w+).+SH=([\w\-]+)', inv._link)
                     if m:
-                        params = {
-                            'feed_data': 'fundbyiden',
-                            'ctry': 'FR',
-                            'client': 'FCPC',
-                            'fId': m.group(1),
-                            'lang': 'fr',
-                            'SH': m.group(2),
-                        }
-                        self.amfcode_hsbc.go(params=params)
-                        if self.amfcode_hsbc.is_here():
+                        fund_id = m.group(1)
+                        share_class = m.group(2)
+                        if "/fcpe-closed" in inv._link:
+                            # This are non public funds, so they are not visible on search engine.
+                            self.hsbc_investments.go(fund_id=fund_id)
+                            hsbc_params = self.page.get_params()
+                            share_id = hsbc_params['pageInformation']['shareId']
+
+                            # Code to perform an api request, that might be needed
+                            # to retrieve performance or other info, but so far
+                            # we can get the AMF code directly from hsbc_params without
+                            # furter requests
+                            '''
+                            hsbc_token_id = hsbc_params['pageInformation']['primaryIdentifierUrl']['id']
+                            self.hsbc_token_page.go(
+                                headers={
+                                    'X-Component': hsbc_token_id,
+                                    'X-Country': 'FR',
+                                    'X-Language': 'FR',
+                                },
+                                method='POST',
+                            )
+                            hsbc_params['currency'] = '0P00012TPV'
+                            hsbc_params['exchange'] = "Not Applicable"
+                            hsbc_params['performance'] = "EUR"
+                            import uuid
+                            hsbc_params['id'] = "{%s}" % uuid.uuid4()
+
+                            hsbc_token = self.page.text
+                            self.amfcode_hsbc.go(
+                                headers={'Authorization': 'Bearer %s' % hsbc_token},
+                                json=hsbc_params,
+                            )
                             inv.code = self.page.get_code()
-                            inv.code_type = Investment.CODE_TYPE_AMF
-                            inv.asset_category = self.page.get_asset_category()
+                            '''
+                            code = share_id
+                        else:
+                            self.hsbc_investments.go()
+                            hsbc_params = self.page.get_params()
+                            hsbc_token_id = hsbc_params['pageInformation']['dataUrl']['id']
+                            self.hsbc_token_page.go(
+                                headers={
+                                    'X-Component': hsbc_token_id,
+                                    'X-Country': 'FR',
+                                    'X-Language': 'FR',
+                                },
+                                method='POST',
+                            )
+
+                            hsbc_token = self.page.text
+                            hsbc_params['paging'] = {'currentPage': 1}
+                            hsbc_params['searchTerm'] = [fund_id]
+                            hsbc_params['view'] = 'Prices'
+                            hsbc_params['appliedFilters'] = []
+                            self.amfcode_search_hsbc.go(
+                                headers={'Authorization': 'Bearer %s' % hsbc_token},
+                                json=hsbc_params,
+                            )
+                            code = self.page.get_code_from_search_result(share_class)
+                        inv.code = code
+                        inv.code_type = Investment.CODE_TYPE_AMF
 
                 elif self.cm_cic_investments.match(inv._link):
                     self.location(inv._link)
@@ -357,7 +550,9 @@ class S2eBrowser(LoginBrowser, StatesMixin):
         if account.id not in self.cache['pockets']:
             self.iter_investment(account)
             # Select account
-            self.accounts.stay_or_go(slug=self.SLUG)
+            self.accounts.go(slug=self.SLUG)
+            # force the page to be on the good tab
+            self.page.change_tab('pocket')
             self.page.get_investment_pages(account.id, pocket=True)
             pockets = [p for p in self.page.iter_pocket(accid=account.id)]
             # Get page with quantity
@@ -367,30 +562,41 @@ class S2eBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def iter_history(self, account):
-        self.history.stay_or_go(slug=self.SLUG)
+        self.history.go(slug=self.SLUG)
         # Handle multi entreprise accounts
-        if hasattr(account, '_space'):
+        if account._space:
             self.page.go_multi(account._space)
             self.history.go(slug=self.SLUG)
         # Get more transactions on each page
         if self.page.show_more("50"):
-            for tr in self.page.iter_history(accid=account.id):
+            for tr in self.page.iter_history(accid=account.id, len_space_accs=account._len_space_accs):
                 yield tr
-        # Go back to first page
-        self.page.go_start()
 
     @need_login
     def get_profile(self):
-        self.profile.stay_or_go(slug=self.SLUG)
+        self.profile.go(slug=self.SLUG, lang=self.LANG)
         profile = self.page.get_profile()
         return profile
 
     @need_login
     def iter_documents(self):
-        self.e_service_page.stay_or_go(slug=self.SLUG)
+        try:
+            self.e_service_page.go(slug=self.SLUG)
+        except ReadTimeoutError:
+            raise BrowserUnavailable()
+
         # we might land on the documents page, but sometimes we land on user info "tab"
         self.page.select_documents_tab()
         self.page.show_more()
+
+        # Sometimes, this page can return an error
+        # Seen messages:
+        # - Impossible de récupérer les relevés électroniques
+        # - Le document souhaité n'a pu être généré (délai d'attente dépassé).
+        #   Merci de renouveler votre demande ultérieurement.
+        error = self.page.get_error_message()
+        if error:
+            raise BrowserUnavailable(error)
 
         # Sometimes two documents have the same ID (same date and same type)
         existing_id = set()
@@ -410,21 +616,9 @@ class S2eBrowser(LoginBrowser, StatesMixin):
             yield document
 
 
-class EsaliaBrowser(S2eBrowser):
-    BASEURL = 'https://salaries.esalia.com'
-    SLUG = 'sg'
-    LANG = 'fr'  # ['fr', 'en']
-
-
 class CapeasiBrowser(S2eBrowser):
     BASEURL = 'https://www.capeasi.com'
     SLUG = 'axa'
-    LANG = 'fr'  # ['fr', 'en']
-
-
-class ErehsbcBrowser(S2eBrowser):
-    BASEURL = 'https://epargnant.ere.hsbc.fr'
-    SLUG = 'hsbc'
     LANG = 'fr'  # ['fr', 'en']
 
 
@@ -435,6 +629,28 @@ class BnppereBrowser(S2eBrowser):
 
 
 class CreditdunordpeeBrowser(S2eBrowser):
-    BASEURL = 'https://salaries.pee.credit-du-nord.fr'
+    BASEURL = 'https://www.pee.credit-du-nord.fr'
     SLUG = 'cdn'
+    LANG = 'fr'  # ['fr', 'en']
+
+    pee_page = URL(r'/fr/epargnants', CreditdunordPeePage)
+
+    def initiate_login_page(self):
+        # Since Crédit du Nord and Société Générale's fusion, PEE has been moved to Esalia space.
+        self.go_home()
+        if self.pee_page.is_here():
+            message = self.page.get_message()
+            # Here is the message displayed on the page:
+            # "Suite à la fusion du Groupe Crédit du Nord et Société Générale, la gestion de votre épargne salariale évolue.
+            # Rendez-vous sur votre espace personnalisé du site www.esalia.com ou sur l’Appli Esalia à l'aide de vos nouveaux
+            # identifiants de connexion reçus par courrier postal / mail."
+            if 'Rendez-vous sur votre espace personnalisé du site www.esalia.com' in message:
+                raise ActionNeeded(message)
+
+        super().initiate_login_page()
+
+
+class FederalFinanceESBrowser(S2eBrowser):
+    BASEURL = 'https://www.epargne-salariale.federal-finance.fr/'
+    SLUG = 'ff'
     LANG = 'fr'  # ['fr', 'en']

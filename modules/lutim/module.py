@@ -2,29 +2,30 @@
 
 # Copyright(C) 2015      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
 
 import re
+from urllib.parse import urljoin
 
-from weboob.tools.backend import Module, BackendConfig
-from weboob.capabilities.paste import CapPaste, BasePaste
-from weboob.tools.capabilities.paste import image_mime
-from weboob.tools.compat import urljoin
-from weboob.tools.value import Value
+from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.paste import CapPaste, BasePaste
+from woob.tools.capabilities.paste import image_mime
+from woob.tools.value import Value
 
 from .browser import LutimBrowser
 
@@ -34,15 +35,15 @@ __all__ = ['LutimModule']
 
 class LutimModule(Module, CapPaste):
     NAME = 'lutim'
-    DESCRIPTION = u'lutim website'
+    DESCRIPTION = u"Lutim (Let's Upload That IMage)"
     MAINTAINER = u'Vincent A'
     EMAIL = 'dev@indigo.re'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
     BROWSER = LutimBrowser
 
-    CONFIG = BackendConfig(Value('base_url', label='Hoster base URL', default='https://lut.im/'))
+    CONFIG = BackendConfig(Value('base_url', label='Hoster base URL'))
 
     @property
     def base_url(self):
@@ -58,9 +59,9 @@ class LutimModule(Module, CapPaste):
         if public:
             return 0
         elif max_age and max_age < 86400:
-            return 0 # it cannot be shorter than one day
+            return 0  # it cannot be shorter than one day
         elif re.search(r'[^a-zA-Z0-9=+/\s]', contents):
-            return 0 # not base64, thus not binary
+            return 0  # not base64, thus not binary
         else:
             mime = image_mime(contents, ('gif', 'jpeg', 'png'))
             return 20 * int(mime is not None)

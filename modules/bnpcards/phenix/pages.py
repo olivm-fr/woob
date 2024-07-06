@@ -2,39 +2,35 @@
 
 # Copyright(C) 2019      Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-import sys
 from datetime import date
 
-from weboob.browser.filters.standard import (
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Date, MapIn, Field,
     Currency, Regexp, Format, Eval,
 )
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.html import Attr, Link
-from weboob.capabilities.bank import Account, Transaction
-from weboob.browser.elements import (
+from woob.browser.filters.json import Dict
+from woob.browser.filters.html import Attr, Link
+from woob.capabilities.bank import Account, Transaction
+from woob.browser.elements import (
     DictElement, ListElement, ItemElement, method,
 )
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.compat import unicode
-from weboob.browser.pages import HTMLPage, LoggedPage, CsvPage
+from woob.capabilities.base import NotAvailable
+from woob.browser.pages import HTMLPage, LoggedPage, CsvPage
 
 
 class LoginPage(HTMLPage):
@@ -48,7 +44,7 @@ class LoginPage(HTMLPage):
 class DashboardPage(LoggedPage, HTMLPage):
     @method
     class iter_accounts(ListElement):
-        item_xpath = '//div[@class="container header_desktop"]//a[@class="carte"]'
+        item_xpath = '//div[contains(@class, "content-header-porteur")]//a[@class="carte"]'
 
         class item(ItemElement):
             klass = Account
@@ -116,9 +112,6 @@ class TransactionCSV(LoggedPage, CsvPage):
     def build_doc(self, content):
         # Dict splits keys on '/' it is intended behaviour because it's primary
         # use is with json files, but it means I have to replace '/' here
-        delimiter = self.FMTPARAMS.get('delimiter')
-        if sys.version_info.major == 2 and delimiter and isinstance(delimiter, unicode):
-            self.FMTPARAMS['delimiter'] = delimiter.encode('utf-8')
         content = content.replace(b'/', b'-')
         return super(TransactionCSV, self).build_doc(content)
 

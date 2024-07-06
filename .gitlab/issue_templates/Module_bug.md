@@ -1,6 +1,6 @@
 This is a template for submitting an issue, fill the blanks and remove non-applicable stuff.
 
-First, read the [frequently asked questions](https://git.weboob.org/weboob/weboob/-/wikis/faq#common-problems).
+First, read the [frequently asked questions](https://gitlab.com/woob/woob/-/wikis/faq#common-problems).
 
 ### With which module do you encounter problems?
 
@@ -14,9 +14,9 @@ paste here
 
 ### What are the steps to reproduce the problem?
 
-### What weboob version are you using?
+### What woob version are you using?
 
-Output of `weboob-config --version` command:
+Output of `woob config --version` command:
 
 ```
 paste here
@@ -24,13 +24,13 @@ paste here
 
 ### What module version are you using?
 
-Output of `weboob-config info MODULE_NAME` command:
+Output of `woob config info MODULE_NAME` command:
 
 ```
 paste here
 ```
 
-### How did you install weboob?
+### How did you install woob?
 
 Example: apt, brew, distro packages, pip, setup.py
 

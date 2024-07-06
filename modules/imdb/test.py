@@ -2,22 +2,23 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.tools.test import BackendTest
+from woob.tools.test import BackendTest
+from woob.capabilities.cinema import Person, Movie
 
 
 class ImdbTest(BackendTest):
@@ -46,7 +47,11 @@ class ImdbTest(BackendTest):
         assert person
         assert person.id
         assert person.name
+        assert person.short_biography
         assert person.birth_date
+        assert person.birth_place
+        assert person.death_date
+        assert person.thumbnail_url
 
     def test_movie_persons(self):
         persons = list(self.backend.iter_movie_persons('tt0079980'))
@@ -85,3 +90,15 @@ class ImdbTest(BackendTest):
         assert len(persons_ids) > 0
         for person_id in persons_ids:
             assert person_id
+
+    def test_fill_person(self):
+        person = Person('nm0223033', 'dewaere')
+        self.backend.fillobj(person, ['birth_place', 'biography'])
+        assert person.birth_place
+        assert person.biography
+
+    def test_fill_movie(self):
+        movie = Movie('tt0079980', 'serie noire')
+        self.backend.fillobj(movie, ['release_date', 'all_release_dates'])
+        assert movie.release_date
+        assert movie.all_release_dates

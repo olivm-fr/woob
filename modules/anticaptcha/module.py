@@ -2,31 +2,30 @@
 
 # Copyright(C) 2018      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
-from weboob.tools.backend import Module, BackendConfig
-from weboob.capabilities.captcha import (
-    CapCaptchaSolver, ImageCaptchaJob, RecaptchaJob, RecaptchaV3Job, RecaptchaV2Job, FuncaptchaJob,
-    HcaptchaJob,
+from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.captcha import (
+    CapCaptchaSolver, ImageCaptchaJob, RecaptchaJob,
+    RecaptchaV3Job, RecaptchaV2Job, FuncaptchaJob,
+    HcaptchaJob, GeetestV4Job, TurnstileJob,
 )
-from weboob.tools.value import ValueBackendPassword
+from woob.tools.value import ValueBackendPassword
 
 from .browser import AnticaptchaBrowser
 
@@ -40,7 +39,7 @@ class AnticaptchaModule(Module, CapCaptchaSolver):
     MAINTAINER = 'Vincent A'
     EMAIL = 'dev@indigo.re'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
     CONFIG = BackendConfig(
         ValueBackendPassword('api_key', label='API key', regexp='^[0-9a-f]+$'),
@@ -58,13 +57,23 @@ class AnticaptchaModule(Module, CapCaptchaSolver):
         elif isinstance(job, RecaptchaJob):
             job.id = self.browser.post_recaptcha(job.site_url, job.site_key)
         elif isinstance(job, RecaptchaV3Job):
-            job.id = self.browser.post_gcaptchav3(job.site_url, job.site_key, job.action)
+            job.id = self.browser.post_gcaptchav3(
+                job.site_url,
+                job.site_key,
+                job.action,
+                job.min_score,
+                job.is_enterprise,
+            )
         elif isinstance(job, RecaptchaV2Job):
-            job.id = self.browser.post_nocaptcha(job.site_url, job.site_key)
+            job.id = self.browser.post_recaptchav2(job.site_url, job.site_key)
         elif isinstance(job, FuncaptchaJob):
-            job.id = self.browser.post_funcaptcha(job.site_url, job.site_key, job.sub_domain)
+            job.id = self.browser.post_funcaptcha(job.site_url, job.site_key, job.sub_domain, job.data)
         elif isinstance(job, HcaptchaJob):
             job.id = self.browser.post_hcaptcha(job.site_url, job.site_key)
+        elif isinstance(job, GeetestV4Job):
+            job.id = self.browser.post_geetestv4(job.site_url, job.gt)
+        elif isinstance(job, TurnstileJob):
+            job.id = self.browser.post_turnstile(job.site_url, job.site_key)
         else:
             raise NotImplementedError()
 

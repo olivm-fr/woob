@@ -2,45 +2,46 @@
 
 # Copyright(C) 2012 Arno Renevier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.browser import PagesBrowser, URL
+from woob.browser import PagesBrowser, URL
 from .pages import WeatherPage, CityPage
 
 __all__ = ['WeatherBrowser']
 
 
 class WeatherBrowser(PagesBrowser):
-    BASEURL = 'https://www.weather.com'
-    API_KEY = 'd522aa97197fd864d36b418f39ebb323'
+    BASEURL = 'https://weather.com'
 
-    city_page = URL('https://dsx\.weather\.com/x/v2/web/loc/fr_FR/1/4/5/9/11/13/19/21/1000/1001/1003/fr%5E/\((?P<pattern>.*)\)', CityPage)
-
-    weather_page = URL('https://api\.weather\.com/v2/turbo/vt1currentdatetime;vt1observation\?units=m&language=fr-FR&geocode=(?P<city_id>.*)&format=json&apiKey=(?P<api>.*)',
-                       WeatherPage)
-
-    forecast_page = URL('https://api\.weather\.com/v2/turbo/vt1dailyForecast\?units=m&language=fr-FR&geocode=(?P<city_id>.*)&format=json&apiKey=(?P<api>.*)',
-                        WeatherPage)
+    city_page = URL('/api/v1/p/redux-dal', CityPage)
+    weather_page = URL('/weather/today/l/(?P<city_id>.*)', WeatherPage)
 
     def iter_city_search(self, pattern):
-        return self.city_page.go(pattern=pattern).iter_cities()
+        params = [{"name": "getSunV3LocationSearchUrlConfig",
+                   "params": {"query": pattern,
+                              "language": "en-US",
+                              "locationType": "locale"}
+                   }]
+
+        headers = {'Host': 'weather.com'}
+        return self.city_page.go(json=params, headers=headers).iter_cities(pattern=pattern)
 
     def get_current(self, city_id):
-        return self.weather_page.go(city_id=city_id, api=self.API_KEY).get_current()
+        return self.weather_page.go(city_id=city_id).get_current()
 
     def iter_forecast(self, city_id):
-        return self.forecast_page.go(city_id=city_id, api=self.API_KEY).iter_forecast()
+        return self.weather_page.go(city_id=city_id).iter_forecast()

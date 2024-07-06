@@ -2,31 +2,31 @@
 
 # Copyright(C) 2014-2015      Oleg Plakhotniuk
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 import json
 import os
-from subprocess import STDOUT, CalledProcessError, check_output
+from subprocess import STDOUT, CalledProcessError, check_output  # nosec
 from tempfile import mkstemp
+from urllib.parse import unquote
 
-from weboob.browser import URL, LoginBrowser, need_login
-from weboob.capabilities.bank import AccountNotFound
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.tools.compat import unquote
+from woob.browser import URL, LoginBrowser, need_login
+from woob.capabilities.bank import AccountNotFound
+from woob.exceptions import BrowserIncorrectPassword
 
 from .pages import ActivityPage, SomePage, StatementPage, StatementsPage, SummaryPage
 
@@ -67,7 +67,7 @@ class AmazonStoreCard(LoginBrowser):
         os.close(cookf)
         for i in range(self.MAX_RETRIES):
             try:
-                check_output(["phantomjs", scrn], stderr=STDOUT)
+                check_output(["phantomjs", scrn], stderr=STDOUT)  # nosec
                 break
             except CalledProcessError as error:
                 last_error = error

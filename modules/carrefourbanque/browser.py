@@ -1,35 +1,36 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import absolute_import, unicode_literals
+# flake8: compatible
 
 import re
 from time import sleep
 
-from weboob.browser import LoginBrowser, URL, need_login, StatesMixin
-from weboob.exceptions import BrowserIncorrectPassword, RecaptchaV2Question, BrowserUnavailable
-from weboob.capabilities.bank import Account
-from weboob.tools.compat import basestring
+from woob.browser import LoginBrowser, URL, need_login, StatesMixin
+from woob.capabilities.captcha import RecaptchaV2Question
+from woob.exceptions import (
+    BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded,
+    AuthMethodNotImplemented, BrowserUserBanned, ActionType,
+)
+from woob.capabilities.bank import Account
 
 from .pages import (
-    LoginPage, MaintenancePage, HomePage, IncapsulaResourcePage, LoanHistoryPage, CardHistoryPage, SavingHistoryPage,
-    LifeInvestmentsPage, LifeHistoryPage, CardHistoryJsonPage,
+    LoginPage, MaintenancePage, HomePage, IncapsulaResourcePage, LoanHistoryPage, CardHistoryPage,
+    SavingHistoryPage, LifeHistoryInvestmentsPage, CardHistoryJsonPage, KYCPage,
 )
 
 
@@ -39,7 +40,8 @@ __all__ = ['CarrefourBanqueBrowser']
 class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
     BASEURL = 'https://www.carrefour-banque.fr'
 
-    login = URL('/espace-client/connexion', LoginPage)
+    login = URL('/espace-client/connexion$', LoginPage)
+    kyc = URL(r'/espace-client/enrollment\?id=.*$', KYCPage)
     maintenance = URL('/maintenance', MaintenancePage)
     incapsula_ressource = URL('/_Incapsula_Resource', IncapsulaResourcePage)
     home = URL('/espace-client$', HomePage)
@@ -47,15 +49,17 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
     loan_history = URL(r'/espace-client/pret-personnel/situation\?(.*)', LoanHistoryPage)
     saving_history = URL(
         r'/espace-client/compte-livret/solde-dernieres-operations\?(.*)',
-        r'/espace-client/epargne-pass/historique-des-operations\?(.*)',
-        r'/espace-client/epargne-libre/historique-des-operations\?(.*)',
+        r'/espace-client/epargne-(libre|pass)/historique-des-operations\?(.*)',
+        r'/espace-client/epargne-(libre|pass)/solde-dernieres-operations\?(.*)',
         SavingHistoryPage
     )
 
     card_history = URL(r'/espace-client/carte-credit/solde-dernieres-operations\?(.*)', CardHistoryPage)
     card_history_json = URL(r'/espace-client/carte-credit/consultation_solde_ajax', CardHistoryJsonPage)
-    life_history = URL(r'/espace-client/assurance-vie/historique-des-operations\?(.*)', LifeHistoryPage)
-    life_investments = URL(r'/espace-client/assurance-vie/solde-dernieres-operations\?(.*)', LifeInvestmentsPage)
+    life_history_investments = URL(
+        r'/espace-client/assurance-vie/solde-dernieres-operations\?(.*)',
+        LifeHistoryInvestmentsPage
+    )
 
     def __init__(self, config, *args, **kwargs):
         self.config = config
@@ -64,15 +68,19 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
         super(CarrefourBanqueBrowser, self).__init__(*args, **kwargs)
 
     def locate_browser(self, state):
-        pass
+        self.login.go()  # Redirects to HomePage if we are logged in
+        if self.home.is_here():
+            # This is a necessary verification, as accessing some urls won't raise a ClientError
+            # when we're not logged in.
+            super(CarrefourBanqueBrowser, self).locate_browser(state)  # needed to make blackbox work
 
     def do_login(self):
         """
         Attempt to log in.
         Note: this method does nothing if we are already logged in.
         """
-        assert isinstance(self.username, basestring)
-        assert isinstance(self.password, basestring)
+        assert isinstance(self.username, str)
+        assert isinstance(self.password, str)
 
         if self.config['captcha_response'].get():
             data = {'g-recaptcha-response': self.config['captcha_response'].get()}
@@ -106,12 +114,28 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
                 raise RecaptchaV2Question(website_key=website_key, website_url=website_url)
             else:
                 # we got javascript page again, this shouldn't happen
-                assert False, "obfuscated javascript not managed"
+                raise AssertionError("obfuscated javascript not managed")
 
         if self.maintenance.is_here():
             raise BrowserUnavailable(self.page.get_message())
 
         self.page.enter_login(self.username)
+
+        '''
+        If the user tries to login with a new login for the first time,
+        he will be redirected to a page where he will have to validate his information
+        (name, birthdate, birthplace).
+        '''
+        if self.kyc.is_here():
+            kyc_msg = self.page.get_error_message()
+            if not kyc_msg:
+                raise AssertionError('KYC page without error message')
+            raise ActionNeeded(
+                action_type=ActionType.FILL_KYC,
+                message=kyc_msg,
+                locale='fr-FR',
+            )
+
         msg = self.page.get_message_if_old_login()
         if msg:
             # carrefourbanque has changed login of their user, they have to use their new internet id
@@ -119,21 +143,77 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
 
         self.page.enter_password(self.password)
 
-        if not self.home.is_here():
+        location = self.response.headers.get('Location', '')
+        if 'connexion/sms' in location:
+            # Detecting SCA before redirecting to avoid sending unnecessary/unhandled sms
+            # Waiting for PSU contact to be able to implement SMS auth
+            raise AuthMethodNotImplemented("L'authentification forte par SMS n'est pas prise en charge.")
+        if location:
+            # Location if redirection to Homepage or SMSPage
+            # No location otherwise. eg App-val pop-in appears, other Dsp2 auth message, error message like below, etc.
+            self.location(location)
+
+        if self.login.is_here():
             error = self.page.get_error_message()
             # Sometimes some connections aren't able to login because of a
             # maintenance randomly occuring.
             if error:
                 if 'travaux de maintenance dans votre Espace Client.' in error:
                     raise BrowserUnavailable(error)
-                elif 'saisies ne correspondent pas à l\'identifiant' in error:
+                # We raise an ActionNeeded because you might have to contact your bank in this case
+                if "votre compte ne vous permet pas d'accéder à votre Espace Client" in error:
+                    raise ActionNeeded(error.replace('× ', ''))
+                elif "saisies ne correspondent pas à l'identifiant" in error:
                     raise BrowserIncorrectPassword(error)
-                assert False, 'Unexpected error at login: "%s"' % error
-            assert False, 'Unexpected error at login'
+                elif "ce compte a été bloqué pendant 24h" in error:
+                    raise BrowserUserBanned(error.replace('× ', ''))
+                raise AssertionError('Unexpected error at login: "%s"' % error)
 
-        if self.login.is_here():
-            # Check if the website asks for strong authentication with OTP
-            self.page.check_action_needed()
+            dsp2_auth_code = self.page.get_dsp2_auth_code()
+            # The dsp2 authentication code gives informations on which strong authentication
+            # method is used by the user (Clé Secure: in-app validation or otp by SMS)
+            # on blocked access to the account and unavailability of the service.
+            if dsp2_auth_code:
+                if dsp2_auth_code == 'authent_cc':
+                    raise ActionNeeded(
+                        "Authentifiez-vous depuis l'appli Carrefour Banque avec Clé Secure."
+                    )
+                elif dsp2_auth_code == 'enrolement_selection':
+                    # On the website 'enrolement_selection' code corresponds to a pop-in in which the Clé Secure
+                    # authentication method is advertised. The user is presented with instructions on how
+                    # to install Clé Secure and he is also given the option to log in using otp by SMS.
+                    raise ActionNeeded(
+                        locale="fr-FR",
+                        message="Veuillez choisir une méthode d'authentification forte sur votre espace personnel",
+                        action_type=ActionType.ENABLE_MFA,
+                    )
+                elif dsp2_auth_code == 'cle_secure_locked':
+                    raise ActionNeeded(
+                        "A la suite de 3 tentatives d'authentification erronées, votre Clé Secure a été bloquée."
+                        + ' Par mesure de sécurité, créez un nouveau code Clé Secure depuis votre appli Carrefour Banque.'
+                    )
+                elif dsp2_auth_code == 'service_indisponible':
+                    raise BrowserUnavailable(
+                        'Le service est momentanément indisponible. Excusez-nous pour la gêne occasionnée.'
+                        + ' Veuillez ré-essayer ultérieurement.'
+                    )
+                elif 'acces_bloque' in dsp2_auth_code:
+                    raise ActionNeeded(
+                        "L'accès à votre Espace Client a été bloqué pour des raisons de sécurité."
+                        + ' Pour le débloquer, contactez le service client de Carrefour Banque.'
+                    )
+                elif dsp2_auth_code == 'enrolement_cc':
+                    # On the website 'enrolement_cc' code corresponds to a pop-in in which the Clé Secure
+                    # authentication method is advertised. But the user can still decide to install it later
+                    # and continue authentication
+                    self.location('/auth/authissuer')
+                    if not self.home.is_here():
+                        raise AssertionError('Should be on home page.')
+                else:
+                    raise AssertionError('Unhandled dsp2 authentication code at login %s' % dsp2_auth_code)
+
+            else:
+                raise AssertionError('Unexpected error at login')
 
     @need_login
     def get_account_list(self):
@@ -151,7 +231,7 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
 
         self.home.stay_or_go()
         self.location(account._life_investments)
-        assert self.life_investments.is_here()
+        assert self.life_history_investments.is_here()
         return self.page.get_investment(account)
 
     @need_login
@@ -186,7 +266,7 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
                 tr = None
                 total = 0
                 loop_limit = 500
-                for page in range(loop_limit):
+                for _ in range(loop_limit):
                     self.card_history_json.go(data={'dateRecup': previous_date, 'index': card_index})
                     previous_date = self.page.get_previous_date()
 
@@ -203,7 +283,7 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
                         # last page
                         if tr and tr.date:
                             self.logger.info("last transaction date %s", tr.date)
-                        self.logger.info("weboob scraped %s transactions", total)
+                        self.logger.info("woob scraped %s transactions", total)
                         self.logger.info("There is no previous_date in the response of the last request")
                         return
                 else:
@@ -216,7 +296,7 @@ class CarrefourBanqueBrowser(LoginBrowser, StatesMixin):
         elif account.type == Account.TYPE_LOAN:
             assert self.loan_history.is_here()
         elif account.type == Account.TYPE_LIFE_INSURANCE:
-            assert self.life_history.is_here()
+            assert self.life_history_investments.is_here()
         else:
             raise NotImplementedError()
         for tr in self.page.iter_history(account):

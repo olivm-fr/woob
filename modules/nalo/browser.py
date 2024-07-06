@@ -2,32 +2,34 @@
 
 # Copyright(C) 2018      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+from woob.browser import LoginBrowser, need_login, URL
+from woob.capabilities.captcha import RecaptchaV2Question
+from woob.capabilities.bank.wealth import Investment
+from woob.exceptions import BrowserIncorrectPassword
+from woob.browser.exceptions import ClientError
 
-from weboob.browser import LoginBrowser, need_login, URL
-from weboob.capabilities.wealth import Investment
-
-from .pages import LoginPage, AccountsPage, AccountPage, InvestPage
+from .pages import LoginPage, HtmlLoginFragment, AccountsPage, AccountPage, InvestPage
 
 
 class NaloBrowser(LoginBrowser):
-    BASEURL = 'https://nalo.fr'
+    BASEURL = 'https://api.nalo.fr'
 
+    login_page = URL(r'https://app.nalo.fr/components/auth/views/login.html', HtmlLoginFragment)
     login = URL(r'/api/v1/login', LoginPage)
     accounts = URL(r'/api/v1/projects/mine/without-details', AccountsPage)
     history = URL(r'/api/v1/projects/(?P<id>\d+)/history')
@@ -36,12 +38,39 @@ class NaloBrowser(LoginBrowser):
 
     token = None
 
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(
+            config['login'].get(),
+            config['password'].get(),
+            *args, **kwargs,
+        )
+
+        self.config = config
+
     def do_login(self):
-        self.login.go(json={
-            'email': self.username,
-            'password': self.password,
-            'userToken': False,
-        })
+        try:
+            self.login_page.stay_or_go()
+            captcha_response = self.config['captcha_response'].get()
+
+            if not captcha_response:
+                raise RecaptchaV2Question(
+                    website_key=self.page.get_recaptcha_site_key(),
+                    website_url=self.url,
+                )
+
+            data = {
+                'email': self.username,
+                'password': self.password,
+                'userToken': False,
+                'recaptcha': captcha_response,
+            }
+
+            self.login.go(json=data)
+        except ClientError as e:
+            message = e.response.json().get('detail', '')
+            if 'Email ou mot de passe incorrect' in message:
+                raise BrowserIncorrectPassword(message)
+            raise AssertionError('An unexpected error occurred: %s' % message)
         self.token = self.page.get_token()
 
     def build_request(self, *args, **kwargs):

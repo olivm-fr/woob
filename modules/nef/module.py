@@ -2,27 +2,25 @@
 
 # Copyright(C) 2019      Damien Cassou
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
-from weboob.capabilities.bank import CapBankTransfer, Account
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword, ValueTransient
+from woob.capabilities.bank import CapBankTransfer, Account, CapBankWealth
 
 from .browser import NefBrowser
 
@@ -30,22 +28,30 @@ from .browser import NefBrowser
 __all__ = ['NefModule']
 
 
-class NefModule(Module, CapBankTransfer):
+class NefModule(Module, CapBankWealth, CapBankTransfer):
     NAME = 'nef'
     DESCRIPTION = 'La Nef'
     MAINTAINER = 'Damien Cassou'
     EMAIL = 'damien@cassou.me'
     LICENSE = 'LGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
     BROWSER = NefBrowser
 
-    CONFIG = BackendConfig(ValueBackendPassword('login', label='username', regexp='.+'),
-                           ValueBackendPassword('password', label='Password'))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='username', masked=False, regexp='.+'),
+        ValueBackendPassword('password', label='Password'),
+        ValueTransient('request_information'),
+        ValueTransient('otp_sms', regexp=r'^\d{6}$'),
+
+    )
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(
+            self.config,
+            self.config['login'].get(),
+            self.config['password'].get()
+        )
 
     # CapBank
     def iter_accounts(self):
@@ -55,17 +61,6 @@ class NefModule(Module, CapBankTransfer):
         :rtype: iter[:class:`Account`]
         """
         return self.browser.iter_accounts_list()
-
-    def iter_coming(self, account):
-        """
-        Iter coming transactions on a specific account.
-
-        :param account: account to get coming transactions
-        :type account: :class:`Account`
-        :rtype: iter[:class:`Transaction`]
-        :raises: :class:`AccountNotFound`
-        """
-        return []
 
     def iter_history(self, account):
         """
@@ -108,22 +103,3 @@ class NefModule(Module, CapBankTransfer):
         """
         return self.browser.iter_recipients_list()
 
-    def init_transfer(self, transfer, **params):
-        """
-        Initiate a transfer.
-
-        :param :class:`Transfer`
-        :rtype: :class:`Transfer`
-        :raises: :class:`TransferError`
-        """
-        raise NotImplementedError()
-
-    def execute_transfer(self, transfer, **params):
-        """
-        Execute a transfer.
-
-        :param :class:`Transfer`
-        :rtype: :class:`Transfer`
-        :raises: :class:`TransferError`
-        """
-        raise NotImplementedError()

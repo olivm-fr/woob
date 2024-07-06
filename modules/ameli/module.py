@@ -1,61 +1,66 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2019      Budget Insight
+# Copyright(C) 2019 Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
 
-from __future__ import unicode_literals
-
-from weboob.capabilities.base import find_object
-from weboob.tools.backend import Module, BackendConfig
-from weboob.capabilities.bill import CapDocument, Document, DocumentTypes, SubscriptionNotFound, DocumentNotFound, Subscription
-from weboob.tools.value import ValueBackendPassword
+from woob.capabilities.base import find_object
+from woob.capabilities.bill import (
+    CapDocument, Document, DocumentCategory, DocumentNotFound, DocumentTypes, Subscription,
+)
+from woob.capabilities.profile import CapProfile
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import AmeliBrowser
-
 
 __all__ = ['AmeliModule']
 
 
-class AmeliModule(Module, CapDocument):
+class AmeliModule(Module, CapDocument, CapProfile):
     NAME = 'ameli'
     DESCRIPTION = "le site de l'Assurance Maladie en ligne"
     MAINTAINER = 'Florian Duguet'
     EMAIL = 'florian.duguet@budget-insight.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    DEPENDENCIES = ('franceconnect',)
 
     BROWSER = AmeliBrowser
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Mon numero de sécurité sociale', regexp=r'\d{13}', masked=False),
-        ValueBackendPassword('password', label='Mon code personnel', regexp=r'\S{8,50}', masked=True),
+        ValueBackendPassword('login', label="Identifiant (dépend de votre méthode d'authentification)", masked=False),
+        ValueBackendPassword('password', label='Mot de passe'),
+        ValueTransient('request_information'),
+        ValueTransient('otp_email', regexp=r'\d{6}'),
+        ValueTransient('login_source', default='direct'),  # for backward compatibility purpose
     )
 
     accepted_document_types = (DocumentTypes.BILL,)
+    document_categories = {DocumentCategory.ADMINISTRATIVE}
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(
+            self.config,
+            self.config['login'].get(),
+            self.config['password'].get()
+        )
 
     def iter_subscription(self):
         return self.browser.iter_subscription()
-
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
 
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):
@@ -73,3 +78,6 @@ class AmeliModule(Module, CapDocument):
             document = self.get_document(document)
 
         return self.browser.open(document.url).content
+
+    def get_profile(self):
+        return self.browser.get_profile()

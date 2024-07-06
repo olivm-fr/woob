@@ -1,114 +1,97 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2012-2019  Budget Insight
+# Copyright(C) 2022 Budget Insight
+#
+# This file is part of a woob module.
+#
+# This woob module is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This woob module is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+from woob.browser.pages import LoggedPage, JsonPage
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.standard import (
+    Date, Format, CleanText,
+    Currency, CleanDecimal, Env, Coalesce,
+)
+from woob.browser.filters.json import Dict
+from woob.capabilities.bill import Subscription, Bill
+from woob.capabilities import NotAvailable
 
-from weboob.browser.pages import LoggedPage, JsonPage
-from weboob.browser.elements import DictElement, ItemElement, method
-from weboob.browser.filters.standard import Date, CleanDecimal, Format, Env, Currency, Field
-from weboob.browser.filters.json import Dict
-from weboob.capabilities import NotAvailable
-from weboob.capabilities.bill import Subscription, Bill
+from .akamai import AkamaiHTMLPage
+
+
+class HomePage(AkamaiHTMLPage):
+    def get_akamai_url(self):
+        url = super(HomePage, self).get_akamai_url()
+        if url.endswith('.js'):
+            # wrong url, the good one is very probably missing
+            return
+        return url
 
 
 class SigninPage(JsonPage):
     @property
     def logged(self):
-        return bool(self.get_token())
+        return Dict('authenticated', default=False)(self.doc) is True
 
-    def get_token(self):
-        return self.doc.get('meta', {}).get('token', {})
+    def get_error(self):
+        return Dict('message', default=None)(self.doc)
 
 
 class UserPage(LoggedPage, JsonPage):
-    def get_subscription(self):
-        user = self.doc['user']
-        sub = Subscription()
-        sub.subscriber = '%s %s' % (user['first_name'], user['last_name'])
-        sub.id = user['id']
-        sub.label = user['email']
+    @method
+    class get_subscription(ItemElement):
+        klass = Subscription
 
-        return sub
+        obj_id = CleanText(Dict('id'))
+        obj_subscriber = Format(
+            '%s %s',
+            CleanText(Dict('firstName')),
+            CleanText(Dict('surname')),
+        )
+        obj_label = CleanText(Dict('email'))
 
 
 class DocumentsPage(LoggedPage, JsonPage):
-    def build_doc(self, text):
-        """
-        this json contains several lists
-        - pnrs
-        - proofs
-        - folders
-        - trips
-        - after_sales_logs_dict
-        and others
-
-        the most important is proofs, because it contains url with a pdf
-        => so one proof gives one bill (for purchase only)
-        """
-        doc = super(DocumentsPage, self).build_doc(text)
-
-        pnrs_dict = {pnr['id']: pnr for pnr in doc['pnrs']}
-        after_sales_logs_dict = {asl['id']: asl for asl in doc['after_sales_logs']}
-
-        bills = []
-        for proof in doc['proofs']:
-            pnr = pnrs_dict[proof['pnr_id']]
-            bill = {
-                'id': proof['id'],  # hash of 32 char length
-                'url': proof['url'],
-                'date': proof['created_at'],
-                'type': proof['type'],  # can be 'purchase' or 'refund'
-                'currency': pnr['currency'] or '',  # because pnr['currency'] can be None
-            }
-
-            assert proof['type'] in ('purchase', 'refund', 'carrier_invoice'), proof['type']
-            if proof['type'] in ('purchase', 'carrier_invoice'):
-                # pnr['cents'] is 0 if this purchase has a refund, but there is nowhere to take it
-                # except make an addition, but we don't do that
-
-                # carrier_invoice comes along with a purchase
-                # typically when travel is in a foreign country
-
-                bill['price'] = pnr['cents']
-                bills.append(bill)
-            else:  # proof['type'] == 'refund'
-                after_sales_logs = [after_sales_logs_dict[asl_id] for asl_id in pnr['after_sales_log_ids']]
-                for asl in after_sales_logs:
-                    new_bill = dict(bill)
-                    new_bill['id'] += '_' + asl['id']
-                    new_bill['price'] = asl['refunded_cents']
-                    bills.append(new_bill)
-
-        return {'bills': bills}
-
     @method
     class iter_documents(DictElement):
-        item_xpath = 'bills'
+        item_xpath = 'pastBookings/results'
+        # when the seller is ouigo we have duplicate data
+        ignore_duplicate = True
 
         class item(ItemElement):
             klass = Bill
 
-            obj_id = Format('%s_%s', Env('subid'), Dict('id'))
-            obj_url = Dict('url')
-            obj_date = Date(Dict('date'))
-            obj_format = 'pdf'
-            obj_currency = Currency(Dict('currency'), default=NotAvailable)
+            def condition(self):
+                return 'COMPLETE' in Dict('order/state')(self)
 
-            def obj_price(self):
-                price = CleanDecimal(Dict('price'), default=NotAvailable)(self)
-                if price:
-                    return price / 100
-                return NotAvailable
-
-            def obj_income(self):
-                if Dict('type')(self) == 'purchase':
-                    return False
-                else:  # type is 'refund'
-                    return True
-
-            def obj_label(self):
-                if Field('income')(self):
-                    return Format('Remboursement du %s', Field('date'))(self)
-                else:
-                    return Format('Achat du %s', Field('date'))(self)
+            obj_id = Format('%s_%s', Env('subid'), CleanText(Dict('order/id')))
+            obj_label = Format(
+                '%s to %s',
+                CleanText(Dict('booking/origin')),
+                CleanText(Dict('booking/destination')),
+            )
+            obj_number = CleanText(Dict('order/friendlyOrderId'))
+            obj_date = Date(Dict('order/orderDate'))
+            obj_currency = Coalesce(
+                Currency(Dict('order/payment/paid/currency', default=''), default=NotAvailable),
+                Currency(Dict('order/invoices/0/currencyCode', default=''), default=NotAvailable)
+            )
+            obj_total_price = Coalesce(
+                CleanDecimal.SI(Dict('order/payment/paid/amount', default=''), default=NotAvailable),
+                CleanDecimal.SI(Dict('order/invoices/0/totalAmount', default=''), default=NotAvailable)
+            )
+            obj_url = Format(
+                'https://www.thetrainline.com/fr/my-account/order/%s/expense-receipt',
+                CleanText(Dict('order/id')),
+            )

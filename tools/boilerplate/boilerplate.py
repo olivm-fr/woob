@@ -1,24 +1,21 @@
 #! /usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-# Copyright(C) 2013-2019      Laurent Bachelier, Sébastien Jean
+# Copyright(C) 2013-2021      Sébastien Jean
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import print_function
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
 import os
@@ -43,7 +40,7 @@ def u8(s):
 
 
 def gitconfig(entry):
-    return u8(subprocess.check_output('git config -z --get %s' % entry, shell=True)[:-1])
+    return u8(subprocess.check_output(f'git config -z --get {entry}', shell=True)[:-1])
 
 
 def main():

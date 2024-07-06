@@ -2,43 +2,41 @@
 
 # Copyright(C) 2012 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from copy import deepcopy
 import re
 import json
 from datetime import datetime
 
-from weboob.browser.pages import AbstractPage, LoggedPage, HTMLPage, JsonPage
-from weboob.browser.elements import DictElement, ItemElement, method
-from weboob.browser.filters.standard import (
+from woob.browser.pages import LoggedPage, HTMLPage, JsonPage
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.standard import (
     Date, CleanDecimal, CleanText, Format, Field, Env, Regexp, Currency,
 )
-from weboob.browser.filters.json import Dict
-from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account, Loan
-from weboob.capabilities.contact import Advisor
-from weboob.capabilities.profile import Profile
-from weboob.capabilities.bill import DocumentTypes, Subscription, Document
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.exceptions import BrowserUnavailable
+from woob.browser.filters.json import Dict
+from woob.capabilities import NotAvailable
+from woob.capabilities.bank import Account, Loan, AccountOwnerType
+from woob.capabilities.contact import Advisor
+from woob.capabilities.profile import Profile
+from woob.capabilities.bill import DocumentTypes, Subscription, Document
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.exceptions import BrowserUnavailable
 
 
 class Transaction(FrenchTransaction):
@@ -74,12 +72,6 @@ class Transaction(FrenchTransaction):
         ),
         (re.compile(r'^FAC CB (?P<text>.*?) (?P<dd>\d{2})/(?P<mm>\d{2})', re.IGNORECASE), FrenchTransaction.TYPE_CARD),
     ]
-
-
-class LoginPage(AbstractPage):
-    PARENT = 'caissedepargne'
-    PARENT_URL = 'login'
-    BROWSER_ATTR = 'package.browser.CaisseEpargneLogin'
 
 
 class CenetLoginPage(HTMLPage):
@@ -157,6 +149,7 @@ class CenetAccountsPage(LoggedPage, CenetJsonPage):
 
             obj_id = obj_number = CleanText(Dict('Numero'))
             obj_label = CleanText(Dict('Intitule'))
+            obj_owner_type = AccountOwnerType.ORGANIZATION
 
             def obj_iban(self):
                 iban = Dict('IBAN')(self)  # IBAN can be `null`
@@ -178,6 +171,13 @@ class CenetAccountsPage(LoggedPage, CenetJsonPage):
             def obj__formated(self):
                 return self.el
 
+            def obj__access_linebourse(self):
+                # To determine if the account has access to linebourse,
+                # the website check if its number does not start by 37.
+                # Source: BASEURL/_custom/dist/scripts/Bourse/comptesTitres.min.js
+                # Find the condition that set the aAccesBourse variable
+                return not (Field('number')(self).startswith('37'))
+
 
 class CenetLoanPage(LoggedPage, CenetJsonPage):
     @method
@@ -188,13 +188,21 @@ class CenetLoanPage(LoggedPage, CenetJsonPage):
             klass = Loan
 
             obj_id = CleanText(Dict('IdentifiantUniqueContrat'), replace=[(' ', '-')])
-            obj_label = CleanText(Dict('Libelle'))
             obj_total_amount = CleanDecimal(Dict('MontantInitial/Valeur'))
             obj_currency = Currency(Dict('MontantInitial/Devise'))
             obj_type = Account.TYPE_LOAN
             obj_duration = CleanDecimal(Dict('Duree'))
             obj_rate = CleanDecimal.French(Dict('Taux'))
             obj_next_payment_amount = CleanDecimal(Dict('MontantProchaineEcheance/Valeur'))
+            obj_owner_type = AccountOwnerType.ORGANIZATION
+
+            def obj_label(self):
+                label = CleanText(Dict('LibelleReference', default=''))(self)
+                if not label:
+                    # TODO: Remove logger when were are sure that LibelleReference is always present in loan accounts.
+                    self.logger.warning('LibelleReference is not present in loan account.')
+                    label = CleanText(Dict('Libelle'))(self)
+                return label
 
             def obj_balance(self):
                 balance = CleanDecimal(Dict('CapitalRestantDu/Valeur'))(self)
@@ -205,21 +213,28 @@ class CenetLoanPage(LoggedPage, CenetJsonPage):
             def obj_subscription_date(self):
                 sub_date = Dict('DateDebutEffet')(self)
                 if sub_date:
-                    date = CleanDecimal().filter(sub_date) / 1000
+                    date = int(CleanDecimal().filter(sub_date) / 1000)
                     return datetime.fromtimestamp(date).date()
                 return NotAvailable
 
             def obj_maturity_date(self):
                 mat_date = Dict('DateDerniereEcheance')(self)
                 if mat_date:
-                    date = CleanDecimal().filter(mat_date) / 1000
+                    date = int(CleanDecimal().filter(mat_date) / 1000)
                     return datetime.fromtimestamp(date).date()
                 return NotAvailable
 
             def obj_next_payment_date(self):
                 next_date = Dict('DateProchaineEcheance')(self)
                 if next_date:
-                    date = CleanDecimal().filter(next_date) / 1000
+                    date = int(CleanDecimal().filter(next_date) / 1000)
+                    return datetime.fromtimestamp(date).date()
+                return NotAvailable
+
+            def obj_start_repayment_date(self):
+                start_date = Dict('DatePremiereEcheance')(self)
+                if start_date:
+                    date = CleanDecimal().filter(start_date) / 1000
                     return datetime.fromtimestamp(date).date()
                 return NotAvailable
 
@@ -246,6 +261,7 @@ class CenetCardsPage(LoggedPage, CenetJsonPage):
             obj_currency = 'EUR'  # not available when no coming
             obj_type = Account.TYPE_CARD
             obj_coming = CleanDecimal(Dict('CumulEnCours/Montant/Valeur'), sign='-')
+            obj_owner_type = AccountOwnerType.ORGANIZATION
 
             def obj__hist(self):
                 # Real Date will not be accepted as history and coming request parameters done later
@@ -390,15 +406,6 @@ class CenetCardSummaryPage(LoggedPage, CenetJsonPage):
                     return -amount
                 else:
                     return amount
-
-
-class _LogoutPage(HTMLPage):
-    def on_load(self):
-        raise BrowserUnavailable(CleanText('//*[@class="messErreur"]')(self.doc))
-
-
-class ErrorPage(_LogoutPage):
-    pass
 
 
 class UnavailablePage(HTMLPage):

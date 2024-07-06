@@ -2,27 +2,26 @@
 
 # Copyright(C) 2013 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+# flake8: compatible
 
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import AccountNotFound
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, Value
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword, Value
 
 from .browser import CarrefourBanqueBrowser
 
@@ -32,14 +31,16 @@ __all__ = ['CarrefourBanqueModule']
 
 class CarrefourBanqueModule(Module, CapBankWealth):
     NAME = 'carrefourbanque'
-    MAINTAINER = u'Romain Bignon'
+    MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
-    DESCRIPTION = u'Carrefour Banque'
+    VERSION = '3.6'
+    DESCRIPTION = 'Carrefour Banque'
     LICENSE = 'LGPLv3+'
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label=u'Votre Identifiant Internet', masked=False),
-                           ValueBackendPassword('password', label=u"Code d'accès",    regexp=u'\d+'),
-                           Value('captcha_response', label='Captcha Response', default='', required=False))
+    CONFIG = BackendConfig(
+        ValueBackendPassword('login', label='Votre Identifiant Internet', masked=False),
+        ValueBackendPassword('password', label="Code d'accès", regexp=r'\d+'),
+        Value('captcha_response', label='Captcha Response', default='', required=False)
+    )
     BROWSER = CarrefourBanqueBrowser
 
     def create_default_browser(self):
@@ -47,9 +48,6 @@ class CarrefourBanqueModule(Module, CapBankWealth):
 
     def iter_accounts(self):
         return self.browser.get_account_list()
-
-    def get_account(self, _id):
-        return find_object(self.browser.get_account_list(), id=_id, error=AccountNotFound)
 
     def iter_history(self, account):
         return self.browser.iter_history(account)

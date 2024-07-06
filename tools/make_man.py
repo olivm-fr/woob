@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-# Copyright(C) 2010-2018 Laurent Bachelier
+# Copyright(C) 2010-2021 Romain Bignon
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import absolute_import, print_function
-
-import imp
+import importlib
 import inspect
 import optparse
 import os
@@ -30,11 +27,11 @@ import time
 from datetime import datetime
 from textwrap import dedent
 
-from weboob.tools.application.base import Application
+from woob.tools.application.base import Application
 
 BASE_PATH = os.path.join(os.path.dirname(__file__), os.pardir)
 DEST_DIR = 'man'
-COMP_PATH = 'tools/weboob_bash_completion'
+COMP_PATH = 'tools/woob_bash_completion'
 
 
 class ManpageHelpFormatter(optparse.HelpFormatter):
@@ -65,21 +62,21 @@ class ManpageHelpFormatter(optparse.HelpFormatter):
         return '.SH SYNOPSIS\n%s' % txt
 
     def format_description(self, description):
-        desc = u'.SH DESCRIPTION\n.LP\n\n%s\n' % description
+        desc = '.SH DESCRIPTION\n.LP\n\n%s\n' % description
         if hasattr(self.app, 'CAPS'):
-            self.app.weboob.modules_loader.load_all()
+            self.app.woob.modules_loader.load_all()
             caps = self.app.CAPS if isinstance(self.app.CAPS, tuple) else (self.app.CAPS,)
             modules = []
-            for name, module in self.app.weboob.modules_loader.loaded.items():
+            for name, module in self.app.woob.modules_loader.loaded.items():
                 if module.has_caps(*caps):
-                    modules.append(u'* %s (%s)' % (name, module.description))
+                    modules.append('* %s (%s)' % (name, module.description))
             if len(modules) > 0:
-                desc += u'\n.SS Supported websites:\n'
-                desc += u'\n.br\n'.join(sorted(modules))
+                desc += '\n.SS Supported websites:\n'
+                desc += '\n.br\n'.join(sorted(modules))
         return desc
 
     def format_commands(self, commands):
-        s = u''
+        s = ''
         for section, cmds in commands.items():
             if len(cmds) == 0:
                 continue
@@ -105,25 +102,25 @@ class ManpageHelpFormatter(optparse.HelpFormatter):
 
 
 def main():
-    scripts_path = os.path.join(BASE_PATH, 'weboob', 'applications')
-    files = os.listdir(scripts_path)
-    completions = dict()
+    # TODO rename when apps have changed folder
+    scripts_path = os.path.join(BASE_PATH, 'woob', 'applications')
+    files = sorted(os.listdir(scripts_path))
+    completions = {}
 
     for fname in files:
         fpath = os.path.join(scripts_path, fname)
         if os.path.isdir(fpath) and not fname.startswith('_'):
             try:
-                fp, pathname, description = imp.find_module(fname, [scripts_path])
-                module = imp.load_module(fname, fp, pathname, description)
+                module = importlib.import_module(f'woob.applications.{fname}')
             except OSError as e:
-                print("Unable to load the %s application (%s)"
-                      % (fname, e), file=sys.stderr)
+                print(f"Unable to load the {fname} application ({e})",
+                      file=sys.stderr)
             else:
-                print("Loaded %s" % fname)
+                print(f"Loaded {fname}")
                 # Find the applications we can handle
                 for klass in module.__dict__.values():
                     if inspect.isclass(klass) and issubclass(klass, Application) and klass.VERSION:
-                        completions[klass.APPNAME] = analyze_application(klass, klass.APPNAME)
+                        completions[klass.APPNAME] = analyze_application(klass, 'woob-' + klass.APPNAME)
 
     write_completions(completions)
 
@@ -146,7 +143,7 @@ def analyze_application(app, script_name):
     formatter = ManpageHelpFormatter(application)
 
     # patch the application
-    application._parser.prog = "%s" % script_name
+    application._parser.prog = "%s" % script_name.replace('woob-', 'woob ')
     application._parser.formatter = formatter
     helptext = application._parser.format_help(formatter)
 
@@ -186,43 +183,43 @@ You can make a expression combinations with the keywords \\fB" AND "\\fR, \\fB" 
 The \\fBLIMIT\\fR keyword can be used to limit the number of items upon which running the expression. \\fBLIMIT\\fR can only be placed at the end of the expression followed by the number of elements you want.
 .SS Examples:
 .nf
-.B boobank ls \-\-condition 'label=Livret A'
+.B woob bank ls \-\-condition 'label=Livret A'
 .fi
 Display only the "Livret A" account.
 .PP
 .nf
-.B boobank ls \-\-condition 'balance>10000'
+.B woob bank ls \-\-condition 'balance>10000'
 .fi
 Display accounts with a lot of money.
 .PP
 .nf
-.B boobank history account@backend \-\-condition 'label|rewe'
+.B woob bank history account@backend \-\-condition 'label|rewe'
 .fi
 Get transactions containing "rewe".
 .PP
 .nf
-.B boobank history account@backend \-\-condition 'date>2013\-12\-01 AND date<2013\-12\-09'
+.B woob bank history account@backend \-\-condition 'date>2013\-12\-01 AND date<2013\-12\-09'
 .fi
 Get transactions betweens the 2th December and 8th December 2013.
 .PP
 .nf
-.B boobank history account@backend \-\-condition 'date>2013\-12\-01  LIMIT 10'
+.B woob bank history account@backend \-\-condition 'date>2013\-12\-01  LIMIT 10'
 .fi
 Get transactions after the 2th December in the last 10 transactions
 """
     footer = """.SH COPYRIGHT
 %s
 .LP
-For full copyright information see the COPYING file in the weboob package.
+For full copyright information see the COPYING file in the woob package.
 .LP
 .RE
 .SH FILES
- "~/.config/weboob/backends" """ % application.COPYRIGHT.replace('YEAR', '%d' % datetime.today().year)
+ "~/.config/woob/backends" """ % application.COPYRIGHT.replace('YEAR', '%d' % datetime.today().year)
     if len(app.CONFIG) > 0:
-        footer += '\n\n "~/.config/weboob/%s"' % app.APPNAME
+        footer += '\n\n "~/.config/woob/%s"' % app.APPNAME
 
     # Skip internal applications.
-    footer += "\n\n.SH SEE ALSO\nHome page: http://weboob.org/applications/%s" % application.APPNAME
+    footer += "\n\n.SH SEE ALSO\nHome page: https://woob.tech/applications/%s" % application.APPNAME
 
     mantext = u"%s\n%s\n%s\n%s\n%s\n%s\n%s" % (coding, comment, header, name, helptext, condition, footer)
     with open(os.path.join(BASE_PATH, DEST_DIR, "%s.1" % script_name), 'w+') as manfile:
@@ -235,29 +232,46 @@ For full copyright information see the COPYING file in the weboob package.
 
 def write_completions(completions):
     compscript = dedent('''
-    # Weboob completion for Bash (automatically generated by tools/make_man.sh)
+    # Woob completion for Bash (automatically generated by tools/make_man.sh)
     #
     # vim: filetype=sh expandtab softtabstop=4 shiftwidth=4
     #
-    # This file is part of weboob.
+    # This file is part of woob.
     #
     # This script can be distributed under the same license as the
-    # weboob or bash packages.
-    ''')
+    # woob or bash packages.
+    _woob()
+    {{
+        local cur prev
+
+        cur=${{COMP_WORDS[COMP_CWORD]}}
+        prev=${{COMP_WORDS[COMP_CWORD-1]}}
+
+        case ${{COMP_CWORD}} in
+            1)
+                COMPREPLY=($(compgen -W "{0}" -- ${{cur}}))
+                ;;
+            2)
+                case ${{prev}} in
+    ''').format(' '.join(completions.keys())).strip()
     for name, items in completions.items():
-        compscript += dedent('''
-        _weboob_{1}()
-        {{
-            local cur args
+        compscript += '''
+                {0})
+                    COMPREPLY=( $(compgen -o default -W "{1}" -- "$cur" ) )
+                    ;;
+        '''.format(name, ' '.join(sorted(items))).rstrip()
 
-            COMPREPLY=()
-            cur=${{COMP_WORDS[COMP_CWORD]}}
-            args="{2}"
+    compscript += dedent('''
+                esac
+                ;;
+            *)
+                COMPREPLY=( $(compgen -o filenames -A file) )
+                ;;
+        esac
+    }
 
-            COMPREPLY=( $(compgen -o default -W "${{args}}" -- "$cur" ) )
-        }}
-        complete -F _weboob_{1} {0}
-        ''').format(name, name.replace('-', '_'), ' '.join(items))
+    complete -F _woob woob
+    ''')
     with open(os.path.join(BASE_PATH, COMP_PATH), 'w') as f:
         f.write(compscript)
 

@@ -2,38 +2,37 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-
-from __future__ import unicode_literals
-
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from functools import wraps
 import json
 import re
+from decimal import Decimal
 
-from weboob.browser.browsers import APIBrowser
-from weboob.browser.exceptions import ClientError
-from weboob.browser.filters.standard import CleanDecimal, Date, Coalesce, MapIn
-from weboob.browser.filters.html import ReplaceEntities
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.wealth import Investment
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.capabilities.bank.investments import is_isin_valid
+from uuid import uuid4
+
+from woob.browser.browsers import APIBrowser
+from woob.browser.exceptions import ClientError
+from woob.browser.filters.standard import CleanDecimal, Date, Coalesce, MapIn
+from woob.browser.filters.html import ReplaceEntities
+from woob.exceptions import BrowserIncorrectPassword, ActionNeeded
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.base import NotAvailable
+from woob.tools.capabilities.bank.investments import is_isin_valid
 
 
 def need_login(func):
@@ -53,6 +52,7 @@ class YomoniBrowser(APIBrowser):
         'assurance vie': Account.TYPE_LIFE_INSURANCE,
         'compte titre': Account.TYPE_MARKET,
         'pea': Account.TYPE_PEA,
+        'per': Account.TYPE_PER,
     }
 
     def __init__(self, username, password, *args, **kwargs):
@@ -63,7 +63,6 @@ class YomoniBrowser(APIBrowser):
         self.accounts = []
         self.investments = {}
         self.histories = {}
-        self.login_headers = {}
         self.request_headers = {}
 
     def build_request(self, *args, **kwargs):
@@ -76,21 +75,13 @@ class YomoniBrowser(APIBrowser):
         return super(APIBrowser, self).build_request(*args, **kwargs)
 
     def do_login(self):
-        headers_response = self.open('auth/init').headers
-
-        self.login_headers['api_token'] = headers_response['API_TOKEN']
-        self.login_headers['csrf'] = headers_response['CSRF']
-
-        self.open('auth/login', method='OPTIONS')
-
         data = {
             'username': self.username,
             'password': self.password,
         }
         try:
-            response = self.open('auth/login', data=data, headers=self.login_headers)
+            response = self.open('auth/login', data=data, headers={'X-Request-Id': str(uuid4().hex)[0:11]})
             self.request_headers['api_token'] = response.headers['API_TOKEN']
-            self.request_headers['csrf'] = response.headers['CSRF']
             self.users = response.json()
         except ClientError:
             raise BrowserIncorrectPassword()
@@ -138,7 +129,9 @@ class YomoniBrowser(APIBrowser):
             yield a
 
         if not self.accounts and waiting:
-            raise ActionNeeded("Le service client Yomoni est en attente d'un retour de votre part.")
+            raise ActionNeeded(
+                locale="fr-FR", message="Le service client Yomoni est en attente d'un retour de votre part.",
+            )
 
     @need_login
     def iter_investment(self, account, invs=None):
@@ -168,7 +161,7 @@ class YomoniBrowser(APIBrowser):
                 i.quantity = CleanDecimal(default=NotAvailable).filter(inv['nombreParts'])
                 i.unitprice = CleanDecimal(default=NotAvailable).filter(inv['prixMoyenAchat'])
                 i.unitvalue = CleanDecimal(default=NotAvailable).filter(inv['valeurCotation'])
-                i.valuation = CleanDecimal().filter(inv['montantEuro'])
+                i.valuation = round(Decimal(inv['montantEuro']), 2)
                 # For some invests the vdate returned is None
                 # Consequently we set the default value at NotAvailable
                 i.vdate = Date(default=NotAvailable).filter(inv['datePosition'])
@@ -186,7 +179,7 @@ class YomoniBrowser(APIBrowser):
                              if acc['details'] is not None]:
 
                 m = re.search(
-                    r'([\d\,]+)(?=[\s]+€|[\s]+euro)',
+                    r'([\d\, ]+)(?=[\s]+€|[\s]+euro)',
                     ReplaceEntities().filter(activity['details']),
                     flags=re.UNICODE,
                 )

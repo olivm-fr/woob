@@ -2,32 +2,31 @@
 
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import datetime
 
 from requests.exceptions import ConnectionError, Timeout
 
-from weboob.browser import URL, LoginBrowser, need_login
-from weboob.browser.exceptions import ServerError
-from weboob.browser.pages import HTMLPage
-from weboob.capabilities.bank import Account, AccountNotFound, Transaction
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
-from weboob.tools.compat import unicode
+from woob.browser import URL, LoginBrowser, need_login
+from woob.browser.exceptions import ServerError
+from woob.browser.pages import HTMLPage
+from woob.capabilities.bank import Account, AccountNotFound, Transaction
+from woob.exceptions import BrowserIncorrectPassword
+from woob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
 
 __all__ = ['VicSecCard']
 
@@ -84,8 +83,8 @@ class RecentPage(SomePage):
             t.date = datetime.strptime(date, '%m/%d/%Y')
             t.rdate = datetime.strptime(date, '%m/%d/%Y')
             t.type = Transaction.TYPE_UNKNOWN
-            t.raw = unicode(label)
-            t.label = unicode(label)
+            t.raw = label
+            t.label = label
             t.amount = -AmTr.decimal_amount(amount)
             yield t
 

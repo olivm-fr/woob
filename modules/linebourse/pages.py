@@ -2,39 +2,39 @@
 
 # Copyright(C) 2018      Fong Ngo
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
+from decimal import Decimal
 
-from weboob.browser.elements import method, DictElement, ItemElement
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import (
-    Date, CleanDecimal, CleanText, Currency, Map, Eval,
-    Env, Regexp, Format, FromTimestamp, Title, Field,
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
+    CleanDecimal, CleanText, Currency, Date, Env, Field, Format, FromTimestamp,
+    Map, Title, Type,
 )
-from weboob.browser.pages import JsonPage, HTMLPage, LoggedPage
-from weboob.capabilities.bank import Transaction
-from weboob.capabilities.wealth import (
-    Investment, MarketOrder, MarketOrderDirection,
-    MarketOrderType, MarketOrderPayment,
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from woob.capabilities.bank import Transaction
+from woob.capabilities.bank.wealth import (
+    Investment, MarketOrder, MarketOrderDirection, MarketOrderPayment,
+    MarketOrderType,
 )
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.capabilities.base import NotAvailable, empty
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
 
 
 class AccountPage(LoggedPage, JsonPage):
@@ -47,7 +47,9 @@ class PortfolioPage(LoggedPage, JsonPage):
         return CleanDecimal(Dict('totalPlv'))(self.doc)  # Plv = plus-value
 
     def get_date(self):
-        return Date(Regexp(Dict('dateValo'), r'(\d{2})(\d{2})(\d{2})', '\\3\\2\\1'), dayfirst=True)(self.doc)
+        # 'dateValo' can come in two different format. Taking June 4, 2021 as an example, we have:
+        # 'Fri Jun 04 00:00:00 CEST 2021' or '210604'
+        return Date(Dict('dateValo'), yearfirst=True)(self.doc)
 
     def get_account_currency(self):
         return Currency(Dict('devise'))(self.doc)
@@ -65,11 +67,12 @@ class PortfolioPage(LoggedPage, JsonPage):
                 # We want invalid values to fail in the CleanDecimal filter so we catch only when mnt is missing
                 return Dict('mnt', default=NotAvailable)(self) is not NotAvailable
 
-            obj_label = Dict('libval')
+            obj_label = CleanText(Dict('libval'))
             obj_code = IsinCode(CleanText(Dict('codval')), default=NotAvailable)
-            obj_code_type = IsinType(CleanText(Dict('codval')), default=NotAvailable)
-            obj_quantity = CleanDecimal(Dict('qttit'))
-            obj_valuation = CleanDecimal(Dict('mnt'))
+            obj_code_type = IsinType(Field('code'))
+            obj_quantity = CleanDecimal.SI(Dict('qttit'))
+            obj_valuation = CleanDecimal.SI(Dict('mnt'))
+            obj_unitprice = CleanDecimal.SI(Dict('pam', default=None), default=NotAvailable)
             obj_vdate = Env('date')
 
             def parse(self, el):
@@ -82,28 +85,27 @@ class PortfolioPage(LoggedPage, JsonPage):
 
             def obj_diff(self):
                 if Dict('plv', default=None)(self) and Env('sign')(self):
-                    return CleanDecimal(Dict('plv'), sign=lambda x: Env('sign')(self))(self)
-                return NotAvailable
-
-            def obj_unitprice(self):
-                if Dict('pam', default=None)(self):
-                    return CleanDecimal(Dict('pam'))(self)
+                    return CleanDecimal.SI(Dict('plv'), sign=lambda x: Env('sign')(self))(self)
                 return NotAvailable
 
             def obj_diff_ratio(self):
                 if not Env('sign')(self):
                     return NotAvailable
                 # obj_diff_ratio key can have several names:
+                # To handle the case of numbers in scientific notation, like -4.0005864849746154e-05
                 if Dict('plvPourcentage', default=None)(self):
-                    return CleanDecimal.SI(Dict('plvPourcentage'))(self) / 100
+                    return Type(Format('%s', Dict('plvPourcentage')), type=Decimal)(self) / 100
                 elif Dict('pourcentagePlv', default=None)(self):
-                    return CleanDecimal.SI(Dict('pourcentagePlv'))(self) / 100
+                    return Type(Format('%s', Dict('pourcentagePlv')), type=Decimal)(self) / 100
 
             def obj_portfolio_share(self):
-                active_percent = Dict('pourcentageActif', default=NotAvailable)(self)
+                active_percent = CleanDecimal.SI(
+                    Dict('pourcentageActif', default=None),
+                    default=NotAvailable
+                )(self)
                 if empty(active_percent):
                     return NotAvailable
-                return Eval(lambda x: x / 100, CleanDecimal(active_percent))(self)
+                return active_percent / 100
 
             def obj_original_currency(self):
                 currency = Currency(Dict('devcrs'))(self)
@@ -116,15 +118,19 @@ class PortfolioPage(LoggedPage, JsonPage):
                     # 'crs' key contains the original_unitvalue
                     # In some cases it contains "%" as the value is displayed as a percentage
                     return NotAvailable
-                return CleanDecimal(Dict('crs'))(self)
+                return CleanDecimal.SI(Dict('crs'))(self)
 
             def obj_original_unitvalue(self):
                 if Field('original_currency')(self):
-                    return CleanDecimal(Dict('crs'))(self)
+                    return CleanDecimal.SI(Dict('crs'))(self)
                 return NotAvailable
 
 
 class AccountCodesPage(LoggedPage, JsonPage):
+    def is_linebourse_space_available(self):
+        # Some market accounts have no Linebourse space on bp website
+        return CleanText(Dict('codeRetour', default=''))(self.doc) != 'sessionKO'
+
     def get_contract_number(self, account_id):
         for acc in self.doc['data']:
             if account_id in acc['affichage']:
@@ -132,6 +138,9 @@ class AccountCodesPage(LoggedPage, JsonPage):
         raise AssertionError('The account code was not found in the linebourse API.')
 
     def get_accounts_list(self):
+        # Linebourse is not accessible for these accounts
+        # Main Browser can catch error like caissedepargne and skip them
+        assert self.doc.get('codeRetour') != 'sessionKO', "No linebourse space"
         return [acc['affichage'] for acc in self.doc['data']]
 
 

@@ -2,28 +2,26 @@
 
 # Copyright(C) 2018 Arthur Huillet
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import CapBankWealth, AccountNotFound
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from woob.capabilities.base import find_object
+from woob.capabilities.bank import CapBankWealth, AccountNotFound
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword
 
 from .browser import Suravenir
 
@@ -35,7 +33,7 @@ class SuravenirModule(Module, CapBankWealth):
     NAME = 'suravenir'
     MAINTAINER = 'Arthur Huillet'
     EMAIL = 'arthur.huillet+weboob@free.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
     LICENSE = 'AGPLv3+'
     DESCRIPTION = u'Assurance-vie Suravenir à travers différents courtiers (assurancevie.com, linxea, ...)'
     CONFIG = BackendConfig(

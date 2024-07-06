@@ -2,27 +2,27 @@
 
 # Copyright(C) 2012 Gilles-Alexandre Quenot
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-from weboob.browser.pages import HTMLPage
-from weboob.browser.filters.html import Attr
-from weboob.browser.filters.standard import CleanText
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded
+from woob.browser.pages import HTMLPage
+from woob.browser.filters.html import Attr
+from woob.browser.filters.standard import CleanText, Coalesce
+from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserUserBanned
 
 
 class LoginPage(HTMLPage):
@@ -45,10 +45,8 @@ class LoginPage(HTMLPage):
             self.browser.check_interactive()
         self.browser.location(submit_page.headers['Location'])
 
-    def check_is_blocked(self):
-        error_message = CleanText('//div[@id="acces_client"]//p[@class="container error"]/label')(self.doc)
-        if 'Votre accès est désormais bloqué' in error_message:
-            raise ActionNeeded(error_message)
+    def get_login_error(self):
+        return CleanText('//div[@id="acces_client"]//p[@class="container error"]/label')(self.doc)
 
 
 class TwoFaPage(HTMLPage):
@@ -68,10 +66,15 @@ class TwoFaPage(HTMLPage):
         return sms_form
 
     def check_otp_error_message(self):
-        error_message = CleanText('//span/label[@class="error"]')(self.doc)
-        if 'Le code saisi est incorrect' in error_message:
+        error_message = Coalesce(
+            CleanText('//span/label[@class="error"]'),
+            CleanText('//p[@id="erreurSecuriteForteOTP"]'),
+            default='',
+        )(self.doc)
+        if any(message in error_message for message in ('Le code saisi est incorrect', 'Le code sécurité est expiré')):
             raise BrowserIncorrectPassword()
-        assert not error_message, 'Error during otp validation: %s' % error_message
+        elif 'trois essais erronés' in error_message:
+            raise BrowserUserBanned(error_message)
 
 
 class UnavailablePage(HTMLPage):

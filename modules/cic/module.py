@@ -1,51 +1,79 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Julien Veyssier
 # Copyright(C) 2012-2013 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.bank import CapBankTransferAddRecipient
-from weboob.capabilities.bill import CapDocument
-from weboob.capabilities.contact import CapContact
-from weboob.tools.backend import AbstractModule, BackendConfig
-from weboob.tools.value import ValueTransient
+# flake8: compatible
+
+from woob.capabilities.bank import CapBankTransferAddRecipient, Account
+from woob.capabilities.bill import CapDocument
+from woob.capabilities.profile import CapProfile
+from woob.capabilities.bank.pfm import CapBankMatching
+from woob.capabilities.contact import CapContact
+from woob_modules.creditmutuel.module import CreditMutuelModule
 
 from .browser import CICBrowser
-
 
 __all__ = ['CICModule']
 
 
-class CICModule(AbstractModule, CapBankTransferAddRecipient, CapDocument, CapContact):
+class CICModule(CreditMutuelModule, CapBankTransferAddRecipient, CapDocument, CapContact, CapProfile, CapBankMatching):
     NAME = 'cic'
-    MAINTAINER = u'Julien Veyssier'
+    MAINTAINER = 'Julien Veyssier'
     EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '2.1'
-    DESCRIPTION = u'CIC'
+    VERSION = '3.6'
+    DESCRIPTION = 'CIC'
     LICENSE = 'LGPLv3+'
+    DEPENDENCIES = ('creditmutuel',)
 
     BROWSER = CICBrowser
-    PARENT = 'creditmutuel'
-
-    ADDITIONAL_CONFIG = BackendConfig(
-        ValueTransient('code', regexp=r'^\d{6}$'),
-    )
 
     def create_default_browser(self):
-        browser = self.create_browser(self.config, weboob=self.weboob)
+        browser = self.create_browser(self.config)
         browser.new_accounts.urls.insert(0, "/mabanque/fr/banque/comptes-et-contrats.html")
         return browser
+
+    def match_account(self, account, old_accounts):
+        def match_card(old_card, card):
+            """
+            Match two cards, based on their numbers and/or their other attributes(label, balance, coming)
+            """
+            if hasattr(card, '_numbers') and card._numbers:
+                # we try to match the based on the numbers
+                if old_card.number in card._numbers:
+                    return True
+
+            # if the numbers do not match, we match the cards based on their other attributes
+            return (
+                old_card.label == card.label
+                and old_card.coming == card.coming
+                and old_card.balance == card.balance
+            )
+
+        # We define it only for cards
+        if account.type != Account.TYPE_CARD:
+            return super().match_account(account, old_accounts)
+
+        for old_account in old_accounts:
+            # filter based on type
+            if old_account.type != Account.TYPE_CARD:
+                continue
+
+            # we match the two cards
+            if match_card(old_account, account):
+                return old_account
+
+        return None

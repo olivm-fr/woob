@@ -1,31 +1,27 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2012-2020  Budget Insight
+# Copyright(C) 2023 Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
 
-from weboob.browser.pages import LoggedPage, HTMLPage
-from weboob.capabilities.bill import Document, DocumentTypes, Subscription
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.standard import Env, CleanText, Date, Regexp, Format
-from weboob.browser.filters.html import Link
+from woob.browser.pages import LoggedPage, HTMLPage
+from woob.capabilities.bill import Document, DocumentTypes, Subscription
+from woob.browser.elements import ListElement, ItemElement, method
+from woob.browser.filters.standard import Env, CleanText, Date, Regexp, Format
+from woob.browser.filters.html import Link
 
 
 class SubscriptionsTransitionPage(LoggedPage, HTMLPage):
@@ -44,7 +40,7 @@ class SubscriptionsDocumentsPage(LoggedPage, HTMLPage):
     @method
     class iter_subscription(ListElement):
         # Some subscriptions exist in 2 occurences in the page: e.g. one account has regular bank statement reports + deffered statements
-        # there might be duplicate, but not a big deal weboob is good and will keep only one subscription.
+        # there might be duplicate, but not a big deal woob is good and will keep only one subscription.
         ignore_duplicate = True
         item_xpath = '//div[contains(text(), "RELEVES DE COMPTES")]/following-sibling::table//tr//div[contains(@class, "table")]'
 

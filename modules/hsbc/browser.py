@@ -2,48 +2,54 @@
 
 # Copyright(C) 2012-2013  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import re
 from collections import OrderedDict
 from datetime import timedelta, date
+from urllib.parse import parse_qsl, urlparse
 
+from dateutil.relativedelta import relativedelta
 from lxml.etree import XMLSyntaxError
 
-from weboob.tools.date import LinearDateGuesser
-from weboob.capabilities.bank import Account, AccountNotFound, AccountOwnership
-from weboob.tools.capabilities.bank.transactions import sorted_transactions, keep_only_card_transactions
-from weboob.tools.compat import parse_qsl, urlparse
-from weboob.tools.value import Value
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion
-from weboob.browser import URL, need_login, TwoFactorBrowser
-from weboob.browser.exceptions import HTTPNotFound
-from weboob.capabilities.base import find_object
+from woob.tools.date import LinearDateGuesser
+from woob.capabilities.bank import Account, AccountNotFound, AccountOwnership
+from woob.capabilities.bank.base import Loan
+from woob.tools.capabilities.bank.transactions import sorted_transactions, keep_only_card_transactions
+from woob.tools.value import Value
+from woob.exceptions import (
+    BrowserIncorrectPassword, BrowserPasswordExpired, BrowserUnavailable,
+    BrowserUserBanned, BrowserQuestion,
+)
+from woob.browser import URL, need_login
+from woob.browser.mfa import TwoFactorBrowser
+from woob.browser.exceptions import HTTPNotFound
+from woob.capabilities.base import find_object
 
 from .pages.account_pages import (
-    AccountsPage, OwnersListPage, CBOperationPage, CPTOperationPage, LoginPage,
-    AppGonePage, RibPage, UnavailablePage, OtherPage, FrameContainer, ProfilePage, ScpiHisPage,
+    AccountsPage, AppGonePage, CBOperationPage, CPTOperationPage, FrameContainer, LoanDetailsPage, LoginPage,
+    OtherPage, OwnersListPage, ProfilePage, RibPage, ScpiHisPage, UnavailablePage,
+    AppGoneException,
 )
+from .pages.document_pages import DocumentPage
 from .pages.life_insurances import (
     LifeInsurancesPage, LifeInsurancePortal, LifeInsuranceMain, LifeInsuranceUseless,
-    LifeNotFound,
+    LifeNotFound, LifeInsuranceFingerprintForm,
 )
 from .pages.investments import (
     LogonInvestmentPage, ProductViewHelper, RetrieveAccountsPage, RetrieveInvestmentsPage,
@@ -56,7 +62,8 @@ __all__ = ['HSBC']
 
 
 class HSBC(TwoFactorBrowser):
-    BASEURL = 'https://client.hsbc.fr'
+    BASEURL = 'https://clients.hsbc.fr'
+    TIMEOUT = 30
     HAS_CREDENTIALS_ONLY = True
 
     app_gone = False
@@ -94,6 +101,7 @@ class HSBC(TwoFactorBrowser):
     accounts = URL(r'/cgi-bin/emcgi', AccountsPage)
     owners_list = URL(r'/cgi-bin/emcgi', OwnersListPage)
     life_insurance_useless = URL(r'/cgi-bin/emcgi', LifeInsuranceUseless)
+
     profile = URL(r'/cgi-bin/emcgi', ProfilePage)
     unavailable = URL(r'/cgi-bin/emcgi', UnavailablePage)
     frame_page = URL(
@@ -110,6 +118,7 @@ class HSBC(TwoFactorBrowser):
     )
     life_insurances = URL(r'https://assurances.hsbc.fr/navigation', LifeInsurancesPage)
     life_not_found = URL(r'https://assurances.hsbc.fr/fr/404.html', LifeNotFound)
+    life_insurance_fingerprint_form = URL(r'/cgi-bin/emcgi', LifeInsuranceFingerprintForm)
 
     # investment pages
     middle_frame_page = URL(r'/cgi-bin/emcgi', JSMiddleFramePage)
@@ -140,6 +149,11 @@ class HSBC(TwoFactorBrowser):
         RetrieveUselessPage
     )
 
+    # loan details page
+    loan_details = URL(r'/cgi-bin/emcgi\?.*&CRE_CdBanque=.*&CRE_IdPrestation=.*', LoanDetailsPage)
+
+    documents = URL(r'/cgi-bin/emcgi', DocumentPage)
+
     # catch-all
     other_page = URL(r'/cgi-bin/emcgi', OtherPage)
 
@@ -156,17 +170,75 @@ class HSBC(TwoFactorBrowser):
         self.AUTHENTICATION_METHODS = {
             'otp': self.handle_otp,
         }
+        self.otp_form_data = None
+        self.otp_validation_url = None
+        self.__states__ += ('otp_form_data', 'otp_validation_url',)
 
     def load_state(self, state):
         # when the otp is being handled, we want to keep the same session
         if self.config['otp'].get():
-            return super(HSBC, self).load_state(state)
-        return
+            state.pop('url', None)
+            super(HSBC, self).load_state(state)
 
     def handle_otp(self):
         otp = self.config['otp'].get()
-        self.page.login_with_secure_key(self.secret, otp)
-        self.end_login()
+
+        # In some scenarios relogin will be triggered (see AppGonePage).
+        # We need to set config['otp'] to None, otherwise we will try to validate
+        # the otp once again even though we might not be on the right page anymore.
+        self.config['otp'].set(self.config['otp'].default)
+
+        if not self.otp_form_data or not self.otp_validation_url:
+            # An ActionNeeded can happen during handle_otp(),
+            # but self.otp_form_data and self.otp_form_url would have been
+            # set to None and the OTP would already been submitted and accepted by the server.
+            #
+            # To avoid running handle_otp a second time, we check
+            # if self.otp_form_data and self.otp_validation_url are present.
+            # If they're not, we call init_login() where the SCA won't be triggered.
+            self.logger.info(
+                "We have an OTP but we don't have the OTP form and/or the OTP validation url."
+                + " Restarting the login process..."
+            )
+            return self.init_login()
+
+        self.otp_form_data['memorableAnswer'] = self.secret
+        self.otp_form_data['idv_OtpCredential'] = otp
+
+        try:
+            self.location(self.otp_validation_url, data=self.otp_form_data)  # validate the otp
+
+            # This is to make sure that we won't run handle_otp() a second time
+            # if an ActionNeeded occurs during handle_otp().
+            self.otp_form_data = self.otp_form_url = None
+            self.end_login()
+        except AppGoneException:
+            self.app_gone = True
+            self.logger.info('Application has gone. Relogging...')
+            self.do_logout()
+            self.do_login()
+
+    def check_login_error(self):
+        error_msg = self.page.get_error()
+
+        if error_msg:
+            if 'Please click Reset Credentials' in error_msg or 'Please reset your HSBC Secure Key' in error_msg:
+                raise BrowserPasswordExpired(error_msg)
+
+            elif 'Please retry in 30 minutes' in error_msg:
+                raise BrowserUserBanned(error_msg)
+
+            elif 'The service is temporarily unavailable' in error_msg:
+                raise BrowserUnavailable(error_msg)
+
+            raise AssertionError('Unhandled error at login: %s' % error_msg)
+
+    def get_otp_validation_url(self, otp_url):
+        # This method is useful for children modules that don't share the same validation url for otp
+        # The url is hardcoded here, because the baseurl changed during the otp_validation request
+        if 'https://' in otp_url:
+            return otp_url
+        return 'https://www.hsbc.fr' + otp_url
 
     def init_login(self):
         self.session.cookies.clear()
@@ -190,7 +262,12 @@ class HSBC(TwoFactorBrowser):
         if no_secure_key_link:
             self.location(no_secure_key_link)
         else:
+            self.check_login_error()
             self.check_interactive()
+
+            otp_form = self.page.get_form(nr=0)
+            self.otp_form_data = dict(otp_form)
+            self.otp_validation_url = self.get_otp_validation_url(otp_form.url)
             raise BrowserQuestion(
                 Value(
                     'otp',
@@ -203,12 +280,10 @@ class HSBC(TwoFactorBrowser):
     def end_login(self):
         for _ in range(3):
             if self.login.is_here():
+                if not self.page.logged:
+                    # we should be logged in at this point
+                    self.check_login_error()
                 self.page.useless_form()
-
-        # This wonderful website has 2 baseurl with only one difference: the 's' at the end of 'client'
-        new_base_url = 'https://clients.hsbc.fr/'
-        if new_base_url in self.url:
-            self.BASEURL = new_base_url
 
         if self.frame_page.is_here():
             self.home_url = self.page.get_frame()
@@ -241,11 +316,11 @@ class HSBC(TwoFactorBrowser):
         if not self.owners_list.is_here():
             self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
 
-        if not self.owners_list.is_here():
-            # Sometimes when we fetch info from a PEA account, the first POST
-            # fails and we are blocked on some owner's AccountsPage.
-            self.logger.warning('The owners list redirection failed, we must try again.')
-            self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
+            if not self.owners_list.is_here():
+                # Sometimes when we fetch info from a PEA account, the first POST
+                # fails and we are blocked on some owner's AccountsPage.
+                self.logger.warning('The owners list redirection failed, we must try again.')
+                self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
 
         # Refresh owners URLs in case they changed:
         self.owners_url_list = self.page.get_owners_urls()
@@ -260,11 +335,13 @@ class HSBC(TwoFactorBrowser):
         """
         if not self.web_space:
             if not self.accounts.is_here():
-                self.location(self.home_url)
-            self.web_space = self.page.get_web_space()
+                self.go_post(self.js_url, data={'debr': 'COMPTES_PAN'})
+            # get_web_space will set the value of self.web_space
+            self.page.get_web_space()
 
         if not self.unique_accounts_dict and self.web_space == 'new_space':
-            self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})  # Go to the owners list to find the list of other owners
+            # Go to the owners list to find the list of other owners
+            self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
             self.owners_url_list = self.page.get_owners_urls()
 
             for owner in range(len(self.owners_url_list)):
@@ -307,6 +384,15 @@ class HSBC(TwoFactorBrowser):
                             if a.parent and not a.currency:
                                 a.currency = a.parent.currency
 
+                # get loans infos
+                for account_id, account in self.accounts_dict[owner].items():
+                    if account.type == Account.TYPE_LOAN:
+                        account = Loan.from_dict(account.to_dict())
+                        # we must set owner to Loans
+                        account._owner = owner
+                        self.fill_loan(account)
+                        self.accounts_dict[owner][account_id] = account
+
                 # We must get back to the owners list before moving to the next owner:
                 self.go_post(self.js_url, data={'debr': 'OPTIONS_TIE'})
 
@@ -321,6 +407,8 @@ class HSBC(TwoFactorBrowser):
 
         if self.unique_accounts_dict:
             for account in self.unique_accounts_dict.values():
+                if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_CAPITALISATION, Account.TYPE_PERP):
+                    self.update_life_insurance_balance(account)
                 yield account
         else:
             # TODO ckeck GrayLog and get rid of old space code if clients are no longer using it
@@ -368,14 +456,40 @@ class HSBC(TwoFactorBrowser):
                     if account.id not in self.unique_accounts_dict.keys():
                         self.unique_accounts_dict[account.id] = account
             for account in self.unique_accounts_dict.values():
+                if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_CAPITALISATION, Account.TYPE_PERP):
+                    self.update_life_insurance_balance(account)
                 yield account
+
+    def fill_loan(self, loan):
+        if loan.url:
+            self.location(loan.url)
+            self.page.fill_loan(obj=loan)
+
+    # To get most updated balance we need to go to account's LifeInsurancesPage
+    # as main dashboard does not provide daily updates
+    def update_life_insurance_balance(self, account):
+        try:
+            if not self._go_to_life_insurance(account):
+                self._quit_li_space()
+                return account
+        except (XMLSyntaxError, HTTPNotFound):
+            self._quit_li_space()
+            return account
+        except AccountNotFound:
+            return account
+
+        self.page.update_balance(obj=account)
+
+        self._quit_li_space()
+
+        return account
 
     @need_login
     def update_accounts_dict(self, owner, iban=True):
         # Go to the owner's account page in case we are not there already:
         self.go_to_owner_accounts(owner)
 
-        for a in self.page.iter_spaces_account(self.web_space):
+        for a in self.page.iter_spaces_account():
             try:
                 self.accounts_dict[owner][a.id].url = a.url
             except KeyError:
@@ -411,6 +525,11 @@ class HSBC(TwoFactorBrowser):
     @need_login
     def _go_to_life_insurance(self, account):
         self._quit_li_space()
+
+        # We need to be on the account's owner space if we want to access the life insurances website.
+        self.go_post(self.js_url, data={'debr': 'SORTIE_ACCES_TIERS'})
+        self.go_to_owner_accounts(account._owner)
+
         self.go_post(account.url)
 
         if (
@@ -422,10 +541,13 @@ class HSBC(TwoFactorBrowser):
             self.logger.warning('cannot go to life insurance %r', account)
             return False
 
-        data = {'url_suivant': 'SITUATIONCONTRATB2C', 'strNumAdh': ''}
-        data.update(self.page.get_lf_attributes(account.id))
+        if self.life_insurance_fingerprint_form.is_here():
+            self.logger.warning('cannot go to life insurance %r because of a fingerprinting form', account)
+            return False
 
-        self.life_insurances.go(data=data)
+        assert self.life_insurances.is_here(), 'Not on the expected LifeInsurancesPage'
+
+        self.page.post_li_form(account.id)
         return True
 
     @need_login
@@ -449,15 +571,15 @@ class HSBC(TwoFactorBrowser):
                 account_url = m.group(1)
             else:
                 account_url = account.url
-            # Need to be on accounts page to go on scpi page
-            self.accounts.go()
+            # Need to be on owner's accounts page to go on scpi page
+            self.go_to_owner_accounts(account._owner)
             # Go on scpi page
             self.location(account_url)
             self.location(self.page.go_scpi_his_detail_page())
 
             return self.page.iter_history()
 
-        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_CAPITALISATION):
+        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_CAPITALISATION, Account.TYPE_PERP):
             if coming is True:
                 return []
 
@@ -481,7 +603,7 @@ class HSBC(TwoFactorBrowser):
                 self.logger.error('life insurance seems unavailable for account %s', account.id)
                 return []
 
-            self.life_insurances.go(data={'url_suivant': 'HISTORIQUECONTRATB2C', 'strMonnaie': 'EURO'})
+            self.page.post_li_history_form()
 
             history = [t for t in self.page.iter_history()]
 
@@ -551,6 +673,8 @@ class HSBC(TwoFactorBrowser):
             ]
             history = sorted_transactions(history)
             return history
+        elif self.life_insurance_useless.is_here():
+            return []
         elif not coming:
             return self._get_history()
         else:
@@ -590,8 +714,12 @@ class HSBC(TwoFactorBrowser):
             account_url = account.url
 
         # Need to be on accounts page to go on scpi page
-        self.go_to_owner_accounts(account._owner)
-        self.accounts.go()
+        try:
+            self.go_to_owner_accounts(account._owner)
+            self.accounts.go()
+        except AppGoneException:
+            pass
+
         # Go on scpi page
         self.location(account_url)
         # Go on scpi details page
@@ -601,11 +729,15 @@ class HSBC(TwoFactorBrowser):
         return self.page.iter_scpi_investment()
 
     def get_pea_investments(self, account):
+        # We need to be on the account's owner space if we want to access the investments website.
+        self.go_post(self.js_url, data={'debr': 'SORTIE_ACCES_TIERS'})
         self.go_to_owner_accounts(account._owner)
         assert account.type in (Account.TYPE_PEA, Account.TYPE_MARKET)
 
         # When invest balance is 0, there is not link to go on market page
-        if not account.balance:
+        # Or if we try to fetch "Compte de Tiers" the website return :
+        # "Cette prestation n'est pas accessible en mode accounts tiers."
+        if not account.balance or account._owner != 0:
             return []
 
         if not self.PEA_LISTING:
@@ -677,6 +809,9 @@ class HSBC(TwoFactorBrowser):
 
         if self.page.get_patrimoine_url():
             self.location(self.page.get_patrimoine_url())
+            # Sometime we cannot access the investments pages
+            if not self.middle_auth_page.is_here():
+                return False
             try:
                 self.page.go_next()
             except BrowserUnavailable:
@@ -693,7 +828,11 @@ class HSBC(TwoFactorBrowser):
                 if not self.investment_form_page.is_here():
                     return False
 
-            self.page.go_to_logon()
+            try:
+                self.page.go_to_logon()
+            except HTTPNotFound:
+                # Sometimes the submitted form redirects to a 404 error page
+                return False
             helper = ProductViewHelper(self)
             # we need to go there to initialize the session
             self.PEA_LISTING['accounts'] = list(helper.retrieve_accounts())
@@ -714,3 +853,17 @@ class HSBC(TwoFactorBrowser):
         data = {'debr': 'PARAM'}
         self.go_post(self.js_url, data=data)
         return self.page.get_profile()
+
+    @need_login
+    def iter_subscriptions(self):
+        self.go_post(self.js_url, data={'debr': 'E_RELEVES_BP'})
+        return self.page.iter_subscriptions()
+
+    @need_login
+    def iter_documents(self, subscription):
+        self.go_post(self.js_url, data={'debr': 'E_RELEVES_BP'})
+        today = date.today()
+        start_date = today - relativedelta(years=1)
+
+        self.page.go_to_documents(subscription._idx_account, start_date)
+        return self.page.iter_documents(subid=subscription.id, idx_account=subscription._idx_account)

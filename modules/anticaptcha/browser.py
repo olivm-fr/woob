@@ -1,34 +1,37 @@
 # -*- coding: utf-8 -*-
 
 # Copyright(C) 2018      Vincent A
+# Copyright(C) 2018-2023 Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 from base64 import b64encode
 
-from weboob.browser.browsers import APIBrowser
-from weboob.exceptions import BrowserIncorrectPassword, BrowserBanned
-from weboob.capabilities.captcha import (
-    ImageCaptchaJob, RecaptchaJob, RecaptchaV3Job, RecaptchaV2Job, FuncaptchaJob, HcaptchaJob,
-    CaptchaError, InsufficientFunds, UnsolvableCaptcha, InvalidCaptcha,
+from urllib3.exceptions import ReadTimeoutError
+
+from woob.browser.browsers import APIBrowser
+from woob.exceptions import BrowserIncorrectPassword, ScrapingBlocked
+from woob.capabilities.captcha import (
+    ImageCaptchaJob, RecaptchaJob, RecaptchaV3Job, RecaptchaV2Job,
+    FuncaptchaJob, HcaptchaJob, CaptchaError, InsufficientFunds,
+    UnsolvableCaptcha, InvalidCaptcha, GeetestV4Job, TurnstileJob,
 )
+from woob.tools.json import json
 
 
 class AnticaptchaBrowser(APIBrowser):
@@ -60,8 +63,8 @@ class AnticaptchaBrowser(APIBrowser):
     def post_recaptcha(self, url, key):
         return self.post_gcaptcha(url, key, 'RecaptchaV1')
 
-    def post_nocaptcha(self, url, key):
-        return self.post_gcaptcha(url, key, 'NoCaptcha')
+    def post_recaptchav2(self, url, key):
+        return self.post_gcaptcha(url, key, 'RecaptchaV2')
 
     def post_hcaptcha(self, url, key):
         return self.post_gcaptcha(url, key, 'HCaptcha')
@@ -81,22 +84,29 @@ class AnticaptchaBrowser(APIBrowser):
         self.check_reply(r)
         return str(r['taskId'])
 
-    def post_gcaptchav3(self, url, key, action):
+    def post_gcaptchav3(self, url, key, action, min_score, is_enterprise):
+        # Regarding the min_score, the acceptable values can be found in:
+        # https://anti-captcha.com/fr/apidoc/task-types/RecaptchaV3TaskProxyless
+        if min_score is None:
+            min_score = 0.3
+        if min_score not in [0.3, 0.7, 0.9]:
+            raise ValueError('The reCaptcha minimum score must be 0.3, 0.7 or 0.9')
         data = {
             "clientKey": self.apikey,
             "task": {
                 "type": "RecaptchaV3TaskProxyless",
                 "websiteURL": url,
                 "websiteKey": key,
-                "minScore": 0.3,
+                "minScore": min_score,
                 "pageAction": action,
+                "isEnterprise": is_enterprise,
             },
         }
         r = self.request('/createTask', data=data)
         self.check_reply(r)
         return str(r['taskId'])
 
-    def post_funcaptcha(self, url, key, sub_domain):
+    def post_funcaptcha(self, url, key, sub_domain, additional_data=None):
         data = {
             "clientKey": self.apikey,
             "task": {
@@ -107,6 +117,41 @@ class AnticaptchaBrowser(APIBrowser):
             },
             "softId": 0,
             "languagePool": "en",
+        }
+        if additional_data:
+            data['task']['data'] = json.dumps(
+                additional_data,
+                separators=(',', ':'),
+            )
+
+        r = self.request('/createTask', data=data)
+        self.check_reply(r)
+        return str(r['taskId'])
+
+    def post_geetestv4(self, url, gt):
+        data = {
+            "clientKey": self.apikey,
+            "task": {
+                "type": "GeeTestTaskProxyless",
+                "websiteURL": url,
+                "gt": gt,
+                "version": 4,
+            },
+            "softId": 0,
+            "languagePool": "en",
+        }
+        r = self.request('/createTask', data=data)
+        self.check_reply(r)
+        return str(r['taskId'])
+
+    def post_turnstile(self, url, key):
+        data = {
+            "clientKey": self.apikey,
+            "task": {
+                "type": "TurnstileTaskProxyless",
+                "websiteURL": url,
+                "websiteKey": key,
+            },
         }
         r = self.request('/createTask', data=data)
         self.check_reply(r)
@@ -123,24 +168,31 @@ class AnticaptchaBrowser(APIBrowser):
             'ERROR_RECAPTCHA_INVALID_DOMAIN': InvalidCaptcha,
             'ERROR_ZERO_BALANCE': InsufficientFunds,
             'ERROR_CAPTCHA_UNSOLVABLE': UnsolvableCaptcha,
-            'ERROR_IP_BLOCKED': BrowserBanned,
-            'ERROR_PROXY_BANNED': BrowserBanned,
+            'ERROR_IP_BLOCKED': ScrapingBlocked,
+            'ERROR_PROXY_BANNED': ScrapingBlocked,
         }
 
         if not r['errorId']:
             return
 
-        self.logger.debug('Captcha Error: %s, %s' % (r.get('errorCode'), r.get('errorDescription')))
-        err = r.get('errorCode')
-        exc_type = excs.get(err, CaptchaError)
-        raise exc_type(r['errorDescription'])
+        code = r.get('errorCode')
+        description = r.get('errorDescription')
+        self.logger.debug('Captcha Error: %s, %s', code, description)
+        exc_type = excs.get(code, CaptchaError)
+        raise exc_type(f"{code}: {description}")
 
     def poll(self, job):
         data = {
             "clientKey": self.apikey,
             "taskId": int(job.id),
         }
-        r = self.request('/getTaskResult', data=data)
+
+        try:
+            r = self.request('/getTaskResult', data=data)
+        except ReadTimeoutError:
+            # Just skip the current poll.
+            return False
+
         self.check_reply(r)
 
         if r['status'] != 'ready':
@@ -155,6 +207,10 @@ class AnticaptchaBrowser(APIBrowser):
         elif isinstance(job, (RecaptchaV2Job, RecaptchaV3Job, HcaptchaJob)):
             job.solution = sol['gRecaptchaResponse']
         elif isinstance(job, FuncaptchaJob):
+            job.solution = sol['token']
+        elif isinstance(job, GeetestV4Job):
+            job.solution = sol
+        elif isinstance(job, TurnstileJob):
             job.solution = sol['token']
         else:
             raise NotImplementedError()

@@ -2,57 +2,59 @@
 
 # Copyright(C) 2018      Simon Rochwerg
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage, RawPage
-from weboob.browser.elements import method, ItemElement, ListElement
-from weboob.browser.filters.standard import (
+from woob.browser.pages import HTMLPage, LoggedPage, RawPage
+from woob.browser.elements import method, ItemElement, ListElement
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Currency, Date, NumberFormatError,
     Field, Env, MapIn,
 )
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.wealth import Investment, PerVersion
-from weboob.browser.filters.html import Attr
-from weboob.capabilities.profile import Profile
-from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.capabilities.base import NotAvailable, empty
+from woob.capabilities.bank import (
+    Account, Transaction, AccountOwnerType,
+)
+from woob.capabilities.bank.wealth import Investment, PerVersion
+from woob.browser.filters.html import Attr
+from woob.capabilities.profile import Profile
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
 
 
 class LoginPage(HTMLPage):
     def login(self, login, password):
         form = self.get_form('//form[@class="form-horizontal"]')
-        form['Login'] = login
+        form['Username'] = login
         form['Password'] = password
+        form['button'] = 'login'
+        form.submit()
+
+
+class LoginStep2Page(HTMLPage):
+    def send_form(self):
+        form = self.get_form()
         form.submit()
 
 
 class LoginErrorPage(HTMLPage):
     def get_message(self):
         return CleanText('//tr[.//img[@class="iconAlert"]]//p')(self.doc)
-
-
-class ErrorPage(HTMLPage):
-    def get_error(self):
-        alert = CleanText('//td/div[@class="editorialContent"]|//div[has-class("blockMaintenance")]/table//p[contains(text(), "password")]')(self.doc)
-        if alert:
-            return alert
 
 
 class ProfilePage(LoggedPage, HTMLPage):
@@ -67,13 +69,6 @@ class ProfilePage(LoggedPage, HTMLPage):
 
 class TermPage(HTMLPage):
     pass
-
-
-class UnexpectedPage(HTMLPage):
-    def get_error(self):
-        alert = CleanText('//div[@class="blockMaintenance mainBlock"]/table//td/h3')(self.doc)
-        if alert:
-            return alert
 
 
 class AccountPage(LoggedPage, HTMLPage):
@@ -109,6 +104,7 @@ class AccountPage(LoggedPage, HTMLPage):
             obj_label = CleanText('./td[2]', replace=[(' o ', ' ')])
             obj_currency = Currency('./td[6]')
             obj_company_name = CleanText('./td[3]')
+            obj_owner_type = AccountOwnerType.PRIVATE
 
             def obj__sublabel(self):
                 # Use the second part of the label to determine account index
@@ -162,7 +158,9 @@ class HistoryPage(LoggedPage, HTMLPage):
                 # This wonderful website randomly displays separators as '.' or ','
                 # For example, numbers can look like "€12,345.67" or "12 345,67 €"
                 try:
-                    return CleanDecimal.French('./div[contains(@class, "accordion_header")]/div[position()=last()]')(self)
+                    return CleanDecimal.French(
+                        './div[contains(@class, "accordion_header")]/div[position()=last()]'
+                    )(self)
                 except NumberFormatError:
                     return CleanDecimal.US('./div[contains(@class, "accordion_header")]/div[position()=last()]')(self)
 

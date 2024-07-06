@@ -2,20 +2,20 @@
 
 # Copyright(C) 2010-2014 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 import time
@@ -29,18 +29,17 @@ try:
 except ImportError:
     from html.parser import HTMLParser
 
-from weboob.capabilities.base import NotLoaded
-from weboob.capabilities.chat import CapChat
-from weboob.capabilities.messages import CapMessages, CapMessagesPost, Message, Thread
-from weboob.capabilities.dating import CapDating, OptimizationNotFound, Event
-from weboob.capabilities.contact import CapContact, ContactPhoto, Query, QueryError
-from weboob.capabilities.account import CapAccount, StatusField
-from weboob.tools.backend import Module, BackendConfig
-from weboob.exceptions import BrowserUnavailable, BrowserHTTPNotFound
-from weboob.tools.value import Value, ValueBool, ValueBackendPassword
-from weboob.tools.date import local2utc
-from weboob.tools.misc import to_unicode
-from weboob.tools.compat import unicode, long, basestring
+from woob.capabilities.base import NotLoaded
+from woob.capabilities.chat import CapChat
+from woob.capabilities.messages import CapMessages, CapMessagesPost, Message, Thread
+from woob.capabilities.dating import CapDating, OptimizationNotFound, Event
+from woob.capabilities.contact import CapContact, ContactPhoto, Query, QueryError
+from woob.capabilities.account import CapAccount, StatusField
+from woob.tools.backend import Module, BackendConfig
+from woob.exceptions import BrowserUnavailable, BrowserHTTPNotFound
+from woob.tools.value import Value, ValueBool, ValueBackendPassword
+from woob.tools.date import local2utc
+from woob.tools.misc import to_unicode
 
 from .contact import Contact
 from .antispam import AntiSpam
@@ -62,7 +61,7 @@ class AuMModule(Module, CapMessages, CapMessagesPost, CapDating, CapChat, CapCon
     NAME = 'aum'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     LICENSE = 'AGPLv3+'
     DESCRIPTION = u'"Adopte un Mec" French dating website'
     CONFIG = BackendConfig(Value('username',                label='Username'),
@@ -100,9 +99,9 @@ class AuMModule(Module, CapMessages, CapMessagesPost, CapDating, CapChat, CapCon
     # ---- CapDating methods ---------------------
 
     def init_optimizations(self):
-        self.add_optimization('PROFILE_WALKER', ProfilesWalker(self.weboob.scheduler, self.storage, self.browser))
-        self.add_optimization('VISIBILITY', Visibility(self.weboob.scheduler, self.browser))
-        self.add_optimization('QUERIES_QUEUE', QueriesQueue(self.weboob.scheduler, self.storage, self.browser))
+        self.add_optimization('PROFILE_WALKER', ProfilesWalker(self.woob.scheduler, self.storage, self.browser))
+        self.add_optimization('VISIBILITY', Visibility(self.woob.scheduler, self.browser))
+        self.add_optimization('QUERIES_QUEUE', QueriesQueue(self.woob.scheduler, self.storage, self.browser))
 
     def iter_events(self):
         all_events = {}
@@ -366,10 +365,10 @@ class AuMModule(Module, CapMessages, CapMessagesPost, CapDating, CapChat, CapCon
     def get_contact(self, contact):
         if isinstance(contact, Contact):
             _id = contact.id
-        elif isinstance(contact, (int,long,basestring)):
+        elif isinstance(contact, (int, str)):
             _id = contact
         else:
-            raise TypeError("The parameter 'contact' isn't a contact nor a int/long/str/unicode: %s" % contact)
+            raise TypeError("The parameter 'contact' isn't a contact nor a int/str: %s" % contact)
 
         profile = self.browser.get_full_profile(_id)
         if not profile:
@@ -457,14 +456,14 @@ class AuMModule(Module, CapMessages, CapMessagesPost, CapDating, CapChat, CapCon
         return self.browser.send_chat_message(_id, message)
 
     #def start_chat_polling(self):
-        #self._profile_walker = ProfilesWalker(self.weboob.scheduler, self.storage, self.browser)
+        #self._profile_walker = ProfilesWalker(self.woob.scheduler, self.storage, self.browser)
 
     def get_account_status(self):
         return (
-                StatusField(u'myname', u'My name', unicode(self.browser.get_my_name())),
-                StatusField(u'score', u'Score', unicode(self.browser.score())),
-                StatusField(u'avcharms', u'Available charms', unicode(self.browser.nb_available_charms())),
-                StatusField(u'newvisits', u'New visits', unicode(self.browser.nb_new_visites())),
+                StatusField(u'myname', u'My name', str(self.browser.get_my_name())),
+                StatusField(u'score', u'Score', str(self.browser.score())),
+                StatusField(u'avcharms', u'Available charms', str(self.browser.nb_available_charms())),
+                StatusField(u'newvisits', u'New visits', str(self.browser.nb_new_visites())),
                )
 
     OBJECTS = {Thread: fill_thread,

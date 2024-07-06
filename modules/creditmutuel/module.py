@@ -3,41 +3,39 @@
 # Copyright(C) 2010-2011 Julien Veyssier
 # Copyright(C) 2012-2013 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-
-from __future__ import unicode_literals
 
 import re
 from decimal import Decimal
 
-from weboob.capabilities.base import find_object, NotAvailable
-from weboob.capabilities.bank import (
+from woob.capabilities.base import find_object, NotAvailable
+from woob.capabilities.bank import (
     CapBankTransferAddRecipient, AccountNotFound, RecipientNotFound,
     Account, TransferInvalidLabel,
 )
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.contact import CapContact
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.bill import (
-    CapDocument, Subscription, SubscriptionNotFound,
-    Document, DocumentNotFound, DocumentTypes,
+from woob.capabilities.bank.pfm import CapBankMatching
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.contact import CapContact
+from woob.capabilities.profile import CapProfile
+from woob.capabilities.bill import (
+    CapDocument, Subscription, Document, DocumentNotFound, DocumentTypes,
 )
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, ValueTransient
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import CreditMutuelBrowser
 
@@ -47,13 +45,13 @@ __all__ = ['CreditMutuelModule']
 
 class CreditMutuelModule(
     Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument,
-    CapContact, CapProfile,
+    CapContact, CapProfile, CapBankMatching,
 ):
 
     NAME = 'creditmutuel'
     MAINTAINER = u'Julien Veyssier'
     EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = u'Crédit Mutuel'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(
@@ -68,18 +66,28 @@ class CreditMutuelModule(
     accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.RIB)
 
     def create_default_browser(self):
-        return self.create_browser(self.config, weboob=self.weboob)
+        return self.create_browser(self.config)
 
     def iter_accounts(self):
         for account in self.browser.get_accounts_list():
             yield account
 
-    def get_account(self, _id):
-        account = self.browser.get_account(_id)
-        if account:
-            return account
-        else:
-            raise AccountNotFound()
+    def match_account(self, account, old_accounts):
+        # This will work for most of accounts
+        match = find_object(old_accounts, number=account.number, label=account.label)
+
+        # But markets accounts can share a same ID for both accounts
+        # So, if we do not have a match, we need to rely on the label
+        if not match and (account.type == Account.TYPE_MARKET):
+            for old_account in old_accounts:
+                if old_account.label.lower() == account.label.lower():
+                    match = old_account
+
+        # If match is None, both find_object and relying on label failed
+        # Which means it's a unknown account
+        if match:
+            self.logger.debug("Returning %s from matching_account", match)
+        return match
 
     def iter_coming(self, account):
         for tr in self.browser.get_history(account):
@@ -117,7 +125,7 @@ class CreditMutuelModule(
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
-        if {'Clé', 'resume'} & set(params.keys()):
+        if {'Clé', 'resume', 'code'} & set(params.keys()):
             return self.browser.continue_transfer(transfer, **params)
 
         # There is a check on the website, transfer can't be done with too long reason.
@@ -129,18 +137,26 @@ class CreditMutuelModule(
             regex = r"[-\w'/=:€?!.,() ]+"
             if not re.match(r"(?:%s)\Z" % regex, transfer.label, re.UNICODE):
                 invalid_chars = re.sub(regex, '', transfer.label, flags=re.UNICODE)
-                raise TransferInvalidLabel("Le libellé de votre transfert contient des caractères non autorisés : %s" % invalid_chars)
+                raise TransferInvalidLabel(
+                    message="Le libellé de votre virement contient des caractères non autorisés : "
+                    + invalid_chars
+                )
 
         self.logger.info('Going to do a new transfer')
-        if transfer.account_iban:
-            account = find_object(self.iter_accounts(), iban=transfer.account_iban, error=AccountNotFound)
-        else:
-            account = find_object(self.iter_accounts(), id=transfer.account_id, error=AccountNotFound)
 
+        account = None
+        acc_list = list(self.iter_accounts())
+        if transfer.account_iban:
+            account = find_object(acc_list, iban=transfer.account_iban)
+        if not account:
+            account = find_object(acc_list, id=transfer.account_id, error=AccountNotFound)
+
+        recipient = None
+        rcpt_list = list(self.iter_transfer_recipients(account.id))
         if transfer.recipient_iban:
-            recipient = find_object(self.iter_transfer_recipients(account.id), iban=transfer.recipient_iban, error=RecipientNotFound)
-        else:
-            recipient = find_object(self.iter_transfer_recipients(account.id), id=transfer.recipient_id, error=RecipientNotFound)
+            recipient = find_object(rcpt_list, iban=transfer.recipient_iban)
+        if not recipient:
+            recipient = find_object(rcpt_list, id=transfer.recipient_id, error=RecipientNotFound)
 
         assert account.id.isdigit(), 'Account id is invalid'
 
@@ -167,9 +183,6 @@ class CreditMutuelModule(
         subscription_id = _id.split('_')[0]
         subscription = self.get_subscription(subscription_id)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
-
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
 
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):

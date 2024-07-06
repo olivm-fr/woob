@@ -1,62 +1,43 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
+# Copyright(C) 2016-2022 Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
+from woob.browser import LoginBrowser, URL, need_login
+from woob.capabilities.captcha import RecaptchaV2Question
+from woob.exceptions import BrowserIncorrectPassword
 
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, RecaptchaV2Question
-
-from .pages import LoginPage, CaptchaPage, ProfilePage, DocumentsPage, DocumentsDetailsPage
-
-
-class MyURL(URL):
-    def go(self, *args, **kwargs):
-        kwargs['lang'] = self.browser.lang
-        return super(MyURL, self).go(*args, **kwargs)
+from .pages import CaptchaPage, DocumentsDetailsPage, DocumentsPage, LoginPage, PeriodPage, ProfilePage
 
 
 class MaterielnetBrowser(LoginBrowser):
     BASEURL = 'https://secure.materiel.net'
 
-    login = MyURL(r'/(?P<lang>.*)Login/Login', LoginPage)
+    login = URL(r'/Login/Login', LoginPage)
     captcha = URL(r'/pm/client/captcha.html', CaptchaPage)
-    profile = MyURL(r'/(?P<lang>.*)Account/InformationsSection',
-                    r'/pro/Account/InformationsSection', ProfilePage)
-    documents = MyURL(r'/(?P<lang>.*)Orders/PartialCompletedOrdersHeader',
-                      r'/pro/Orders/PartialCompletedOrdersHeader', DocumentsPage)
-    document_details = MyURL(r'/(?P<lang>.*)Orders/PartialCompletedOrderContent',
-                             r'/pro/Orders/PartialCompletedOrderContent', DocumentsDetailsPage)
+    profile = URL(r'/Identity', ProfilePage)
+    documents = URL(r'/Orders/PartialCompletedOrdersHeader', DocumentsPage)
+    document_details = URL(r'/Orders/PartialCompletedOrderContent', DocumentsDetailsPage)
+    periods = URL(r'/Orders/CompletedOrdersPeriodSelection', PeriodPage)
 
     def __init__(self, config, *args, **kwargs):
-        super(MaterielnetBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.config = config
-        self.is_pro = None
-        self.lang = ''
-
-    def par_or_pro_location(self, url, *args, **kwargs):
-        if self.is_pro:
-            url = '/pro' + url
-        elif self.lang:
-            url = '/' + self.lang[:-1] + url
-
-        return self.location(url, *args, **kwargs)
 
     def do_login(self):
         self.login.go()
@@ -64,7 +45,7 @@ class MaterielnetBrowser(LoginBrowser):
         # captcha is not always present
         if sitekey:
             if not self.config['captcha_response'].get():
-                raise RecaptchaV2Question(website_key=sitekey, website_url=self.login.build(lang=self.lang))
+                raise RecaptchaV2Question(website_key=sitekey, website_url=self.url)
 
         self.page.login(self.username, self.password, self.config['captcha_response'].get())
 
@@ -77,16 +58,17 @@ class MaterielnetBrowser(LoginBrowser):
             if error:
                 raise BrowserIncorrectPassword(error)
 
-        self.is_pro = 'pro' in self.url
-
     @need_login
     def get_subscription_list(self):
-        return self.par_or_pro_location('/Account/InformationsSection').page.get_subscriptions()
+        # There is no subscription. The profile page is used to generate one
+        # so only one subscription will be returned.
+        return self.profile.go().get_subscriptions()
 
     @need_login
-    def iter_documents(self, subscription):
-        json_response = self.par_or_pro_location('/Orders/CompletedOrdersPeriodSelection', data={}).json()
+    def iter_documents(self):
+        periods = self.periods.go(method='POST').get_periods()
 
-        for data in json_response:
-            for doc in self.par_or_pro_location('/Orders/PartialCompletedOrdersHeader', data=data).page.get_documents():
+        # data will be a dict containing information to retrieve bills by period
+        for period in periods:
+            for doc in self.documents.go(data=period).get_documents():
                 yield doc

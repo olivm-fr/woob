@@ -2,35 +2,36 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
+import datetime
 from lxml import etree
 from io import StringIO
 
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
-from weboob.browser.exceptions import HTTPNotFound, ServerError
-from weboob.tools.capabilities.bank.investments import create_french_liquidity
+from woob.browser import LoginBrowser, URL, need_login
+from woob.exceptions import BrowserIncorrectPassword, ActionNeeded, BrowserPasswordExpired
+from woob.browser.exceptions import HTTPNotFound, ServerError
+from woob.capabilities.bank import Account
+from woob.tools.capabilities.bank.investments import create_french_liquidity
 
 from .pages import (
-    LoginPage, HomePage, AccountsPage, OldAccountsPage, HistoryPage, InvestmentPage, InvestDetailPage,
-    InvestmentListPage, QuestionPage, ChangePassPage, LogonFlowPage, ViewPage, SwitchPage,
-    HandlePasswordsPage, PostponePasswords,
+    LoginPage, HomePage, AccountsPage, OldAccountsPage, HistoryPage,
+    InvestmentPage, InvestDetailPage, InvestmentListPage, MarketOrdersPage,
+    QuestionPage, ChangePassPage, LogonFlowPage, ViewPage, SwitchPage,
+    HandlePasswordsPage, PostponePasswords, PersonalInfoPage,
 )
 
 
@@ -44,6 +45,8 @@ class BinckBrowser(LoginBrowser):
     view = URL('/PersonIntroduction/Index', ViewPage)
     logon_flow = URL(r'/AmlQuestionnairesOverview/LogonFlow$', LogonFlowPage)
 
+    personal_info = URL(r'/PersonalInformationLogin', PersonalInfoPage)
+
     account = URL(r'/PortfolioOverview/Index', AccountsPage)
     accounts = URL(r'/PersonAccountOverview/Index', AccountsPage)
     old_accounts = URL(r'/AccountsOverview/Index', OldAccountsPage)
@@ -55,6 +58,8 @@ class BinckBrowser(LoginBrowser):
     investment = URL(r'/PortfolioOverview/GetPortfolioOverview', InvestmentPage)
     investment_list = URL(r'PortfolioOverview$', InvestmentListPage)
     invest_detail = URL(r'/SecurityInformation/Get', InvestDetailPage)
+
+    market_orders = URL(r'/HistoricOrdersOverview/HistoricOrders', MarketOrdersPage)
 
     history = URL(r'/TransactionsOverview/GetTransactions',
                   r'/TransactionsOverview/FilteredOverview', HistoryPage)
@@ -72,7 +77,18 @@ class BinckBrowser(LoginBrowser):
         super(BinckBrowser, self).deinit()
 
     def do_login(self):
-        self.login.go().login(self.username, self.password)
+        self.login.go()
+        self.page.login(self.username, self.password)
+
+        if self.handle_passwords.is_here():
+            if self.page.has_action_needed():
+                # There is no detailed message, just a button with "Créer l'identifiant personnel"
+                # that is created with javascript.
+                raise BrowserPasswordExpired()
+
+            token = self.page.get_token()
+            self.postpone_passwords.go(headers=token, method='POST')
+            self.home_page.go()
 
         if self.login.is_here():
             error = self.page.get_error()
@@ -91,6 +107,12 @@ class BinckBrowser(LoginBrowser):
                 raise ActionNeeded(error)
             raise AssertionError('Unhandled behavior at login: error is "{}"'.format(error))
 
+        if self.personal_info.is_here():
+            message = self.page.get_message()
+            if 'informations personnelles' in message:
+                raise ActionNeeded(message)
+            raise AssertionError('Unhandled behavior at login: message is "%s"' % message)
+
     @need_login
     def switch_account(self, account_id):
         self.accounts.stay_or_go()
@@ -105,8 +127,9 @@ class BinckBrowser(LoginBrowser):
     @need_login
     def iter_accounts(self):
         # If we already know that it is an old website connection,
-        # we can call old_website_connection() right away.
+        # we can call iter_old_accounts() right away.
         if self.old_website_connection:
+            self.logger.warning('This connection has accounts on the old version of the website.')
             for account in self.iter_old_accounts():
                 yield account
             return
@@ -145,6 +168,7 @@ class BinckBrowser(LoginBrowser):
     def iter_old_accounts(self):
         self.old_accounts.go()
         for a in self.page.iter_accounts():
+            self.logger.warning('There is an old account: %s', a.label)
             try:
                 self.old_accounts.stay_or_go().go_to_account(a.id)
             except ServerError as exception:
@@ -210,6 +234,42 @@ class BinckBrowser(LoginBrowser):
 
         for inv in self.page.iter_investment(currency=account.currency):
             yield inv
+
+    def go_to_market_orders(self, headers, page):
+        data = {
+            'year': str(datetime.datetime.now().year),
+            'month': str(datetime.datetime.now().month),
+            'page': str(page),
+            'sortProperty': 'AccountOrderId',
+            'sortOrder': '1',
+        }
+        self.market_orders.go(data=data, headers=headers)
+
+    @need_login
+    def iter_market_orders(self, account):
+        if account.type not in (Account.TYPE_MARKET, Account.TYPE_PEA):
+            # This account type has no market order
+            return
+
+        self.switch_account(account.id)
+        headers = self.page.get_token()
+        try:
+            self.go_to_market_orders(headers, page=1)
+        except HTTPNotFound:
+            self.logger.warning('Account %s has no available market orders.', account.label)
+            return
+
+        # First market order page
+        for order in self.page.iter_market_orders():
+            yield order
+
+        # Verify if there are other pages and handle pagination
+        total_pages = self.page.count_total_pages()
+        if total_pages > 1:
+            for page in range(2, total_pages + 1):
+                self.go_to_market_orders(headers, page)
+                for order in self.page.iter_market_orders():
+                    yield order
 
     @need_login
     def iter_history(self, account):

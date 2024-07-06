@@ -2,30 +2,30 @@
 
 # Copyright(C) 2015      Roger Philibert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 import re
 
-from weboob.browser.browsers import DomainBrowser
-from weboob.browser.profiles import IPhone
-from weboob.browser.pages import HTMLPage
-from weboob.browser.filters.standard import CleanText
-from weboob.exceptions import BrowserIncorrectPassword, ParseError
-from weboob.tools.json import json
+from woob.browser.browsers import DomainBrowser
+from woob.browser.profiles import IPhone
+from woob.browser.pages import HTMLPage
+from woob.browser.filters.standard import CleanText
+from woob.exceptions import BrowserIncorrectPassword, ParseError
+from woob.tools.json import json
 
 
 __all__ = ['HappnBrowser', 'FacebookBrowser']
@@ -41,6 +41,10 @@ class FacebookBrowser(DomainBrowser):
 
     def login(self, username, password):
         self.location('https://www.facebook.com/dialog/oauth?client_id=%s&redirect_uri=fbconnect://success&scope=email,user_birthday,user_friends,public_profile,user_photos,user_likes&response_type=token' % self.CLIENT_ID)
+        page = HTMLPage(self, self.response)
+        form = page.get_form('//form')
+        form['accept_only_essential'] = '1'
+        form.submit()
         page = HTMLPage(self, self.response)
         form = page.get_form('//form[@id="login_form"]')
         form['email'] = username
@@ -91,6 +95,7 @@ class HappnBrowser(DomainBrowser):
             'grant_type': 'assertion',
             'assertion_type': 'facebook_access_token',
             'assertion': facebook.access_token,
+            'assertion_version': '6.0',
             'scope': 'mobile_app',
         })
         self.session.headers['Authorization'] = 'OAuth="%s"' % r['access_token']
@@ -152,6 +157,9 @@ class HappnBrowser(DomainBrowser):
 
     def set_position(self, lat, lng):
         r = self.request('/api/users/%s/devices/%s' % (self.my_id, self.device_id), method='PUT',
-                         data={'latitude': lat, 'longitude': lng, 'altitude': 0.0})
+                         json={'latitude': lat,
+                               'longitude': lng,
+                               'location_accuracy': 'EXACT'
+                               })
 
         return r['data']['position']

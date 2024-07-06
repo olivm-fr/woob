@@ -2,31 +2,29 @@
 
 # Copyright(C) 2017      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import datetime
 import re
 
-from weboob.tools.json import json
-from weboob.browser.browsers import APIBrowser
-from weboob.browser.filters.standard import CleanText
-from weboob.capabilities.gallery import BaseImage
-from weboob.capabilities.image import Thumbnail
+from woob.tools.json import json
+from woob.browser.browsers import APIBrowser
+from woob.browser.filters.standard import CleanText
+from woob.capabilities.gallery import BaseImage
+from woob.capabilities.image import Thumbnail
 
 
 class TumblrBrowser(APIBrowser):
@@ -101,6 +99,7 @@ class TumblrBrowser(APIBrowser):
             if not match:
                 return
             img = BaseImage(
+                id=post["id"],
                 index=index,
                 gallery=gallery,
                 url=match.group(1),

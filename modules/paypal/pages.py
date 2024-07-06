@@ -1,36 +1,36 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2013      Laurent Bachelier
+# Copyright(C) 2013-2021      Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from ast import literal_eval
 from decimal import Decimal, ROUND_DOWN
 import re
+from urllib.parse import unquote
 
-from weboob.tools.compat import unicode, unquote
-from weboob.capabilities.bank import Account
-from weboob.capabilities.base import NotAvailable
-from weboob.exceptions import BrowserUnavailable, ActionNeeded
-from weboob.browser.exceptions import ServerError
-from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
-from weboob.browser.filters.standard import CleanText, CleanDecimal
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.date import parse_french_date
-from weboob.tools.js import Javascript
+from woob.capabilities.bank import Account
+from woob.capabilities.base import NotAvailable
+from woob.exceptions import BrowserUnavailable, ActionNeeded
+from woob.browser.exceptions import ServerError
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from woob.browser.filters.standard import CleanText, CleanDecimal
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.date import parse_french_date
+from woob.tools.js import Javascript
 
 
 class LandingPage(HTMLPage):
@@ -97,7 +97,7 @@ class LoginPage(HTMLPage):
             csrf = tokens["_csrf"]
             key = tokens["key"]
             value = tokens["value"]
-        except:
+        except (TypeError, KeyError):
             raise BrowserUnavailable("Could not grab tokens")
 
         # Clean string obfuscation like: '\x70\x61\x79\x70\x61\x6c\x20\x73\x75\x63\x6b\x73'
@@ -179,7 +179,7 @@ class AccountPage(HomePage):
                 primary_account.label = u'%s' % (self.browser.username)
             else:
                 primary_account.currency = Account.get_currency(balance)
-                primary_account.id = unicode(primary_account.currency)
+                primary_account.id = primary_account.currency
                 primary_account.balance = Decimal(FrenchTransaction.clean_amount(balance))
                 primary_account.label = u'%s %s*' % (self.browser.username, primary_account.currency)
 
@@ -262,7 +262,7 @@ class ProHistoryPage(HistoryPage, JsonPage):
         if 'grossAmount' not in transaction or not 'currency' in transaction['grossAmount'] \
                 or transaction['transactionDescription']['description'].startswith("Conversion de devise"):
             return []
-        original_currency = unicode(transaction['grossAmount']['currency'])
+        original_currency = transaction['grossAmount']['currency']
         if not original_currency == account.currency:
             if original_currency in self.browser.account_currencies:
                 return []
@@ -318,7 +318,7 @@ class PartHistoryPage(HistoryPage, JsonPage):
         if not transaction['isPrimaryCurrency']:
             if not 'txnCurrency' in transaction['amounts']:
                 return []
-            original_currency = unicode(transaction['amounts']['txnCurrency'])
+            original_currency = transaction['amounts']['txnCurrency']
             if original_currency in self.browser.account_currencies:
                 return []
             if 'conversionFrom' in transaction['amounts'] and 'value' in transaction['amounts']['conversionFrom'] and account.currency == transaction['amounts']['conversionFrom']['currency']:

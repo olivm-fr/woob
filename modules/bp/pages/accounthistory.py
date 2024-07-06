@@ -1,42 +1,41 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2012 Nicolas Duhamel
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import datetime
 import re
+from urllib.parse import urljoin
 
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.capabilities.bank import Account, Transaction as BaseTransaction
-from weboob.capabilities.wealth import Investment
-from weboob.exceptions import BrowserUnavailable
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.browser.pages import LoggedPage
-from weboob.browser.elements import TableElement, ItemElement, method
-from weboob.browser.filters.html import Link, TableCell
-from weboob.browser.filters.standard import (
-    CleanDecimal, CleanText, Eval, Async, AsyncLoad, Date, Env, Format,
-    Regexp, Base,
+from woob.browser.elements import DictElement, ItemElement, TableElement, method
+from woob.browser.filters.html import Attr, Link, TableCell
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
+    Base, CleanDecimal, CleanText, Coalesce, Currency, Date, Env, Eval, Field,
+    Format, Regexp,
 )
-from weboob.tools.compat import urljoin
+from woob.browser.pages import JsonPage, LoggedPage
+from woob.capabilities.bank import Account, AccountOwnerType
+from woob.capabilities.bank import Transaction as BaseTransaction
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.base import NotAvailable, empty
+from woob.exceptions import BrowserUnavailable
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
 from .base import MyHTMLPage
 
@@ -55,7 +54,7 @@ class Transaction(FrenchTransaction):
         ),
         (re.compile(r'^(?P<category>ECHEANCEPRET)(?P<text>.*)'), FrenchTransaction.TYPE_LOAN_PAYMENT),
         (
-            re.compile(r'^CARTE X.\d{4} (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2,4}) A \d{2}H\d{2} (?P<text>(?P<category>RETRAIT DAB) .*)'),
+            re.compile(r'^CARTE X\d{4} (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2,4}) A \d{2}H\d{2} (?P<text>(?P<category>RETRAIT DAB) .*)'),
             FrenchTransaction.TYPE_WITHDRAWAL,
         ),
         (
@@ -86,16 +85,22 @@ class Transaction(FrenchTransaction):
             FrenchTransaction.TYPE_CARD,
         ),
         (re.compile(r'^(?P<category>RETRAIT DAB)/TPE INTERNE$'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (
+            re.compile(r'\d* (?P<category>RETRAIT) EFFECTUE LE (?P<dd>\d{2})(?P<mm>\d{2})(?P<yy>\d{2,4}) A .*'),
+            FrenchTransaction.TYPE_WITHDRAWAL,
+        ),
+        (re.compile(r'(?P<category>RETRAIT) ESPECES EURO ZONE EURO'), FrenchTransaction.TYPE_WITHDRAWAL),
     ]
 
 
 class AccountHistory(LoggedPage, MyHTMLPage):
     def on_load(self):
+        super().on_load()
         if bool(CleanText('//h2[contains(text(), "ERREUR")]')(self.doc)):
             raise BrowserUnavailable()
 
     def is_here(self):
-        return not bool(CleanText('//h1[contains(text(), "tail de vos cartes")]')(self.doc))
+        return not bool(CleanText('//h2[contains(text(), "tail de vos cartes")]')(self.doc))
 
     def get_next_link(self):
         for a in self.doc.xpath('//a[@class="btn_crt"]'):
@@ -107,8 +112,10 @@ class AccountHistory(LoggedPage, MyHTMLPage):
         """
         deffered is True when we are on a card page.
         """
-        mvt_table = self.doc.xpath("//table[@id='mouvements']", smart_strings=False)[0]
-        mvt_ligne = mvt_table.xpath("./tbody/tr")
+        mvt_ligne = []
+        if self.has_transactions():
+            mvt_table = self.doc.xpath("//table[contains(@id, 'mouvements')]", smart_strings=False)[0]
+            mvt_ligne = mvt_table.xpath("./tbody/tr")
 
         operations = []
 
@@ -138,28 +145,19 @@ class AccountHistory(LoggedPage, MyHTMLPage):
         for mvt in mvt_ligne:
             op = Transaction()
             op.parse(
-                date=CleanText('./td[1]/span')(mvt),
-                raw=CleanText('./td[2]/span')(mvt)
+                date=CleanText('./td[@data-label="Date"]')(mvt),
+                raw=CleanText('./td[@data-label="Libellé"]')(mvt),
             )
 
             if op.label.startswith('DEBIT CARTE BANCAIRE DIFFERE'):
                 op.deleted = True
 
-            r = re.compile(r'\d+')
-
-            tmp = mvt.xpath("./td/span/strong")
-            if not tmp:
-                tmp = mvt.xpath("./td/span")
-            amount = None
-
-            if any("null" in t.text for t in tmp):  # null amount, why not
-                continue
-
-            for t in tmp:
-                if r.search(t.text):
-                    amount = t.text
-
-            op.set_amount(amount)
+            op.amount = Coalesce(
+                CleanDecimal.French('./td[@data-label="Montant"]', default=None),
+                CleanDecimal.French('./td[@data-label="Euros"]', default=None),
+                CleanDecimal.French('./td[@data-label="Credit"]', default=None),
+                CleanDecimal.French('./td[@data-label="Debit"]', default=None)
+            )(mvt)
 
             if deferred:
                 op._cardid = 'CARTE %s' % card_no
@@ -179,11 +177,13 @@ class AccountHistory(LoggedPage, MyHTMLPage):
         tr = Transaction()
         text = CleanText('//div[@class="infosynthese"]')
         # card account: positive summary amount
-        tr.amount = abs(CleanDecimal(
-            Regexp(text, r'Montant imputé le \d+/\d+/\d+ : (.*) euros'),
-            replace_dots=True
+        tr.amount = abs(CleanDecimal.French(
+            Regexp(text, r'[Montant imputé le|cours prélevé au] \d+/\d+/\d+ : (.*) €')
         )(self.doc))
-        tr.date = tr.rdate = Date(Regexp(text, r'Montant imputé le (\d+/\d+/\d+)'), dayfirst=True)(self.doc)
+        tr.date = tr.rdate = Date(
+            Regexp(text, r'[Montant imputé le|cours prélevé au] (\d+/\d+/\d+)'),
+            dayfirst=True
+        )(self.doc)
         tr.type = tr.TYPE_CARD_SUMMARY
         tr.label = 'DEBIT CARTE BANCAIRE DIFFERE'
         tr._coming = False
@@ -191,12 +191,12 @@ class AccountHistory(LoggedPage, MyHTMLPage):
 
     def has_transactions(self):
         return not CleanText(
-            """//table[@id="mouvementsTable" or @id="mouvements"]//tr[contains(., "pas d'opérations") or contains(., "Pas d'opération")]"""
+            """//table[contains(@id, 'mouvements')]//tr[contains(., "as d'opération")]"""
         )(self.doc)
 
     @method
     class iter_transactions(TableElement):
-        head_xpath = '//table[@id="mouvementsTable"]/thead/tr/th/a'
+        head_xpath = '//table[@id="mouvementsTable"]/thead/tr/th/button'
         item_xpath = '//table[@id="mouvementsTable"]/tbody/tr'
 
         col_date = re.compile('Date')
@@ -205,6 +205,9 @@ class AccountHistory(LoggedPage, MyHTMLPage):
 
         class item(ItemElement):
             klass = Transaction
+
+            def condition(self):
+                return self.page.has_transactions()
 
             obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
             obj_amount = CleanDecimal(TableCell('amount'), replace_dots=True)
@@ -229,32 +232,34 @@ class AccountHistory(LoggedPage, MyHTMLPage):
         ret.coming = CleanDecimal(
             Regexp(
                 CleanText('.'),
-                r'En cours prélevé au \d+/\d+/\d+ : ([\d\s,-]+) euros'
+                r'cours prélevé au \d+/\d+/\d+ : ([\d\s,-]+) [euros|€]'
             ),
             replace_dots=True
         )(div)
-        ret.number = Regexp(CleanText('.'), r'sur votre carte n°([\d*]+)')(div)
+        ret.number = Regexp(CleanText('.'), r'sur votre carte [nN]°([\d*]+)')(div)
         ret.id = '%s.%s' % (parent_id, ret.number)
         ret.currency = 'EUR'
         ret.label = 'CARTE %s' % ret.number
         ret.url = self.url
+        ret.owner_type = AccountOwnerType.PRIVATE
+        ret._account_holder = NotAvailable
         return ret
 
 
 class CardsList(LoggedPage, MyHTMLPage):
     def is_here(self):
         return bool(
-            CleanText('//h1[contains(text(), "tail de vos cartes")]')(self.doc)
-            and not CleanText('//h1[contains(text(), "tail de vos op")]')(self.doc)
+            CleanText('//h2[contains(text(), "tail de vos cartes")]')(self.doc)
+            and not CleanText('//h2[contains(text(), "tail de vos op")]')(self.doc)
         )
 
     @method
     class get_cards(TableElement):
-        item_xpath = '//table[@class="dataNum"]/tbody/tr'
-        head_xpath = '//table[@class="dataNum"]/thead/tr/th'
+        item_xpath = '//table[has-class("dataNum") or has-class("dataCarte")]/tbody/tr'
+        head_xpath = '//table[has-class("dataNum") or has-class("dataCarte")]/thead/tr/th'
 
-        col_label = re.compile('Vos cartes Encours actuel prélevé au')
-        col_balance = 'Euros'
+        col_label = re.compile('Vos cartes,? [Ee]ncours actuel prélevé au')
+        col_balance = re.compile('(Euros|Montant)')
         col_number = 'Numéro'
         col__credit = 'Crédit (euro)'
         col__debit = 'Débit (euro)'
@@ -267,6 +272,8 @@ class CardsList(LoggedPage, MyHTMLPage):
             obj_number = CleanText(TableCell('number'))
             obj_label = Format('%s %s', CleanText(TableCell('label')), obj_number)
             obj_id = Format('%s.%s', Env('parent_id'), obj_number)
+            obj_owner_type = AccountOwnerType.PRIVATE
+            obj__account_holder = NotAvailable
 
             def obj_coming(self):
                 comings = (
@@ -288,6 +295,7 @@ class CardsList(LoggedPage, MyHTMLPage):
 
 class SavingAccountSummary(LoggedPage, MyHTMLPage):
     def on_load(self):
+        super().on_load()
         link = Link('//ul[has-class("tabs")]//a[@title="Historique des mouvements"]', default=NotAvailable)(self.doc)
         if link:
             self.browser.location(link)
@@ -320,20 +328,31 @@ class InvestItem(ItemElement):
         return not empty(obj.valuation)
 
 
-class CachemireCatalogPage(LoggedPage, MyHTMLPage):
-    def on_load(self):
-        self.product_codes = self.load_product_codes()
+class LifeInsuranceInvest(LoggedPage, JsonPage):
+    @method
+    class iter_investments(DictElement):
+        item_xpath = '0/rubriques/*/classesActifs/*/supports'
 
-    def load_product_codes(self):
-        # store ISIN codes in a dictionary with a (label: isin) fashion
-        product_codes = {}
-        for table in self.doc.xpath('//table/tbody'):
-            for row in table.xpath('//tr[contains(./th/@scope,"row")]'):
-                label = CleanText('./th[1]', default=None)(row)
-                isin_code = CleanText('./td[1]', default=None)(row)
-                if label and isin_code:
-                    product_codes[label.upper()] = isin_code
-        return product_codes
+        def condition(self):
+            # List of investments is sometimes unavailable and the value of the 'rubriques' key is null
+            return Dict('0/rubriques', default=False)(self)
+
+        class item(ItemElement):
+            klass = Investment
+
+            obj_label = CleanText(Dict('libelleSupport'))
+            obj_code = IsinCode(CleanText(Dict('codeISIN'), default=NotAvailable), default=NotAvailable)
+            obj_code_type = IsinType(Field('code'))
+            obj_valuation = CleanDecimal.SI(Dict('montant'))
+            obj_quantity = CleanDecimal.SI(Dict('nombreUniteCompte'), default=NotAvailable)
+            obj_unitvalue = CleanDecimal.SI(Dict('valeurLiquidative'), default=NotAvailable)
+            obj_vdate = Date(CleanText(Dict('dateValorisation')), default=NotAvailable)
+
+            def obj_portfolio_share(self):
+                raw_value = CleanDecimal.SI(Dict('repartition'), default=None)(self)
+                if not empty(raw_value):
+                    return raw_value / 100
+                return NotAvailable
 
 
 class LifeInsuranceSummary(LoggedPage, MyHTMLPage):
@@ -345,53 +364,31 @@ class LifeInsuranceSummary(LoggedPage, MyHTMLPage):
         )(self.doc)
 
 
-class LifeInsuranceInvest(LoggedPage, MyHTMLPage):
-    def has_error(self):
-        return 'erreur' in CleanText('//p[has-class("titlePage")]')(self.doc) or 'ERREUR' in CleanText('//h2')(self.doc)
+class LifeInsuranceInitPage(LoggedPage, MyHTMLPage):
+    pass
 
-    def get_cachemire_link(self):
-        return Link('//a[contains(@title, "espace cachemire")]', default=None)(self.doc)
 
+class LifeInsuranceAccessHistory(LoggedPage, MyHTMLPage):
+    def submit_form(self):
+        form = self.get_form()
+        form.submit()
+
+    def get_product_code(self):
+        return Attr('//input[@name="codeProduit"]', 'value')(self.doc)
+
+
+class LifeInsuranceHistory(LoggedPage, JsonPage):
     @method
-    class iter_investments(InvestTable):
-        head_xpath = '//table[starts-with(@id, "mouvements")]/thead//th'
-        item_xpath = '//table[starts-with(@id, "mouvements")]/tbody//tr'
-
-        col_unitvalue = 'Valeur Liquidative'
-        col_vdate = 'Date'
-
-        class item(InvestItem):
-            obj_unitvalue = CleanDecimal(TableCell('unitvalue'), replace_dots=True, default=NotAvailable)
-            obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True, default=NotAvailable)
-
-
-class LifeInsuranceHistory(LoggedPage, MyHTMLPage):
-    @method
-    class get_history(TableElement):
-        head_xpath = '//table[@id="options"]/thead//th'
-        item_xpath = '//table[@id="options"]/tbody//tr'
-
-        col_date = 'Date de valeur'
-        col_amount = 'Montant'
-        col_label = "Type d'opération"
+    class get_history(DictElement):
+        item_xpath = 'operations'
 
         class item(ItemElement):
             klass = BaseTransaction
 
-            obj_label = CleanText(TableCell('label'))
-            obj_amount = CleanDecimal(TableCell('amount'), replace_dots=True)
-            obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
+            obj_label = CleanText(Dict('libelleOperation'))
+            obj_amount = CleanDecimal.SI(Dict('montantOperation'))
+            obj_date = Date(CleanText(Dict('dateOperation')))
             obj__coming = False
-
-            load_invs = Link('.//a', default=NotAvailable) & AsyncLoad
-
-            def obj_investments(self):
-                try:
-                    page = Async('invs').loaded_page(self)
-
-                    return list(page.iter_investments())
-                except AttributeError:  # No investments available
-                    return list()
 
 
 class LifeInsuranceHistoryInv(LoggedPage, MyHTMLPage):
@@ -435,3 +432,53 @@ class TemporaryPage(LoggedPage, MyHTMLPage):
                 r'location.replace\([\'"](.*)[\'"]\)'
             )(self.doc)
         )
+
+
+class CardsJsonDetails(LoggedPage, JsonPage):
+    @method
+    class iter_cards(DictElement):
+        item_xpath = 'cartouchesCarte'
+
+        def condition(self):
+            return self.page.doc.get('userMessage', '') != 'Aucune carte'
+
+        class item(ItemElement):
+            klass = Account
+
+            def condition(self):
+                return CleanText(Dict('typeDeDebit'))(self) == 'DIFFÉRÉ'
+
+            obj_type = Account.TYPE_CARD
+            obj_number = CleanText(Dict('numeroPanTronque'), replace=[(' ', '')])
+            obj_coming = CleanDecimal.US(
+                Dict('encoursCarte/listeOuverte/0/montantEncours', default=None),
+                default=NotAvailable
+            )
+            obj_currency = Currency(
+                Dict('encoursCarte/listeOuverte/0/deviseEncours', default=''),
+                default=NotAvailable
+            )
+            obj_owner_type = AccountOwnerType.PRIVATE
+            obj__account_holder = NotAvailable
+
+            def obj_id(self):
+                return '%s.%s' % (Env('parent_id')(self), self.obj.number)
+
+            def obj_label(self):
+                return 'CARTE %s' % self.obj.number
+
+    def generate_summary(self, card):
+        for item in self.doc['cartouchesCarte']:
+            if CleanText(Dict('numeroPanTronque'), replace=[(' ', '')])(item) != card.number:
+                continue
+            if empty(card.coming):
+                continue
+            tr = Transaction()
+            # card account: positive summary amount
+            tr.amount = abs(card.coming)
+            tr.date = tr.rdate = Date(Dict('encoursCarte/listeOuverte/0/dateEncours'))(item)
+            tr.type = tr.TYPE_CARD_SUMMARY
+            tr.label = 'DEBIT CARTE BANCAIRE DIFFERE'
+            tr._coming = False
+            return [tr]
+        return []

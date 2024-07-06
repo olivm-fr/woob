@@ -2,59 +2,54 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-from weboob.browser import PagesBrowser, URL
-from .pages import ResultsPage, RecipePage, HomePage
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.tools.compat import urlencode
+from urllib.parse import quote
+
+from woob.browser import PagesBrowser, URL
+from .pages import ResultsPage, RecipePage
 
 __all__ = ['AllrecipesBrowser']
 
 
 class AllrecipesBrowser(PagesBrowser):
-    BASEURL = 'https://apps.allrecipes.com'
-    results = URL('/v1/recipes\?(?P<query>.*)', ResultsPage)
-    recipe = URL('/v1/recipes/(?P<_id>.*)/', RecipePage)
-    home = URL('http://allrecipes.com', HomePage)
 
-    TOKEN = None
-
-    def fill_token(self):
-        self.home.open()
-        self.TOKEN = 'Bearer %s' % self.session.cookies.get('ARToken')
-        self.session.headers['X-Requested-With'] = 'XMLHttpRequest'
-        self.session.headers['Authorization'] = self.TOKEN
+    BASEURL = 'https://www.allrecipes.com'
+    results = URL(r'/element-api/content-proxy/faceted-searches-load-more\?search=(?P<search>.*)&page=(?P<page>.*)',
+                  ResultsPage)
+    recipe = URL(r'/recipe/(?P<id>\d*)/',
+                 r'/recipe/\d*/.*/',
+                 RecipePage)
 
     def iter_recipes(self, pattern):
-        query = {'query': pattern,
-                 'page': 1,
-                 'pagesize': 20,
-                 'sort': 're'}
+        return self.results.go(search=quote(pattern), page=1).iter_recipes()
 
-        if not self.TOKEN:
-            self.fill_token()
-
-        return self.results.go(query=urlencode(query)).iter_recipes()
-
-    def get_recipe(self, _id, obj=None):
-        if not self.TOKEN:
-            self.fill_token()
-
-        recipe = self.recipe.go(_id=_id).get_recipe(obj=obj)
-        comments = list(self.page.get_comments())
-        if comments:
-            recipe.comments = comments
+    @recipe.id2url
+    def get_recipe(self, url, obj=None):
+        self.location(url)
+        assert self.recipe.is_here()
+        recipe = self.page.get_recipe(obj=obj)
+        recipe.comments = list(self.get_comments(url))
         return recipe
+
+    @recipe.id2url
+    def get_comments(self, url):
+        if not self.recipe.is_here():
+            self.location(url)
+            assert self.recipe.is_here()
+
+        assert self.recipe.is_here()
+        return self.page.get_comments()

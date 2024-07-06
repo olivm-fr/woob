@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Jocelyn Jaubert
 #
 # This file is part of a woob module.
@@ -23,27 +21,27 @@ from urllib.parse import urlsplit, urlunsplit, urlencode
 
 import requests
 
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, AccountOwnership
-from weboob.capabilities.bank.wealth import (
+from woob.capabilities.base import NotAvailable, empty
+from woob.capabilities.bank import Account, AccountOwnership, NoAccountsException
+from woob.capabilities.bank.wealth import (
     Investment, MarketOrder, MarketOrderDirection,
     MarketOrderType, MarketOrderPayment,
 )
-from weboob.capabilities.bill import Subscription
-from weboob.capabilities.contact import Advisor
-from weboob.capabilities.profile import Person, ProfileMissing
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.capabilities.bank.investments import create_french_liquidity, IsinCode, IsinType
-from weboob.browser.elements import DictElement, ItemElement, TableElement, method, ListElement
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import (
+from woob.capabilities.bill import Subscription
+from woob.capabilities.contact import Advisor
+from woob.capabilities.profile import Person, ProfileMissing
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.capabilities.bank.investments import create_french_liquidity, IsinCode, IsinType
+from woob.browser.elements import DictElement, ItemElement, TableElement, method, ListElement
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Lower, Regexp, Currency, Eval, Field,
     Format, Date, Env, Map, MapIn, Coalesce, Base,
 )
-from weboob.browser.filters.html import Link, TableCell, Attr
-from weboob.browser.pages import HTMLPage, XMLPage, JsonPage, LoggedPage, pagination
-from weboob.exceptions import (
-    BrowserUnavailable, NoAccountsException,
+from woob.browser.filters.html import Link, TableCell, Attr
+from woob.browser.pages import HTMLPage, XMLPage, JsonPage, LoggedPage, pagination
+from woob.exceptions import (
+    BrowserUnavailable, BrowserUserBanned,
 )
 
 
@@ -75,7 +73,7 @@ class JsonBasePage(LoggedPage, JsonPage):
             action = Dict('commun/action')(self.doc)
 
             if action and 'BLOCAGE' in action:
-                raise BrowserUnavailable()
+                raise BrowserUserBanned()
 
             if reason and 'err_tech' in reason:
                 # This error is temporary and usually do not happens on the next try
@@ -319,7 +317,7 @@ class LoansPage(LoggedPage, JsonPage):
                     loan.next_payment_amount = CleanDecimal.French(Dict('montantProchaineEcheance'))(acc)
                     loan.next_payment_date = Date(CleanText(Dict('detailPret/dateProchaineEcheance'), default=NotAvailable), default=NotAvailable)(acc)
                     loan.used_amount = CleanDecimal.French(Dict('montantUtilise', default=None), default=NotAvailable)(acc)
-                    loan.opening_date = Date(CleanText(Dict('detailPret/dateOuverture'), default=''), default=NotAvailable)(acc)
+                    loan.subscription_date = Date(CleanText(Dict('detailPret/dateOuverture'), default=''), default=NotAvailable)(acc)
                     loan.available_amount = CleanDecimal.French(Dict('soldeReserveOuCapital', default=None), default=NotAvailable)(acc)
                     loan.balance = CleanDecimal.French(
                         Coalesce(
@@ -370,7 +368,7 @@ class Transaction(FrenchTransaction):
                                                             FrenchTransaction.TYPE_WITHDRAWAL),
                 (re.compile(r'^CARTE \w+ REMBT (?P<dd>\d{2})\/(?P<mm>\d{2})( A (?P<HH>\d+)H(?P<MM>\d+))? (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_PAYBACK),
-                (re.compile(r'^(?P<category>CARTE) \w+ (?P<dd>\d{2})\/(?P<mm>\d{2}) (?P<text>.*)'),
+                (re.compile(r'^(?P<category>CARTE) \w+ (?P<dd>\d{2})\/(?P<mm>(0[1-9]|1[0-2])) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD),
                 (re.compile(r'^(?P<dd>\d{2})(?P<mm>\d{2})\/(?P<text>.*?)\/?(-[\d,]+)?$'),
                                                             FrenchTransaction.TYPE_CARD),
@@ -398,7 +396,7 @@ class Transaction(FrenchTransaction):
                                                             FrenchTransaction.TYPE_CARD_SUMMARY),
                 (re.compile(r'^Paiements CB (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD_SUMMARY),
-                (re.compile(r'^CARTE \w+ (?P<dd>\d{2})\/(?P<mm>\d{2}) (?P<text>.*)'),
+                (re.compile(r'^CARTE \w+ (?P<dd>\d{2})\/(?P<mm>(0[1-9]|1[0-2])) (?P<text>.*)'),
                                                             FrenchTransaction.TYPE_CARD),
                ]
 
@@ -772,18 +770,84 @@ class LifeInsuranceInvest2(LifeInsuranceInvest):
         # there no trace on any space for the history on this page
         return []
 
-    @method
-    class iter_investment(TableElement):
-        item_xpath = '//table/tbody/tr[starts-with(@class, "net2g_asv_tableau_ligne_")]'
-        head_xpath = '//table/thead/tr/td'
 
-        col_label = u'Support'
-        col_valuation = u'Montant'
+class LifeInsuranceAPI(LoggedPage, JsonPage):
+    def check_availability(self):
+        return Dict('commun/statut')(self.doc) == 'OK'
+
+
+class LifeInsuranceInvestAPI(LoggedPage, JsonPage):
+    def check_availability(self):
+        return Dict('commun/statut')(self.doc) == 'OK'
+
+    @method
+    class iter_investment(DictElement):
+        item_xpath = 'donnees/actifs'
 
         class item(ItemElement):
             klass = Investment
-            obj_label = CleanText(TableCell('label'))
-            obj_valuation = MyDecimal(TableCell('valuation'))
+
+            obj_label = CleanText(Dict('libelle'))
+            obj_valuation = CleanDecimal.French(Dict('mntTotal/value'))
+            obj_code = IsinCode(Dict('codeISIN'), default=NotAvailable)
+            obj_code_type = IsinType(Field('code'))
+
+
+class LifeInsuranceInvestAPI2(LoggedPage, JsonPage):
+    @method
+    class iter_investment(DictElement):
+        item_xpath = 'donnees/actifs/*/supportList'
+
+        class item(ItemElement):
+            klass = Investment
+
+            obj_label = CleanText(Dict('libelleSupport'))
+            obj_valuation = CleanDecimal.French(Dict('montantDetenu'))
+            obj_code = IsinCode(Dict('codePlacement'), default=NotAvailable)
+            obj_code_type = IsinType(Field('code'))
+
+            def obj_quantity(self):
+                if Field('label')(self) == 'SUPPORT EURO':
+                    return NotAvailable
+                return CleanDecimal.SI(Dict('nombrePart'))(self)
+
+            def obj_unitvalue(self):
+                if Field('label')(self) == 'SUPPORT EURO':
+                    return NotAvailable
+                return CleanDecimal.French(Dict('coursDuPlacement'))(self)
+
+
+class LifeInsuranceInvestDetailsAPI(LoggedPage, JsonPage):
+    @method
+    class fill_life_insurance_investment(ItemElement):
+        def parse(self, el):
+            for fund in Dict('donnees/listePerformancePlacements')(self):
+                if Dict('codePlacement')(fund) == self.obj.code:
+                    current_fund = fund
+                    break
+            else:
+                return
+
+            diff_ratio = CleanDecimal.SI(
+                Dict('pourcentagePerformance', default=None),
+                default=None
+            )(current_fund)
+            if not empty(diff_ratio):
+                self.env['diff_ratio'] = diff_ratio / 100
+            else:
+                self.env['diff_ratio'] = NotAvailable
+
+            self.env['diff'] = CleanDecimal.SI(Dict('montantPlusMoinsValue'))(current_fund)
+            self.env['unitprice'] = CleanDecimal.SI(Dict('prixDeRevient'))(current_fund)
+            self.env['vdate'] = Date(CleanText(Dict('donnees/datePerformance')))(self)
+
+        def condition(self):
+            return self.obj.code
+
+        obj_unitprice = Env('unitprice')
+        obj_diff = Env('diff')
+        obj_diff_ratio = Env('diff_ratio')
+        obj_vdate = Env('vdate')
 
 
 class LifeInsuranceHistory(LifeInsurance):

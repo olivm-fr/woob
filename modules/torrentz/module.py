@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from weboob.capabilities.torrent import CapTorrent
-from weboob.tools.backend import Module
+from woob.capabilities.torrent import CapTorrent
+from woob.tools.backend import Module
 
 from .browser import TorrentzBrowser
 
@@ -13,7 +13,7 @@ class TorrentzModule(Module, CapTorrent):
     NAME = 'torrentz'
     MAINTAINER = u'Matthieu Weber'
     EMAIL = 'weboob@weber.fi.eu.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = 'Torrentz Search Engine.'
     LICENSE = 'AGPL'
     BROWSER = TorrentzBrowser

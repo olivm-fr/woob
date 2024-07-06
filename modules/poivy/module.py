@@ -2,26 +2,27 @@
 
 # Copyright(C) 2013-2014 Florent Fourcot
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.capabilities.bill import CapDocument, Subscription, SubscriptionNotFound, Detail
-from weboob.capabilities.base import find_object
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword
+from woob.capabilities.bill import (
+    CapDocument, Subscription, Detail, DocumentCategory,
+)
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword
 
 from .browser import PoivyBrowser
 
@@ -33,7 +34,7 @@ class PoivyModule(Module, CapDocument):
     NAME = 'poivy'
     MAINTAINER = u'Florent Fourcot'
     EMAIL = 'weboob@flo.fourcot.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'Poivy website'
     CONFIG = BackendConfig(ValueBackendPassword('login',
@@ -44,15 +45,14 @@ class PoivyModule(Module, CapDocument):
                            )
     BROWSER = PoivyBrowser
 
+    document_categories = {DocumentCategory.INTERNET_TELEPHONY}
+
     def create_default_browser(self):
         return self.create_browser(self.config['login'].get(),
                                    self.config['password'].get())
 
     def iter_subscription(self):
         return self.browser.get_subscription_list()
-
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
 
     def iter_documents_history(self, subscription):
         # Try if we have a real subscription before to load the history

@@ -2,44 +2,47 @@
 
 # Copyright(C) 2020      Ludovic LANGE
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.browser.pages import (
+from woob.browser.pages import (
     JsonPage,
     LoggedPage,
+    HTMLPage,
 )
-from weboob.exceptions import (
+from woob.exceptions import (
     BrowserIncorrectPassword,
     BrowserUnavailable,
 )
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import (
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
     CleanText,
     Format,
     Coalesce,
     Date,
     CleanDecimal,
 )
-from weboob.capabilities.profile import Person
-from weboob.capabilities.bill import DocumentTypes, Document
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.capabilities.base import NotAvailable
+from woob.capabilities.profile import Person
+from woob.capabilities.bill import DocumentTypes, Document
+from woob.browser.elements import ItemElement, DictElement, method
+from woob.capabilities.base import NotAvailable
+
+
+class HomePage(HTMLPage):
+  pass
 
 
 class AprilJsonPage(JsonPage):
@@ -56,16 +59,9 @@ class AprilJsonPage(JsonPage):
             )
 
 
-class LoginPage(AprilJsonPage):
-    @property
-    def logged(self):
-        return "token" in self.doc
-
-    def get_token(self):
-        return Dict("token")(self.doc)
-
+class LoginPage(HTMLPage):
     def login(self, username, password):
-        form = self.get_form(xpath='//form[has-class("loginForm")]')
+        form = self.get_form(xpath='//form[has-class("form-block")]')
         form["username"] = username
         form["password"] = password
         form.submit()
@@ -132,7 +128,7 @@ class DocumentsPage(JsonPage):
                 Dict("dateEmission", default=NotAvailable), default=NotAvailable
             )
             obj_format = "pdf"
-            obj_url = Format("/api/documents/auth/%s", Dict("reference"))
+            obj_url = Format("/selfcare/documents/auth/%s", Dict("reference"))
 
             def obj_type(self):
                 doc_type = Dict("typeDocument")(self)

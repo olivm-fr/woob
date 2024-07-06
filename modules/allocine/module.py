@@ -2,29 +2,28 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 import re
 
-from weboob.capabilities.base import UserError
-from weboob.capabilities.calendar import CATEGORIES, BaseCalendarEvent, CapCalendarEvent
-from weboob.capabilities.cinema import CapCinema, Movie, Person
-from weboob.capabilities.collection import CapCollection, Collection, CollectionNotFound
-from weboob.capabilities.video import BaseVideo, CapVideo
-from weboob.tools.backend import Module
-from weboob.tools.compat import unicode
+from woob.capabilities.base import UserError
+from woob.capabilities.calendar import CATEGORIES, BaseCalendarEvent, CapCalendarEvent
+from woob.capabilities.cinema import CapCinema, Movie, Person
+from woob.capabilities.collection import CapCollection, Collection, CollectionNotFound
+from woob.capabilities.video import BaseVideo, CapVideo
+from woob.tools.backend import Module
 
 from .browser import AllocineBrowser
 
@@ -35,7 +34,7 @@ class AllocineModule(Module, CapCinema, CapVideo, CapCalendarEvent, CapCollectio
     NAME = 'allocine'
     MAINTAINER = u'Julien Veyssier'
     EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = u'AlloCiné French cinema database service'
     LICENSE = 'AGPLv3+'
     BROWSER = AllocineBrowser
@@ -121,7 +120,7 @@ class AllocineModule(Module, CapCinema, CapVideo, CapCalendarEvent, CapCollectio
                 video = self.get_video(self, video.id)
 
             if hasattr(video, '_video_code'):
-                video.url = unicode(self.browser.get_video_url(video._video_code))
+                video.url = str(self.browser.get_video_url(video._video_code))
 
         if 'thumbnail' in fields and video and video.thumbnail:
             video.thumbnail.data = self.browser.open(video.thumbnail.url)

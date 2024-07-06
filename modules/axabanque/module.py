@@ -1,58 +1,63 @@
-# -*- coding: utf-8 -*-
 
 # flake8: compatible
 
 # Copyright(C) 2013 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
 
-from weboob.capabilities.base import find_object, empty
-from weboob.capabilities.bank import (
-    Account, TransferInvalidLabel, CapBankTransferAddRecipient, AccountNotFound,
+from woob.capabilities.base import find_object, empty
+from woob.capabilities.bank import (
+    Account, TransferInvalidLabel, CapBankTransfer, AccountNotFound,
     RecipientNotFound, RecipientInvalidLabel,
 )
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.bill import CapDocument, Subscription, Document, DocumentNotFound, SubscriptionNotFound
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.capabilities.bank.bank_transfer import sorted_transfers
-from weboob.tools.value import ValueBackendPassword
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.profile import CapProfile
+from woob.capabilities.bill import (
+    CapDocument, Subscription, Document, DocumentNotFound,
+    DocumentTypes,
+)
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.capabilities.bank.bank_transfer import sorted_transfers
+from woob.tools.value import ValueBackendPassword, ValueTransient
 
-from .browser import AXABanque, AXAAssurance
+from .browser import AXAAssuranceBrowser, AXABanqueBrowser
+from .proxy_browser import ProxyBrowser
 
 
 __all__ = ['AXABanqueModule']
 
 
-class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument, CapProfile):
+class AXABanqueModule(Module, CapBankWealth, CapBankTransfer, CapDocument, CapProfile):
     NAME = 'axabanque'
     MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    DEPENDENCIES = ('allianzbanque',)
     DESCRIPTION = 'AXA Banque'
     LICENSE = 'LGPLv3+'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant', masked=False),
-        ValueBackendPassword('password', label='Code', regexp=r'\d+'),
+        ValueBackendPassword('password', label='Code', regexp=r'\S+'),
+        ValueTransient('code'),
+        ValueTransient('request_information'),
     )
-    BROWSER = AXABanque
+    BROWSER = ProxyBrowser
+    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.OTHER)
 
     def create_default_browser(self):
 
@@ -63,13 +68,13 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
 
         login = self.config['login'].get()
         if login.isdigit():
-            self.BROWSER = AXABanque
+            self.BROWSER = ProxyBrowser
         else:
-            self.BROWSER = AXAAssurance
+            self.BROWSER = AXAAssuranceBrowser
         return self.create_browser(
+            self.config,
             login,
             self.config['password'].get(),
-            weboob=self.weboob
         )
 
     def iter_accounts(self):
@@ -85,12 +90,10 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
         return self.browser.iter_coming(account)
 
     def iter_transfer_recipients(self, origin_account):
-        if not isinstance(self.browser, AXABanque):
+        if not isinstance(self.browser, AXABanqueBrowser):  # AxaAssuranceBrowser and AxaBourseBrowser can't have recipients
             raise NotImplementedError()
-        if isinstance(origin_account, Account):
-            origin_account = origin_account.id
-        # Only 11 first character are required to iter recipient
-        origin_account = origin_account[:11]
+        if not isinstance(origin_account, Account):
+            origin_account = self.get_account(origin_account)
         return self.browser.iter_recipients(origin_account)
 
     def new_recipient(self, recipient, **params):
@@ -101,7 +104,10 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
             # because this appears after the sms otp. This allow the user to know that
             # the label is incorrect before having to enter an otp.
             # The message in the error is the exact one that is displayed on the website.
-            raise RecipientInvalidLabel("Les caractères autorisés sont l'alphabet latin, les chiffres et les caractères / - ? : ( ) . , ' + ESPACE")
+            raise RecipientInvalidLabel(
+                message="Les caractères autorisés sont l'alphabet latin, les chiffres et "
+                + "les caractères / - ? : ( ) . , ' + ESPACE"
+            )
 
         return self.browser.new_recipient(recipient, **params)
 
@@ -159,9 +165,6 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
     def iter_subscription(self):
         return self.browser.get_subscription_list()
 
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
-
     def get_document(self, _id):
         subid = _id.rsplit('_', 1)[0]
         subscription = self.get_subscription(subid)
@@ -176,7 +179,7 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
     def download_document(self, document):
         if not isinstance(document, Document):
             document = self.get_document(document)
-        return self.browser.download_document(document._download_id)
+        return self.browser.download_document(document)
 
     def iter_resources(self, objs, split_path):
         if Account in objs:
@@ -190,7 +193,7 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDoc
         return self.browser.get_profile()
 
     def iter_emitters(self):
-        if self.BROWSER != AXABanque:
+        if self.BROWSER != ProxyBrowser:
             raise NotImplementedError()
         return self.browser.iter_emitters()
 

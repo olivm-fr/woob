@@ -4,62 +4,60 @@
 # Copyright(C) 2011      Gabriel Kerneis
 # Copyright(C) 2010-2011 Jocelyn Jaubert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 
-from weboob.capabilities.base import empty, find_object
-from weboob.capabilities.bank import (
-    Account, AccountNotFound, CapCurrencyRate,
+from woob.capabilities.bank import (
+    Account, CapCurrencyRate,
     CapBankTransferAddRecipient, CapBankWealth,
 )
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.contact import CapContact
-from weboob.capabilities.bill import (
-    CapDocument, Subscription, SubscriptionNotFound,
-    Document, DocumentNotFound, DocumentTypes,
-)
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, ValueTransient
+from woob.capabilities.bank.pfm import CapBankMatching
+from woob.capabilities.base import empty, find_object
+from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
+from woob.capabilities.contact import CapContact
+from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import BoursoramaBrowser
-
 
 __all__ = ['BoursoramaModule']
 
 
 class BoursoramaModule(
-    Module, CapBankWealth, CapBankTransferAddRecipient, CapProfile, CapContact, CapCurrencyRate, CapDocument
+    Module, CapBankWealth, CapBankTransferAddRecipient, CapProfile,
+    CapContact, CapCurrencyRate, CapDocument, CapBankMatching,
 ):
     NAME = 'boursorama'
     MAINTAINER = 'Gabriel Kerneis'
     EMAIL = 'gabriel@kerneis.info'
-    VERSION = '2.1'
     LICENSE = 'LGPLv3+'
     DESCRIPTION = 'Boursorama'
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant', masked=False, regexp=r'^[0-9]+$'),
         ValueBackendPassword('password', label='Mot de passe', regexp=r'[a-zA-Z0-9]+'),
-        ValueTransient('pin_code'),
+        ValueTransient('code'),
+        ValueTransient('email_code'),
+        ValueTransient('resume'),
         ValueTransient('request_information'),
     )
+
     BROWSER = BoursoramaBrowser
 
     accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.RIB)
@@ -69,13 +67,6 @@ class BoursoramaModule(
 
     def iter_accounts(self):
         return self.browser.get_accounts_list()
-
-    def get_account(self, _id):
-        account = self.browser.get_account(_id)
-        if account:
-            return account
-        else:
-            raise AccountNotFound()
 
     def iter_history(self, account):
         for tr in self.browser.get_history(account):
@@ -105,6 +96,11 @@ class BoursoramaModule(
         return self.browser.iter_transfer_recipients(account)
 
     def init_transfer(self, transfer, **kwargs):
+        # Continue a previously initiated transfer if an otp info is given (ie otp_sms, otp_email)
+        if self.browser.otp_validation_continue_transfer(transfer, **kwargs):
+            # The otp step is performed on the confirmation page.
+            # so, from there, we should continue processing at execute_transfer subsequently
+            return transfer
         return self.browser.init_transfer(transfer, **kwargs)
 
     def new_recipient(self, recipient, **kwargs):
@@ -163,9 +159,6 @@ class BoursoramaModule(
         subscription = self.get_subscription(subscription_id)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
-
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):
             subscription = self.get_subscription(subscription)
@@ -190,6 +183,23 @@ class BoursoramaModule(
         if Subscription in objs:
             self._restrict_level(split_path)
             return self.iter_subscription()
+
+    def match_account(self, account, old_accounts):
+        matched_accounts = []
+
+        if account.type == Account.TYPE_CARD:
+            for old_account in old_accounts:
+                if (
+                    old_account.type == Account.TYPE_CARD
+                    and old_account.number == account.number
+                ):
+                    matched_accounts.append(old_account)
+
+        if len(matched_accounts) > 1:
+            raise AssertionError(f'Found multiple candidates to match the card {account.label}.')
+
+        if len(matched_accounts) == 1:
+            return matched_accounts[0]
 
     OBJECTS = {
         Account: fill_account,

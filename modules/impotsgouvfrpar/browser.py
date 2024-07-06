@@ -1,111 +1,78 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2012-2020  Budget Insight
+# Copyright(C) 2012-2023  Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-from weboob.browser import AbstractBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
-from weboob.tools.capabilities.bill.documents import sorted_documents
+from woob.browser import URL, need_login
+from woob.exceptions import BrowserIncorrectPassword
+from woob.tools.capabilities.bill.documents import sorted_documents
+from woob_modules.franceconnect.browser import FranceConnectBrowser
 
 from .pages import (
-    LoginAccessPage, LoginAELPage, ProfilePage, DocumentsPage,
-    ThirdPartyDocPage, NoDocumentPage, ErrorDocumentPage,
-    GetContextePage, HomePage
+    ProfilePage, DocumentsPage, ThirdPartyDocPage, NoDocumentPage,
+    ErrorDocumentPage, HomePage, FCAuthorizePage,
 )
 
 
-class ImpotsParBrowser(AbstractBrowser):
+class ImpotsParBrowser(FranceConnectBrowser):
     BASEURL = 'https://cfspart.impots.gouv.fr'
     PARENT = 'franceconnect'
 
-    login_access = URL(r'/LoginAccess', LoginAccessPage)
-    login_ael = URL(r'/LoginAEL', LoginAELPage)
-    get_contexte = URL(r"/GetContexte", GetContextePage)
-    home          = URL(r"/monprofil-webapp/connexion",
-                        r"/enp/ensu/accueilensupres.do",
-                        r"/enp/accueil.ex",
-                        r"/enp/j_appelportail",
-                        r"/enp/j_accueil;jsessionid=(?P<jsessionid>.*)",
-                        r"/enp/\?urlDest=(?P<url>.*)", HomePage)
-    third_party_doc_page = URL(r'/enp/ensu/dpr.do', ThirdPartyDocPage)
-    no_document_page = URL(r'/enp/ensu/documentabsent.do', NoDocumentPage)
-    error_document_page = URL(r'/enp/ensu/drpabsent.do', ErrorDocumentPage)
+    authorize = URL(r'https://app.franceconnect.gouv.fr/api/v1/authorize', FCAuthorizePage)
+    home = URL(
+        r"/monprofil-webapp/connexion",
+        r"/enp/accueilensupres.do",
+        r"/enp/accueil.ex",
+        r"/enp/j_appelportail",
+        r"/enp/j_accueil;jsessionid=(?P<jsessionid>.*)",
+        r"/enp/\?urlDest=(?P<url>.*)",
+        HomePage
+    )
+    third_party_doc_page = URL(r'/enp/dpr.do', ThirdPartyDocPage)
+    no_document_page = URL(r'/enp/documentabsent.do', NoDocumentPage)
+    error_document_page = URL(r'/enp/drpabsent.do', ErrorDocumentPage)
 
-    # affichageadresse.do is pretty similar to chargementprofil.do but display address
     profile = URL(
-        r'/enp/ensu/affichageadresse.do',
+        r'/enp/chargementprofil.do',
         r'/enp/?$',
         ProfilePage
     )
-    documents = URL(r'/enp/ensu/documents.do', DocumentsPage)
+    documents = URL(r'/enp/documents.do', DocumentsPage)
 
     def __init__(self, login_source, *args, **kwargs):
         super(ImpotsParBrowser, self).__init__(*args, **kwargs)
         self.login_source = login_source
 
-    def login_impots(self):
-        # 1bis) start with LoginAccessPage
-        contexte_url = self.page.url_contexte
-        url_login_mot_de_passe = self.page.url_login_mot_de_passe
-
-        # Note : I'd prefer to use `response = self.open(...)` below
-        # but it does not seem to execute page.on_load() ??
-        # Instead, saving current page to use it later
-        login_page = self.page
-
-        # 2) POST /GetContexte (GetContextePage)
-        self.location(contexte_url, data={"spi": self.username})
-
-        if not self.page.handle_message():
-            raise BrowserIncorrectPassword('wrong login')
-
-        # 3) POST /LoginAEL (LoginAELPage)
-        login_page.login(
-            self.username, self.password,
-            url_login_mot_de_passe,
-        )
-
-        # 4) GET /enp/ (HomePage) (case direct)
-        # or GET ...authorize (case fc)
-        next_page = self.page.handle_message()
-        self.location(next_page)
-
-    def login_ameli(self):
-        self.page.login(self.username, self.password)
-
-        if self.ameli_wrong_login_page.is_here():
-            raise BrowserIncorrectPassword(self.page.get_error_message())
-
     def france_connect_do_login(self):
         self.location('https://cfsfc.impots.gouv.fr/', data={'lmAuth': 'FranceConnect'})
-        self.fc_call('dgfip', 'https://idp.impots.gouv.fr')
         self.login_impots()
-        self.fc_redirect()
         # Needed to set cookies to be able to access profile page
         # without being disconnected
         self.home.go()
 
     def france_connect_ameli_do_login(self):
         self.location('https://cfsfc.impots.gouv.fr/', data={'lmAuth': 'FranceConnect'})
-        self.fc_call('ameli', 'https://fc.assure.ameli.fr')
+        if self.page.is_ameli_disabled():
+            # Message on the website "Non disponible sur ce service"
+            raise BrowserIncorrectPassword(
+                "La connection via Ameli n'est plus disponible.",
+                bad_fields=['login', 'password', 'login_source']
+            )
         self.login_ameli()
-        self.fc_redirect()
         # Needed to set cookies to be able to access profile page
         # without being disconnected
         self.location('https://cfsfc.impots.gouv.fr/enp/')
@@ -120,10 +87,13 @@ class ImpotsParBrowser(AbstractBrowser):
             return
 
         # 1) GET /LoginAccess (LoginAccessPage)
-        self.login_access.go()
-        self.login_impots()
+        self.impot_login_page.go()
+        self.login_impots(fc_redirection=False)
+
+        self.home.go()
+
         if not self.page.logged:
-            raise BrowserIncorrectPassword('wrong password')
+            raise BrowserIncorrectPassword(bad_fields=['password'])
 
     @need_login
     def iter_subscription(self):
@@ -134,11 +104,10 @@ class ImpotsParBrowser(AbstractBrowser):
         # it's a document json which is used in the event of a declaration by a third party
         self.third_party_doc_page.go()
 
-        if self.error_document_page.is_here():
-            raise BrowserUnavailable()
-
         third_party_doc = None
-        if not self.no_document_page.is_here():
+        if self.error_document_page.is_here():
+            self.logger.warning('Third party declaration is unavailable')
+        elif self.third_party_doc_page.is_here():
             third_party_doc = self.page.get_third_party_doc()
 
         # put ?n=0, else website return an error page

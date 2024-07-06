@@ -2,131 +2,96 @@
 
 # Copyright(C) 2014      smurail
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import datetime
 import re
 
 from dateutil.relativedelta import relativedelta
 
-from weboob.tools.capabilities.bank.transactions import sorted_transactions
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import Account
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.browser.exceptions import ServerError
-from weboob.tools.date import LinearDateGuesser
-from weboob.tools.compat import urlparse, parse_qsl
+from woob.tools.capabilities.bank.transactions import sorted_transactions
+from woob.capabilities.base import find_object
+from woob.capabilities.bank import Account
+from woob.exceptions import BrowserIncorrectPassword
+from woob.browser import URL, need_login
+from woob.browser.exceptions import ServerError
+from woob.tools.date import LinearDateGuesser
 
+from ..par.browser import CmsoLoginBrowser
 from .pages import (
-    LoginPage, PasswordCreationPage, AccountsPage, HistoryPage, SubscriptionPage, InvestmentPage,
-    InvestmentAccountPage, UselessPage, SSODomiPage, AuthCheckUser, ErrorPage,
+    AccountsPage, HistoryPage, SubscriptionPage, InvestmentPage,
+    InvestmentAccountPage, SSODomiPage, AuthCheckUser, ErrorPage, LoansPage, ProfilePage, EmptyPage,
 )
-from ..par.pages import ProfilePage
 
 
-class CmsoProBrowser(LoginBrowser):
-    login = URL(r'https://api.(?P<website>[\w.]+)/oauth-implicit/token', LoginPage)
+class CmsoProBrowser(CmsoLoginBrowser):
     subscription = URL(r'https://api.(?P<website>[\w.]+)/domiapi/oauth/json/accesAbonnement', SubscriptionPage)
     accounts = URL(
-        r'/domiweb/prive/professionnel/situationGlobaleProfessionnel/0-situationGlobaleProfessionnel.act',
+        r'https://www.(?P<website>[\w.]+)/domiweb/prive/professionnel/situationGlobaleProfessionnel/0-situationGlobaleProfessionnel.act',
         AccountsPage
     )
+    loans = URL(
+        r'https://www.(?P<website>[\w.]+)/domiweb/prive/particulier/encoursCredit/0-encoursCredit.act',
+        LoansPage
+    )
     history = URL(
-        r'/domiweb/prive/professionnel/situationGlobaleProfessionnel/1-situationGlobaleProfessionnel.act',
+        r'https://www.(?P<website>[\w.]+)/domiweb/prive/professionnel/situationGlobaleProfessionnel/1-situationGlobaleProfessionnel.act',
         HistoryPage
     )
-    password_creation = URL(
-        r'/domiweb/prive/particulier/modificationMotDePasse/0-creationMotDePasse.act',
-        PasswordCreationPage
+    investment = URL(
+        r'https://www.(?P<website>[\w.]+)/domiweb/prive/particulier/portefeuilleSituation/0-situationPortefeuille.act',
+        InvestmentPage
     )
-    useless = URL(r'/domiweb/prive/particulier/modificationMotDePasse/0-expirationMotDePasse.act', UselessPage)
-    investment = URL(r'/domiweb/prive/particulier/portefeuilleSituation/0-situationPortefeuille.act', InvestmentPage)
     invest_account = URL(
-        r'/domiweb/prive/particulier/portefeuilleSituation/2-situationPortefeuille.act\?(?:csrf=[^&]*&)?indiceCompte=(?P<idx>\d+)&idRacine=(?P<idroot>\d+)',
+        r'https://www.(?P<website>[\w.]+)/domiweb/prive/particulier/portefeuilleSituation/2-situationPortefeuille.act\?(?:csrf=[^&]*&)?indiceCompte=(?P<idx>\d+)&idRacine=(?P<idroot>\d+)',
         InvestmentAccountPage
     )
-    error = URL(r'https://pro.(?P<website>[\w.]+)/auth/errorauthn', ErrorPage)
+    error = URL(
+        r'https://pro.(?P<website>[\w.]+)/auth/errorauthn',
+        r'https://espacepro.(?P<website>[\w.]+)#error',
+        ErrorPage
+    )
     profile = URL(r'https://api.(?P<website>[\w.]+)/domiapi/oauth/json/edr/infosPerson', ProfilePage)
     ssoDomiweb = URL(r'https://api.(?P<website>[\w.]+)/domiapi/oauth/json/ssoDomiwebEmbedded', SSODomiPage)
     auth_checkuser = URL(r'https://api.(?P<website>[\w.]+)/securityapi/checkuser', AuthCheckUser)
-
+    empty_page = URL(
+        r'https://www.cmb.fr/domiweb/prive/particulier/identification/afficherMessageRepDecede.jsp*.+',
+        EmptyPage
+    )
     filter_page = URL(r'https://pro.(?P<website>[\w.]+)/espace/filter')
 
-    arkea = '03'
+    space = 'PRO'
 
-    def __init__(self, website, config, *args, **kwargs):
-        super(CmsoProBrowser, self).__init__(*args, **kwargs)
+    def __init__(self, config, *args, **kwargs):
+        super(CmsoProBrowser, self).__init__(config, *args, **kwargs)
 
-        self.BASEURL = "https://www.%s" % website
-        self.website = website
         self.areas = []
         self.curr_area = None
         self.last_csrf = None
-        self.name = website.split('.')[0]
         # This ids can be found pro.{website}/mabanque/config-XXXXXX.js
         self.client_id = 'nMdBJgaYgVaT67Ysf7XvTS9ayr9fdI69'
 
-    def get_login_data(self):
-        return {
-            'accessCode': self.username,
-            'password': self.password,
-            'client_id': self.client_id,
-            'responseType': 'token',
-            'clientId': 'com.arkea.sitemobilepro.%s' % self.name,
-            'redirectUri': 'https://pro.%s/auth/checkuser' % self.website,
-            'errorUri': 'https://pro.%s/auth/errorauthn' % self.website,
-            'fingerprint': 'b61a924d1245beb7469fef44db132e96',
-        }
-
-    def do_login(self):
-        self.login.go(data=self.get_login_data(), website=self.website)
-        if self.error.is_here():
-            if 'INVALID_CREDENTIALS' in self.url:
-                raise BrowserIncorrectPassword()
-            raise Exception('Login error not handled: %r' % (urlparse(self.url).fragment,))
-
-        hidden_params = dict(parse_qsl(urlparse(self.url).fragment))
-        if hidden_params.get('scope') == 'consent':
-            raise ActionNeeded('Vous devez réaliser la double authentification sur le portail internet')
-        assert 'access_token' in hidden_params, 'Could not retrieve csrf token'
-
-        self.session.headers.update({
-            'Authorization': "Bearer %s" % hidden_params['access_token'],
-            'X-ARKEA-EFS': self.arkea,
-            'X-Csrf-Token': hidden_params['access_token'],
-            'X-REFERER-TOKEN': 'RWDPRO',
-        })
-
-        self.auth_checkuser.go(json={"espaceApplication": "PRO", "espacePRO": "PRO"}, website=self.website)
-
-        if self.useless.is_here():
-            # user didn't change his password for 6 months and website ask us if we want to change it
-            # just skip it by calling this url
-            self.location('https://pro.%s/mabanque/pro/comptes/comptes' % self.website, method='POST')
-
-        if self.password_creation.is_here():
-            # user got a temporary password and never changed it, website ask to set a new password before grant access
-            raise ActionNeeded(self.page.get_message())
-
-        self.fetch_areas()
+    def load_state(self, state):
+        # The stored state keeps us connected to the user space,
+        # but not to the API, which we need to browse the other areas.
+        # We remove the URL to force a relogin.
+        state.pop('url', None)
+        super(CmsoProBrowser, self).load_state(state)
 
     def fetch_areas(self):
         if not self.areas:
@@ -136,24 +101,30 @@ class CmsoProBrowser(LoginBrowser):
             )
 
             for sub in self.page.get('listAbonnement'):
-                self.areas.append({
-                    'contract': sub['numContratBAD'],
-                    'id': sub['numeroPersonne'],
-                })
+                current_area = {'contract': sub['numContratBAD']}
+                if 'numeroPersonne' in sub.keys():
+                    current_area['id'] = sub['numeroPersonne']
+                else:
+                    # 'contract' key is the most important because we will use it later.
+                    self.logger.warning('unavailable "numeroPersonne" key')
+                self.areas.append(current_area)
 
     def go_with_ssodomi(self, path):
+        '''
+        'go_with_ssodomi' is a process of defined requests needed to succeed to
+        go on the targeted page
+        '''
+        # We must check the url given here and substract /domiweb from it since the next request is
+        # containing 'service', which is supposed to be the url without /domiweb
         if isinstance(path, URL):
             path = path.urls[0]
-        if path.startswith('/domiweb'):
-            path = path[len('/domiweb'):]
+        if path.startswith(r'https://www.(?P<website>[\w.]+)/domiweb'):
+            path = path[len(r'https://www.(?P<website>[\w.]+)/domiweb'):]
 
         json = {
             'rwdStyle': 'true',
             'service': path,
         }
-
-        # Prevent an error 403
-        self.filter_page.go(website=self.website)
 
         url = self.ssoDomiweb.go(
             website=self.website,
@@ -168,9 +139,6 @@ class CmsoProBrowser(LoginBrowser):
     def go_on_area(self, area):
         if self.curr_area == area:
             return
-
-        # The website raise an error 403 if we try to change the area without doing this call first.
-        self.filter_page.go(website=self.website)
 
         ret = self.location(
             'https://api.%s/securityapi/changeSpace' % (self.website),
@@ -200,6 +168,9 @@ class CmsoProBrowser(LoginBrowser):
             self.go_on_area(area)
             try:
                 account_page = self.go_with_ssodomi(self.accounts)
+                # if no account, account page leads to an empty page
+                if self.empty_page.is_here():
+                    continue
                 for a in account_page.iter_accounts():
                     if a.type == Account.TYPE_MARKET:
                         # for legacy reason we have to get id on investment page for market account
@@ -219,6 +190,11 @@ class CmsoProBrowser(LoginBrowser):
                     a._area = area
                     seen.add(seenkey)
                     yield a
+                self.go_with_ssodomi(self.loans)
+                if self.loans.is_here():
+                    for loan in self.page.iter_loans():
+                        loan._area = area
+                        yield loan
             except ServerError:
                 self.logger.warning('Area unavailable.')
 
@@ -235,7 +211,7 @@ class CmsoProBrowser(LoginBrowser):
 
     @need_login
     def iter_history(self, account):
-        if account._history_url.startswith('javascript:') or account._history_url == '#':
+        if not account._history_url or account._history_url.startswith('javascript:') or account._history_url == '#':
             raise NotImplementedError()
 
         account = find_object(self.iter_accounts(), id=account.id)
@@ -282,10 +258,16 @@ class CmsoProBrowser(LoginBrowser):
         # account id in investment page, is a little bit different from the account page
         # some part of id have swapped and one other (with two digit) is not present
         # if account_page_id is 222223333311111111144 then investment_page_id will be 111111111.33333xx
-        number, _id = investment_page_id.split('.')
-        _id = _id[:-2] + number
+        if '.' in investment_page_id:
+            number, _id = investment_page_id.split('.')
+            _id = _id[:-2] + number
 
-        return _id in account_page_id
+            return _id in account_page_id
+
+        # If there is no character '.' in investment_page_id no swap is present in this case,
+        # the investment_page_id without last digit exist in account_page_id.
+        # For example if account_page_id is 222223333311111111144 the investment_page_id is 33333x.
+        return investment_page_id[:-1] in account_page_id
 
     @need_login
     def iter_investment(self, account):

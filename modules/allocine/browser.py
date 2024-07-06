@@ -2,35 +2,35 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import base64
 import hashlib
 import time
 from datetime import date, datetime, timedelta
+from urllib.parse import urlencode
 
-from weboob.browser.browsers import APIBrowser
-from weboob.browser.profiles import Android
-from weboob.capabilities.base import NotAvailable, NotLoaded, find_object
-from weboob.capabilities.calendar import CATEGORIES, STATUS, TRANSP, BaseCalendarEvent
-from weboob.capabilities.cinema import Movie, Person
-from weboob.capabilities.collection import Collection
-from weboob.capabilities.image import Thumbnail
-from weboob.capabilities.video import BaseVideo
-from weboob.tools.compat import unicode, urlencode
+from woob.browser.browsers import APIBrowser
+from woob.browser.profiles import Android
+from woob.capabilities.base import NotAvailable, NotLoaded, find_object
+from woob.capabilities.calendar import CATEGORIES, STATUS, TRANSP, BaseCalendarEvent
+from woob.capabilities.cinema import Movie, Person
+from woob.capabilities.collection import Collection
+from woob.capabilities.image import Thumbnail
+from woob.capabilities.video import BaseVideo
 
 __all__ = ['AllocineBrowser']
 
@@ -79,8 +79,8 @@ class AllocineBrowser(APIBrowser):
             short_description = tdesc.strip('; ')
             thumbnail_url = NotAvailable
             if 'poster' in m:
-                thumbnail_url = unicode(m['poster']['href'])
-            movie = Movie(m['code'], unicode(m['originalTitle']))
+                thumbnail_url = str(m['poster']['href'])
+            movie = Movie(m['code'], str(m['originalTitle']))
             movie.other_titles = NotLoaded
             movie.release_date = NotLoaded
             movie.duration = NotLoaded
@@ -107,8 +107,8 @@ class AllocineBrowser(APIBrowser):
         for p in jres['feed']['person']:
             thumbnail_url = NotAvailable
             if 'picture' in p:
-                thumbnail_url = unicode(p['picture']['href'])
-            person = Person(p['code'], unicode(p['name']))
+                thumbnail_url = str(p['picture']['href'])
+            person = Person(p['code'], str(p['name']))
             desc = u''
             if 'birthDate' in p:
                 desc += '(%s), ' % p['birthDate']
@@ -158,9 +158,9 @@ class AllocineBrowser(APIBrowser):
 
         if 'originalTitle' not in jres:
             return
-        title = unicode(jres['originalTitle'].strip())
+        title = str(jres['originalTitle'].strip())
         if 'poster' in jres:
-            thumbnail_url = unicode(jres['poster']['href'])
+            thumbnail_url = str(jres['poster']['href'])
         if 'genre' in jres:
             for g in jres['genre']:
                 genres.append(g['$'])
@@ -184,7 +184,7 @@ class AllocineBrowser(APIBrowser):
                 country += '%s, ' % c['$']
             country = country.strip(', ')
         if 'synopsis' in jres:
-            pitch = unicode(jres['synopsis'])
+            pitch = str(jres['synopsis'])
         if 'statistics' in jres and 'userRating' in jres['statistics']:
             note = u'%s/5 (%s votes)' % (jres['statistics']['userRating'], jres['statistics']['userReviewCount'])
         if 'castMember' in jres:
@@ -245,9 +245,9 @@ class AllocineBrowser(APIBrowser):
             if 'family' in jres['name']:
                 name += ' %s' % jres['name']['family']
         if 'biographyShort' in jres:
-            short_biography = unicode(jres['biographyShort'])
+            short_biography = str(jres['biographyShort'])
         if 'birthPlace' in jres:
-            birth_place = unicode(jres['birthPlace'])
+            birth_place = str(jres['birthPlace'])
         if 'birthDate' in jres:
             df = jres['birthDate'].split('-')
             birth_date = datetime(int(df[0]), int(df[1]), int(df[2]))
@@ -255,7 +255,7 @@ class AllocineBrowser(APIBrowser):
             df = jres['deathDate'].split('-')
             death_date = datetime(int(df[0]), int(df[1]), int(df[2]))
         if 'realName' in jres:
-            real_name = unicode(jres['realName'])
+            real_name = str(jres['realName'])
         if 'gender' in jres:
             gcode = jres['gender']
             if gcode == '1':
@@ -263,14 +263,14 @@ class AllocineBrowser(APIBrowser):
             else:
                 gender = u'Female'
         if 'picture' in jres:
-            thumbnail_url = unicode(jres['picture']['href'])
+            thumbnail_url = str(jres['picture']['href'])
         if 'nationality' in jres:
             nationality = u''
             for n in jres['nationality']:
                 nationality += '%s, ' % n['$']
             nationality = nationality.strip(', ')
         if 'biography' in jres:
-            biography = unicode(jres['biography'])
+            biography = str(jres['biography'])
         if 'participation' in jres:
             for m in jres['participation']:
                 if m['activity']['$'] not in roles:
@@ -317,13 +317,13 @@ class AllocineBrowser(APIBrowser):
                 if (role_filter is None or
                    (role_filter is not None and cast['activity']['$'].lower().strip() == role_filter.lower().strip())):
                     id = cast['person']['code']
-                    name = unicode(cast['person']['name'])
-                    short_description = unicode(cast['activity']['$'])
+                    name = str(cast['person']['name'])
+                    short_description = str(cast['activity']['$'])
                     if 'role' in cast:
                         short_description += ', %s' % cast['role']
                     thumbnail_url = NotAvailable
                     if 'picture' in cast:
-                        thumbnail_url = unicode(cast['picture']['href'])
+                        thumbnail_url = str(cast['picture']['href'])
                     person = Person(id, name)
                     person.short_description = short_description
                     person.real_name = NotLoaded
@@ -361,7 +361,7 @@ class AllocineBrowser(APIBrowser):
                 short_description = u'(%s) %s' % (prod_year, m['activity']['$'])
                 if 'role' in m:
                     short_description += ', %s' % m['role']
-                movie = Movie(m['movie']['code'], unicode(m['movie']['originalTitle']))
+                movie = Movie(m['movie']['code'], str(m['movie']['originalTitle']))
                 movie.other_titles = NotLoaded
                 movie.release_date = NotLoaded
                 movie.duration = NotLoaded
@@ -390,7 +390,7 @@ class AllocineBrowser(APIBrowser):
         else:
             return
         for m in jres['participation']:
-            yield unicode(m['movie']['code'])
+            yield str(m['movie']['code'])
 
     def iter_movie_persons_ids(self, movie_id):
         params = [('partner', self.PARTNER_KEY),
@@ -411,7 +411,7 @@ class AllocineBrowser(APIBrowser):
             return
         if 'castMember' in jres:
             for cast in jres['castMember']:
-                yield unicode(cast['person']['code'])
+                yield str(cast['person']['code'])
 
     def get_movie_releases(self, id, country):
         if country == 'fr':
@@ -437,7 +437,7 @@ class AllocineBrowser(APIBrowser):
 
         biography = NotAvailable
         if 'biography' in jres:
-            biography = unicode(jres['biography'])
+            biography = str(jres['biography'])
 
         return biography
 
@@ -471,27 +471,27 @@ class AllocineBrowser(APIBrowser):
 
     def parse_video(self, _video, category):
         video = BaseVideo(u'%s#%s' % (_video['code'], category))
-        video.title = unicode(_video['title'])
-        video._video_code = unicode(_video['code'])
+        video.title = str(_video['title'])
+        video._video_code = str(_video['code'])
         video.ext = u'mp4'
         if 'runtime' in _video:
             video.duration = timedelta(seconds=int(_video['runtime']))
         if 'description' in _video:
-            video.description = unicode(_video['description'])
+            video.description = str(_video['description'])
         renditions = sorted(_video['rendition'],
                             key=lambda x: 'bandwidth' in x and x['bandwidth']['code'],
                             reverse=True)
-        video.url = unicode(max(renditions, key=lambda x: 'bandwidth' in x)['href'])
+        video.url = str(max(renditions, key=lambda x: 'bandwidth' in x)['href'])
         return video
 
     def parse_movie(self, movie):
         video = BaseVideo(u'%s#%s' % (movie['code'], 'movie'))
-        video.title = unicode(movie['trailer']['name'])
-        video._video_code = unicode(movie['trailer']['code'])
+        video.title = str(movie['trailer']['name'])
+        video._video_code = str(movie['trailer']['code'])
         video.ext = u'mp4'
         if 'poster' in movie:
             video.thumbnail = Thumbnail(movie['poster']['href'])
-            video.thumbnail.url = unicode(movie['poster']['href'])
+            video.thumbnail.url = str(movie['poster']['href'])
         tdate = movie['release']['releaseDate'].split('-')
         day = 1
         month = 1
@@ -508,12 +508,12 @@ class AllocineBrowser(APIBrowser):
             video.rating = movie['statistics']['pressRating'] * 2
         video.rating_max = 5
         if 'synopsis' in movie:
-            video.description = unicode(movie['synopsis'].replace('<p>', '').replace('</p>', ''))
+            video.description = str(movie['synopsis'].replace('<p>', '').replace('</p>', ''))
         elif 'synopsisShort' in movie:
-            video.description = unicode(movie['synopsisShort'].replace('<p>', '').replace('</p>', ''))
+            video.description = str(movie['synopsisShort'].replace('<p>', '').replace('</p>', ''))
         if 'castingShort' in movie:
             if 'directors' in movie['castingShort']:
-                video.author = unicode(movie['castingShort']['directors'])
+                video.author = str(movie['castingShort']['directors'])
         if 'runtime' in movie:
             video.duration = timedelta(seconds=int(movie['runtime']))
         return video
@@ -557,7 +557,7 @@ class AllocineBrowser(APIBrowser):
         if result is None:
             return
         for emission in result['feed']['term']:
-            yield Collection([basename, unicode(emission['nameShort'])], unicode(emission['$']))
+            yield Collection([basename, str(emission['nameShort'])], str(emission['$']))
 
     def search_events(self, query):
         params = [('partner', self.PARTNER_KEY),
@@ -607,12 +607,12 @@ class AllocineBrowser(APIBrowser):
 
         for items in data['feed']['theaterShowtimes']:
             cinema = items['place']['theater']
-            city = unicode(cinema['city'])
+            city = str(cinema['city'])
             location = u'%s, %s' % (cinema['name'], cinema['address'])
             postalCode = cinema['postalCode']
             cinemaCode = cinema['code']
             for show in items['movieShowtimes']:
-                summary = unicode(show['onShow']['movie']['title'])
+                summary = str(show['onShow']['movie']['title'])
                 movieCode = show['onShow']['movie']['code']
                 for jour in show['scr']:
                     tdate = jour['d'].split('-')

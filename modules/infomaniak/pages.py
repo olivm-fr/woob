@@ -4,38 +4,45 @@
 
 # flake8: compatible
 
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import datetime
 
-from weboob.browser.pages import LoggedPage, JsonPage, pagination
-from weboob.browser.elements import ItemElement, method, DictElement
-from weboob.browser.filters.standard import (
+from woob.browser.pages import LoggedPage, JsonPage, pagination
+from woob.browser.elements import ItemElement, method, DictElement
+from woob.browser.filters.standard import (
     CleanDecimal, Env, Format, Currency, Eval,
 )
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bill import Bill, Subscription
+from woob.browser.filters.json import Dict
+from woob.capabilities.bill import Bill, Subscription
 
 
 class LoginPage(JsonPage):
     @property
     def logged(self):
+        if self.doc['data'].get('need_double_auth'):
+            return False
         return self.doc['result'] == 'success'
+
+    @property
+    def has_otp(self):
+        return self.doc['data']['default_method']
+
+    def get_error(self):
+        return self.doc['error']['description']
 
 
 class SubscriptionsPage(LoggedPage, JsonPage):
@@ -77,6 +84,6 @@ class DocumentsPage(LoggedPage, JsonPage):
             obj_date = Eval(datetime.fromtimestamp, Dict('created_at'))
             obj_label = Format('Facture %s', obj_number)
             obj_url = Dict('document/href')
-            obj_price = CleanDecimal(Dict('amount/amount'))
-            obj_currency = Currency(Dict('amount/currency'))
+            obj_total_price = CleanDecimal.SI(Dict('amount/amount_incl_tax'))
+            obj_currency = Currency(Dict('amount/currency_code'))
             obj_format = 'pdf'

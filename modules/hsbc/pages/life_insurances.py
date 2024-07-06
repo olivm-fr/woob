@@ -1,41 +1,37 @@
 # coding: utf-8
 # Copyright(C) 2012-2020  Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import re
 from decimal import Decimal
 
-from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import AccountNotFound
-from weboob.capabilities.wealth import Investment
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.browser.elements import TableElement, ItemElement, method
-from weboob.browser.pages import HTMLPage, LoggedPage, FormNotFound
-from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Field, Regexp, Eval, Date,
+from woob.capabilities import NotAvailable
+from woob.capabilities.bank import AccountNotFound
+from woob.capabilities.bank.wealth import Investment
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.browser.elements import TableElement, ItemElement, method
+from woob.browser.pages import HTMLPage, LoggedPage, FormNotFound
+from woob.browser.filters.standard import (
+    CleanText, CleanDecimal, Field, Regexp, Eval, Date, Lower,
 )
-from weboob.browser.filters.html import Link, XPathNotFound, TableCell
-from weboob.browser.filters.javascript import JSVar
-
-from .account_pages import Transaction
+from woob.browser.filters.html import Link, XPathNotFound, TableCell
+from woob.browser.filters.javascript import JSVar
 
 """ Life insurance subsite related pages """
 
@@ -63,6 +59,21 @@ class LifeInsurancePortal(LoggedPage, HTMLPage):
         form.submit()
 
 
+class LifeInsuranceFingerprintForm(LoggedPage, HTMLPage):
+    """
+    For some accounts, when we try to go to a lifeinsurance account page,
+    we are redirected to an empty page with an automatic form.
+    It looks like to be a kind of recaptcha that fingerprint use js to
+    fingerprint the browser and send the resulting string back inside the
+    DevicePrint attribute.
+    If you submit this form with the empty field or the "No Data" value,
+    you are simply redirected to the frame_page.
+    For the moment we do nothing, but maybe we could access these few
+    limited accounts by properly filling the fingerprint and submitting
+    """
+    is_here = '//form[@name="formSaisie"]/input[@id="DevicePrint"]'
+
+
 class LifeInsuranceMain(LoggedPage, HTMLPage):
     def on_load(self):
         self.logger.debug('automatically following form')
@@ -87,7 +98,8 @@ class LifeInsurancesPage(LoggedPage, HTMLPage):
 
             obj_raw = LITransaction.Raw(CleanText(TableCell('label')))
             obj_date = Date(CleanText(TableCell('date')))
-            obj_amount = Transaction.Amount(TableCell('amount'), TableCell('gross_amount'), replace_dots=False)
+            obj_amount = CleanDecimal.SI(TableCell('amount'), default=NotAvailable)
+            obj_gross_amount = CleanDecimal.SI(TableCell('gross_amount'), default=NotAvailable)
 
     @method
     class iter_investments(TableElement):
@@ -106,10 +118,13 @@ class LifeInsurancesPage(LoggedPage, HTMLPage):
             klass = Investment
 
             obj_label = CleanText(TableCell('label'))
-            obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True)
-            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal(TableCell('portfolio_share')))
-            obj_unitvalue = CleanDecimal(TableCell('unitvalue'), default=Decimal('1'))
-            obj_valuation = CleanDecimal(TableCell('support_value'))
+            obj_vdate = Date(CleanText(TableCell('vdate')), dayfirst=True, default=NotAvailable)
+            obj_portfolio_share = Eval(lambda x: x / 100, CleanDecimal.SI(TableCell('portfolio_share')))
+            obj_unitvalue = CleanDecimal.SI(TableCell('unitvalue'), default=NotAvailable)
+            obj_quantity = CleanDecimal.SI(TableCell('quantity'), default=NotAvailable)
+            obj_valuation = CleanDecimal.SI(TableCell('support_value'))
+            # The currency is not displayed on each invest line but the headers in the table indicate that the values are in EUR
+            obj_original_currency = 'EUR'
 
             def obj_diff_ratio(self):
                 diff_ratio_el = self.el.xpath('.//td')[4]
@@ -119,7 +134,7 @@ class LifeInsurancesPage(LoggedPage, HTMLPage):
                 try:
                     img = diff_ratio_el.xpath('.//img')[0]
                     is_negative = 'decrease' in img.attrib['src']
-                except Exception:
+                except (IndexError, KeyError):
                     self.logger.debug("didn't find decrease img")
                     is_negative = False
                 val = Decimal(val)
@@ -128,24 +143,20 @@ class LifeInsurancesPage(LoggedPage, HTMLPage):
                 return val / 100
 
             def obj_code(self):
-                if "Fonds en euros" in Field('label')(self):
+                euro_funds_label = ['support euros', 'fonds en euros']
+                if any(eur_label in Lower(Field('label'))(self) for eur_label in euro_funds_label):
                     return NotAvailable
                 return Regexp(
-                    Link('.//a'),
+                    Link('.//a', default=None),
                     r'javascript:openSupportPerformanceWindow\(\'(.*?)\', \'(.*?)\'\)',
-                    r'\2'
+                    r'\2',
+                    default=NotAvailable
                 )(self)
-
-            def obj_quantity(self):
-                # default for euro funds
-                return CleanDecimal(TableCell('quantity'), default=CleanDecimal(TableCell('support_value'))(self))(self)
 
             def condition(self):
                 return len(self.el.xpath('.//td')) > 1
 
-    def get_lf_attributes(self, lfid):
-        attributes = {}
-
+    def post_li_form(self, lfid):
         # values can be in JS var format but it's not mandatory param so we don't go to get the real value
         try:
             values = Regexp(
@@ -156,11 +167,24 @@ class LifeInsurancesPage(LoggedPage, HTMLPage):
             raise AccountNotFound('cannot find account id %s on life insurance site' % lfid)
         keys = Regexp(CleanText('//script'), r'consultationContrat\((.*?)\)')(self.doc).replace(' ', '').split(',')
 
-        attributes = dict(zip(keys, values))
-        return attributes
+        form = self.get_form(name="formConsultation")
+        form.update(dict(zip(keys, values)))
+        form.submit()
+
+    def post_li_history_form(self):
+        form = self.get_form(name='formNavigation')
+        form.update({'url_suivant': 'HISTORIQUECONTRATB2C', 'strMonnaie': 'EURO'})
+        form.submit()
 
     def disconnect(self):
         self.get_form(name='formDeconnexion').submit()
+
+    @method
+    class update_balance(ItemElement):
+        # balance parsed on the dashboard is not the most up to date value
+        obj_balance = CleanDecimal.SI(
+            '//td[contains(text(), "Total contrat")]/following-sibling::td/strong'
+        )
 
 
 class LifeInsuranceUseless(LoggedPage, HTMLPage):

@@ -2,25 +2,25 @@
 
 # Copyright(C) 2019      Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired
-from weboob.browser.exceptions import ClientError
-from weboob.browser import LoginBrowser, URL, need_login
+from woob.exceptions import BrowserIncorrectPassword, BrowserPasswordExpired
+from woob.browser.exceptions import ClientError
+from woob.browser import LoginBrowser, URL, need_login
 
 from .pages import (
     LoginPage, DashboardPage, TransactionPage, TransactionCSV,
@@ -33,7 +33,11 @@ __all__ = ['BnpcartesentreprisePhenixBrowser']
 class BnpcartesentreprisePhenixBrowser(LoginBrowser):
     BASEURL = 'https://corporatecards.bnpparibas.com'
 
-    login = URL(r'https://connect.corporatecards.bnpparibas/login', LoginPage)
+    login = URL(
+        r'/c/portal/login',
+        r'https://connect.corporatecards.bnpparibas/login',
+        LoginPage
+    )
     dashboard = URL(r'/group/bddf/dashboard', DashboardPage)
     transactions_page = URL(r'/group/bddf/transactions', TransactionPage)
     transaction_csv = URL(r'/group/bddf/transactions', TransactionCSV)
@@ -42,17 +46,24 @@ class BnpcartesentreprisePhenixBrowser(LoginBrowser):
     def __init__(self, website, *args, **kwargs):
         super(BnpcartesentreprisePhenixBrowser, self).__init__(*args, **kwargs)
         self.website = website
+        self.corporate_browser = None
 
     def do_login(self):
-        self.login.go()
-        try:
-            self.page.login(self.username, self.password)
-        except ClientError as e:
-            if e.response.status_code == 401:
-                raise BrowserIncorrectPassword()
-            raise
+        # these parameters are useful to get to the login area
+        # if we don't use them we land in a page that has no form
+        self.login.go(params={'user_type': 'holder'})
+        # sometimes when we switch from main to the phenix we are already in dashboard page
+        # also we can be in the PasswordExpiredPage we have to change our password
+        if self.login.is_here():
+            try:
+                self.page.login(self.username, self.password)
+            except ClientError as e:
+                if e.response.status_code == 401:
+                    raise BrowserIncorrectPassword()
+                raise
 
         self.dashboard.stay_or_go()
+
         if self.password_expired.is_here():
             raise BrowserPasswordExpired(self.page.get_error_message())
 

@@ -1,79 +1,90 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
 import time
 from datetime import datetime, timedelta
 from itertools import groupby
 from operator import attrgetter
+from urllib.parse import urlparse
+from dateutil import tz
+from requests.exceptions import HTTPError, TooManyRedirects
 
-from weboob.capabilities.bill import Subscription
-from weboob.exceptions import (
-    ActionNeeded, AppValidation, AppValidationExpired, AppValidationCancelled, AuthMethodNotImplemented,
-    BrowserIncorrectPassword, BrowserUnavailable, BrowserQuestion, NoAccountsException, NeedInteractiveFor2FA,
+from woob.capabilities.bill import Subscription
+from woob.exceptions import (
+    ActionNeeded, AppValidation, AppValidationExpired, AppValidationCancelled,
+    AuthMethodNotImplemented, BrowserIncorrectPassword, BrowserUnavailable,
+    BrowserQuestion, NeedInteractiveFor2FA, BrowserUserBanned, ActionType,
 )
-from weboob.tools.compat import basestring
-from weboob.tools.value import Value
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction, sorted_transactions
-from weboob.browser.browsers import need_login, TwoFactorBrowser
-from weboob.browser.profiles import Wget
-from weboob.browser.url import URL
-from weboob.browser.pages import FormNotFound
-from weboob.browser.exceptions import ClientError, ServerError
-from weboob.capabilities.bank import (
+from woob.tools.value import Value
+from woob.tools.capabilities.bank.transactions import FrenchTransaction, sorted_transactions
+from woob.tools.decorators import retry
+from woob.browser.browsers import need_login
+from woob.browser.mfa import TwoFactorBrowser
+from woob.browser.profiles import Wget
+from woob.browser.url import URL
+from woob.browser.pages import FormNotFound
+from woob.browser.exceptions import ClientError, ServerError
+from woob.capabilities.bank import (
     Account, AddRecipientStep, Recipient, AccountOwnership,
     AddRecipientTimeout, TransferStep, TransferBankError,
-    AddRecipientBankError,
+    AddRecipientBankError, TransferTimeout,
+    AccountOwnerType, NoAccountsException
 )
-from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.capabilities import NotAvailable
-from weboob.tools.compat import urlparse
-from weboob.capabilities.base import find_object, empty
+from woob.tools.capabilities.bank.investments import create_french_liquidity
+from woob.tools.pdf import extract_text as extract_text_from_pdf
+from woob.capabilities import NotAvailable
+from woob.capabilities.base import find_object, empty
+from woob.browser.filters.standard import QueryValue, Regexp
 
 from .pages import (
-    LoginPage, LoginErrorPage, AccountsPage, UserSpacePage,
+    InfoDocPage, LoginPage, LoginErrorPage, AccountsPage, UserSpacePage,
     OperationsPage, CardPage, ComingPage, RecipientsListPage,
     ChangePasswordPage, VerifCodePage, EmptyPage, PorPage,
     IbanPage, NewHomePage, AdvisorPage, RedirectPage,
     LIAccountsPage, CardsActivityPage, CardsListPage,
     CardsOpePage, NewAccountsPage, InternalTransferPage,
     ExternalTransferPage, RevolvingLoanDetails, RevolvingLoansList,
-    ErrorPage, SubscriptionPage, NewCardsListPage, CardPage2, FiscalityConfirmationPage,
+    ErrorPage, SubscriptionPage, NewCardsListPage, NewCardsOpe, CardPage2, FiscalityConfirmationPage,
     ConditionsPage, MobileConfirmationPage, UselessPage, DecoupledStatePage, CancelDecoupled,
     OtpValidationPage, OtpBlockedErrorPage, TwoFAUnabledPage,
-    LoansOperationsPage, OutagePage, PorInvestmentsPage, PorHistoryPage, PorHistoryDetailsPage,
-    PorMarketOrdersPage, PorMarketOrderDetailsPage, SafeTransPage,
+    LoansOperationsPage, LoansInsurancePage, OutagePage, PorInvestmentsPage, PorHistoryPage, PorHistoryDetailsPage,
+    PorMarketOrdersPage, PorMarketOrderDetailsPage, SafeTransPage, InformationConfirmationPage,
+    AuthorityManagementPage, DigipassPage, GeneralAssemblyPage, AuthenticationModePage, SolidarityPage,
 )
 
 
 __all__ = ['CreditMutuelBrowser']
 
 
+class WrongBrowser(Exception):
+    pass
+
+
 class CreditMutuelBrowser(TwoFactorBrowser):
     PROFILE = Wget()
-    TIMEOUT = 30
+    TIMEOUT = 90
     BASEURL = 'https://www.creditmutuel.fr'
     HAS_CREDENTIALS_ONLY = True
     STATE_DURATION = 5
     TWOFA_DURATION = 60 * 24 * 90
+
+    HAS_MULTI_BASEURL = False  # Some of the users will use CreditMutuel's BASEURL when others will use the child's url
+    WRONG_BROWSER_EXCEPTION = WrongBrowser
 
     # connexion
     login = URL(
@@ -83,9 +94,10 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         r'/(?P<subbank>.*)fr/banques/particuliers/index.html',
         LoginPage
     )
-    login_error = URL(r'/(?P<subbank>.*)fr/identification/default.cgi',      LoginErrorPage)
-    outage_page = URL(r'/fr/outage.html', OutagePage)
+    login_error = URL(r'/(?P<subbank>.*)fr/identification/default.cgi', LoginErrorPage)
+    outage_page = URL(r'/(?P<subbank>.*)fr/outage.html', OutagePage)
     twofa_unabled_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', TwoFAUnabledPage)
+    digipass_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', DigipassPage)
     mobile_confirmation = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', MobileConfirmationPage)
     safetrans_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', SafeTransPage)
     decoupled_state = URL(r'/(?P<subbank>.*)fr/banque/async/otp/SOSD_OTP_GetTransactionState.htm', DecoupledStatePage)
@@ -93,11 +105,14 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     otp_validation_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', OtpValidationPage)
     otp_blocked_error_page = URL(r'/(?P<subbank>.*)fr/banque/validation.aspx', OtpBlockedErrorPage)
     fiscality = URL(r'/(?P<subbank>.*)fr/banque/residencefiscale.aspx', FiscalityConfirmationPage)
+    authentication_mode = URL(r'/(?P<subbank>.*)fr/banque/ModeAuthentification.html', AuthenticationModePage)
 
     # accounts
-    accounts =    URL(r'/(?P<subbank>.*)fr/banque/situation_financiere.cgi',
-                      r'/(?P<subbank>.*)fr/banque/situation_financiere.html',
-                      AccountsPage)
+    accounts = URL(
+        r'/(?P<subbank>.*)fr/banque/situation_financiere.cgi',
+        r'/(?P<subbank>.*)fr/banque/situation_financiere.html',
+        AccountsPage
+    )
     useless_page = URL(r'/(?P<subbank>.*)fr/banque/paci/defi-solidaire.html', UselessPage)
 
     revolving_loan_list = URL(
@@ -106,39 +121,64 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         RevolvingLoansList
     )
     revolving_loan_details = URL(r'/(?P<subbank>.*)fr/banque/CR/cam9_vis_lstcpt.asp.*', RevolvingLoanDetails)
-    user_space =  URL(r'/(?P<subbank>.*)fr/banque/espace_personnel.aspx',
-                      r'/(?P<subbank>.*)fr/banque/accueil.cgi',
-                      r'/(?P<subbank>.*)fr/banque/DELG_Gestion',
-                      r'/(?P<subbank>.*)fr/banque/paci_engine/engine.aspx',
-                      r'/(?P<subbank>.*)fr/banque/paci_engine/static_content_manager.aspx',
-                      UserSpacePage)
-    card =        URL(r'/(?P<subbank>.*)fr/banque/operations_carte.cgi.*',
-                      r'/(?P<subbank>.*)fr/banque/mouvements.html\?webid=.*cardmonth=\d+$',
-                      r'/(?P<subbank>.*)fr/banque/mouvements.html.*webid=.*cardmonth=\d+.*cardid=',
-                      CardPage)
-    operations =  URL(r'/(?P<subbank>.*)fr/banque/mouvements.cgi.*',
-                      r'/(?P<subbank>.*)fr/banque/mouvements.html.*',
-                      r'/(?P<subbank>.*)fr/banque/nr/nr_devbooster.aspx.*',
-                      r'(?P<subbank>.*)fr/banque/CRP8_GESTPMONT.aspx\?webid=.*&trnref=.*&contract=\d+&cardid=.*&cardmonth=\d+',
-                      OperationsPage)
+    user_space = URL(
+        r'/(?P<subbank>.*)fr/banque/espace_personnel.aspx',
+        r'/(?P<subbank>.*)fr/banque/accueil.cgi',
+        r'/(?P<subbank>.*)fr/banque/DELG_Gestion',
+        r'/(?P<subbank>.*)fr/banque/paci_engine/engine.aspx',
+        r'/(?P<subbank>.*)fr/banque/paci_engine/static_content_manager.aspx',
+        UserSpacePage
+    )
+    card = URL(
+        r'/(?P<subbank>.*)fr/banque/operations_carte.cgi.*',
+        r'/(?P<subbank>.*)fr/banque/mouvements.html\?webid=.*cardmonth=\d+$',
+        r'/(?P<subbank>.*)fr/banque/mouvements.html.*webid=.*cardmonth=\d+.*cardid=',
+        CardPage
+    )
+    operations = URL(
+        r'/(?P<subbank>.*)fr/banque/mouvements.cgi.*',
+        r'/(?P<subbank>.*)fr/banque/mouvements.html.*',
+        r'/(?P<subbank>.*)fr/banque/nr/nr_devbooster.aspx.*',
+        r'(?P<subbank>.*)fr/banque/CRP8_GESTPMONT.aspx\?webid=.*&trnref=.*&contract=\d+&cardid=.*&cardmonth=\d+',
+        OperationsPage
+    )
+
     # This loans_operations contains operation for some loans, but not all of them.
-    loans_operations = URL(r'/(?P<subbank>.*)fr/banque/gec9.aspx.*', LoansOperationsPage)
-    coming =      URL(r'/(?P<subbank>.*)fr/banque/mvts_instance.cgi.*',      ComingPage)
-    info =        URL(r'/(?P<subbank>.*)fr/banque/BAD.*',                    EmptyPage)
+    loans_operations = URL(
+        r'/(?P<subbank>.*)fr/banque/gec9.aspx.*',
+        r'/(?P<subbank>.*)fr/banque/CR/consultation.asp\?webid=.*',
+        LoansOperationsPage
+    )
+    loans_insurance = URL(
+        r'/(?P<subbank>.*)fr/assurances/consultation/ASSEMPR.aspx',
+        LoansInsurancePage
+    )
+    coming = URL(r'/(?P<subbank>.*)fr/banque/mvts_instance.cgi.*', ComingPage)
+    info = URL(r'/(?P<subbank>.*)fr/banque/BAD.*', EmptyPage)
     change_pass = URL(r'/(?P<subbank>.*)fr/validation/change_password.cgi',
                       '/fr/services/change_password.html', ChangePasswordPage)
-    verify_pass = URL(r'/(?P<subbank>.*)fr/validation/verif_code.cgi.*',
-                      r'/(?P<subbank>.*)fr/validation/lst_codes.cgi.*', VerifCodePage)
-    new_home =    URL(r'/(?P<subbank>.*)fr/banque/pageaccueil.html',
-                      r'/(?P<subbank>.*)banque/welcome_pack.html', NewHomePage)
-    empty =       URL(r'/(?P<subbank>.*)fr/banques/index.html',
-                      r'/(?P<subbank>.*)fr/banque/paci_beware_of_phishing.*',
-                      r'/(?P<subbank>.*)fr/validation/(?!change_password|verif_code|image_case|infos).*',
-                      EmptyPage)
+    verify_pass = URL(
+        r'/(?P<subbank>.*)fr/validation/verif_code.cgi.*',
+        r'/(?P<subbank>.*)fr/validation/lst_codes.cgi.*',
+        VerifCodePage
+    )
+    new_home = URL(
+        r'/(?P<subbank>.*)fr/banque/pageaccueil.html',
+        r'/(?P<subbank>.*)banque/welcome_pack.html',
+        NewHomePage
+    )
+    empty = URL(
+        r'/(?P<subbank>.*)fr/banques/index.html',
+        r'/(?P<subbank>.*)fr/banque/paci_beware_of_phishing.*',
+        r'/(?P<subbank>.*)fr/validation/(?!change_password|verif_code|image_case|infos).*',
+        EmptyPage
+    )
+
     por = URL(
         r'/(?P<subbank>.*)fr/banque/SYNT_Synthese.aspx\?entete=1',
         r'/(?P<subbank>.*)fr/banque/PORT_Synthese.aspx',
         r'/(?P<subbank>.*)fr/banque/SYNT_Synthese.aspx',
+        r'/(?P<subbank>.*)fr/banque/SYNT_AccueilBourse.aspx',
         PorPage
     )
     por_investments = URL(
@@ -160,79 +200,120 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     por_market_order_details = URL(r'/(?P<subbank>.*)fr/banque/PORT_OrdresDet.aspx', PorMarketOrderDetailsPage)
     por_action_needed = URL(r'/(?P<subbank>.*)fr/banque/ORDR_InfosGenerales.aspx', EmptyPage)
 
-    li =          URL(r'/(?P<subbank>.*)fr/assurances/profilass.aspx\?domaine=epargne',
-                      r'/(?P<subbank>.*)fr/assurances/(consultations?/)?WI_ASS.*',
-                      r'/(?P<subbank>.*)fr/assurances/WI_ASS',
-                      r'/(?P<subbank>.*)fr/assurances/SYNASSINT.aspx.*',
-                      r'/(?P<subbank>.*)fr/assurances/SYNASSVIE.aspx.*',
-                      '/fr/assurances/', LIAccountsPage)
+    li = URL(
+        r'/(?P<subbank>.*)fr/assurances/profilass.aspx\?domaine=epargne',
+        r'/(?P<subbank>.*)fr/assurances/(consultations?/)?WI_ASS.*',
+        r'/(?P<subbank>.*)fr/assurances/WI_ASS',
+        r'/(?P<subbank>.*)fr/assurances/SYNASSINT.aspx.*',
+        r'/(?P<subbank>.*)fr/assurances/SYNASSVIE.aspx.*',
+        r'/(?P<subbank>.*)fr/assurances/SYNASSINTNEXT.aspx.*',
+        r'/fr/assurances/',
+        LIAccountsPage
+    )
     li_history = URL(
         r'/(?P<subbank>.*)fr/assurances/SYNASSVIE.aspx\?_tabi=C&_pid=ValueStep&_fid=GoOnglets&Id=3',
         LIAccountsPage
     )
-    iban =        URL(r'/(?P<subbank>.*)fr/banque/rib.cgi', IbanPage)
+    iban = URL(r'/(?P<subbank>.*)fr/banque/rib.cgi', IbanPage)
 
     new_accounts = URL(r'/(?P<subbank>.*)fr/banque/comptes-et-contrats.html', NewAccountsPage)
-    new_operations = URL(r'/(?P<subbank>.*)fr/banque/mouvements.cgi',
-                         r'/fr/banque/nr/nr_devbooster.aspx.*',
-                         r'/(?P<subbank>.*)fr/banque/RE/aiguille(liste)?.asp',
-                         '/fr/banque/mouvements.html',
-                         r'/(?P<subbank>.*)fr/banque/consultation/operations', OperationsPage)
+    new_operations = URL(
+        r'/(?P<subbank>.*)fr/banque/mouvements.cgi',
+        r'/fr/banque/nr/nr_devbooster.aspx.*',
+        r'/(?P<subbank>.*)fr/banque/RE/aiguille(liste)?.asp',
+        r'/fr/banque/mouvements.html',
+        r'/(?P<subbank>.*)fr/banque/consultation/operations',
+        r'/fr/banque/credit/operations/.*/consultation.aspx.*',
+        r'/(?P<subbank>.*)fr/banque/credit/operations/.*/RE/consultation.aspx.*',
+        OperationsPage
+    )
 
-    advisor = URL(r'/(?P<subbank>.*)fr/banques/contact/trouver-une-agence/(?P<page>.*)',
-                  r'/(?P<subbank>.*)fr/infoclient/',
-                  r'/(?P<subbank>.*)fr/banques/accueil/menu-droite/Details.aspx\?banque=.*',
-                  AdvisorPage)
+    advisor = URL(
+        r'/(?P<subbank>.*)fr/banques/contact/trouver-une-agence/(?P<page>.*)',
+        r'/(?P<subbank>.*)fr/infoclient/',
+        r'/(?P<subbank>.*)fr/banques/accueil/menu-droite/Details.aspx\?banque=.*',
+        AdvisorPage
+    )
 
     redirect = URL(r'/(?P<subbank>.*)fr/banque/paci_engine/static_content_manager.aspx', RedirectPage)
 
     cards_activity = URL(r'/(?P<subbank>.*)fr/banque/pro/ENC_liste_tiers.aspx', CardsActivityPage)
-    cards_list = URL(r'/(?P<subbank>.*)fr/banque/pro/ENC_liste_ctr.*',
-                     r'/(?P<subbank>.*)fr/banque/pro/ENC_detail_ctr', CardsListPage)
+    cards_list = URL(
+        r'/(?P<subbank>.*)fr/banque/pro/ENC_liste_ctr.*',
+        r'/(?P<subbank>.*)fr/banque/pro/ENC_detail_ctr',
+        CardsListPage
+    )
     cards_ope = URL(r'/(?P<subbank>.*)fr/banque/pro/ENC_liste_oper', CardsOpePage)
-    cards_ope2 = URL('/(?P<subbank>.*)fr/banque/CRP8_SCIM_DEPCAR.aspx', CardPage2)
+    cards_ope2 = URL(r'/(?P<subbank>.*)fr/banque/CRP8_SCIM_DEPCAR.aspx', CardPage2)
+    newcards_ope = URL(r'/(?P<subbank>.*)fr/banque/PCS3_SCIM_DEPCAR.aspx', NewCardsOpe)
 
-    cards_hist_available = URL('/(?P<subbank>.*)fr/banque/SCIM_default.aspx\?_tabi=C&_stack=SCIM_ListeActivityStep%3a%3a&_pid=ListeCartes&_fid=ChangeList&Data_ServiceListDatas_CurrentType=MyCards',
-                               '/(?P<subbank>.*)fr/banque/PCS1_CARDFUNCTIONS.aspx', NewCardsListPage)
-    cards_hist_available2 = URL('/(?P<subbank>.*)fr/banque/SCIM_default.aspx', NewCardsListPage)
+    cards_hist_available = URL(
+        r'/(?P<subbank>.*)fr/banque/SCIM_default.aspx\?_tabi=C&_stack=SCIM_ListeActivityStep%3a%3a&_pid=ListeCartes&_fid=ChangeList&Data_ServiceListDatas_CurrentType=MyCards',
+        r'/(?P<subbank>.*)fr/banque/PCS1_CARDFUNCTIONS.aspx',
+        r'/(?P<subbank>.*)fr/banque/PCS[25]_FUNCTIONS.aspx',
+        NewCardsListPage
+    )
+    cards_hist_available2 = URL(r'/(?P<subbank>.*)fr/banque/SCIM_default.aspx', NewCardsListPage)
 
     internal_transfer = URL(r'/(?P<subbank>.*)fr/banque/virements/vplw_vi.html', InternalTransferPage)
     external_transfer = URL(r'/(?P<subbank>.*)fr/banque/virements/vplw_vee.html', ExternalTransferPage)
-    recipients_list =   URL(r'/(?P<subbank>.*)fr/banque/virements/vplw_bl.html', RecipientsListPage)
+    recipients_list = URL(r'/(?P<subbank>.*)fr/banque/virements/vplw_bl.html', RecipientsListPage)
     error = URL(r'/(?P<subbank>.*)validation/infos.cgi', ErrorPage)
 
     subscription = URL(r'/(?P<subbank>.*)fr/banque/documentinternet.html', SubscriptionPage)
-    terms_and_conditions = URL(r'/(?P<subbank>.*)fr/banque/conditions-generales.html',
-                               r'/(?P<subbank>.*)fr/banque/coordonnees_personnelles.aspx',
-                               r'/(?P<subbank>.*)fr/banque/paci_engine/paci_wsd_pdta.aspx',
-                               r'/(?P<subbank>.*)fr/banque/reglementation-dsp2.html', ConditionsPage)
+    terms_and_conditions = URL(
+        r'/(?P<subbank>.*)fr/banque/conditions-generales.html',
+        r'/(?P<subbank>.*)fr/banque/coordonnees_personnelles.aspx',
+        r'/(?P<subbank>.*)fr/banque/paci_engine/paci_wsd_pdta.aspx',
+        r'/(?P<subbank>.*)fr/banque/reglementation-dsp2.html',
+        ConditionsPage
+    )
+    information_confirmation_page = URL(
+        r'/(?P<subbank>.*)fr/client/paci_engine/information-client.html',
+        InformationConfirmationPage
+    )
+    authority_management = URL(r'/(?P<subbank>.*)fr/banque/migr_gestion_pouvoirs.html', AuthorityManagementPage)
+    solidarity = URL(
+        r'/(?P<subbank>.*)fr/banque/paci_application_territoire_de_solidarite_p\d.html',
+        r'/(?P<subbank>.*)fr/banque/paci_application_defi_solidaire_p\d.html',
+        SolidarityPage,
+    )
+
+    general_assembly_page = URL(
+        # Same URLs for all, but we can encounter different sub directory given
+        # the website (cmag, cmmabn/fr, fr, ...)
+        r'https://www.creditmutuel.fr/.+/assembleegenerale',
+        GeneralAssemblyPage,
+    )
+
+    info_doc_page = URL(r'/(?P<subbank>.*)fr/banque/CMIG_Statut.aspx', InfoDocPage)
 
     currentSubBank = None
     is_new_website = None
     form = None
-    logged = None
     need_clear_storage = None
     accounts_list = None
 
     def __init__(self, config, *args, **kwargs):
         self.config = config
-        self.weboob = kwargs['weboob']
         kwargs['username'] = self.config['login'].get()
         kwargs['password'] = self.config['password'].get()
         super(CreditMutuelBrowser, self).__init__(config, *args, **kwargs)
 
-        self.__states__ += (
-            'currentSubBank', 'logged', 'is_new_website',
+        self.__states__ = self.__states__ + (
+            'currentSubBank', 'is_new_website',
             'need_clear_storage', 'recipient_form',
             'twofa_auth_state', 'polling_data', 'otp_data',
-            'key_form',
+            'key_form', 'transfer_code_form',
         )
+
         self.twofa_auth_state = {}
         self.polling_data = {}
         self.otp_data = {}
         self.keep_session = None
         self.recipient_form = None
         self.key_form = None
+        self.transfer_code_form = None
 
         self.AUTHENTICATION_METHODS = {
             'resume': self.handle_polling,
@@ -245,8 +326,10 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         self.twofa_auth_state is present and contains the exact time of the end of its validity
         Else, it will only last self.STATE_DURATION
         """
-        if self.twofa_auth_state:
-            expires = datetime.fromtimestamp(self.twofa_auth_state['expires']).isoformat()
+        if self.twofa_auth_state and self.twofa_auth_state.get('expires'):
+            expires = datetime.fromtimestamp(
+                self.twofa_auth_state['expires'], tz.tzlocal()
+            ).replace(microsecond=0).isoformat()
             return expires
         return super(CreditMutuelBrowser, self).get_expire()
 
@@ -263,6 +346,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             or state.get('recipient_form')
             or state.get('otp_data')
             or state.get('key_form')
+            or state.get('transfer_code_form')
         ):
             # can't start on an url in the middle of a validation process
             # or server will cancel it and launch another one
@@ -277,8 +361,9 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         store 'auth_client_state' cookie to prove to server,
         for a TWOFA_DURATION, that 2FA is already done.
         """
-
-        self.location(
+        #retry to handle random ServerError on this url
+        final_location = retry((ServerError, ConnectionError))(self.location)
+        final_location(
             twofa_data['final_url'],
             data=twofa_data['final_url_params'],
             allow_redirects=False
@@ -290,7 +375,32 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 # not present if 2FA is triggered systematically
                 self.twofa_auth_state['value'] = cookie.value  # this is a token
                 self.twofa_auth_state['expires'] = cookie.expires  # this is a timestamp
-                self.location(self.response.headers['Location'])
+                if not cookie.expires:
+                    self.logger.info(
+                        "The expiration state of the twofa authentication cookie is null. Cookie details: expires=%s, value=%s",
+                        cookie.expires,
+                        cookie.value
+                    )
+                break
+        else:
+            self.logger.info("User probably has his account setup with a systematic sca")
+
+        redirect_uri = self.response.headers.get('Location')
+        if redirect_uri:
+            self.location(redirect_uri)
+
+    def handle_polling_redirection(self):
+        """
+        Handle case where decoupled page redirect us to an another page.
+        """
+        if self.login.is_here():
+            # We are back to login page.
+            raise AppValidationCancelled()
+        if self.page.logged:
+            # We are logged. Can continue with finalize_twofa.
+            return
+
+        raise AssertionError(f'Unhandled decoupled redirection. URL: {self.url}')
 
     def poll_decoupled(self, transactionId):
         """
@@ -303,7 +413,12 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         data = {'transactionId': transactionId}
 
         while time.time() < timeout:
-            self.decoupled_state.go(data=data, subbank=self.currentSubBank)
+            #retry to handle random ServerError
+            go_decoupled = retry(ServerError)(self.decoupled_state.go)
+            go_decoupled(data=data, subbank=self.currentSubBank)
+
+            if not self.decoupled_state.is_here():
+                return self.handle_polling_redirection()
 
             decoupled_state = self.page.get_decoupled_state()
             if decoupled_state == 'VALIDATED':
@@ -321,6 +436,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
     def handle_polling(self):
         if 'polling_id' not in self.polling_data:
+            self.logger.info("Restarting login since we do not have the polling data")
             return self.init_login()
 
         try:
@@ -333,13 +449,20 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         # Too much wrong OTPs, locked down after total 3 wrong inputs
         if self.otp_blocked_error_page.is_here():
             error_msg = self.page.get_error_message()
+            if "erreurs de saisie du code de confirmation" in error_msg:
+                raise BrowserUserBanned(error_msg)
             raise BrowserUnavailable(error_msg)
 
     def handle_sms(self):
+        if not self.otp_data or 'final_url_params' not in self.otp_data:
+            raise BrowserIncorrectPassword("Le code de confirmation envoyé par SMS n'est plus utilisable")
         self.otp_data['final_url_params']['otp_password'] = self.code
         self.finalize_twofa(self.otp_data)
 
-        ## cases where 2FA is not finalized
+        if self.authority_management.is_here():
+            self.page.skip_authority_management()
+
+        # cases where 2FA is not finalized
         # Too much wrong OTPs, locked down after total 3 wrong inputs
         self.check_otp_blocked()
 
@@ -386,20 +509,35 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             raise NeedInteractiveFor2FA()
 
         elif location:
-            allow_redirects = 'conditions-generales' in location
-            # Don't stay on this 302
-            # This URL is still caught by ConditionsPage
+            # Check if we still are on ConditionsPage,
+            # keep following redirections until we have left this page.
+            allow_redirects = any(string in location for string in [
+                'conditions-generales',
+                'paci_wsd_pdta',
+                'static_content_manager',
+                'paci',
+            ])
             self.location(location, allow_redirects=allow_redirects)
 
     def check_auth_methods(self):
-        self.getCurrentSubBank()
+        self.get_current_sub_bank(force=True)
+
+        if self.digipass_page.is_here():
+            raise AuthMethodNotImplemented("La validation OTP par DIGIPASS n'est pas supportée.")
 
         if self.mobile_confirmation.is_here():
             self.page.check_bypass()
+            if self.page.is_waiting_for_sca_activation():
+                raise ActionNeeded(
+                    locale="fr-FR", message="Une intervention de votre part est requise sur votre espace client.",
+                    action_type=ActionType.ENABLE_MFA,
+                )
             if self.mobile_confirmation.is_here():
                 self.polling_data = self.page.get_polling_data()
                 assert self.polling_data, "Can't proceed to polling if no polling_data"
-                raise AppValidation(self.page.get_validation_msg())
+                app_val_message = self.page.get_validation_msg()
+                assert app_val_message, "Did not find any AppValidation message to share with the user."
+                raise AppValidation(app_val_message)
 
         if self.safetrans_page.is_here():
             msg = self.page.get_safetrans_message()
@@ -413,12 +551,20 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         self.check_otp_blocked()
 
     def init_login(self):
-        self.login.go()
+        # Retrying to avoid a random ServerError
+        # while requesting login page
+        go_login = retry((ServerError, ConnectionError))(self.login.go)
+        go_login()
 
         # 2FA already done ; if valid, login() redirects to home page
         # 2FA might also now be systematic, this is handled with check_redirections()
         if self.twofa_auth_state:
-            self.session.cookies.set('auth_client_state', self.twofa_auth_state['value'])
+            self.session.cookies.set(
+                'auth_client_state',
+                self.twofa_auth_state['value'],
+                domain=urlparse(self.url).hostname,
+            )
+
             self.page.login(self.username, self.password)
 
             self.check_redirections()
@@ -430,10 +576,39 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 # website proposes to redo 2FA when approaching end of its validity
                 self.page.skip_redo_twofa()
 
+            if self.information_confirmation_page.is_here():
+                # If we reached this point, there is no SCA since:
+                # - the user has to confirm its phone number
+                # - or acknowledge a message about personal data settings being available in his client space
+                link = self.page.get_confirmation_link()
+                self.location(link)
+
+        if self.authority_management.is_here():
+            self.page.skip_authority_management()
+
+        if self.solidarity.is_here():
+            # it is a page that ask you to donate for disabled people
+            raise ActionNeeded(
+                    locale="fr-FR", message="Un message relatif au don pour les personnes en situation d'handicap est disponible sur votre espace.",
+                    action_type=ActionType.ACKNOWLEDGE,
+            )
+
         if not self.page.logged:
             # 302 redirect to catch to know if polling
             if self.login.is_here():
-                self.page.login(self.username, self.password)
+
+                # retry to handle random Server Error
+                login = retry((ServerError, ConnectionError))(self.page.login)
+                login(self.username, self.password)
+
+                if self.login.is_here():
+                    error_message = self.page.get_error_message()
+                    if error_message:
+                        # handle the case of the following error message:
+                        # Vos droits d'accès sont échus. Veuillez vous rapprocher du mandataire principal de votre contrat.
+                        if "Vos droits d'accès sont échus." in error_message:
+                            raise ActionNeeded(error_message)
+                        raise AssertionError(f"Unhandled login error : {error_message}")
 
                 self.check_redirections()
                 # There could be two redirections to arrive to the mobile_confirmation page
@@ -461,8 +636,12 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             if self.twofa_unabled_page.is_here():
                 raise ActionNeeded(self.page.get_error_msg())
 
-            # when people try to log in but there are on a sub site of creditmutuel
             if not self.page and not self.url.startswith(self.BASEURL):
+                if self.HAS_MULTI_BASEURL:
+                    # the psu selected another child module, this doesn't necessarily means he used the wrong creds
+                    raise WrongBrowser()
+
+                # when people try to log in but there are on a sub site of creditmutuel
                 raise BrowserIncorrectPassword()
 
             if self.login_error.is_here():
@@ -473,7 +652,17 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
         self.check_auth_methods()
 
-        self.getCurrentSubBank()
+        self.get_current_sub_bank(force=True)
+
+        # This will log if the account is setup with a systematic 2FA, it will prevent
+        # useless audit if/when user does not understand why they had a systematic 2FA.
+        try:
+            self.authentication_mode.go(subbank=self.currentSubBank)
+        except (HTTPError, TooManyRedirects):
+            self.logger.warning('We cannot access to the authentication setting page')
+        else:
+            if self.authentication_mode.is_here() and self.page.has_systematic_2fa():
+                self.logger.warning('This connection is set up with systematic 2FA.')
 
     def ownership_guesser(self):
         profile = self.get_profile()
@@ -497,16 +686,17 @@ class CreditMutuelBrowser(TwoFactorBrowser):
     @need_login
     def get_accounts_list(self):
         if not self.accounts_list:
-            if self.currentSubBank is None:
-                self.getCurrentSubBank()
+            self.get_current_sub_bank()
 
             self.two_cards_page = None
             self.accounts_list = []
             self.revolving_accounts = []
             self.unavailablecards = []
             self.cards_histo_available = []
-            self.cards_list =[]
-            self.cards_list2 =[]
+            self.cards_list = []
+            self.cards_list2 = []
+
+            default_owner_type = self.get_default_owner_type()
 
             # For some cards the validity information is only availaible on these 2 links
             self.cards_hist_available.go(subbank=self.currentSubBank)
@@ -519,7 +709,9 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                     self.cards_histo_available.append(acc.id)
 
             if not self.cards_list:
-                self.cards_hist_available2.go(subbank=self.currentSubBank)
+                #retrying to handle random ServerError
+                go_cards_hist_available2 = retry(ServerError)(self.cards_hist_available2.go)
+                go_cards_hist_available2(subbank=self.currentSubBank)
                 if self.cards_hist_available2.is_here():
                     self.unavailablecards.extend(self.page.get_unavailable_cards())
                     for acc in self.page.iter_accounts():
@@ -528,39 +720,53 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                         self.cards_list.append(acc)
                         self.cards_histo_available.append(acc.id)
 
-            for acc in self.revolving_loan_list.stay_or_go(subbank=self.currentSubBank).iter_accounts():
-                self.accounts_list.append(acc)
-                self.revolving_accounts.append(acc.label.lower())
-
             # Handle cards on tiers page
             self.cards_activity.go(subbank=self.currentSubBank)
             companies = self.page.companies_link() if self.cards_activity.is_here() else \
                         [self.page] if self.is_new_website else []
-            for company in companies:
-                # We need to return to the main page to avoid navigation error
-                self.cards_activity.go(subbank=self.currentSubBank)
-                page = self.open(company).page if isinstance(company, basestring) else company
-                for card in page.iter_cards():
-                    card2 = find_object(self.cards_list, id=card.id[:16])
-                    if card2:
-                        # In order to keep the id of the card from the old space, we exchange the following values
-                        card._link_id = card2._link_id
-                        card._parent_id = card2._parent_id
-                        card.coming = card2.coming
-                        card._referer = card2._referer
-                        card._secondpage = card2._secondpage
-                        self.accounts_list.remove(card2)
+
+            if not companies and self.page.has_cards():
+                # if we have only 1 company we get its card list directly
+                for card in self.page.iter_cards():
                     self.accounts_list.append(card)
                     self.cards_list2.append(card)
-            self.cards_list.extend(self.cards_list2)
+                self.cards_list.extend(self.cards_list2)
+            else:
+                for company in companies:
+                    # We need to return to the main page to avoid navigation error
+                    self.cards_activity.go(subbank=self.currentSubBank)
+                    page = self.open(company).page if isinstance(company, str) else company
+                    for card in page.iter_cards():
+
+                        # This part was only tested on CIC (need to find connection with pro accounts)
+                        self.location(card._link_id)
+                        self.page.go_contract_details()
+                        self.page.fill_card_numbers(card)
+
+                        card2 = find_object(self.cards_list, id=card.id[:16])
+                        if card2:
+                            # In order to keep the id of the card from the old space, we exchange the following values
+                            card._link_id = card2._link_id
+                            if hasattr(card2, '_submit_button_name'):
+                                card._submit_button_name = card2._submit_button_name
+                            card._parent_id = card2._parent_id
+                            card.coming = card2.coming
+                            card._referer = card2._referer
+                            card._secondpage = card2._secondpage
+                            self.accounts_list.remove(card2)
+                        self.accounts_list.append(card)
+                        self.cards_list2.append(card)
+                self.cards_list.extend(self.cards_list2)
 
             # Populate accounts from old website
             if not self.is_new_website:
-                self.logger.info('On old creditmutuel website')
+                self.logger.warning('On old creditmutuel website')
                 self.accounts.stay_or_go(subbank=self.currentSubBank)
                 has_no_account = self.page.has_no_account()
                 self.accounts_list.extend(self.page.iter_accounts())
-                self.iban.go(subbank=self.currentSubBank).fill_iban(self.accounts_list)
+                # Retrying to avoid a random ServerError on iban page
+                go_iban = retry(ServerError)(self.iban.go)
+                go_iban(subbank=self.currentSubBank).fill_iban(self.accounts_list)
                 self.go_por_accounts()
                 self.page.add_por_accounts(self.accounts_list)
             # Populate accounts from new website
@@ -568,16 +774,43 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 self.new_accounts.stay_or_go(subbank=self.currentSubBank)
                 has_no_account = self.page.has_no_account()
                 self.accounts_list.extend(self.page.iter_accounts())
-                self.iban.go(subbank=self.currentSubBank).fill_iban(self.accounts_list)
+                # Retrying to avoid a random ServerError on iban page
+                go_iban = retry(ServerError)(self.iban.go)
+                go_iban(subbank=self.currentSubBank).fill_iban(self.accounts_list)
                 self.go_por_accounts()
                 self.page.add_por_accounts(self.accounts_list)
 
-            self.li.go(subbank=self.currentSubBank)
+            # if account is of type checking and has no iban, try to get it from documents
+            for account in self.accounts_list:
+                if account.type == Account.TYPE_CHECKING and empty(account.iban):
+                    fake_sub = Subscription()
+                    fake_sub.id = account.id
+                    fake_sub.label = account.label
+                    account_statements = [
+                        doc for doc in self.iter_documents(fake_sub) if 'Extrait de comptes' in doc.label
+                    ]
+                    if not account_statements:
+                        continue
+
+                    content = self.open(account_statements[0].url).content
+                    text = extract_text_from_pdf(content)
+                    iban = Regexp(
+                        pattern=r'IBAN : ([A-Z]{2}[0-9]{2}(?:[ ]?[0-9]{4}){5}(?:[ ]?[0-9]{3}))',
+                        default='',
+                    ).filter(text)
+
+                    if iban:
+                        account.iban = iban.replace(' ', '')
+
+            # Retrying to avoid a random ServerError
+            go_li = retry(ServerError)(self.li.go)
+            go_li(subbank=self.currentSubBank)
+
             if self.page.has_accounts():
                 self.page.go_accounts_list()
                 for account in self.page.iter_li_accounts():
                     # The navigation is made through forms so we need to come back to the accounts list page
-                    self.li.go(subbank=self.currentSubBank)
+                    go_li(subbank=self.currentSubBank)
                     self.page.go_accounts_list()
 
                     # We can build the history and investments URLs using the account ID in the account details URL
@@ -598,16 +831,44 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
             accounts_by_id = {}
             for acc in self.accounts_list:
+                if empty(acc.owner_type):
+                    acc.owner_type = default_owner_type
+
                 if acc.label.lower() not in excluded_label:
                     accounts_by_id[acc.id] = acc
 
-            # Set the parent to loans and cards accounts
             for acc in self.accounts_list:
+                # Set the parent to loans and cards accounts
                 if acc.type == Account.TYPE_CARD and not empty(getattr(acc, '_parent_id', None)):
                     acc.parent = accounts_by_id.get(acc._parent_id, NotAvailable)
 
-                elif acc.type in (Account.TYPE_MORTGAGE, Account.TYPE_LOAN) and acc._parent_id:
-                    acc.parent = accounts_by_id.get(acc._parent_id, NotAvailable)
+                elif acc.type in (Account.TYPE_MORTGAGE, Account.TYPE_LOAN):
+                    if acc._parent_id:
+                        acc.parent = accounts_by_id.get(acc._parent_id, NotAvailable)
+
+                    # fetch loan insurance
+                    if acc._insurance_url:
+                        self.location(acc._insurance_url)
+                        if self.page.is_insurance_page_available(acc):
+                            self.page.get_insurance_details_page()
+                            self.page.fill_insurance(obj=acc)
+                        else:
+                            error_message = self.page.get_error_message()
+
+                            if error_message:
+                                if "Vous n'avez pas l'autorisation d'accéder à ce contrat" in error_message:
+                                    continue
+                                if 'momentanément indisponible' in error_message:
+                                    raise BrowserUnavailable(error_message)
+
+                                raise AssertionError(f'Not handled error in insurance details page: {error_message}')
+
+                elif acc.type == Account.TYPE_UNKNOWN:
+                    self.logger.warning(
+                        'There is an untyped account: please add "%s" to ACCOUNT_TYPES.',
+                        acc.label
+                    )
+
 
             self.accounts_list = list(accounts_by_id.values())
 
@@ -629,28 +890,47 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             if self.page.is_message_skippable:
                 self.page.handle_skippable_action_needed()
             else:
-                raise ActionNeeded(message)
+                raise ActionNeeded(locale="fr-FR", message=message)
+
+        # The info page popup may redirect us to the wrong tab
+        # We make sure that the entete param is present in the url
+        entete = QueryValue(None, 'entete', default='').filter(self.url)
+        if entete != '1':
+            self.por.go(subbank=self.currentSubBank)
 
     def get_account(self, _id):
-        assert isinstance(_id, basestring)
+        assert isinstance(_id, str)
 
         for a in self.get_accounts_list():
             if a.id == _id:
                 return a
 
-    def getCurrentSubBank(self):
-        # the account list and history urls depend on the sub bank of the user
-        paths = urlparse(self.url).path.lstrip('/').split('/')
-        self.currentSubBank = paths[0] + "/" if paths[0] != "fr" else ""
-        if self.currentSubBank and paths[0] == 'banqueprivee' and paths[1] == 'mabanque':
-            self.currentSubBank = 'banqueprivee/mabanque/'
-        if self.currentSubBank and paths[1] == "decouverte":
-            self.currentSubBank += paths[1] + "/"
-        if paths[0] in ["cmmabn", "fr", "mabanque", "banqueprivee"]:
-            self.is_new_website = True
+    def get_current_sub_bank(self, *, force=False):
+        """Determine the current sub bank out of the URL we're currently on.
+
+        :param force: Whether to redetermine the current sub bank if it is
+                      already defined. This parameter was introduced for
+                      compatibility with the previous approach.
+        """
+        if force or self.currentSubBank is None:
+            # the account list and history urls depend on the sub bank of the user
+            paths = urlparse(self.url).path.lstrip('/').split('/')
+            self.currentSubBank = paths[0] + "/" if paths[0] != "fr" else ""
+            if self.currentSubBank and paths[0] == 'banqueprivee' and paths[1] == 'mabanque':
+                self.currentSubBank = 'banqueprivee/mabanque/'
+            if self.currentSubBank and paths[1] == "decouverte":
+                self.currentSubBank += paths[1] + "/"
+            if paths[0] in ["cmmabn", "fr", "mabanque", "banqueprivee"]:
+                self.is_new_website = True
+
+        if (
+            self.currentSubBank
+            and self.currentSubBank.startswith('banqueprivee')
+        ):
+            self.logger.info('Is CIC Banque Privée: %r', self.currentSubBank)
 
     def list_operations(self, page, account):
-        if isinstance(page, basestring):
+        if isinstance(page, str):
             if page.startswith('/') or page.startswith('https') or page.startswith('?'):
                 self.location(page)
             else:
@@ -663,11 +943,17 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             self.page = page
 
         # On some savings accounts, the page lands on the contract tab, and we want the situation
-        if account.type == Account.TYPE_SAVINGS and "Capital Expansion" in account.label:
+        if account.type == Account.TYPE_SAVINGS and re.match(
+            "Capital Expansion|Plan Epargne Logement", account.label
+        ):
             self.page.go_on_history_tab()
 
         if self.li.is_here():
             return self.page.iter_history()
+
+        if self.revolving_loan_list.is_here():
+            # if we get redirected here, it means the account has no transactions
+            return []
 
         if self.is_new_website and self.page:
             try:
@@ -787,9 +1073,21 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             return
 
         if not account._link_id:
-            raise NotImplementedError()
+            if hasattr(account, '_submit_button_name'):
+                account._referer.go(subbank=self.currentSubBank)
+                self.page.go_to_operations_by_form(account)
+
+                today = datetime.today()
+                for tr in self.page.iter_history():
+                    if tr.date > today:
+                        tr._is_coming = True
+                    yield tr
+                return
+            else:
+                raise NotImplementedError()
 
         if len(account.id) >= 16 and account.id[:16] in self.cards_histo_available:
+            self.logger.warning("Old card navigation with history available")
             if self.two_cards_page:
                 # In this case, you need to return to the page where the iter account get the cards information
                 # Indeed, for the same position of card in the two pages the url, headers and parameters are exactly the same
@@ -819,12 +1117,12 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                             # Arbitrary range; it's the number of click needed to access to the full history of the month (stop with the next break)
                             data = {
                                 '_FID_DoAddElem': '',
-                                '_wxf2_cc':	'fr-FR',
-                                '_wxf2_pmode':	'Normal',
-                                '_wxf2_pseq':	i,
-                                '_wxf2_ptarget':	'C:P:updPan',
+                                '_wxf2_cc': 'fr-FR',
+                                '_wxf2_pmode': 'Normal',
+                                '_wxf2_pseq': i,
+                                '_wxf2_ptarget': 'C:P:updPan',
                                 'Data_ServiceListDatas_CurrentOtherCardThirdPartyNumber': '',
-                                'Data_ServiceListDatas_CurrentType':	'MyCards',
+                                'Data_ServiceListDatas_CurrentType': 'MyCards',
                             }
                             if 'fid=GoMonth&mois=' in self.url:
                                 m = re.search(r'fid=GoMonth&mois=(\d+)', self.url)
@@ -866,9 +1164,13 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                         yield tr
 
         else:
+            # This gets the history for checking accounts
             # need to refresh the months select
             if account._link_id.startswith('ENC_liste_oper'):
                 self.location(account._pre_link)
+            elif account._link_id.startswith('/fr/banque/pro/ENC_liste_tiers'):
+                self.location(account._link_id)
+                transactions.extend(self.page.iter_cards_history())
 
             if not hasattr(account, '_card_pages'):
                 for tr in self.list_operations(account._link_id, account):
@@ -919,8 +1221,10 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 if not account._link_inv:
                     return []
                 self.location(account._link_inv)
+                if self.page.is_euro_fund():
+                    return [self.page.create_euro_fund_invest(account.balance)]
             return self.page.iter_investment()
-        if account.type is Account.TYPE_PEA:
+        if account.type in (Account.TYPE_MARKET, Account.TYPE_PEA):
             liquidities = create_french_liquidity(account.balance)
             liquidities.label = account.label
             return [liquidities]
@@ -948,6 +1252,8 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
     def continue_transfer(self, transfer, **params):
         if 'Clé' in params:
+            if not self.key_form:
+                raise TransferTimeout(message="La validation du transfert par carte de clés personnelles a expiré")
             url = self.key_form.pop('url')
             self.format_personal_key_card_form(params['Clé'])
             self.location(url, data=self.key_form)
@@ -963,9 +1269,29 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
             if self.login.is_here():
                 # User took too much time to input the personal key.
-                raise TransferBankError(message='La validation du transfert par carte de clés personnelles a expiré')
+                raise TransferBankError(message="La validation du transfert par carte de clés personnelles a expiré")
 
-            transfer.id = self.page.get_transfer_webid()
+            transfer_id = self.page.get_transfer_webid()
+            if transfer_id and (empty(transfer.id) or transfer.id != transfer_id):
+                transfer.id = self.page.get_transfer_webid()
+
+        elif 'code' in params:
+            code_form = self.transfer_code_form
+            if not code_form:
+                raise TransferTimeout(message="Le code de confirmation envoyé par SMS n'est plus utilisable")
+            # Specific field of the confirmation page
+            code_form['Bool:data_input_confirmationDoublon'] = 'true'
+            self.send_sms(code_form, params['code'])
+            self.transfer_code_form = None
+
+            # OTP is expired after 15', we end up on login page
+            if self.login.is_here():
+                raise TransferBankError(message="Le code de confirmation envoyé par SMS n'est plus utilisable")
+
+            transfer_id = self.page.get_transfer_webid()
+            if transfer_id and (empty(transfer.id) or transfer.id != transfer_id):
+                transfer.id = self.page.get_transfer_webid()
+
         elif 'resume' in params:
             self.poll_decoupled(self.polling_data['polling_id'])
 
@@ -973,11 +1299,41 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 self.polling_data['final_url'],
                 data=self.polling_data['final_url_params'],
             )
-            # Dont set `self.polling_data = None` yet because we need to know in
-            # execute_transfer if we just did an app validation.
+            self.polling_data = None
 
-        # At this point the app validation has already been sent (after validating the
-        # personal key card code).
+        transfer = self.check_and_initiate_transfer_otp(transfer)
+
+        return transfer
+
+    def check_and_initiate_transfer_otp(self, transfer, account=None, recipient=None):
+        if self.page.needs_personal_key_card_validation():
+            self.location(self.page.get_card_key_validation_link())
+            error = self.page.get_personal_keys_error()
+            if error:
+                raise TransferBankError(message=error)
+
+            self.key_form = self.page.get_personal_key_card_code_form()
+            raise TransferStep(
+                transfer,
+                Value('Clé', label=self.page.get_question())
+            )
+
+        if account and transfer:
+            transfer = self.page.handle_response_create_transfer(
+                account, recipient, transfer.amount, transfer.label, transfer.exec_date
+            )
+        else:
+            transfer = self.page.handle_response_reuse_transfer(transfer)
+
+        if self.page.needs_otp_validation():
+            self.transfer_code_form = self.page.get_transfer_code_form()
+            raise TransferStep(
+                transfer,
+                Value('code', label='Veuillez saisir le code reçu par sms pour confirmer votre opération')
+            )
+
+        # The app validation, if needed, could have already been started
+        # (for example, after validating the personal key card code).
         msg = self.page.get_validation_msg()
         if msg:
             self.polling_data = self.page.get_polling_data(form_xpath='//form[contains(@action, "virements")]')
@@ -1006,41 +1362,34 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
         self.page.prepare_transfer(account, recipient, transfer.amount, transfer.label, transfer.exec_date)
 
-        if self.page.needs_personal_key_card_validation():
-            self.location(self.page.get_card_key_validation_link())
-            error = self.page.get_personal_keys_error()
-            if error:
-                raise TransferBankError(message=error)
-
-            self.key_form = self.page.get_personal_key_card_code_form()
-            raise TransferStep(transfer, Value('Clé', label=self.page.get_question()))
-        elif self.page.needs_otp_validation():
-            raise AuthMethodNotImplemented("La validation des transferts avec un code sms n'est pas encore disponible.")
-
-        msg = self.page.get_validation_msg()
-        if msg:
-            self.polling_data = self.page.get_polling_data(form_xpath='//form[contains(@action, "virements")]')
-            assert self.polling_data, "Can't proceed without polling data"
-            raise AppValidation(
-                resource=transfer,
-                message=msg,
-            )
-
-        return self.page.handle_response(account, recipient, transfer.amount, transfer.label, transfer.exec_date)
+        new_transfer = self.check_and_initiate_transfer_otp(transfer, account, recipient)
+        return new_transfer
 
     @need_login
     def execute_transfer(self, transfer, **params):
-        if self.polling_data:
-            # If we just did a transfer to a new recipient the transfer has already
-            # been confirmed with the app validation.
-            self.polling_data = None
-        else:
+        # If we just did a transfer to a new recipient the transfer has already
+        # been confirmed because of the app validation or the sms otp
+        # Otherwise, do the confirmation when still needed
+        if self.page.doc.xpath(
+            '//form[@id="P:F"]//input[@type="submit" and contains(@value, "Confirmer")]'
+        ):
             form = self.page.get_form(id='P:F', submit='//input[@type="submit" and contains(@value, "Confirmer")]')
             # For the moment, don't ask the user if he confirms the duplicate.
             form['Bool:data_input_confirmationDoublon'] = 'true'
             form.submit()
 
         return self.page.create_transfer(transfer)
+
+    def get_default_owner_type(self):
+        if self.is_new_website:
+            # Retrying to avoid a random ServerError
+            go_new_accounts = retry(ServerError)(self.new_accounts.go)
+            go_new_accounts(subbank=self.currentSubBank)
+            if self.page.business_advisor_intro():
+                return AccountOwnerType.ORGANIZATION
+            elif self.page.private_advisor_intro():
+                return AccountOwnerType.PRIVATE
+        self.logger.warning("Could not find a default owner type")
 
     @need_login
     def get_advisor(self):
@@ -1097,6 +1446,8 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
     def continue_new_recipient(self, recipient, **params):
         if 'Clé' in params:
+            if not self.key_form:
+                raise AddRecipientTimeout(message="La validation par carte de clés personnelles a expiré")
             url = self.key_form.pop('url')
             self.format_personal_key_card_form(params['Clé'])
             self.location(url, data=self.key_form)
@@ -1112,37 +1463,43 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
             if self.login.is_here():
                 # User took too much time to input the personal key.
-                raise AddRecipientTimeout()
+                raise AddRecipientBankError(message="La validation par carte de clés personnelles a expiré")
 
         self.page.add_recipient(recipient)
         if self.page.bic_needed():
             self.page.ask_bic(self.get_recipient_object(recipient))
         self.page.ask_auth_validation(self.get_recipient_object(recipient))
 
-    def send_sms(self, sms):
-        url = self.recipient_form.pop('url')
-        self.recipient_form['otp_password'] = sms
-        self.recipient_form['_FID_DoConfirm.x'] = '1'
-        self.recipient_form['_FID_DoConfirm.y'] = '1'
-        self.recipient_form['global_backup_hidden_key'] = ''
-        self.location(url, data=self.recipient_form)
+    def send_sms(self, form, sms):
+        url = form.pop('url')
+        form['otp_password'] = sms
+        form['_FID_DoConfirm.x'] = '1'
+        form['_FID_DoConfirm.y'] = '1'
+        form['global_backup_hidden_key'] = ''
+        self.location(url, data=form)
 
-    def send_decoupled(self):
-        url = self.recipient_form.pop('url')
-        transactionId = self.recipient_form.pop('transactionId')
+    def send_decoupled(self, form):
+        url = form.pop('url')
+        transactionId = form.pop('transactionId')
 
         self.poll_decoupled(transactionId)
 
-        self.recipient_form['_FID_DoConfirm.x'] = '1'
-        self.recipient_form['_FID_DoConfirm.y'] = '1'
-        self.recipient_form['global_backup_hidden_key'] = ''
-        self.location(url, data=self.recipient_form)
+        form['_FID_DoConfirm.x'] = '1'
+        form['_FID_DoConfirm.y'] = '1'
+        form['global_backup_hidden_key'] = ''
+        self.location(url, data=form)
 
     def end_new_recipient_with_auth_validation(self, recipient, **params):
         if 'code' in params:
-            self.send_sms(params['code'])
+            if not self.recipient_form:
+                raise AddRecipientTimeout(message="Le code de confirmation envoyé par SMS n'est plus utilisable")
+            self.send_sms(self.recipient_form, params['code'])
+
         elif 'resume' in params:
-            self.send_decoupled()
+            if not self.recipient_form:
+                raise AddRecipientTimeout(message="Le demande de confirmation a expiré")
+            self.send_decoupled(self.recipient_form)
+
         self.recipient_form = None
         self.page = None
         return self.get_recipient_object(recipient)
@@ -1157,8 +1514,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         self.page.ask_auth_validation(self.get_recipient_object(recipient))
 
     def set_new_recipient(self, recipient, **params):
-        if self.currentSubBank is None:
-            self.getCurrentSubBank()
+        self.get_current_sub_bank()
 
         if 'Bic' in params:
             return self.post_with_bic(recipient, **params)
@@ -1176,8 +1532,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
 
     @need_login
     def new_recipient(self, recipient, **params):
-        if self.currentSubBank is None:
-            self.getCurrentSubBank()
+        self.get_current_sub_bank()
 
         self.recipients_list.go(subbank=self.currentSubBank)
         if self.page.has_list():
@@ -1204,18 +1559,40 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             sub.label = account.label
             yield sub
 
-
     @need_login
     def iter_documents(self, subscription):
-        if self.currentSubBank is None:
-            self.getCurrentSubBank()
-        self.subscription.go(subbank=self.currentSubBank, params={'typ': 'doc'})
-        link_to_bank_statements = self.page.get_link_to_bank_statements()
-        self.location(link_to_bank_statements)
+        return self.iter_documents_for_account(subscription.id, subscription.label)
 
+    def iter_documents_for_account(self, account_id, account_label):
+        self.get_current_sub_bank()
+
+        # Retrying to avoid a random ServerError on iban page
+        go_iban = retry(ServerError)(self.iban.go)
+        go_iban(subbank=self.currentSubBank)
+        iban_document = self.page.get_iban_document(account_label, account_id)
+        if iban_document:
+            yield iban_document
+        #retrying to avoid random Server error
+        go_subscription = retry(ServerError)(self.subscription.go)
+        go_subscription(subbank=self.currentSubBank, params={'typ': 'doc'})
+
+        if self.info_doc_page.is_here():
+            # Same precedent request is sufficient to skip the redirected page, with no relevant information, we're on
+            go_subscription(subbank=self.currentSubBank, params={'typ': 'doc'})
+
+        access_not_allowed_msg = "Vous ne disposez pas des droits nécessaires pour accéder à cette partie de l'application."
+        if access_not_allowed_msg in self.page.error_msg():
+            self.logger.warning("Bank user account has insufficient right to access the documents page")
+            return
+
+        link_to_bank_statements = self.page.get_link_to_bank_statements()
+        if not link_to_bank_statements:
+            return
+
+        self.location(link_to_bank_statements)
         security_limit = 10
 
-        internal_account_id = self.page.get_internal_account_id_to_filter_subscription(subscription)
+        internal_account_id = self.page.get_internal_account_id_to_filter_subscription(account_id)
         if internal_account_id:
             params = {
                 '_pid': 'SelectDocument',
@@ -1224,22 +1601,16 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 'k_typePageDoc': 'DocsFavoris'
             }
             for i in range(security_limit):
-                params['k_numPage'] = i+1
+                params['k_numPage'] = i + 1
                 # there is no way to match a document to a subscription for sure
                 # so we have to ask the bank only documents for the wanted subscription
 
-                self.subscription.go(params=params, subbank=self.currentSubBank)
-                for doc in self.page.iter_documents(sub_id=subscription.id):
+                go_subscription(params=params, subbank=self.currentSubBank)
+                for doc in self.page.iter_documents(sub_id=account_id):
                     yield doc
 
                 if self.page.is_last_page():
                     break
-        self.iban.go(subbank=self.currentSubBank)
-        iban_document = self.page.get_iban_document(subscription)
-        if iban_document:
-            yield iban_document
-
-
 
     @need_login
     def iter_emitters(self):
@@ -1248,7 +1619,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         are only allowed to do internal transfers.
         """
         emitter_ids = []
-        self.getCurrentSubBank()
+        self.get_current_sub_bank(force=True)
         if not self.is_new_website:
             self.logger.info('On old creditmutuel website')
             raise NotImplementedError()

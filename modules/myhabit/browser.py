@@ -2,20 +2,20 @@
 
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 from datetime import datetime
@@ -23,19 +23,18 @@ from decimal import Decimal
 
 from requests.exceptions import Timeout
 
-from weboob.browser import URL, LoginBrowser, need_login
-from weboob.browser.pages import HTMLPage
-from weboob.capabilities.base import Currency
-from weboob.capabilities.shop import Item, Order, OrderNotFound, Payment
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
-from weboob.tools.compat import unicode
+from woob.browser import URL, LoginBrowser, need_login
+from woob.browser.pages import HTMLPage
+from woob.capabilities.base import Currency
+from woob.capabilities.shop import Item, Order, OrderNotFound, Payment
+from woob.exceptions import BrowserIncorrectPassword
+from woob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
 
 __all__ = ['MyHabit']
 
 
 def cleanup(s):
-    return u' '.join(unicode(s).split())
+    return u' '.join(str(s).split())
 
 
 class MyHabitPage(HTMLPage):
@@ -75,7 +74,7 @@ class HistoryPage(MyHabitPage):
 class OrderPage(MyHabitPage):
     def order(self, url):
         order = Order(id=self.order_number())
-        order.url = unicode(url)
+        order.url = str(url)
         order.date = self.order_date()
         order.tax = self.tax()
         order.shipping = self.shipping()
@@ -100,7 +99,7 @@ class OrderPage(MyHabitPage):
             price = span.xpath('span[@class="itemPrice"]/text()')[0]
             price = Decimal(qty)*AmTr.decimal_amount(price)
             item = Item()
-            item.url = unicode(url)
+            item.url = url
             item.label = cleanup(label)
             item.price = price
             yield item

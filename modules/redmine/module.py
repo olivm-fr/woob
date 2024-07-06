@@ -2,31 +2,30 @@
 
 # Copyright(C) 2010-2011 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.capabilities.content import CapContent, Content
-from weboob.capabilities.bugtracker import CapBugTracker, Issue, Project, User, \
+from woob.capabilities.content import CapContent, Content
+from woob.capabilities.bugtracker import CapBugTracker, Issue, Project, User, \
                                            Version, Status, Update, Attachment, \
                                            Query, Change
-from weboob.capabilities.collection import CapCollection, Collection, CollectionNotFound
-from weboob.tools.backend import Module, BackendConfig
-from weboob.exceptions import BrowserHTTPNotFound
-from weboob.tools.compat import basestring, unicode
-from weboob.tools.value import ValueBackendPassword, Value
+from woob.capabilities.collection import CapCollection, Collection, CollectionNotFound
+from woob.tools.backend import Module, BackendConfig
+from woob.exceptions import BrowserHTTPNotFound
+from woob.tools.value import ValueBackendPassword, Value
 
 from .browser import RedmineBrowser
 
@@ -38,7 +37,7 @@ class RedmineModule(Module, CapContent, CapBugTracker, CapCollection):
     NAME = 'redmine'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = 'The Redmine project management web application'
     LICENSE = 'AGPLv3+'
     CONFIG = BackendConfig(Value('url',      label='URL of the Redmine website', regexp=r'https?://.*'),
@@ -57,7 +56,7 @@ class RedmineModule(Module, CapContent, CapBugTracker, CapCollection):
         return id.split('/', 2)
 
     def get_content(self, id, revision=None):
-        if isinstance(id, basestring):
+        if isinstance(id, str):
             content = Content(id)
         else:
             content = id
@@ -99,7 +98,7 @@ class RedmineModule(Module, CapContent, CapBugTracker, CapCollection):
                         for project in self.iter_projects()]
             elif len(split_path) == 1:
                 query = Query()
-                query.project = unicode(split_path[0])
+                query.project = str(split_path[0])
                 return self.iter_issues(query)
 
     def validate_collection(self, objs, collection):
@@ -131,7 +130,7 @@ class RedmineModule(Module, CapContent, CapBugTracker, CapCollection):
         if not text:
             return None
 
-        if isinstance(text, basestring) and text.isdigit():
+        if isinstance(text, str) and text.isdigit():
             return text
 
         for value, key in availables:

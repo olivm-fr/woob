@@ -2,56 +2,57 @@
 
 # Copyright(C) 2013 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 import re
 import base64
 import datetime
 from io import BytesIO
+
 from PIL import Image
 
-from weboob.tools.json import json
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage
-from weboob.browser.elements import ListElement, TableElement, ItemElement, method, DictElement
-from weboob.browser.filters.standard import (
-    Regexp, Field, CleanText, CleanDecimal, Eval, Currency, Date,
+from woob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage
+from woob.browser.elements import ListElement, TableElement, ItemElement, method, DictElement
+from woob.browser.filters.standard import (
+    Coalesce, Regexp, Field, CleanText, CleanDecimal, Eval, Currency, Date,
 )
-from weboob.browser.filters.html import Link, TableCell, Attr, AttributeNotFound
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.exceptions import ActionNeeded
+from woob.browser.filters.html import (
+    Attr, AttributeNotFound, Link, TableCell, XPathNotFound,
+)
+from woob.browser.filters.json import Dict
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.base import NotAvailable, empty
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
 
 class CarrefourBanqueKeyboard(object):
     symbols = {
-        '0': '00111001111110111011011001111100011110001111000111100111110011111111100111100',
-        '1': '00011000011100011110011011000001100000110000011000001100000110000011000001100',
-        '2': '00111001111110110011100001110000110000111000111000011000011000011111111111111',
-        '3': '01111001111110100011100001110001110011110000111100000111000011111111111111110',
-        '4': '00001100001110001111000111100110110110011011001101111111111111100001100000110',
-        '5': '01111101111110111000011000001111100111111000001110000111000011111111101111100',
-        '6': '00011100111110111000011000001111110111111111001111100011110001111111110111110',
-        '7': '11111111111111000011100001100000110000110000011000011100001100001110000110000',
-        '8': '00111001111110110011111001111111110011110011111101100111110001111111110111110',
-        '9': '00110001111110110011111000111100011111111111111110000011000011011111101111100'
+        '0': '11100000001111100000000011100000000000110000010000010000011100001000001110000000001111000000000111100000000011111000000001111100000000111100000000011111000000001111000000000111100000000001110000000000111000011000001000001100000000001111000000000111110000000111',
+        '1': '11111110001111111110000111111110000011111110000001111100000000111110000000011111000000001111100010000111110011000011111111100001111111110000111111111000011111111100001111111110000111111111000011111111100001111111110000111111111000011111111100001111111111111111',
+        '2': '11000000011111000000000011000000000001100001110000011011111100001111111110000111111111000011111111100011111111100001111111100001111111100000111111100000111111100000111111100000111111110000111111110000111111110000000000001000000000000100000000000011111111111111',
+        '3': '11000000001110000000000011000000000000110011111000011111111100001111111110000111111111000111111110000011110000000011111000000001111110000000011111111110000111111111000011111111110001111111110000101111111000010000000000001000000000001100000000001111111111111111',
+        '4': '11111110000011111111000001111111000000111111000000011111000000001111100010000111100001000011100001100001100001110000110001111000010000111100001000111110000100000000000000000000000000000000000000011111111000011111111100001111111110000111111111000011111111111111',
+        '5': '10000000000111000000000011100000000001110001111111110000111111111000011111111100001111111110000000000111000000000001100000000000011111111000001111111110000111111111100011111111110001111111110000101111110000010000000000011000000000001100000000011111111111111111',
+        '6': '11110000000111110000000011110000000001110000011111111000111111111000011111111100001111111110001000000111000000000001100000000000010000011100001000011111000100011111100010000111110001000011111000100001111000011000000000011110000000001111100000011111111111111111',
+        '7': '00000000000000000000000000000000000000011111111100001111111100001111111110000111111111000011111111000011111111100001111111100001111111110000111111110000111111111000011111111000011111111100001111111100000111111110000111111110000011111111000011111111111101111111',
+        '8': '11100000001111000000000001100000000000100001111100000000111110000000011111000010000111000011000000000001110000000011111000000000111000000000001000001100000000001111100000001111111000000011111100000001111100000000000000000100000000000111000000000111111111111111',
+        '9': '11100000001111000000000011100000000000100001111000000000111110000000111111000000011111100000000111110000000011110000000000000000001000000000000110000000100011111111100001111111110000111111110000111111110000011000000000011100000000011110000000111111111111111111',
     }
 
     def __init__(self, data_code):
@@ -63,11 +64,11 @@ class CarrefourBanqueKeyboard(object):
             matrix = img.load()
             s = ""
             # The digit is only displayed in the center of image
-            for y in range(11, 22):
-                for x in range(14, 21):
+            for y in range(15, 35):
+                for x in range(19, 32):
                     (r, g, b) = matrix[x, y]
                     # If the pixel is "white" enough
-                    if r + g + b > 600:
+                    if r + g + b > 700:
                         s += "1"
                     else:
                         s += "0"
@@ -107,6 +108,14 @@ def MyDecimal(*args, **kwargs):
 
 
 class LoginPage(HTMLPage):
+    def build_doc(self, data):
+        # allow_redirects must be set to false for the password form submit
+        # so that SCA can be detected ahead. That makes lxml crash because
+        # some redirections are totally blank page
+        if not len(data):
+            data = b'<html></html>'
+        return super(LoginPage, self).build_doc(data)
+
     def on_load(self):
         """
         website may have identify us as a robot, if it happens login form won't be available in login page
@@ -114,7 +123,7 @@ class LoginPage(HTMLPage):
         """
         try:
             attr = Attr('head/meta', 'name')(self.doc)
-        except AttributeNotFound:
+        except (AttributeNotFound, XPathNotFound):  # XPathNotFound for blank pages cases
             # website have identify us as a human ;)
             return
 
@@ -128,44 +137,46 @@ class LoginPage(HTMLPage):
     def enter_login(self, username):
         form = self.get_form(nr=1)
         form['name'] = username
+        form['op'] = 'Valider'
+        form['cpass'] = ''
+        form.pop('form_number')
         form.submit()
 
     def get_message_if_old_login(self):
-        return CleanText('//div[@class="messages error"]', children=False)(self.doc)
+        return CleanText('//div[contains(@class, "alert")]', children=False)(self.doc)
+
+    def get_error_message(self):
+        return CleanText('//div[contains(@class, "alert")]')(self.doc)
 
     def enter_password(self, password):
         data_code = {}
         for img in self.doc.xpath('//img[@class="digit"]'):
             data_code[img.attrib['data-code']] = base64.b64decode(re.search(r'base64,(.*)', img.attrib['src']).group(1))
-
         codestring = CarrefourBanqueKeyboard(data_code).get_string_code(password)
 
         form = self.get_form(nr=1)
         form['pass'] = '*' * len(password)
         form['cpass'] = codestring
+        form['op'] = 'Me+connecter'
         form.pop('form_number')  # don't remember me
 
-        form.submit()
+        form.submit(allow_redirects=False)
 
-    def check_action_needed(self):
-        # The JavaScript variable 'tc_vars' is supposed to contain the 'user_login' value
-        # and 'user_login'='logged'. If there is no user_login and 'user_login'='unlogged',
-        # the customer has to validate an OTP by SMS.
-        raw_text = Regexp(
-            CleanText('//script[contains(text(), "tc_vars")]'),
-            r'var tc_vars = (\{[^]]+\})'
+    def get_dsp2_auth_code(self):
+        return Regexp(
+            CleanText('//script[contains(text(), "popin_dsp2")]', replace=[('-', '_')]),
+            r'"popin_dsp2":"(\w+)"',
+            default=''
         )(self.doc)
-        json_text = json.loads(raw_text)
-        if not json_text['user_ID'] and json_text['user_login'] == 'unlogged':
-            # The real message contains the user's phone number, so we send a generic message.
-            raise ActionNeeded(
-                "Veuillez vous connecter sur le site de Carrefour Banque pour "
-                "recevoir un code par SMS afin d'accéder à votre Espace Client."
-            )
-        assert False, 'Unhandled error: password submission failed and we are still on Login Page.'
 
+
+class KYCPage(HTMLPage):
     def get_error_message(self):
-        return CleanText('//div[@class="messages error"]', default=None)(self.doc)
+        return CleanText(
+            '//form[contains(@id, "user-login-enrollment-details-verify-form")]'
+            + '//section[contains(@class, "outerdiv")]//p'
+        )(self.doc)
+
 
 class MaintenancePage(HTMLPage):
     def get_message(self):
@@ -194,14 +205,17 @@ class item_account_generic(ItemElement):
     klass = Account
 
     def obj_balance(self):
-        balance = CleanDecimal('.//div[contains(@class, "right_col")]//h2[1]', replace_dots=True)(self)
+        balance = CleanDecimal.French('.//div[@class="catre_col_one"]/h3')(self)
         if Field('type')(self) in (Account.TYPE_LOAN, ):
             return -balance
         return balance
 
-    obj_currency = Currency('.//div[contains(@class, "right_col")]//h2[1]')
-    obj_label = CleanText('.//div[contains(@class, "leftcol")]//h2[1]')
-    obj_id = Regexp(CleanText('.//div[contains(@class, "leftcol")]//p'), ":\s+([\d]+)")
+    obj_currency = Currency('.//div[@class="catre_col_one"]/h3')
+    obj_label = CleanText('.//div[@class="right_col_wrapper"]/h2')
+    obj_id = Regexp(
+        CleanText('.//p[contains(text(), "N°")]'),
+        r'N°\s+(\d+)'
+    )
     obj_number = Field('id')
 
     def obj_url(self):
@@ -211,13 +225,13 @@ class item_account_generic(ItemElement):
 
 
 class iter_history_generic(Transaction.TransactionsElement):
-    head_xpath = u'//div[*[contains(text(), "opérations")]]/table//thead/tr/th'
-    item_xpath = u'//div[*[contains(text(), "opérations")]]/table/tbody/tr[td]'
+    head_xpath = '//div[*[contains(text(), "opérations")]]/table//thead/tr/th'
+    item_xpath = '//div[*[contains(text(), "opérations")]]/table/tbody/tr[td]'
 
     col_debittype = 'Mode'
 
     def next_page(self):
-        next_page = Link(u'//a[contains(text(), "précédentes")]', default=None)(self)
+        next_page = Link('//a[contains(text(), "précédentes")]', default=None)(self)
         if next_page:
             return "/%s" % next_page
 
@@ -243,36 +257,48 @@ class HomePage(LoggedPage, HTMLPage):
 
         class item(item_account_generic):
             obj_type = Account.TYPE_LOAN
+            obj_label = CleanText('.//div[@class="block_pret block_synthproduct"]/h2')
+            obj_id = Regexp(
+                CleanText('.//p[contains(text(), "Réf. dossier")]'),
+                r'Réf. dossier :\s+(\d+)'
+            )
+            obj_currency = Currency('.//span[contains(., "Restants à rembourser")]//following-sibling::span')
+
+            obj_balance = CleanDecimal.French(
+                './/span[contains(., "Restants à rembourser")]//following-sibling::span',
+                sign='-'
+            )
 
     @method
     class iter_card_accounts(ListElement):  # PASS cards
-        item_xpath = '//div/div[contains(./h2, "Carte et Crédit") and contains(./p, "Numéro de compte")]/..'
+        item_xpath = '//div[div[contains(./h2, "Carte et Crédit") and contains(./p, "N°")]]'
 
         class item(item_account_generic):
             obj_type = Account.TYPE_CARD
+            obj_label = CleanText('.//div[@class="block_cartepass block_synthproduct"]/h2')
+            obj_currency = Coalesce(
+                Currency('.//p[contains(., "encours depuis le")]//preceding-sibling::h3'),
+                Currency('.//span[contains(., "Plafond")]//following-sibling::span'),
+                Currency('.//span[contains(., "Disponible à crédit")]//following-sibling::span'),
+            )
 
             def obj_balance(self):
-                available = CleanDecimal(
-                    './/p[contains(., "encours depuis le")]//preceding-sibling::h2',
-                    default=None,
-                    replace_dots=True
+                available = CleanDecimal.French(
+                    './/p[contains(., "encours depuis le")]//preceding-sibling::h3',
+                    default=NotAvailable,
                 )(self)
-                if available is not None:
+                if available:
                     return -available
 
                 # No "en cours" available: return - (total_amount - available_amount)
                 total_amount = CleanDecimal.French(
-                    Regexp(
-                        CleanText('.//p[text()[contains(., "plafond de")]]'),
-                        r'plafond de ([0-9, ]+)',
-                        default=NotAvailable
-                    ),
-                    default=NotAvailable
+                    './/span[contains(., "Plafond")]//following-sibling::span',
+                    default=NotAvailable,
                 )(self)
 
                 available_amount = CleanDecimal.French(
-                    './/p[contains(text(), "disponibles à crédit")]//preceding-sibling::h2',
-                    default=NotAvailable
+                    './/span[contains(., "Disponible à crédit")]//following-sibling::span',
+                    default=NotAvailable,
                 )(self)
 
                 if empty(total_amount) or empty(available_amount):
@@ -282,34 +308,57 @@ class HomePage(LoggedPage, HTMLPage):
     @method
     class iter_saving_accounts(ListElement):  # livrets
         item_xpath = (
-            '//div[div[(contains(./h2, "Livret Carrefour") or contains(./h2, "Epargne")) and contains(./p, "Numéro de compte")]]'
+            '//div[div[(contains(./h2, "Livret Carrefour") or contains(./h2, "Epargne")) and contains(./p, "N°")]]'
         )
 
         class item(item_account_generic):
             obj_type = Account.TYPE_SAVINGS
-            obj_url = Link('.//a[contains(., "Historique des opérations")]')
+            obj_label = Coalesce(
+                CleanText('.//div[@class="right_col_wrapper"]/h2'),
+                CleanText('.//div[@class="block_compteproduct block_synthproduct"]/h2'),
+            )
+            obj_url = Coalesce(
+                Link('.//a[contains(., "Historique des opérations")]', default=NotAvailable),
+                Link('..//div//a[contains(., "Historique des opérations")]', default=NotAvailable),
+            )
+            obj_currency = Currency('.//span[contains(., "Montant")]//following-sibling::span')
 
             def obj_balance(self):
-                val = CleanDecimal('.//a[contains(text(), "versement")]//preceding-sibling::h2', replace_dots=True, default=NotAvailable)(self)
+                val = CleanDecimal.French(
+                    './/span[contains(., "Montant")]//following-sibling::span',
+                    default=NotAvailable
+                )(self)
                 if val is not NotAvailable:
                     return val
-                val = CleanDecimal(Regexp(CleanText('./div[@class="right_col_wrapper"]//h2'), r'([\d ,]+€)'), replace_dots=True)(self)
+                val = CleanDecimal.French(
+                    Regexp(
+                        CleanText('.//div[@class="catre_col_one"]/h3'),
+                        r'([\d ,]+€)'
+                    ),
+                )(self)
                 return val
 
     @method
     class iter_life_accounts(ListElement):  # Assurances vie
-        item_xpath = '//div/div[(contains(./h2, "Carrefour Horizons") or contains(./h2, "Carrefour Avenir")) and contains(./p, "Numéro de compte")]/..'
+        item_xpath = '//div[div[(contains(./h2, "Carrefour Horizons") or contains(./h2, "Carrefour Avenir")) and contains(./p, "N°")]]'
 
         class item(item_account_generic):
             obj_type = Account.TYPE_LIFE_INSURANCE
+            obj_label = CleanText('.//div[@class="block_compteproduct block_synthproduct"]/h2')
+            obj_balance = CleanDecimal.French('.//span[contains(., "Montant")]//following-sibling::span')
+            obj_currency = Currency('.//span[contains(., "Montant")]//following-sibling::span')
 
             def obj_url(self):
                 acc_number = Field('id')(self)
-                xpath_link = '//li[contains(., "{acc_number}")]/ul/li/a[contains(text(), "Dernieres opérations")]'.format(acc_number=acc_number)
+                xpath_link = (
+                    '//li[contains(., "{acc_number}")]/ul/li/a[contains(text(), "opérations")]'
+                ).format(acc_number=acc_number)
                 return Link(xpath_link)(self)
 
             def obj__life_investments(self):
-                xpath_link = '//li[contains(., "{acc_number}")]/ul/li/a[contains(text(), "Solde")]'.format(acc_number=Field('id')(self))
+                xpath_link = '//li[contains(., "{acc_number}")]/ul/li/a[contains(text(), "Solde")]'.format(
+                    acc_number=Field('id')(self)
+                )
                 return Link(xpath_link)(self)
 
 
@@ -329,17 +378,17 @@ class SavingHistoryPage(LoggedPage, HTMLPage):
         item_xpath = '//table[@id="creditHistory" or @id="TransactionHistory"]/tbody/tr'
 
 
-class LifeInvestmentsPage(LoggedPage, HTMLPage):
+class LifeHistoryInvestmentsPage(TransactionsPage):
     @method
     class get_investment(TableElement):
-        item_xpath = '//table[@id="assets"]/tbody/tr[position() > 1]'
-        head_xpath = '//table[@id="assets"]/tbody/tr[1]/td'
+        item_xpath = '//table[@id="assets"]/tbody/tr'
+        head_xpath = '//table[@id="assets"]/thead/tr[1]/th'
 
-        col_label = u'Fonds'
-        col_quantity = u'Nombre de parts'
-        col_unitvalue = u'Valeur part'
-        col_valuation = u'Total'
-        col_portfolio_share = u'Répartition'
+        col_label = 'Fonds'
+        col_quantity = 'Nombre de parts'
+        col_unitvalue = 'Valeur part'
+        col_valuation = 'Total'
+        col_portfolio_share = 'Répartition'
 
         class item(ItemElement):
             klass = Investment
@@ -349,10 +398,6 @@ class LifeInvestmentsPage(LoggedPage, HTMLPage):
             obj_unitvalue = MyDecimal(TableCell('unitvalue'))
             obj_valuation = MyDecimal(TableCell('valuation'))
             obj_portfolio_share = Eval(lambda x: x / 100, MyDecimal(TableCell('portfolio_share')))
-
-
-class LifeHistoryPage(TransactionsPage):
-    pass
 
 
 class LoanHistoryPage(TransactionsPage):
@@ -391,7 +436,11 @@ class CardHistoryJsonPage(LoggedPage, JsonPage):
         #
         # this function converts the response to the good format if needed
         if isinstance(self.doc['tab_historique'], dict):
-            self.doc['tab_historique'] = sorted(self.doc['tab_historique'].values(), key=lambda x: x['timestampOperation'], reverse=True)
+            self.doc['tab_historique'] = sorted(
+                self.doc['tab_historique'].values(),
+                key=lambda x: x['timestampOperation'],
+                reverse=True
+            )
 
         elif self.doc['tab_historique'] is None:
             # No transaction available, set value to empty dict
@@ -406,7 +455,10 @@ class CardHistoryJsonPage(LoggedPage, JsonPage):
             klass = Transaction
 
             def obj_date(self):
-                return datetime.datetime.strptime(CleanText(Dict('timestampOperation'))(self), "%Y-%m-%d-%H.%M.%S.%f").date()
+                return datetime.datetime.strptime(
+                    CleanText(Dict('timestampOperation'))(self),
+                    "%Y-%m-%d-%H.%M.%S.%f"
+                ).date()
 
             obj_rdate = Date(CleanText(Dict('date')), dayfirst=True)
             obj_raw = CleanText(Dict('label'))

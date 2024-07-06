@@ -1,48 +1,42 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Théo Dorée
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-from weboob.browser.pages import HTMLPage, LoggedPage, FormNotFound, PartialHTMLPage, pagination
-from weboob.browser.elements import ItemElement, ListElement, method
-from weboob.browser.filters.html import Link, Attr
-from weboob.browser.filters.standard import (
+from woob.browser.exceptions import ServerError
+from woob.browser.pages import HTMLPage, LoggedPage, FormNotFound, PartialHTMLPage, pagination, JsonPage
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.html import Link, Attr, HasElement
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Env, Regexp, Format,
-    Field, Currency, RegexpError, Date, Async, AsyncLoad,
-    Coalesce,
+    Field, Currency, Date, Coalesce,
 )
-from weboob.capabilities.bill import DocumentTypes, Bill, Subscription
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.date import parse_french_date
+from woob.capabilities.bill import Bill, Subscription
+from woob.capabilities.base import NotAvailable
+from woob.tools.date import parse_french_date
 
 
 class HomePage(HTMLPage):
     def get_login_link(self):
-        return self.doc.xpath('//a[./span[contains(., "%s")]]/@href' % self.browser.L_SIGNIN)[0]
+        return Attr('//a[@data-nav-role="signin"]', 'href')(self.doc)
 
     def get_panel_link(self):
         return Link('//a[contains(@href, "homepage.html") and has-class(@nav-link)]')(self.doc)
-
-
-class PanelPage(LoggedPage, HTMLPage):
-    def get_sub_link(self):
-        return CleanText('//a[@class="ya-card__whole-card-link" and contains(@href, "cnep")]/@href')(self.doc)
 
 
 class SecurityPage(HTMLPage):
@@ -52,7 +46,7 @@ class SecurityPage(HTMLPage):
         # amazon send us otp in two cases:
         # - if it's the first time we connect to this account for an ip => manage it normally
         # - if user has activated otp in his options => raise ActionNeeded, an ask user to deactivate it
-        form = self.get_form(xpath='//form[.//h1]')
+        form = self.get_form(xpath='//form[@action="verify" or contains(@action, "signin")]')
         url = form.url.replace(self.browser.BASEURL, '')
 
         # verify: this otp is sent by amazon when we connect to the account for the first time from a new ip or computer
@@ -64,7 +58,7 @@ class SecurityPage(HTMLPage):
         return CleanText('//div[@class="a-box-inner"]/p')(self.doc)
 
     def send_code(self):
-        form = self.get_form()
+        form = self.get_form(submit='//input[@type="submit" and @value="verifyCaptcha"]')
         if form.el.attrib.get('id') == 'auth-select-device-form':
             # the first is sms, second email, third application
             # the first item is automatically selected
@@ -92,7 +86,7 @@ class SecurityPage(HTMLPage):
         return Attr('//img[@alt="captcha"]', 'src', default=NotAvailable)(self.doc)
 
     def resolve_captcha(self, captcha_response):
-        form = self.get_form('//form[@action="verify"]')
+        form = self.get_form('//form[@action="verify"]', submit='//input[@type="submit" and @value="verifyCaptcha"]')
         form['cvf_captcha_input'] = captcha_response
         form.submit()
 
@@ -106,26 +100,69 @@ class SecurityPage(HTMLPage):
         return bool(self.doc.xpath('//form[@id="auth-select-device-form"]'))
 
 
-class ApprovalPage(HTMLPage, LoggedPage):
+class ApprovalPage(HTMLPage):
     def get_msg_app_validation(self):
-        msg = CleanText('//span[has-class("transaction-approval-word-break")]')
+        msg = CleanText('//div[has-class("a-spacing-large")]/span[has-class("transaction-approval-word-break")]')
         sending_address = CleanText('//div[@class="a-row"][1]')
-        msg = Format('%s %s', msg, sending_address)
-        return msg(self.doc)
+        return Format('%s %s', msg, sending_address)(self.doc)
 
     def get_link_app_validation(self):
-        return Link('//a[@id="resend-approval-link"]')(self.doc)
+        return Attr('//input[@name="openid.return_to"]', 'value')(self.doc)
 
     def resend_link(self):
         form = self.get_form(id='resend-approval-form')
         form.submit()
+
+    def get_polling_request(self):
+        form = self.get_form(id="pollingForm")
+        return form.request
+
+
+class PollingPage(HTMLPage):
+    def get_approval_status(self):
+        return Attr('//input[@name="transactionApprovalStatus"]', 'value', default=None)(self.doc)
+
+
+class CountriesPage(JsonPage):
+    def get_csrf_token(self):
+        return Dict('data/inputs/token')(self.doc)
 
 
 class LanguagePage(HTMLPage):
     pass
 
 
+class AccountSwitcherLoadingPage(HTMLPage):
+    def is_here(self):
+        return bool(self.doc.xpath('//div[@id="ap-account-switcher-container"]'))
+
+    def get_arb_token(self):
+        # Get the token from attribute data-arbToken (data-arbtoken using the Attr filter)
+        return Attr('//div[@id="ap-account-switcher-container"]', 'data-arbtoken')(self.doc)
+
+
+class AccountSwitcherPage(PartialHTMLPage):
+    def validate_account(self):
+        form = self.get_form(xpath='//form[@action="/ap/switchaccount"]')
+        form['switch_account_request'] = Attr('//a[@data-name="switch_account_request"]', 'data-value')(self.doc)
+        form.submit()
+
+    def get_add_account_link(self):
+        return Link('//a[@id="cvf-account-switcher-add-accounts-link"]')(self.doc)
+
+    def has_account_to_switch_to(self):
+        return HasElement('//form[@action="/ap/switchaccount"]')(self.doc)
+
+
+class SwitchedAccountPage(JsonPage):
+    def get_redirect_url(self):
+        return Dict('redirectUrl')(self.doc)
+
+
 class LoginPage(PartialHTMLPage):
+    def is_here(self):
+        return not bool(self.doc.xpath('//div[@id="ap-account-switcher-container"]'))
+
     ENCODING = 'utf-8'
 
     def login(self, login, password, captcha=None):
@@ -140,19 +177,25 @@ class LoginPage(PartialHTMLPage):
         # we catch redirect to check if the browser send a notification for the user
         form.submit(allow_redirects=False)
 
-    def has_captcha(self):
-        return self.doc.xpath('//div[@id="image-captcha-section"]//img[@id="auth-captcha-image"]/@src')
+    def get_captcha(self):
+        if self.captcha_form_is_here():
+            return Attr('//form[@action="/errors/validateCaptcha"]//img', 'src', default=None)(self.doc)
+        return Attr('//img[@id="auth-captcha-image"]', 'src', default=None)(self.doc)
 
-    def get_response_form(self):
-        try:
-            form = self.get_form(id='auth-mfa-form')
-            return form
-        except FormNotFound:
-            form = self.get_form(nr=0)
-            return form
+    def get_captcha_form(self):
+        if self.captcha_form_is_here():
+            return self.get_form(xpath='//form[@action="/errors/validateCaptcha"]')
+        return self.get_form(name='signIn')
+
+    def captcha_form_is_here(self):
+        return HasElement('//form[@action="/errors/validateCaptcha"]')(self.doc)
 
     def get_error_message(self):
-        return CleanText('//div[@id="auth-error-message-box"]')(self.doc)
+        return Coalesce(
+            CleanText('//div[@id="auth-error-message-box"]'),
+            CleanText('//div[not(@id="auth-cookie-warning-message")]/div/h4[@class="a-alert-heading"]'),
+            default=NotAvailable,
+        )(self.doc)
 
 
 class PasswordExpired(HTMLPage):
@@ -165,13 +208,13 @@ class SubscriptionsPage(LoggedPage, HTMLPage):
     class get_item(ItemElement):
         klass = Subscription
 
-        def obj_subscriber(self):
-            try:
-                return Regexp(CleanText('//div[contains(@class, "a-fixed-right-grid-col")]'), self.page.browser.L_SUBSCRIBER)(self)
-            except RegexpError:
-                return self.page.browser.username
-
         obj_id = 'amazon'
+
+        def obj_subscriber(self):
+            return CleanText(
+                '//h1[@class="mcx-profile__name a-size-large"]',
+                default=NotAvailable,
+            )(self)
 
         def obj_label(self):
             return self.page.browser.username
@@ -189,7 +232,7 @@ class HistoryPage(LoggedPage, HTMLPage):
 class DocumentsPage(LoggedPage, HTMLPage):
     @pagination
     @method
-    class iter_documents(ListElement):
+    class iter_summary_documents(ListElement):
         item_xpath = '//div[contains(@class, "order") and contains(@class, "a-box-group")]'
 
         def next_page(self):
@@ -197,29 +240,33 @@ class DocumentsPage(LoggedPage, HTMLPage):
 
         class item(ItemElement):
             klass = Bill
-            load_details = Field('_pre_url') & AsyncLoad
 
-            obj__simple_id = Coalesce(
+            obj__order_id = Coalesce(
                 CleanText('.//span[contains(text(), "N° de commande")]/following-sibling::span', default=NotAvailable),
                 CleanText('.//span[contains(text(), "Order")]/following-sibling::span'),
             )
-
-            obj_id = Format('%s_%s', Env('subid'), Field('_simple_id'))
-
-            obj__pre_url = Format('/gp/shared-cs/ajax/invoice/invoice.html?orderId=%s&relatedRequestId=%s&isADriveSubscription=&isHFC=',
-                                  Field('_simple_id'), Env('request_id'))
-            obj_label = Format('Facture %s', Field('_simple_id'))
-            obj_type = DocumentTypes.BILL
+            obj_id = Format('%s_%s', Env('subid'), Field('_order_id'))
+            obj_label = Format('Récapitulatif de commande %s', Field('_order_id'))
 
             def obj_date(self):
                 # The date xpath changes depending on the kind of order
                 return Coalesce(
-                    Date(CleanText('.//div[has-class("a-span4") and not(has-class("recipient"))]/div[2]'), parse_func=parse_french_date, dayfirst=True, default=NotAvailable),
-                    Date(CleanText('.//div[has-class("a-span3") and not(has-class("recipient"))]/div[2]'), parse_func=parse_french_date, dayfirst=True, default=NotAvailable),
-                    Date(CleanText('.//div[has-class("a-span2") and not(has-class("recipient"))]/div[2]'), parse_func=parse_french_date, dayfirst=True, default=NotAvailable),
+                    Date(
+                        CleanText('.//div[has-class("a-span4") and not(has-class("recipient"))]/div[2]'),
+                        parse_func=parse_french_date, dayfirst=True, default=NotAvailable
+                    ),
+                    Date(
+                        CleanText('.//div[has-class("a-span3") and not(has-class("recipient"))]/div[2]'),
+                        parse_func=parse_french_date, dayfirst=True, default=NotAvailable
+                    ),
+                    Date(
+                        CleanText('.//div[has-class("a-span2") and not(has-class("recipient"))]/div[2]'),
+                        parse_func=parse_french_date, dayfirst=True, default=NotAvailable
+                    ),
+                    default=NotAvailable,
                 )(self)
 
-            def obj_price(self):
+            def obj_total_price(self):
                 # Some orders, audiobooks for example, are paid using "audio credits", they have no price or currency
                 currency = Env('currency')(self)
                 return CleanDecimal(
@@ -234,25 +281,93 @@ class DocumentsPage(LoggedPage, HTMLPage):
                     default=NotAvailable
                 )(self)
 
-            def obj_url(self):
-                async_page = Async('details').loaded_page(self)
-                url = Coalesce(
-                    Link('//a[@class="a-link-normal" and contains(text(), "Invoice")]', default=NotAvailable),
-                    Link('//a[contains(text(), "Order Details")]', default=NotAvailable),
+            def condition(self):
+                # Sometimes an order can be empty
+                return bool(Coalesce(
+                    CleanText('.//div[has-class("a-span4")]'),
+                    CleanText('.//div[has-class("a-span3")]'),
+                    CleanText('.//div[has-class("a-span2")]'),
                     default=NotAvailable,
-                )(self)
-                if not url:
-                    url = Coalesce(
-                        Link('//a[contains(@href, "download")]|//a[contains(@href, "generated_invoices")]', default=NotAvailable),
-                        Link('//a[contains(text(), "Récapitulatif de commande")]', default=NotAvailable),
-                    )(async_page.doc)
-                return url
-
-            def obj_format(self):
-                if 'summary' in Field('url')(self):
-                    return 'html'
-                return 'pdf'
+                )(self))
 
 
-class DownloadDocumentPage(LoggedPage, PartialHTMLPage):
-    pass
+class InvoiceFilesListPage(LoggedPage, PartialHTMLPage):
+    def is_missing_some_invoices(self):
+        return HasElement(
+            '//a[contains(text(), "Invoice unavailable for some items")]|'
+            + '//a[contains(text(), "Pas de facture disponible pour certains articles")]'
+        )(self.doc)
+
+    @method
+    class iter_invoice_documents(ListElement):
+        item_xpath = '//a[contains(text(), "Facture")]|//a[contains(text(), "Invoice")]'
+
+        class item(ItemElement):
+            klass = Bill
+
+            obj_id = Format('%s-%s', Env('summary_doc_id'), Field('_file_number'))
+            obj__file_number = Regexp(
+                CleanText('.'),
+                r'^(?:Facture(?: ou note de crédit)?|Invoice(?: or Credit note)?) (\d+)$',
+                default=NotAvailable
+            )
+            obj__file_label = Regexp(
+                CleanText('.'),
+                r'^((?:Facture(?: ou note de crédit)?|Invoice(?: or Credit note)?)) \d+$',
+            )
+            obj_date = Env('date')
+            # Will result to "Invoice 123-4567891-2345678-1" or "Invoice or Credit note 123-4567891-2345678-1"
+            obj_label = Format('%s %s-%s', Field('_file_label'), Env('order_id'), Field('_file_number'))
+            obj_url = Link('.')
+            obj_format = 'pdf'
+
+            def condition(self):
+                return Field('_file_number')(self) != NotAvailable
+
+    @method
+    class fill_order_document(ItemElement):
+        # Will result to "Order Summary 123-4567891-2345678" (and in french for the french website)
+        obj_label = Format(
+            '%s %s',
+            CleanText('//a[contains(text(), "Récapitulatif de commande")]|//a[contains(text(), "Order Summary")]'),
+            Env('order_id')
+        )
+
+        def obj_url(self):
+            order_summary_link = Link(
+                '//a[contains(text(), "Récapitulatif de commande")]|//a[contains(text(), "Order Summary")]',
+                default=NotAvailable
+            )(self)
+            # We have to check whether the document is available or not and we have to keep the content to use
+            # it later in obj_format to determine if this document is a PDF. We can't verify this information
+            # with a HEAD request since Amazon doesn't allow those requests (405 Method Not Allowed)
+            if order_summary_link:
+                try:
+                    self.page.get_or_fetch_summary_content(self.obj.id, order_summary_link)
+                except ServerError:
+                    # For some orders (witnessed for 1 order right now) amazon respond with a status code 500
+                    # It's also happening using a real browser
+                    return NotAvailable
+            return order_summary_link
+
+        def obj_format(self):
+            url = Field('url')(self)
+            if not url:
+                return NotAvailable
+
+            content = self.page.get_or_fetch_summary_content(self.obj.id, url)
+            # Summary documents can be a PDF file (seems to be rare) or an
+            # HTML file but there are no hints of it before trying to get the
+            # document
+            if content[:4] != b'%PDF':
+                return 'html'
+
+            # Log those cases to check if they're still occurring
+            self.logger.warning('The summary document is a PDF instead instead of an HTML page')
+            return 'pdf'
+
+    def get_or_fetch_summary_content(self, doc_id, url):
+        if not self.browser.summary_documents_content.get(doc_id):
+            self.browser.summary_documents_content[doc_id] = self.browser.open(url).content
+
+        return self.browser.summary_documents_content[doc_id]

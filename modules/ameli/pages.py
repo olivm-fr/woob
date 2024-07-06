@@ -1,46 +1,107 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2019      Budget Insight
+# Copyright(C) 2019 Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 import re
-
 from hashlib import sha1
+from html import unescape
 
-from weboob.browser.elements import method, ListElement, ItemElement, DictElement
-from weboob.browser.filters.html import Link
-from weboob.browser.filters.standard import CleanText, Regexp, CleanDecimal, Currency, Field, Env, Format
-from weboob.browser.filters.json import Dict
-from weboob.browser.pages import LoggedPage, HTMLPage, PartialHTMLPage, RawPage, JsonPage
-from weboob.capabilities.bill import Subscription, Bill, Document, DocumentTypes
-from weboob.exceptions import BrowserUnavailable
-from weboob.tools.date import parse_french_date
-from weboob.tools.json import json
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
+from woob.browser.filters.html import Attr, Link
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Env, Field, Format, Regexp
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, PartialHTMLPage, RawPage
+from woob.capabilities.address import PostalAddress
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bill import Bill, Document, DocumentTypes, Subscription
+from woob.capabilities.profile import Person
+from woob.exceptions import BrowserUnavailable
+from woob.tools.date import parse_french_date
+from woob.tools.json import json
 
 
 class LoginPage(HTMLPage):
+    def is_here(self):
+        return self.doc.xpath('//form[contains(@id, "CompteForm")]') or self.doc.xpath('//div[@id="loginPage"]')
+
     def login(self, username, password, _ct):
         form = self.get_form(id='connexioncompte_2connexionCompteForm')
         form['connexioncompte_2numSecuriteSociale'] = username
         form['connexioncompte_2codeConfidentiel'] = password
         form['_ct'] = _ct
         form.submit()
+
+    def get_error_message(self):
+        return Coalesce(
+            CleanText('//div[@id="loginPage"]//div[has-class("zone-alerte") and not(has-class("hidden"))]/span'),
+            CleanText('//div[@class="centrepage compte_bloque"]//p[@class="msg_erreur"]'),
+            default=""
+        )(self.doc)
+
+    def is_direct_login_disabled(self):
+        info_message = (
+            'Suite à une opération de maintenance, cliquez sur FranceConnect et '
+            + 'utilisez vos identifiants ameli pour accéder à votre compte.'
+        )
+        return info_message in CleanText('//div[@id="idBlocCnx"]/div/p')(self.doc)
+
+
+class LoginContinuePage(HTMLPage):
+    def get_action_needed_url(self):
+        # Url we need is in a content attribute formatted like
+        # "0; url=http..."
+        return Regexp(
+            Attr('//div[@class="wlp-bighorn-window-content"]//meta', 'content'),
+            r'url=(.*)',
+            default='',
+        )(self.doc)
+
+
+class NewPasswordPage(HTMLPage):
+    pass
+
+
+class AmeliConnectOpenIdPage(LoginPage):
+    def login(self, username, password):
+        """
+        Submits the form to login with username / password.
+        """
+        form = self.get_form(id='connexioncompte_2connexionCompteForm')
+        form['user'] = username
+        form['password'] = password
+        form.submit()
+
+    def request_otp(self):
+        """
+        Submits the form to request an OTP.
+        """
+        form = self.get_form(id='connexioncompte_2connexionCompteForm', submit='//input[@type="submit" and @name="envoiOTP"]')
+        form['authStep'] = 'ENVOI_OTP'
+        form.submit()
+
+    def otp_step(self):
+        """
+        Returns OTP auth step ('', OTP_NECESSAIRE, SAISIE_OTP).
+
+        :rtype: str
+        """
+        form = self.get_form(id='connexioncompte_2connexionCompteForm', submit='//input[@type="submit" and @id="id_r_cnx_btn_submit"]')
+        return form['authStep']
 
 
 class CtPage(RawPage):
@@ -61,8 +122,9 @@ class CguPage(LoggedPage, HTMLPage):
 
 class ErrorPage(HTMLPage):
     def on_load(self):
-        msg = CleanText('//div[@id="backgroundId"]//p')(self.doc)
-        raise BrowserUnavailable(msg)
+        # message is: "Oups... votre compte ameli est momentanément indisponible. Il sera de retour en pleine forme très bientôt."
+        # nothing we can do, but retry later
+        raise BrowserUnavailable(unescape(CleanText('//div[@class="mobile"]/p')(self.doc)))
 
 
 class SubscriptionPage(LoggedPage, HTMLPage):
@@ -73,6 +135,40 @@ class SubscriptionPage(LoggedPage, HTMLPage):
         sub.label = sub.subscriber = CleanText('//div[@id="pageAssure"]//span[@class="NomEtPrenomLabel"]')(self.doc)
 
         return sub
+
+    @method
+    class get_profile(ItemElement):
+        klass = Person
+
+        # Other recipients can also be on this page.
+        # The first one corresponds to the logged user.
+        obj_name = CleanText('(//span[@class="NomEtPrenomLabel"])[1]')
+        obj_birth_date = Date(CleanText('(//td[@class="dateNaissance"]/span)[1]'), parse_func=parse_french_date)
+        obj_phone = CleanText(Coalesce(
+            '//div[@class="infoGauche"][normalize-space()="Téléphone portable"]/following-sibling::div/span',
+            '//div[@class="infoGauche"][normalize-space()="Téléphone fixe"]/following-sibling::div/span',
+            default=NotAvailable
+        ))
+
+        class obj_postal_address(ItemElement):
+            klass = PostalAddress
+
+            def parse(self, obj):
+                full_address = CleanText(
+                    '//div[@class="infoGauche"][normalize-space()="Adresse postale"]/following-sibling::div/span'
+                )(self)
+                self.env['full_address'] = full_address
+                m = re.search(r'(\d{1,4}.*) (\d{5}) (.*)', full_address)
+                if m:
+                    street, postal_code, city = m.groups()
+                    self.env['street'] = street
+                    self.env['postal_code'] = postal_code
+                    self.env['city'] = city
+
+            obj_full_address = Env('full_address', default=NotAvailable)
+            obj_street = Env('street', default=NotAvailable)
+            obj_postal_code = Env('postal_code', default=NotAvailable)
+            obj_city = Env('city', default=NotAvailable)
 
 
 class DocumentsDetailsPage(LoggedPage, PartialHTMLPage):
@@ -96,13 +192,15 @@ class DocumentsDetailsPage(LoggedPage, PartialHTMLPage):
                 return '%s_%s' % (Env('subid')(self), sha1(_id.encode('utf-8')).hexdigest())
 
             obj_label = CleanText('.//div[has-class("col-label")]')
-            obj_price = CleanDecimal.French('.//div[has-class("col-montant")]/span')
+            obj_total_price = CleanDecimal.French('.//div[has-class("col-montant")]/span')
             obj_currency = Currency('.//div[has-class("col-montant")]/span')
             obj_url = Link('.//div[@class="col-download"]/a')
             obj_format = 'pdf'
 
             def obj_date(self):
-                year = Regexp(CleanText('./preceding-sibling::li[@class="rowdate"]//span[@class="mois"]'), r'(\d+)')(self)
+                year = Regexp(
+                    CleanText('./preceding-sibling::li[@class="rowdate"]//span[@class="mois"]'), r'(\d+)'
+                )(self)
                 day_month = CleanText('.//div[has-class("col-date")]/span')(self)
 
                 return parse_french_date(day_month + ' ' + year)

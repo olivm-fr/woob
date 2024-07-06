@@ -1,49 +1,84 @@
-before_script:
-  - "pip install -r .ci/requirements.txt"
-  - "REQUIREMENTS=$(mktemp) && python setup.py requirements > ${REQUIREMENTS} && pip install -r ${REQUIREMENTS} && rm ${REQUIREMENTS}"
-  - "pip install -r .ci/requirements_modules.txt"
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  GIT_STRATEGY: clone
 
-build:3:
-  image: "python:3"
-  stage: "build"
-  script:
-    - "./tools/local_install.sh --local-modules ~/bin"
+cache:
+  paths:
+    - .cache/pip
 
-pyflakes:3:
-  image: "python:3"
-  stage: "test"
-  script:
-      - "./tools/pyflakes.sh"
+stages:
+  - lint
+  - test
+  - doc
+  - build
 
-pyflakes-strict:3:
-  image: "python:3"
-  stage: "test"
-  script:
-    # TODO: move to .ci/requirements.txt
-    - "pip install flake8-bugbear"
-    - "./tools/pyflakes-strict.sh"
+.except-default: &except-default
+  except:
+    - tags
 
-load-modules:3:
-  image: "python:3"
-  stage: "test"
-  script:
-    - "./tools/local_run.sh weboob-config update"
+.python_version:
+  <<: *except-default
+  image: python:3.7
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install --upgrade -r requirements-dev.txt
+    - python -m pip install -e .
 
-unittests:3:
-  image: "python:3"
-  stage: "test"
+lint:
+  stage: lint
+  extends: .python_version
   script:
-    - "./tools/run_tests.sh --no-modules"
+    - ./tools/pyflakes.sh
 
-unittests-modules:3:
-  image: "python:3"
-  stage: "test"
-  allow_failure: true
+lint strict:
+  stage: lint
+  extends: .python_version
   script:
-    - "./tools/run_tests.sh --no-core"
+    - ./tools/pyflakes-strict.sh
 
-doc:3:
-  image: "python:3"
-  stage: "deploy"
+bandit:
+  extends: .python_version
+  stage: lint
   script:
-    - "cd ./docs && make html"
+    - pip install bandit
+    - bandit -r woob
+    - bandit -r modules
+    - bandit -r contrib
+
+check modules:
+  stage: test
+  extends: .python_version
+  script:
+    - .ci/check_modules.sh
+
+test:
+  stage: test
+  extends: .python_version
+  script:
+    - ./tools/run_tests.sh --no-modules
+    - coverage xml -o coverage.xml -i
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+doc:
+  stage: doc
+  extends: .python_version
+  script:
+    - make docs
+
+build:
+  stage: build
+  extends: .python_version
+  script:
+    - pip install build twine
+    - python -m build
+    - twine check dist/*.whl
+
+local install:
+  stage: build
+  extends: .python_version
+  script:
+    - ./tools/local_install.sh --local-modules ~/bin

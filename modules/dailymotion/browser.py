@@ -2,26 +2,26 @@
 
 # Copyright(C) 2011  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
+from urllib.parse import quote_plus
 
-from weboob.tools.compat import unicode
-from weboob.browser import PagesBrowser, URL
-from weboob.tools.compat import quote_plus
+from woob.browser import PagesBrowser, URL
+
 from .pages import IndexPage, VideoPage
 
 
@@ -67,14 +67,14 @@ class DailymotionBrowser(PagesBrowser):
         for resolution, url in urls.items():
             for item in self.read_url(url):
                 if return_next:
-                    return unicode(item.split('#')[0])
+                    return str(item.split('#')[0])
 
                 m = re.match('^#.*,NAME="%s"' % self.resolution, item)
                 if not m:
                     continue
 
                 return_next = True
-        return unicode(item.split('#')[0])
+        return str(item.split('#')[0])
 
     def read_url(self, url):
         r = self.open(url, stream=True)

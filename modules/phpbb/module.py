@@ -2,27 +2,27 @@
 
 # Copyright(C) 2010-2011  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.capabilities.messages import CantSendMessage, CapMessages, CapMessagesPost, Message, Thread
-from weboob.tools.backend import BackendConfig, Module
-from weboob.tools.misc import limit
-from weboob.tools.newsfeed import Newsfeed
-from weboob.tools.value import Value, ValueBackendPassword, ValueInt
+from woob.capabilities.messages import CantSendMessage, CapMessages, CapMessagesPost, Message, Thread
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.misc import limit
+from woob.tools.newsfeed import Newsfeed
+from woob.tools.value import Value, ValueBackendPassword, ValueInt
 
 from .browser import PhpBB
 from .tools import id2topic, id2url, rssid, url2id
@@ -34,7 +34,7 @@ class PhpBBModule(Module, CapMessages, CapMessagesPost):
     NAME = 'phpbb'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     LICENSE = 'AGPLv3+'
     DESCRIPTION = "phpBB forum"
     CONFIG = BackendConfig(Value('url',                     label='URL of forum', regexp='https?://.*'),

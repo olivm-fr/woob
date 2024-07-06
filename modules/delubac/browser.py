@@ -1,49 +1,84 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-import time
+import re
 
-from weboob.browser import URL, need_login, AbstractBrowser
+from woob.browser import URL, need_login, LoginBrowser
+from woob.exceptions import BrowserIncorrectPassword, ActionNeeded, ActionType
+from woob.tools.capabilities.bank.transactions import sorted_transactions
 
-from .pages import LoginPage, MenuPage
+from .pages import LoginPage, LoginResultPage, AccountsPage, HistoryPage
 
 
 __all__ = ['DelubacBrowser']
 
 
-class DelubacBrowser(AbstractBrowser):
-    PARENT = 'themisbanque'
-    PARENT_ATTR = 'package.browser.ThemisBrowser'
+class DelubacBrowser(LoginBrowser):
+    BASEURL = 'https://www.edelubac.com'
 
-    BASEURL = 'https://e.delubac.com'
-
-    login = URL(r'/es@b/fr/codeident.jsp', LoginPage)
-    menu = URL(
-        r'/es@b/fr/menuConnecte1.jsp\?c&deploye=false&pulseMenu=false&styleLien=false&dummyDate=(?P<date>.*)',
-        MenuPage
+    login = URL(r'/josso/signon/entLogin.jsp', LoginPage)
+    login_result = URL(r'/josso/signon/entKbvLogin.do', LoginResultPage)
+    accounts = URL(r'/consultation/action/private/consultation/synthese/comptes.do', AccountsPage)
+    transactions = URL(
+        r'/consultation/action/private/consultation/search/index.do',
+        r'consultation/action/private/consultation/search/resOperations.do',
+        HistoryPage
     )
+
+    def do_login(self):
+        self.login.go()
+        self.page.login(self.username, self.password)
+
+        if self.login_result.is_here():
+            error_msg = self.page.get_error()
+            error_snippets = (
+                'mot de passe est incorrect',
+                'your password is incorrect',
+            )
+            error_patterns = re.compile('|'.join(error_snippets))
+            if re.search(error_patterns, error_msg):
+                raise BrowserIncorrectPassword(error_msg)
+
+            sca_message = self.page.get_sca_message()
+            sca_snippets = (
+                'authentification forte',
+                'authentication is required',
+            )
+            sca_patterns = re.compile('|'.join(sca_snippets))
+            if re.search(sca_patterns, sca_message):
+                raise ActionNeeded(
+                    locale="fr-FR", message="Vous devez réaliser la double authentification sur le portail internet.",
+                    action_type=ActionType.PERFORM_MFA,
+                )
+            raise AssertionError("Unhandled error at login: {}".format(error_msg))
 
     @need_login
     def iter_accounts(self):
-        self.menu.go(date=int(time.time()*1000))
-        self.location(self.page.accounts_url)
+        self.accounts.go()
         for account in self.page.iter_accounts():
             yield account
+
+    @need_login
+    def iter_history(self, account):
+        self.transactions.go()
+        self.page.search_transactions_form(account)
+        if self.page.has_no_transaction():
+            return
+        for tr in sorted_transactions(self.page.iter_history()):
+            yield tr

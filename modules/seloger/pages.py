@@ -2,38 +2,35 @@
 
 # Copyright(C) 2012 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.browser.pages import JsonPage, pagination, HTMLPage
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.html import XPath
-from weboob.browser.filters.standard import (CleanText, CleanDecimal, Currency,
-                                             Env, Regexp, Field, BrowserURL)
-from weboob.capabilities.base import NotAvailable, NotLoaded
-from weboob.capabilities.housing import (Housing, HousingPhoto, City,
-                                         UTILITIES, ENERGY_CLASS, POSTS_TYPES,
-                                         ADVERT_TYPES)
-from weboob.capabilities.address import PostalAddress
-from weboob.tools.capabilities.housing.housing import PricePerMeterFilter
-from weboob.tools.json import json
-from weboob.exceptions import ActionNeeded
-from .constants import TYPES, RET
 import codecs
+
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import BrowserURL, CleanDecimal, CleanText, Currency, Env, Field, Regexp
+from woob.browser.pages import HTMLPage, JsonPage, pagination
+from woob.capabilities.address import PostalAddress
+from woob.capabilities.base import NotAvailable, NotLoaded
+from woob.capabilities.housing import ADVERT_TYPES, ENERGY_CLASS, POSTS_TYPES, UTILITIES, City, Housing, HousingPhoto
+from woob.exceptions import ActionNeeded
+from woob.tools.capabilities.housing.housing import PricePerMeterFilter
+from woob.tools.json import json
+from .constants import RET, TYPES, BASE_URL
 
 
 class ErrorPage(HTMLPage):
@@ -65,33 +62,50 @@ class SearchResultsPage(HTMLPage):
     @pagination
     @method
     class iter_housings(DictElement):
+        ignore_duplicate = True
+
         item_xpath = 'cards/list'
 
         def next_page(self):
             page_nb = Dict('navigation/pagination/page')(self)
-            max_results = Dict('navigation/pagination/maxResults')(self)
+            max_results = Dict('navigation/counts/count')(self)
             results_per_page = Dict('navigation/pagination/resultsPerPage')(self)
 
             if int(max_results) / int(results_per_page) > int(page_nb):
                 return BrowserURL('search', query=Env('query'), page_number=int(page_nb) + 1)(self)
 
-        # TODO handle bellesdemeures
-
         class item(ItemElement):
             klass = Housing
 
             def condition(self):
-                return Dict('cardType')(self) not in ['advertising', 'localExpert'] and Dict('id', default=False)(self)
+                return (
+                    Dict('classifiedURL', default=False)(self)
+                    and Dict('id', default=False)(self)
+                    and (
+                        Dict('classifiedURL', default='')(self).startswith(BASE_URL) or
+                        int(Env('query_type')(self)) == TYPES[POSTS_TYPES.RENT]
+                    )
+                )
 
             obj_id = Dict('id')
 
             def obj_type(self):
-                idType = int(Env('query_type')(self))
-                type = next(k for k, v in TYPES.items() if v == idType)
-                if type == POSTS_TYPES.FURNISHED_RENT:
-                    # SeLoger does not let us discriminate between furnished and not furnished.
-                    return POSTS_TYPES.RENT
-                return type
+                id_type = int(Env('query_type')(self))
+                try:
+                    post_type = next(k for k, v in TYPES.items() if v == id_type)
+                    if post_type == POSTS_TYPES.FURNISHED_RENT:
+                        # SeLoger does not let us discriminate between furnished and not furnished.
+                        return POSTS_TYPES.RENT
+                    return post_type
+                except StopIteration:
+                    return NotAvailable
+
+            def obj_house_type(self):
+                naturebien = CleanText(Dict('estateTypeId'))(self)
+                try:
+                    return next(k for k, v in RET.items() if v == naturebien)
+                except StopIteration:
+                    return NotLoaded
 
             def obj_title(self):
                 return "{} - {} - {}".format(Dict('estateType')(self),
@@ -105,7 +119,7 @@ class SearchResultsPage(HTMLPage):
                 else:
                     return ADVERT_TYPES.PERSONAL
 
-            obj_utilities = UTILITIES.EXCLUDED
+            obj_utilities = UTILITIES.UNKNOWN
 
             def obj_photos(self):
                 photos = []
@@ -119,55 +133,53 @@ class SearchResultsPage(HTMLPage):
                 ville = Dict('cityLabel')(self)
                 ville = ville if ville else ''
                 cp = Dict('zipCode')(self)
-                cp = cp if cp else ''
-                return u'%s %s (%s)' % (quartier, ville, cp)
+                cp = f'({cp})' if cp else ''
+                return u'%s %s %s' % (quartier, ville, cp)
 
             obj_url = Dict('classifiedURL')
 
             obj_text = Dict('description')
 
-            obj_cost = CleanDecimal(Dict('pricing/price', default=NotLoaded), default=NotLoaded)
-            obj_currency = Currency(Dict('pricing/price', default=NotLoaded), default=NotLoaded)
-            obj_price_per_meter = CleanDecimal(Dict('pricing/squareMeterPrice'), default=PricePerMeterFilter)
+            obj_cost = CleanDecimal(Dict('pricing/price', default=''), default=NotLoaded)
+            obj_currency = Currency(Dict('pricing/price', default=''), default=NotLoaded)
+            obj_area = CleanDecimal(Dict('surface'))
+
+            def obj_price_per_meter(self):
+                ppm = CleanDecimal(Dict('pricing/squareMeterPrice'), default='')(self)
+                if not ppm:
+                    ppm = PricePerMeterFilter()(self)
+                return ppm
 
 
 class HousingPage(HTMLPage):
+
+    def __init__(self, *args, **kwargs):
+        HTMLPage.__init__(self, *args, **kwargs)
+        self.doc = json.loads(CleanText('//script[@id="__NEXT_DATA__"]')(self.doc))
+
     @method
     class get_housing(ItemElement):
         klass = Housing
 
-        def parse(self, el):
-            json_content = Regexp(CleanText('//script'), "var ava_data = ({.+?});")(self)
-            json_content = json_content.replace("logged", "\"logged\"")
-            json_content = json_content.replace("lengthcarrousel", "\"lengthcarrousel\"")
-            json_content = json_content.replace("products", "\"products\"")
-            json_content = json_content.replace("// // ANNONCES_SIMILAIRE / RECO", "")
-            self.house_json_datas = json.loads(json_content)['products'][0]
-
-        obj_id = CleanText('//form[@name="central"]/input[@name="idannonce"]/@value')
+        obj_id = Dict('props/pageProps/listingData/listing/listingDetail/id')
 
         def obj_house_type(self):
-            naturebien = CleanText('//form[@name="central"]/input[@name="naturebien"]/@value')(self)
+            naturebien = CleanText(Dict('props/pageProps/listingData/listing/listingDetail/propertyTypeId'))(self)
             try:
                 return next(k for k, v in RET.items() if v == naturebien)
             except StopIteration:
                 return NotLoaded
 
         def obj_type(self):
-            idType = int(CleanText('//form[@name="central"]/input[@name="idtt"]/@value')(self))
-            type = next(k for k, v in TYPES.items() if v == idType)
-            if type == POSTS_TYPES.FURNISHED_RENT:
+            id_type = Dict('props/pageProps/listingData/listing/listingDetail/transactionTypeId')(self)
+            post_type = next(k for k, v in TYPES.items() if v == id_type)
+            if post_type == POSTS_TYPES.FURNISHED_RENT:
                 # SeLoger does not let us discriminate between furnished and not furnished.
                 return POSTS_TYPES.RENT
-            return type
+            return post_type
 
         def obj_advert_type(self):
-            is_agency = (
-                CleanText('//form[@name="central"]/input[@name="nomagance"]/@value')(self) or
-                CleanText('//form[@name="central"]/input[@name="urlagence"]/@value')(self) or
-                CleanText('//form[@name="central"]/input[@name="adresseagence"]/@value')(self)
-            )
-            if is_agency:
+            if Dict('props/pageProps/listingData/agency/id', default=None)(self) is not None:
                 return ADVERT_TYPES.PROFESSIONAL
             else:
                 return ADVERT_TYPES.PERSONAL
@@ -175,88 +187,79 @@ class HousingPage(HTMLPage):
         def obj_photos(self):
             photos = []
 
-            for photo in XPath('//div[@class="carrousel_slide"]/img/@src')(self):
-                photos.append(HousingPhoto("https:{}".format(photo)))
-
-            for photo in XPath('//div[@class="carrousel_slide"]/@data-lazy')(self):
-                p = json.loads(photo)
-                photos.append(HousingPhoto("https:{}".format(p['url'])))
+            for photo in Dict('props/pageProps/listingData/listing/listingDetail/media/photos')(self):
+                photos.append(HousingPhoto(photo['defaultUrl']))
 
             return photos
 
-        obj_title = CleanText('//title[1]')
+        obj_title = Dict('props/pageProps/listingData/listing/listingDetail/title')
 
         def obj_location(self):
-            quartier = Regexp(CleanText('//script'),
-                              r"'nomQuartier', { value: \"([\w -]+)\", ")(self)
-            ville = CleanText('//form[@name="central"]/input[@name="ville"]/@value')(self)
-            ville = ville if ville else ''
-            cp = CleanText('//form[@name="central"]/input[@name="codepostal"]/@value')(self)
-            cp = cp if cp else ''
-            return u'%s %s (%s)' % (quartier, ville, cp)
+            address = Dict('props/pageProps/listingData/listing/listingDetail/address')(self)
+            return f'{address["district"] or ""} {address["city"]} ({address["postalCode"]})'.strip()
 
         def obj_address(self):
-            p = PostalAddress()
+            address = Dict('props/pageProps/listingData/listing/listingDetail/address')(self)
 
-            p.street = Regexp(CleanText('//script'),
-                              r"'nomQuartier', { value: \"([\w -]+)\", ")(self)
-            p.postal_code = CleanText('//form[@name="central"]/input[@name="codepostal"]/@value')(self)
-            p.city = CleanText('//form[@name="central"]/input[@name="ville"]/@value')(self)
+            p = PostalAddress()
+            p.street = address['street'] or ""
+            p.postal_code = address['postalCode']
+            p.city = address['city']
             p.full_address = Field('location')(self)
+
             return p
 
-        obj_text = CleanText('//form[@name="central"]/input[@name="description"]/@value')
+        obj_text = Dict('props/pageProps/listingData/listing/listingDetail/descriptive')
 
-        obj_cost = CleanDecimal(CleanText('//a[@id="price"]'), default=NotLoaded)
-        obj_currency = Currency(CleanText('//a[@id="price"]'), default=NotLoaded)
+        obj_cost = Dict('props/pageProps/listingData/listing/listingDetail/listingPrice/price')
+
+        obj_currency = Dict('props/pageProps/listingData/listing/listingDetail/listingPrice/priceUnit')
         obj_price_per_meter = PricePerMeterFilter()
 
-        obj_area = CleanDecimal('//form[@name="central"]/input[@name="surface"]/@value', replace_dots=True)
-        obj_url = CleanText('//form[@name="central"]/input[@name="urlannonce"]/@value')
-        obj_phone = CleanText('//div[@class="data-action"]/a[@data-phone]/@data-phone')
+        obj_area = Dict('props/pageProps/listingData/listing/listingDetail/surface')
+
+        obj_url = Dict('props/pageProps/listingData/listing/url/value')
+
+        def obj_phone(self):
+            if Dict('props/pageProps/listingData/agency/id', default=None)(self) is not None:
+                return Dict('props/pageProps/listingData/agency/phoneNumber')
+            return NotAvailable
 
         def obj_utilities(self):
-            mention = CleanText('//span[@class="detail_indice_prix"]', default="")(self)
-            if "(CC) Loyer mensuel charges comprises" in mention:
+            mention = \
+                Dict(
+                    'props/pageProps/listingData/listing/listingDetail/listingPrice/price/priceInformation',
+                    default="")(self)
+            if mention and "cc" in mention:
                 return UTILITIES.INCLUDED
             else:
                 return UTILITIES.UNKNOWN
 
-        def obj_bedrooms(self):
-            return CleanDecimal(Dict('nb_chambres', default=NotLoaded))(self.house_json_datas)
-
-        def obj_rooms(self):
-            return CleanDecimal(Dict('nb_pieces', default=NotLoaded))(self.house_json_datas)
-
-
-class HousingJsonPage(JsonPage):
-    @method
-    class get_housing(ItemElement):
-        klass = Housing
+        obj_bedrooms = CleanDecimal(Dict('props/pageProps/listingData/listing/listingDetail/bedroomCount'),
+                                    default=NotAvailable)
+        obj_rooms = CleanDecimal(Dict('props/pageProps/listingData/listing/listingDetail/roomCount'),
+                                 default=NotAvailable)
 
         def obj_DPE(self):
-            DPE = Dict("energie", default="")(self)
-            if DPE['status'] > 0:
-                return NotAvailable
-            else:
-                return getattr(ENERGY_CLASS, DPE['lettre'], NotAvailable)
+            dpe = \
+                Dict(
+                    "props/pageProps/listingData/listing/listingDetail/energyPerformanceCertificate/electricityRating",
+                    default=None)(self)
+            if dpe is not None:
+                return getattr(ENERGY_CLASS, dpe, NotAvailable)
+            return NotAvailable
 
         def obj_GES(self):
-            GES = Dict("ges", default="")(self)
-            if GES['status'] > 0:
-                return NotAvailable
-            else:
-                return getattr(ENERGY_CLASS, GES['lettre'], NotAvailable)
+            ges = Dict("props/pageProps/listingData/listing/listingDetail/energyPerformanceCertificate/gasRating",
+                       default=None)(self)
+            if ges is not None:
+                return getattr(ENERGY_CLASS, ges, NotAvailable)
+            return NotAvailable
 
         def obj_details(self):
             details = {}
-
-            for c in Dict('categories')(self):
-                if c['criteria']:
-                    details[c['name']] = ' / '.join([_['value'] for _ in c['criteria']])
-
-            for _, c in Dict('infos_acquereur')(self).items():
-                for key, value in c.items():
-                    details[key] = value
-
+            for k, v in Dict('props/pageProps/listingData/listing/listingDetail/featureCategories')(self).items():
+                if type(v) == dict and 'features' in v.keys():
+                    for _ in v['features']:
+                        details[_['name']] = _['title']
             return details

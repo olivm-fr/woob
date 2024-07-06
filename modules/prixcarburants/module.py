@@ -2,25 +2,25 @@
 
 # Copyright(C) 2012 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value
-from weboob.capabilities.pricecomparison import CapPriceComparison, Price, Product, PriceNotFound
-from weboob.capabilities.base import find_object
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value
+from woob.capabilities.pricecomparison import CapPriceComparison, Price, Product, PriceNotFound
+from woob.capabilities.base import find_object
 
 from .browser import PrixCarburantsBrowser
 
@@ -32,11 +32,12 @@ class PrixCarburantsModule(Module, CapPriceComparison):
     NAME = 'prixcarburants'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = 'French governement website to compare fuel prices'
     LICENSE = 'AGPLv3+'
     BROWSER = PrixCarburantsBrowser
-    CONFIG = BackendConfig(Value('zipcode', label='Zipcode', regexp='\d+'))
+    CONFIG = BackendConfig(Value('zipcode', label='Zipcode', regexp=r'\d+', default=''),
+                           Value('town', label='Town name', regexp=r'[\w\-\s]+', masked=False, default=''))
 
     def search_products(self, pattern=None):
         for product in self.browser.iter_products():
@@ -46,7 +47,9 @@ class PrixCarburantsModule(Module, CapPriceComparison):
     def iter_prices(self, products):
         product = [product for product in products if product.backend == self.name]
         if product:
-            return self.browser.iter_prices(self.config['zipcode'].get(), product[0])
+            return self.browser.iter_prices(self.config['zipcode'].get(),
+                                            self.config['town'].get(),
+                                            product[0])
 
     def get_price(self, id, price=None):
         product = Product(id.split('.')[0])

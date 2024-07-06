@@ -1,32 +1,35 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2019      Budget Insight
+# Copyright(C) 2019      Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded
+from requests.exceptions import ConnectionError
+
+from woob.browser.exceptions import ClientError, ServerError
+from woob.browser import LoginBrowser, URL, need_login
+from woob.capabilities.captcha import RecaptchaV3Question
+from woob.exceptions import AuthMethodNotImplemented, BrowserIncorrectPassword, ActionNeeded
+
 from .pages import (
     LoginPage, AccountsPage, OperationsListPage, OperationPage, ActionNeededPage,
-    InvestmentPage, InvestmentDetailsPage, AssetManagementPage,
+    InvestmentPage, InvestmentDetailsPage,
 )
 
 
@@ -34,6 +37,8 @@ class CmesBrowser(LoginBrowser):
     BASEURL = 'https://www.cic-epargnesalariale.fr'
 
     login = URL(r'(?P<client_space>.*)fr/identification/authentification.html', LoginPage)
+
+    mfa = URL(r'https://www.creditmutuel-epargnesalariale.fr/fr/epargnants/premiers-pas/authentification-forte/index.html')
 
     action_needed = URL(
         r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/premiers-pas/saisir-vos-coordonnees',
@@ -45,28 +50,43 @@ class CmesBrowser(LoginBrowser):
     accounts = URL(
         r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/mon-epargne/situation-financiere-detaillee/index.html',
         r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/tableau-de-bord/index.html',
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/entreprise/tableau-de-bord/index.html',
         AccountsPage
     )
 
-    investments = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/supports/fiche-du-support.html', InvestmentPage)
-    investment_details = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/supports/epargne-sur-le-support.html', InvestmentDetailsPage)
-    asset_management = URL(
-        r'https://www.cmcic-am.fr/fr/conseillers-gestion-patrimoine/nos-fonds/VALE_FicheSynthese.aspx',
-        r'https://www.cmcic-am.fr/fr/conseillers-gestion-patrimoine/nos-fonds/VALE_Fiche.aspx',
-        AssetManagementPage
+    entreprise_accounts = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/entreprise/situation-financiere-detaillee/index.html',
+        AccountsPage
     )
-    operations_list = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/operations/index.html', OperationsListPage)
 
-    operation = URL(r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/operations/consulter-une-operation/index.html\?param_=(?P<idx>\d+)', OperationPage)
+    investments = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/supports/fiche-du-support.html',
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/entreprise/supports/synthese-du-support.html',
+        InvestmentPage
+    )
+    investment_details = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/epargnants/supports/epargne-sur-le-support.html',
+        InvestmentDetailsPage
+    )
+    operations_list = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/(?P<sub_space>.*)/operations/index.html',
+        OperationsListPage
+    )
 
-    client_space = 'espace-client/'
+    operation = URL(
+        r'(?P<subsite>.*)(?P<client_space>.*)fr/(?P<sub_space>.*)/operations/consulter-une-operation/index.html\?param_=(?P<idx>\d+)',
+        OperationPage
+    )
 
-    def __init__(self, username, password, website, subsite="", *args, **kwargs):
+    client_space = ''
+
+    def __init__(self, config, username, password, website, subsite="", *args, **kwargs):
         super(LoginBrowser, self).__init__(*args, **kwargs)
         self.BASEURL = website
         self.username = username
         self.password = password
         self.subsite = subsite
+        self.config = config
 
     @property
     def logged(self):
@@ -74,13 +94,49 @@ class CmesBrowser(LoginBrowser):
 
     def do_login(self):
         self.login.go(client_space=self.client_space)
-        self.page.login(self.username, self.password)
+
+        if not self.config['captcha_response'].get():
+            captcha_site_key = self.page.get_captcha_site_key()
+            if captcha_site_key:
+                raise RecaptchaV3Question(
+                    website_key=captcha_site_key,
+                    website_url=self.url,
+                    is_enterprise=True,
+                    min_score=0.7,
+                )
+
+        self.page.login(self.username, self.password, self.config['captcha_response'].get())
+        self.handle_mfa_page()
 
         if self.login.is_here():
-            raise BrowserIncorrectPassword
+            raise BrowserIncorrectPassword()
+
+    def handle_mfa_page(self):
+        # check if we are being redirected to mfa page. if that's the case stop.
+        redirect = self.response.headers.get('Location', '')
+
+        if self.accounts.match(redirect):
+            self.location(self.response.headers['Location'])
+            return
+
+        if self.mfa.match(redirect):
+            # if the redirect url is for mfa, we don't follow it.
+            # the mfa won't be sent to the user.
+            raise AuthMethodNotImplemented('Multi Factor Authentication is not handled yet')
+
+        raise AssertionError('Unexpected rediretion url')
+
+    def go_to_investment_details(self):
+        """ Go to InvestmentDetailsPage and return True if reached """
+        url_inv_details = self.page.get_investment_details()
+        if url_inv_details:
+            self.location(url_inv_details)
+            return True
+        return False
 
     @need_login
     def iter_accounts(self):
+        is_entreprise = False
         self.accounts.go(subsite=self.subsite, client_space=self.client_space)
 
         if self.action_needed.is_here():
@@ -101,64 +157,70 @@ class CmesBrowser(LoginBrowser):
                 else:
                     raise AssertionError('Unhandled action needed: %s' % msg)
 
-        return self.page.iter_accounts()
+        if 'entreprise' in self.url:
+            is_entreprise = True
+            self.entreprise_accounts.go(subsite=self.subsite, client_space=self.client_space)
 
-    def go_investment(self, form, inv_param):
-        form[inv_param] = ''
-        form.submit()
+        return self.page.iter_accounts(is_entreprise=is_entreprise)
 
     @need_login
     def iter_investment(self, account):
         if 'compte courant bloqué' in account.label.lower():
             # CCB accounts have Pockets but no Investments
             return
-        self.accounts.stay_or_go(subsite=self.subsite, client_space=self.client_space)
-        form = self.page.get_investment_form()
-        for inv in self.page.iter_investments(account=account):
-            # Go to the investment details to get employee savings attributes
-            self.go_investment(form, inv._form_param)
-            if self.investments.is_here():
-                asset_management_url = self.page.get_asset_management_url()
 
+        if account._entreprise_or_epargnants == 'epargnants':
+            self.accounts.stay_or_go(subsite=self.subsite, client_space=self.client_space)
+        else:
+            self.entreprise_accounts.stay_or_go(subsite=self.subsite, client_space=self.client_space)
+
+        for inv in self.page.iter_investments(account=account):
+            # Investments can either be fetched by submitting a form or a direct link.
+            if not inv._form_param and not inv._details_url:
+                self.logger.info('No available details for investment %s.', inv.label)
+                self.accounts.stay_or_go(subsite=self.subsite, client_space=self.client_space)
+                yield inv
+                continue
+            # Go to the investment details to get employee savings attributes
+            if inv._form_param:
+                form = self.page.get_investment_form(form_param=inv._form_param)
+                # Sometimes we encounter the error "remote disconnected".
+                # The reason has not been found yet.
+                try:
+                    form.submit()
+                except (ClientError, ServerError) as e:
+                    raise e
+                except ConnectionError:
+                    self.logger.warning('Form could not be submitted, URL: %s escaped', form.url)
+            elif inv._details_url:
+                self.location(inv._details_url)
+
+            if self.investments.is_here():
                 # Fetch SRRI, asset category & recommended period
                 self.page.fill_investment(obj=inv)
 
-                if asset_management_url:
-                    self.location(asset_management_url)
-                    self.asset_management.go(params=self.page.get_page_params())
-
-                    # Fetch performance history & asset category (more reliable on this page)
-                    self.page.fill_investment(obj=inv)
-
-                    # We need to return to the investment page
-                    self.go_investment(form, inv._form_param)
-                else:
-                    performances = {}
-                    # Get 1-year performance
+                # Get (1,3,5)-year performance
+                performances = {}
+                for year in (1, 3, 5):
                     url = self.page.get_form_url()
-                    self.location(url, data={'_FID_DoFilterChart_timePeriod:1Year': ''})
-                    performances[1] = self.page.get_performance()
-
-                    # Get 5-years performance
-                    url = self.page.get_form_url()
-                    self.location(url, data={'_FID_DoFilterChart_timePeriod:5Years': ''})
-                    performances[5] = self.page.get_performance()
-
-                    # There is no available form for 3-year history, we must build the request
-                    url = self.page.get_form_url()
-                    data = {
-                        '[t:dbt%3adate;]Data_StartDate': (datetime.today() - relativedelta(years=3)).strftime(
-                            '%d/%m/%Y'),
-                        '[t:dbt%3adate;]Data_EndDate': datetime.today().strftime('%d/%m/%Y'),
-                        '_FID_DoDateFilterChart': '',
-                    }
+                    if year == 1:
+                        data = {'_FID_DoFilterChart_timePeriod:1Year': ''}
+                    elif year == 3:
+                        data = {
+                            '[t:dbt%3adate;]Data_StartDate': (datetime.today() - relativedelta(years=3)).strftime(
+                                '%d/%m/%Y'),
+                            '[t:dbt%3adate;]Data_EndDate': datetime.today().strftime('%d/%m/%Y'),
+                            '_FID_DoDateFilterChart': '',
+                        }
+                    elif year == 5:
+                        data = {'_FID_DoFilterChart_timePeriod:5Years': ''}
                     self.location(url, data=data)
-                    performances[3] = self.page.get_performance()
-                    inv.performance_history = performances
+                    performances[year] = self.page.get_performance()
+                inv.performance_history = performances
 
                 # Fetch investment quantity on the 'Mes Avoirs'/'Mon épargne' tab
-                self.page.go_investment_details()
-                inv.quantity = self.page.get_quantity()
+                if self.go_to_investment_details():
+                    self.page.fill_investment(obj=inv, account_type=account.type)
                 self.page.go_back()
             else:
                 self.logger.info('No available details for investment %s.', inv.label)
@@ -167,12 +229,26 @@ class CmesBrowser(LoginBrowser):
 
     @need_login
     def iter_history(self, account):
-        self.operations_list.stay_or_go(subsite=self.subsite, client_space=self.client_space)
-        for idx in self.page.get_operations_idx():
-            self.operation.go(subsite=self.subsite, client_space=self.client_space, idx=idx)
-            for tr in self.page.get_transactions():
-                if account.label == tr._account_label:
-                    yield tr
+        self.operations_list.stay_or_go(
+            subsite=self.subsite,
+            client_space=self.client_space,
+            sub_space=account._entreprise_or_epargnants
+        )
+
+        for idx in self.page.get_operations_idx(account._entreprise_or_epargnants):
+            self.operation.go(
+                subsite=self.subsite,
+                client_space=self.client_space,
+                sub_space=account._entreprise_or_epargnants,
+                idx=idx
+            )
+
+            if account._entreprise_or_epargnants == 'epargnants':
+                for tr in self.page.get_transactions():
+                    if account.label == tr._account_label:
+                        yield tr
+            else:
+                yield from self.page.get_entreprise_transactions()
 
     @need_login
     def iter_pocket(self, account):
@@ -182,14 +258,15 @@ class CmesBrowser(LoginBrowser):
             for pocket in self.page.iter_ccb_pockets(account=account):
                 yield pocket
         else:
-            form = self.page.get_investment_form()
             for inv in self.page.iter_investments(account=account):
                 # Go to the investment details to get employee savings attributes
-                self.go_investment(form, inv._form_param)
+                if inv._form_param:
+                    form = self.page.get_investment_form(form_param=inv._form_param)
+                    form.submit()
+                elif inv._details_url:
+                    self.location(inv._details_url)
+
                 if self.investments.is_here():
-                    try:
-                        self.page.go_investment_details()
-                        for pocket in self.page.iter_pockets(inv=inv):
-                            yield pocket
-                    finally:
+                    if self.go_to_investment_details():
+                        yield from self.page.iter_pockets(inv=inv, acc=account)
                         self.page.go_back()

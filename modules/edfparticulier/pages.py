@@ -2,43 +2,43 @@
 
 # Copyright(C) 2012-2020  Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from datetime import datetime
 from decimal import Decimal
 
-from weboob.browser.filters.html import Attr
-from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage, RawPage
-from weboob.browser.filters.standard import Env, Format, Date, Eval, CleanText, Regexp
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bill import Bill, Subscription
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.profile import Profile
+from woob.browser.filters.html import Attr
+from woob.browser.pages import LoggedPage, JsonPage, HTMLPage, RawPage
+from woob.browser.filters.standard import Env, Format, Date, Eval, CleanText
+from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.filters.json import Dict
+from woob.capabilities.bill import Bill, Subscription
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.profile import Profile
+
+from .akamai import AkamaiHTMLPage
 
 
 class HomePage(HTMLPage):
     pass
 
 
-class XUIPage(HTMLPage):
+class XUIPage(AkamaiHTMLPage):
     pass
 
 
@@ -63,15 +63,21 @@ class WrongPasswordPage(HTMLPage):
     def get_wrongpass_message(self, attempt_number):
         # edf website block access after 5 wrong password, and user will have to change his password
         # this is very important because it can tell to user how much attempt it remains
-        script = CleanText('//script[contains(text(), "Mot de passe incorrect")]')
+        msg = CleanText('//p[@id="error1"]')(self.doc)
+        msg_remain_attemp = CleanText('//p[strong[@id="attempt-number"]]', default='')(self.doc)
+        msg_remain_attemp = msg_remain_attemp.replace('{{theme.settings.spaceName.texte}} ', '')
 
         if attempt_number > 0:
-            return Format(
-                '%s %s %s',
-                Regexp(script, r">(Mot de passe incorrect.*?)<"),
-                CleanText('//div[@class="arrow_box--content"]', children=False), int(attempt_number)
-            )(self.doc)
-        return Regexp(script, r">(Vous avez atteint.*?)<")(self.doc)
+            msg += ' ' + msg_remain_attemp.replace(
+                'Tentatives restantes : X', 'Tentatives restantes : %d' % attempt_number
+            )
+
+        return msg
+
+
+class OTPTemplatePage(HTMLPage):
+    def get_otp_message(self):
+        return CleanText('//main[has-class("auth__content")]/h2', children=False)(self.doc)
 
 
 class WelcomePage(LoggedPage, HTMLPage):

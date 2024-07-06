@@ -2,43 +2,46 @@
 
 # Copyright(C) 2010-2012 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 from decimal import Decimal
+from urllib.parse import urljoin
 
-from weboob.browser.elements import ItemElement, ListElement, TableElement, method
-from weboob.browser.filters.html import AbsoluteLink, Attr, TableCell, XPath
-from weboob.browser.filters.javascript import JSVar
-from weboob.browser.filters.standard import (
+from woob.browser.elements import ItemElement, ListElement, TableElement, method
+from woob.browser.filters.html import AbsoluteLink, Attr, TableCell, XPath
+from woob.browser.filters.javascript import JSVar
+from woob.browser.filters.standard import (
     CleanDecimal, CleanText, Currency, Date, DateGuesser, Env, Field, Filter, Format, MapIn, Regexp,
 )
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination
-from weboob.capabilities import NotAvailable
-from weboob.capabilities.bank import Account, AccountOwnerType
-from weboob.capabilities.profile import Person
-from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.compat import urljoin
+from woob.browser.pages import HTMLPage, LoggedPage, pagination
+from woob.capabilities import NotAvailable
+from woob.capabilities.bank import Account, AccountOwnerType
+from woob.capabilities.bank.base import Loan
+from woob.capabilities.profile import Person
+from woob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
 from .landing_pages import GenericLandingPage
+
+
+class AppGoneException(Exception):
+    pass
 
 
 class Transaction(FrenchTransaction):
@@ -95,7 +98,7 @@ class AccountsType(Filter):
         (r'c\.aff', Account.TYPE_CHECKING),
         (r'\bssmouv\b', Account.TYPE_CHECKING),
         (r'\bpea\b', Account.TYPE_PEA),
-        (r'invest', Account.TYPE_MARKET),
+        (r'\binvest\b', Account.TYPE_MARKET),
         (r'\bptf\b', Account.TYPE_MARKET),
         (r'\bldd\b', Account.TYPE_SAVINGS),
         (r'\bcel\b', Account.TYPE_SAVINGS),
@@ -121,6 +124,7 @@ class AccountsType(Filter):
         (r'business ', Account.TYPE_CARD),
         (r'plan assur\. innovat\.', Account.TYPE_LIFE_INSURANCE),
         (r'hsbc evol pat transf', Account.TYPE_LIFE_INSURANCE),
+        (r'hsbc strat\. ret\.', Account.TYPE_PERP),
         (r'hsbc evol pat capi', Account.TYPE_CAPITALISATION),
         (r'bourse libre', Account.TYPE_MARKET),
         (r'plurival', Account.TYPE_LIFE_INSURANCE),
@@ -140,8 +144,13 @@ class Label(Filter):
         return text.lstrip(' 0123456789').title()
 
 
-class AccountsPage(GenericLandingPage):
-    IS_HERE_CONDITIONS = '//p[contains(text(), "Tous mes comptes au ")]|//span[contains(text(), "Tous mes comptes au ")]'
+class _AccountsPageCommon(GenericLandingPage):
+    # 'Mes comptes courants' when only those are accessible (case of MCI access)
+    IS_HERE_CONDITIONS = '''
+        //p[contains(text(), "Tous mes comptes au ")]
+        |//span[contains(text(), "Tous mes comptes au ")]
+        |//h3[contains(text(), "Mes comptes courants")]
+    '''
 
     def is_here(self):
         return (
@@ -152,26 +161,37 @@ class AccountsPage(GenericLandingPage):
         )
 
     def get_web_space(self):
-        """ Several spaces on HSBC, need to get which one we are on to adapt parsing to owners"""
+        """Several spaces on HSBC, need to get which one we are on to adapt parsing to owners
+
+        We cache the value in the browser directly.
+        """
+        if self.browser.web_space:
+            return self.browser.web_space
+
         if self.doc.xpath('//p[text()="HSBC Fusion"]'):
             # TODO ckeck GrayLog and get rid of fusion space code if clients are no longer using it
             self.logger.warning('Passed through the HSBC Fusion webspace')
-            return 'fusion'
+            web_space = 'fusion'
         elif self.doc.xpath('//a/img[@alt="HSBC"]'):
-            return 'new_space'
+            web_space = 'new_space'
         else:
-            return 'default'
+            web_space = 'default'
 
-    def iter_spaces_account(self, space):
+        self.browser.web_space = web_space
+        return web_space
+
+    def iter_spaces_account(self):
         accounts = {
             'fusion': self.iter_fusion_accounts,
             'default': self.iter_accounts,
             'new_space': self.iter_new_space_accounts,
         }
-        return accounts[space]()
+        web_space = self.get_web_space()
+        return accounts[web_space]()
 
     def go_history_page(self, account):
-        if self.browser.web_space == 'new_space':
+        web_space = self.get_web_space()
+        if web_space == 'new_space':
             self.get_form(
                 xpath='//form[@id][input[(@name="CPT_IdPrestation" or @name="CB_IdPrestation") and @value="%s"]]' % (
                     account._ref
@@ -191,7 +211,7 @@ class AccountsPage(GenericLandingPage):
     class iter_new_space_accounts(ListElement):
         def find_elements(self):
             # In case of pro/perso space, if we do not precise '//div\[@id="rbb-all"\]', and just leave //form[@id]/parent::*
-            # the forms will be fetched twice by weboob because it will go through //div\[@id="rbb-all"\] but also //div\[@id="rbb-pro"\] and //div\[@id="rbb-perso"\].
+            # the forms will be fetched twice by woob because it will go through //div\[@id="rbb-all"\] but also //div\[@id="rbb-pro"\] and //div\[@id="rbb-perso"\].
             all_xpaths = (
                 '//div[@id="rbb-all"]//form[@id]/parent::*',  # new space with nav between 'avoirs pro' and 'avoirs perso'
                 '//form[@id]/parent::*',  # new space with default accounts page
@@ -237,9 +257,16 @@ class AccountsPage(GenericLandingPage):
             def obj_id(self):
                 # Investment accounts and main account can have the same id
                 _id = CleanText('.//form[@id]/preceding-sibling::*[1]/span[2]', replace=[('.', ''), (' ', '')])(self)
+                # SCPI can have the same id, so we add the name of the SCPI account to distinguish them
+                # 'SCPI EP - PP XXXXXXXXX.EUR' become 'XXXXXXXXX.SCPIEPPP' instead of 'XXXXXXXX.SCPI'
+                # 'SCPI ER5 - PP XXXXXXXXX.EUR' become 'XXXXXXXXX.SCPIER5PP' instead of 'XXXXXXXX.SCPI'
                 if "Scpi" in Field('label')(self):
-                    return _id + ".SCPI"
-                # Same problem with scpi accounts.
+                    scpi_name = Regexp(
+                        CleanText('.//form[@id]/preceding-sibling::*[1]/span[1]', replace=[(' ', ''), ('-', '')]),
+                        r'^[\w\s]*'
+                    )(self)
+                    _id = _id + "." + scpi_name
+                    return _id
                 if Field('type')(self) == Account.TYPE_MARKET:
                     return _id + ".INVEST"
                 # Cards are displayed like '4561 00XX XXXX 5813 - Carte à  débit différé'
@@ -335,7 +362,11 @@ class AccountsPage(GenericLandingPage):
                     return account_id
 
 
-class OwnersListPage(AccountsPage):
+class AccountsPage(_AccountsPageCommon):
+    pass
+
+
+class OwnersListPage(_AccountsPageCommon):
     """
     Within the new space the 'Mes comptes de tiers' service is not activated by default, so this page is empty.
     The only owner in then the 'self owner' which is attached to home_url in `get_owners_urls()`
@@ -349,7 +380,8 @@ class OwnersListPage(AccountsPage):
         )
 
     def get_owners_urls(self):
-        if self.browser.web_space == 'new_space':
+        web_space = self.get_web_space()
+        if web_space == 'new_space':
             owners_url_list = self.doc.xpath('//img[contains(@alt, "Accès aux comptes du tiers")]/parent::a/@href')  # new space
             # the self owner is not diplayed on the page but can be access through a js request
             owners_url_list.insert(0, self.browser.js_url + 'COMPTES_PAN')
@@ -369,7 +401,7 @@ class RibPage(GenericLandingPage):
             if digit_id in CleanText('//div[@class="RIB_content"]')(self.doc):
                 acc.iban = re.search(
                     r'(FR\d{25})',
-                    CleanText('//div[strong[contains(text(), "IBAN")]]', replace=[(' ', '')])(self.doc)
+                    CleanText('//td[@class="th_iban"]/strong', replace=[(' ', '')])(self.doc)
                 ).group(1)
 
     def get_rib(self, accounts):
@@ -466,9 +498,9 @@ class CBOperationPage(GenericLandingPage):
         # deferred cards are displayed with an image contrary to other accounts
         for card in self.doc.xpath('//div/img[contains(@src, "produits/cartes")]'):
             card_id = CleanText('./following-sibling::span[1]')(card)
-            # fetch the closest /li sibling (with 'COMPTE'), it is the one that corresponds the parent acount
+            # fetch the closest /li sibling (with 'COMPTE' or 'SSMOUV'), it is the one that corresponds the parent acount
             parent_id = CleanText(
-                './ancestor::li/preceding-sibling::li[.//span[contains(text(), "COMPTE")]][1]//span[contains(@class, "hsbc-select-account-number")]'
+                './ancestor::li/preceding-sibling::li[.//span[contains(text(), "COMPTE") or contains(text(), "SSMOUV")]][1]//span[contains(@class, "hsbc-select-account-number")]'
             )(card)
             all_parent_id.append((card_id, parent_id))
         return all_parent_id
@@ -515,12 +547,9 @@ class CPTOperationPage(GenericLandingPage):
                 yield op
 
 
-class AppGonePage(HTMLPage):
+class AppGonePage(LoggedPage, HTMLPage):
     def on_load(self):
-        self.browser.app_gone = True
-        self.logger.info('Application has gone. Relogging...')
-        self.browser.do_logout()
-        self.browser.do_login()
+        raise AppGoneException()
 
 
 class LoginPage(HTMLPage):
@@ -531,17 +560,19 @@ class LoginPage(HTMLPage):
         return False
 
     def on_load(self):
-        for message in self.doc.xpath('//div[has-class("csPanelErrors")]'):
+        for message in self.doc.xpath('//div[@class="mainBloc"]/*[@class="error"]'):  # Sometimes <p>, sometimes <div>
+
             error_msg = CleanText('.')(message)
-            if any(
-                msg in error_msg
-                for msg in [
-                    'Please enter valid credentials for memorable answer and password.',
-                    'Please enter a valid Username.',
-                    'mot de passe invalide',
-                    'Log on error',  # wrong otp
-                ]
-            ):
+
+            error_at_login_regex = re.compile(
+                'Please enter valid credentials for memorable answer and password.'
+                + '|Please enter a valid Username.'
+                + '|Please enter your Username.'  # This message should'nt appear anymore with the regex in the module, but better with then without i think.
+                + '|mot de passe invalide'
+                + '|Log on error'  # wrong otp
+            )
+
+            if error_at_login_regex.search(error_msg):
                 raise BrowserIncorrectPassword(error_msg)
             else:
                 raise BrowserUnavailable(error_msg)
@@ -553,6 +584,9 @@ class LoginPage(HTMLPage):
         form = self.get_form(id='idv_auth_form')
         form['userid'] = form['__hbfruserid'] = login
         form.submit()
+
+    def get_error(self):
+        return CleanText('//div[contains(@class, "PanelMsgGroup")]')(self.doc)
 
     def get_no_secure_key_link(self):
         try:
@@ -586,12 +620,6 @@ class LoginPage(HTMLPage):
         form['password'] = split_pass
         form.submit()
 
-    def login_with_secure_key(self, secret, otp):
-        form = self.get_form(nr=0)
-        form['memorableAnswer'] = secret
-        form['idv_OtpCredential'] = otp
-        form.submit()
-
     def useless_form(self):
         form = self.get_form(nr=0)
         # There is space added at the end of the url
@@ -599,11 +627,12 @@ class LoginPage(HTMLPage):
         form.submit()
 
 
-class OtherPage(HTMLPage):
+class _OtherPageCommon(HTMLPage):
     ERROR_CLASSES = [
         ('Votre contrat est suspendu', ActionNeeded),
         ("Vos données d'identification (identifiant - code secret) sont incorrectes", BrowserIncorrectPassword),
         ('Erreur : Votre contrat est clôturé.', ActionNeeded),
+        ("Cette prestation n'est pas accessible en mode accès tiers.", NotImplementedError),
     ]
 
     def on_load(self):
@@ -612,7 +641,11 @@ class OtherPage(HTMLPage):
                 raise exc(CleanText('.')(tag))
 
 
-class ProfilePage(OtherPage):
+class OtherPage(_OtherPageCommon):
+    pass
+
+
+class ProfilePage(LoggedPage, _OtherPageCommon):
     # Warning: this page contains a div_err and displays "Service indisponible" even if it is not...
     # but we can still see the data we need
     is_here = '//h1[contains(text(), "mes données")]'
@@ -643,5 +676,28 @@ class ScpiHisPage(LoggedPage, HTMLPage):
             klass = Transaction
 
             obj_label = Format('%s - %s', CleanText(TableCell('operation')), CleanText(TableCell('nature')))
-            obj_rdate = Date(CleanText(TableCell('date')), dayfirst=True)
+            obj_date = obj_rdate = Date(CleanText(TableCell('date')), dayfirst=True)
             obj_amount = CleanDecimal(TableCell('amount'), sign='-', replace_dots=True)
+
+
+class LoanDetailsPage(LoggedPage, HTMLPage):
+    @method
+    class fill_loan(ItemElement):
+        klass = Loan
+
+        obj_total_amount = CleanDecimal.French('''//p[label[contains(text(), "Montant emprunté")]]/strong''')
+        obj_subscription_date = Date(
+            CleanText('''//p[label[contains(text(), "Date d'ouverture")]]/strong'''),
+            dayfirst=True,
+            default=NotAvailable,
+        )
+        obj_maturity_date = Date(
+            CleanText('''//p[label[contains(text(), "Date de fin")]]/strong'''),
+            dayfirst=True
+        )
+        obj_rate = CleanDecimal.French('''//p[label[contains(text(), "Taux d'intérêt")]]/strong''')
+        obj_next_payment_amount = CleanDecimal.French('''//p[label[contains(text(), "Montant échéance")]]/strong''')
+        obj_next_payment_date = Date(
+            CleanText('''//p[label[contains(text(), "Prochaine échéance")]]/strong'''),
+            dayfirst=True
+        )

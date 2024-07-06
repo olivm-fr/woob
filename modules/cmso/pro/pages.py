@@ -2,53 +2,41 @@
 
 # Copyright(C) 2014      smurail
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
+from urllib.parse import urljoin
 
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.browser.pages import HTMLPage, JsonPage, pagination, LoggedPage
-from weboob.browser.elements import ListElement, ItemElement, TableElement, method
-from weboob.browser.filters.standard import (
+from woob.exceptions import BrowserIncorrectPassword
+from woob.browser.pages import HTMLPage, JsonPage, pagination, LoggedPage
+from woob.browser.elements import ListElement, ItemElement, TableElement, method
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, DateGuesser, Env, Field, Filter, Regexp, Currency, Date,
+    Format, Lower, Coalesce,
 )
-from weboob.browser.filters.html import Link, Attr, TableCell
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.compat import urljoin
-from weboob.tools.capabilities.bank.investments import is_isin_valid
-
-
-__all__ = ['LoginPage']
-
-
-class UselessPage(HTMLPage):
-    pass
-
-
-class PasswordCreationPage(HTMLPage):
-    def get_message(self):
-        xpath = '//div[@class="bienvenueMdp"]/following-sibling::div'
-        return '%s%s' % (CleanText(xpath + '/strong')(self.doc), CleanText(xpath, children=False)(self.doc))
+from woob.browser.filters.json import Dict
+from woob.browser.filters.html import Link, Attr, TableCell
+from woob.capabilities.bank import Account, Loan
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.profile import Profile
+from woob.capabilities.base import NotAvailable
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.capabilities.bank.investments import is_isin_valid
 
 
 class ErrorPage(HTMLPage):
@@ -56,10 +44,6 @@ class ErrorPage(HTMLPage):
 
 
 class SubscriptionPage(LoggedPage, JsonPage):
-    pass
-
-
-class LoginPage(HTMLPage):
     pass
 
 
@@ -113,6 +97,45 @@ class AccountsPage(CMSOPage):
     def on_load(self):
         if self.doc.xpath('//p[contains(text(), "incident technique")]'):
             raise BrowserIncorrectPassword("Vous n'avez aucun compte sur cet espace. Veuillez choisir un autre type de compte.")
+
+
+class LoansPage(CMSOPage):
+    @method
+    class iter_loans(ListElement):
+        item_xpath = '//div[@class="master-table"]//li'
+
+        class item(ItemElement):
+            klass = Loan
+
+            obj__history_url = None
+            obj_type = Account.TYPE_LOAN
+            obj_label = CleanText('./a/span[1]//strong')
+            obj_maturity_date = Date(
+                Regexp(CleanText('.//span[contains(@text, "Date de fin")]'), r'Date de fin : (.*)', default=''),
+                dayfirst=True,
+                default=NotAvailable
+            )
+            obj_balance = CleanDecimal.SI(
+                './/i[contains(text(), "Montant restant dû")]/../following-sibling::span[1]',
+                sign='-'
+            )
+            obj_currency = Currency('.//i[contains(text(), "Montant restant dû")]/../following-sibling::span[1]')
+            obj_next_payment_date = Date(
+                CleanText('.//i[contains(text(), "Date échéance")]/../following-sibling::span[1]'),
+                dayfirst=True,
+                default=NotAvailable
+            )
+            obj_next_payment_amount = CleanDecimal.SI(
+                './/i[contains(text(), "Montant échéance")]/../following-sibling::span[1]'
+            )
+
+            # There is no actual ID or number for loans
+            # The credit index is not stable, it's based on javascript code but it's necessary to avoid duplicate IDs
+            obj_id = Format(
+                '%s-%s',
+                Lower('./a/span[1]//strong', replace=[(' ', '_')]),
+                Regexp(Attr('./a', 'onclick'), r'indCredit, (\d+),'),
+            )
 
 
 class InvestmentPage(CMSOPage):
@@ -274,4 +297,24 @@ class SSODomiPage(JsonPage, UpdateTokenMixin):
 
 
 class AuthCheckUser(HTMLPage):
+    pass
+
+
+class ProfilePage(LoggedPage, JsonPage):
+    @method
+    class get_profile(ItemElement):
+        klass = Profile
+
+        obj_id = Coalesce(
+            Dict('identifiantExterne', default=NotAvailable),
+            Dict('login', default=NotAvailable),
+        )
+
+        obj_name = Format('%s %s', Dict('firstName'), Dict('lastName'))
+
+    def get_token(self):
+        return Dict('loginEncrypted')(self.doc)
+
+
+class EmptyPage(LoggedPage, HTMLPage):
     pass

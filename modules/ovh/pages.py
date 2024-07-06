@@ -2,62 +2,68 @@
 
 # Copyright(C) 2015      Vincent Paredes
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-from weboob.capabilities.bill import Bill, Subscription
-from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, Date
-from weboob.browser.filters.html import Attr
-from weboob.browser.filters.json import Dict
-from weboob.browser.elements import ListElement, ItemElement, method, DictElement
-from weboob.exceptions import ActionNeeded, AuthMethodNotImplemented
-
+from woob.capabilities.bill import Bill, Subscription
+from woob.browser.pages import HTMLPage, LoggedPage, JsonPage
+from woob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, DateTime
+from woob.browser.filters.html import Attr
+from woob.browser.filters.json import Dict
+from woob.browser.elements import ListElement, ItemElement, method, DictElement
+import time
 
 class LoginPage(HTMLPage):
-    def on_load(self):
-        if self.doc.xpath('//p[contains(text(), "You have activated the double factor authentication")]'):
-            raise AuthMethodNotImplemented('Two-Factor authentication is not supported.')
-
     def is_logged(self):
-        return not self.doc.xpath('//input[@name="credentialToken"]')
+        return self.doc.xpath('//div[@class="already-logged-content"]')
 
     def login(self, login, password):
-        form = self.get_form('//form[@class="pagination-centered"]')
+        form = self.get_form('//form[@id="login-form"]')
         # because name attribute for login and password change each time we call this page
-        user = Attr('//form[@class="pagination-centered"]//input[@type="text"]', 'name')(self.doc)
-        pwd = Attr('//form[@class="pagination-centered"]//input[@type="password"]', 'name')(self.doc)
+        user = Attr('//form[@id="login-form"]//input[@id="account"]', 'name')(self.doc)
+        pwd = Attr('//form[@id="login-form"]//input[@id="password"]', 'name')(self.doc)
 
         form[user] = login
         form[pwd] = password
         form.submit()
 
     def get_error_message(self):
-        return CleanText('//form[@class="pagination-centered"]/div[@class="error"]')(self.doc)
+        return CleanText('//form[@id="login-form"]/div[@class="error"]')(self.doc)
 
     # There is 2 double auth method
-    # One activated by the user, that we don't handle,
-    # The other, spawning sometimes at first login, that we can handle.
+    # One activated by the user, that we can handle,
+    # The other, spawning sometimes at first login, that we can also handle.
 
     def check_user_double_auth(self):
-        double_auth = self.doc.xpath('//input[@id="codeSMS"]')
+        double_auth = self.doc.xpath('//p[contains(text(), "You have activated the double factor authentication")]')
+        double_auth2 = self.doc.xpath('//div[@class="mfa-title" and contains(text(), "Two-Factor authentication")]')
+        return bool(double_auth) or bool(double_auth2)
 
-        if double_auth:
-            raise ActionNeeded(CleanText('(//div[contains(., "Two-Factor")])[5]')(self.doc))
+    def maybe_switch_user_double_auth(self, method):
+        form = self.get_form('//form[@id="form-2fa" or @id="2fa"]')
+        if form['change2FA'] != method:
+            form['change2FA'] = method
+            time.sleep(0.5)
+            form.submit()
+
+    def submit_user_double_auth(self, method, value):
+        form = self.get_form('//form[@id="form-2fa" or @id="2fa"]')
+        form[method] = value
+        form['otpMethod'] = method
+        time.sleep(0.5)
+        form.submit()
 
     def check_website_double_auth(self):
         double_auth = self.doc.xpath('//input[@id="emailCode"]')
@@ -82,17 +88,30 @@ class ProfilePage(LoggedPage, JsonPage):
             obj_id = CleanText(Dict('nichandle'))
 
 
+class BillItem(ItemElement):
+    klass = Bill
+
+    obj_id = Format('%s.%s', Env('subid'), Dict('orderId'))
+    obj_total_price = CleanDecimal.SI(Dict('priceWithTax/value'))
+    obj_format = 'pdf'
+    obj_url = Dict('pdfUrl')
+    obj_label = Format('Facture %s', Dict('orderId'))
+
+
 class BillsPage(LoggedPage, JsonPage):
     @method
     class get_documents(DictElement):
         item_xpath = 'list/results'
 
-        class item(ItemElement):
-            klass = Bill
+        class item(BillItem):
+            obj_date = DateTime(Dict('billingDate'))
 
-            obj_id = Format('%s.%s', Env('subid'), Dict('orderId'))
-            obj_date = Date(Dict('billingDate'))
-            obj_format = 'pdf'
-            obj_price = CleanDecimal(Dict('priceWithTax/value'))
-            obj_url = Dict('pdfUrl')
-            obj_label = Format('Facture %s', Dict('orderId'))
+
+class RefundsPage(LoggedPage, JsonPage):
+    @method
+    class get_documents(DictElement):
+        item_xpath = 'list/results'
+
+        class item(BillItem):
+            obj_date = DateTime(Dict('date'))
+            obj_total_price = CleanDecimal.SI(Dict('priceWithTax/value'), sign='-')

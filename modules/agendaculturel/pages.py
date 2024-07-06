@@ -2,29 +2,29 @@
 
 # Copyright(C) 2015      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.browser.pages import HTMLPage
-from weboob.browser.elements import ItemElement, ListElement, method
-from weboob.browser.filters.standard import CleanText, Date, Regexp, Filter, Env, Format, Decode, Time, Type
-from weboob.browser.filters.html import CleanHTML, XPath
-from weboob.browser.filters.json import Dict
+from woob.browser.pages import HTMLPage
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import CleanText, Date, Regexp, Filter, Env, Format, Decode, Time, Type
+from woob.browser.filters.html import CleanHTML, XPath
+from woob.browser.filters.json import Dict
 
-from weboob.capabilities.calendar import CATEGORIES
+from woob.capabilities.calendar import CATEGORIES
 from .calendar import AgendaculturelEvent
 from datetime import datetime, time
 
@@ -62,7 +62,7 @@ class BasePage(HTMLPage):
             _json = CleanText('.')(XPath('//script[@type="application/ld+json"][1]')(el)[0])
 
             try:
-                from weboob.tools.json import json
+                from woob.tools.json import json
                 self.env['_json'] = json.loads(_json)
             except ValueError:
                 self.env['_json'] = {}
@@ -154,7 +154,7 @@ class BasePage(HTMLPage):
                 return False
 
             def check_category(self, obj):
-                return (not self.env['categories'] or obj.category in self.env['categories'])
+                return not self.env['categories'] or obj.category in self.env['categories']
 
             obj_id = Format('%s.%s',
                             Env('region'),
@@ -166,4 +166,4 @@ class BasePage(HTMLPage):
                 _date = Date(CleanText('./meta[@itemprop="startDate"]/@content'))(self)
                 return datetime.combine(_date, time.min)
 
-            obj_category = AgendaculturelCategory(Regexp(CleanText('./@itemtype'), 'http://schema.org/(.*)'))
+            obj_category = AgendaculturelCategory(Regexp(CleanText('./@itemtype'), 'https://schema.org/(.*)'))

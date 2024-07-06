@@ -2,26 +2,26 @@
 
 # Copyright(C) 2016      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.tools.compat import unicode
-from weboob.capabilities.image import CapImage, BaseImage, Thumbnail
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
+from woob.capabilities.file import LICENSES
+from woob.capabilities.image import CapImage, BaseImage, Thumbnail
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import PixabayBrowser
 
@@ -45,11 +45,11 @@ class Img(BaseImage):
 
 class PixabayModule(Module, CapImage):
     NAME = 'pixabay'
-    DESCRIPTION = u'Pixabay public domain photo search'
+    DESCRIPTION = u'Pixabay photo search'
     MAINTAINER = u'Vincent A'
     EMAIL = 'dev@indigo.re'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
     BROWSER = PixabayBrowser
 
@@ -70,13 +70,13 @@ class PixabayModule(Module, CapImage):
         return self.get_image(_id)
 
     def _build_image(self, d):
-        img = Img(unicode(d['id']))
+        img = Img(str(d['id']))
         img.title = d['tags']
         img.author = d['user']
         img.thumbnail = Thumbnail(d['previewURL'])
         img.url = d['webformatURL']
         img._page_url = d['pageURL']
-        img.license = u'Public Domain'
+        img.license = LICENSES.COPYRIGHT
         return img
 
     def get_image(self, _id):

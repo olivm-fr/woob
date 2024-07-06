@@ -2,36 +2,34 @@
 
 # Copyright(C) 2017 Vincent Ardisson
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from decimal import Decimal
-import re
 
-from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage, RawPage
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.browser.filters.standard import (
+from woob.browser.pages import LoggedPage, JsonPage, HTMLPage
+from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.filters.standard import (
     Date, Eval, Env, CleanText, Field, CleanDecimal, Format,
     Currency,
 )
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.base import NotAvailable
-from weboob.exceptions import ActionNeeded, BrowserUnavailable
+from woob.browser.filters.json import Dict
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.base import NotAvailable
+from woob.exceptions import ActionNeeded, BrowserUnavailable
+from woob.browser.selenium import SeleniumPage
 from dateutil.parser import parse as parse_date
 
 
@@ -77,6 +75,7 @@ class LoginPage(JsonPage):
         # - LGON005 = Account blocked
         # - LGON008 = ?
         # - LGON010 = Browser unavailable
+        # - LGON013 = SCA
         return CleanText(Dict('errorCode'))(self.doc)
 
     def get_error_message(self):
@@ -87,6 +86,27 @@ class LoginPage(JsonPage):
 
     def get_redirect_url(self):
         return CleanText(Dict('redirectUrl'))(self.doc)
+
+    def get_reauth(self):
+        return Dict('reauth')(self.doc)
+
+
+class ReadAuthChallengePage(JsonPage):
+    def get_challenge(self):
+        return Dict("challenge")(self.doc)
+
+    def get_account_token(self):
+        identity_data = Dict("identityData")(self.doc)
+        assert len(identity_data) == 1, "How can we have multiple identity_data?"
+        return identity_data[0]["identityValue"]
+
+    def get_otp_methods(self):
+        return Dict("tenuredChannels")(self.doc)
+
+
+class UpdateAuthTokenPage(JsonPage):
+    def get_pending_challenges(self):
+        return Dict('pendingChallenges')(self.doc)
 
 
 class AccountsPage(LoggedPage, JsonPage):
@@ -215,8 +235,9 @@ class JsonHistory(LoggedPage, JsonPage):
             obj__ref = Dict('identifier')
 
 
-class JsDataPage(RawPage):
-    def get_version(self):
-        version = re.search(r'"(\d\.[\d\._]+)"', self.text)
-        assert version, 'Could not match version number in javascript'
-        return version.group(1)
+class SHomePage(SeleniumPage):
+    pass
+
+
+class SLoginPage(SeleniumPage):
+    pass

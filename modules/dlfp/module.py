@@ -2,32 +2,31 @@
 
 # Copyright(C) 2010-2011  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 from datetime import datetime, timedelta
 import time
 
-from weboob.tools.backend import Module, BackendConfig
-from weboob.exceptions import BrowserForbidden
-from weboob.tools.newsfeed import Newsfeed
-from weboob.tools.value import Value, ValueBool, ValueBackendPassword
-from weboob.capabilities.messages import CapMessages, CapMessagesPost, Message, Thread, CantSendMessage
-from weboob.capabilities.content import CapContent, Content
-from weboob.tools.compat import basestring
+from woob.tools.backend import Module, BackendConfig
+from woob.exceptions import BrowserForbidden
+from woob.tools.newsfeed import Newsfeed
+from woob.tools.value import Value, ValueBool, ValueBackendPassword
+from woob.capabilities.messages import CapMessages, CapMessagesPost, Message, Thread, CantSendMessage
+from woob.capabilities.content import CapContent, Content
 
 from .browser import DLFP
 from .tools import rssid, id2url
@@ -40,7 +39,7 @@ class DLFPModule(Module, CapMessages, CapMessagesPost, CapContent):
     NAME = 'dlfp'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     LICENSE = 'AGPLv3+'
     DESCRIPTION = "Da Linux French Page news website"
     CONFIG = BackendConfig(Value('username',                label='Username', default=''),
@@ -236,7 +235,7 @@ class DLFPModule(Module, CapMessages, CapMessagesPost, CapContent):
 
     #### CapContent ###############################################
     def get_content(self, _id, revision=None):
-        if isinstance(_id, basestring):
+        if isinstance(_id, str):
             content = Content(_id)
         else:
             content = _id

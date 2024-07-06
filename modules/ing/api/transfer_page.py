@@ -1,25 +1,21 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019 Sylvie Ye
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import random
 from datetime import datetime
@@ -27,12 +23,12 @@ from io import BytesIO
 
 from PIL import Image, ImageFilter
 
-from weboob.tools.captcha.virtkeyboard import SimpleVirtualKeyboard
-from weboob.browser.pages import LoggedPage, JsonPage
-from weboob.browser.elements import method, DictElement, ItemElement
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import Env, Field, Date, CleanText
-from weboob.capabilities.bank import Recipient, Emitter
+from woob.tools.captcha.virtkeyboard import SimpleVirtualKeyboard
+from woob.browser.pages import LoggedPage, JsonPage
+from woob.browser.elements import method, DictElement, ItemElement
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import Env, Field, Date, CleanText
+from woob.capabilities.bank import Recipient, Emitter
 
 
 class TransferINGVirtKeyboard(SimpleVirtualKeyboard):
@@ -50,15 +46,15 @@ class TransferINGVirtKeyboard(SimpleVirtualKeyboard):
 
     symbols = {
         '0': ('178b23cc890c258bd5594665f2df31c5', '9229a326c21320282f604c2e2d026c2b'),
-        '1': 'd4a68e94d6267de3fa0c426aba0b8dc6',
+        '1': ('d4a68e94d6267de3fa0c426aba0b8dc6', '7e7b5a903e07e774d0e301d04324d17f'),
         '2': '4a17f9e4088ef7d1a499a80bd7b56718',
         '3': 'f7f6364000813aec31e3d2df0dde8194',
-        '4': '4f3161c7dacb0f8981dc8ad8321b7d22',
+        '4': ('4f3161c7dacb0f8981dc8ad8321b7d22', '47e3949fdcf44714c170655bdedd10c9'),
         '5': '6210d53a580d26fdbbf1e5ba62dc5f3d',
         '6': 'f748b7a25f12cc8b87deb22e33eff4a5',
-        '7': '04a0f83158133ab5eeb69163f08c918f',
+        '7': ('04a0f83158133ab5eeb69163f08c918f', '1d9eb809d7f7c0bc2160c607bace798b'),
         '8': '859b2ad7dd70f429c761db4d625e3b57',
-        '9': 'f249afdd16cf98e441e71d7a9dae5359',
+        '9': ('f249afdd16cf98e441e71d7a9dae5359', '323c138524084009a665c6a4960c78ea', '767e78ab0abad54a143d69b50ee232e9'),
     }
 
     # Clean image

@@ -2,51 +2,51 @@
 
 # Copyright(C) 2012-2020  Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from decimal import Decimal
 import re
 
-from weboob.browser.pages import JsonPage, LoggedPage
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.browser.filters.standard import (
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage
+from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.filters.standard import (
     CleanText, Date, Regexp, CleanDecimal,
     Env, Field, Currency, Map, Title,
 )
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import (
+from woob.browser.filters.json import Dict
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import (
     Investment, MarketOrder, MarketOrderDirection, MarketOrderType,
 )
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.exceptions import AuthMethodNotImplemented
-from weboob.tools.capabilities.bank.investments import is_isin_valid, IsinCode
+from woob.capabilities.base import NotAvailable, empty
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.capabilities.bank.investments import is_isin_valid, IsinCode
 
 
 def float_to_decimal(f):
     return Decimal(str(f))
 
 
+class MaintenancePage(HTMLPage):
+    pass
+
+
 class LoginPage(JsonPage):
-    def on_load(self):
-        if Dict('statusText', default="")(self.doc) == "totpNeeded":
-            raise AuthMethodNotImplemented("Time-based One-time Password is not supported")
+    def has_2fa(self):
+        return Dict('statusText', default="")(self.doc) == "totpNeeded"
 
     def get_session_id(self):
         return Dict('sessionId')(self.doc)
@@ -54,6 +54,10 @@ class LoginPage(JsonPage):
     def get_information(self, information):
         key = 'data/' + information
         return Dict(key, default=None)(self.doc)
+
+
+class OtpPage(RawPage):
+    pass
 
 
 def list_to_dict(l):
@@ -75,10 +79,10 @@ class AccountsPage(LoggedPage, JsonPage):
         # sum of its investments in browser.py
 
         def obj_id(self):
-            return str(self.page.browser.intAccount)
+            return str(self.page.browser.int_account)
 
         def obj_number(self):
-            return str(self.page.browser.intAccount)
+            return str(self.page.browser.int_account)
 
         def obj_label(self):
             return '%s DEGIRO' % self.page.browser.name.title()
@@ -97,30 +101,32 @@ class AccountsPage(LoggedPage, JsonPage):
                 return float_to_decimal(list_to_dict(self.el['value'])['size'])
 
             obj_unitvalue = Env('unitvalue', default=NotAvailable)
+            obj_unitprice = Env('unitprice', default=NotAvailable)
             obj_original_currency = Env('original_currency', default=NotAvailable)
             obj_original_unitvalue = Env('original_unitvalue', default=NotAvailable)
+            obj_original_unitprice = Env('original_unitprice', default=NotAvailable)
             obj_valuation = Env('valuation')
+            obj_quantity = Env('quantity', default=NotAvailable)
+            obj_diff = Env('diff')
+            obj_diff_ratio = Env('diff_ratio', default=NotAvailable)
 
             def obj__product_id(self):
                 return str(list_to_dict(self.el['value'])['id'])
 
-            def obj_quantity(self):
-                return float_to_decimal(list_to_dict(self.el['value'])['size'])
-
-            def obj_unitprice(self):
-                return float_to_decimal(list_to_dict(self.el['value'])['breakEvenPrice'])
-
             def obj_label(self):
-                return self._product()['name']
+                product_data = Field('_product_data')(self)
+                return product_data['name']
 
             def obj_vdate(self):
-                vdate = self._product().get('closePriceDate')  # .get() because certain invest don't have that key in the json
+                product_data = Field('_product_data')(self)
+                vdate = product_data.get('closePriceDate')  # .get() because certain invest don't have that key in the json
                 if vdate:
                     return Date().filter(vdate)
                 return NotAvailable
 
             def obj_code(self):
-                code = self._product()['isin']
+                product_data = Field('_product_data')(self)
+                code = product_data['isin']
                 if is_isin_valid(code):
                     # Prefix CFD (Contrats for difference) ISIN codes with "XX-"
                     # to avoid id_security duplicates in the database
@@ -134,19 +140,52 @@ class AccountsPage(LoggedPage, JsonPage):
                     return NotAvailable
                 return Investment.CODE_TYPE_ISIN
 
-            def _product(self):
+            def obj__product_data(self):
                 return self.page.browser.get_product(str(Field('_product_id')(self)))
 
+            def obj_stock_symbol(self):
+                product_data = Field('_product_data')(self)
+                return CleanText(default=NotAvailable).filter(product_data.get('symbol'))
+
+            def obj_stock_market(self):
+                exchanges = Env('exchanges')(self)
+                product_data = Field('_product_data')(self)
+                exchange_id = product_data['exchangeId']
+                if exchange_id:
+                    return exchanges.get(int(exchange_id), NotAvailable)
+                return NotAvailable
+
             def parse(self, el):
-                currency = self._product()['currency']
-                unitvalue = float_to_decimal(list_to_dict(self.el['value'])['price'])
-                valuation = float_to_decimal(list_to_dict(self.el['value'])['value'])
-                self.env['valuation'] = valuation / SPECIFIC_CURRENCIES.get(currency, 1)
+                product_data = Field('_product_data')(self)
+                currency = product_data['currency']
+                unitvalue = Decimal.quantize(Decimal(list_to_dict(Dict('value')(el))['price']), Decimal('0.0001'))
+                unitprice = Decimal.quantize(Decimal(list_to_dict(Dict('value')(el))['breakEvenPrice']), Decimal('0.0001'))
+                quantity = Decimal.quantize(Decimal(list_to_dict(Dict('value')(el))['size']), Decimal('0.01'))
+                valuation = Decimal(list_to_dict(Dict('value')(el))['value'])
+
+                invested_amount = Decimal(list_to_dict(Dict('value')(el))['plBase'][self.env['currency']])
+                current_valuation = Decimal(list_to_dict(Dict('value')(el))['todayPlBase'][self.env['currency']])
+                self.env['diff'] = Decimal.quantize(invested_amount - current_valuation, Decimal('0.0001'),)
+                if invested_amount:
+                    # invested amount can be 0
+                    self.env['diff_ratio'] = Decimal.quantize(self.env['diff'] / abs(invested_amount), Decimal('0.0001'))
+
+                if currency == 'GBX':
+                    # Some stocks are priced in GBX (penny sterling)
+                    # We convert them to GBP to avoid ambiguity with the crypto-currency with the same symbol
+                    currency = 'GBP'
+                    unitvalue = unitvalue / 100
+                    unitprice = unitprice / 100
+
+                self.env['valuation'] = round(valuation / SPECIFIC_CURRENCIES.get(currency, 1), 2)
+                self.env['quantity'] = quantity
 
                 if currency == self.env['currency']:
                     self.env['unitvalue'] = unitvalue
+                    self.env['unitprice'] = unitprice
                 else:
                     self.env['original_unitvalue'] = unitvalue
+                    self.env['original_unitprice'] = unitprice
 
                 self.env['original_currency'] = currency
 
@@ -211,6 +250,16 @@ class MarketOrdersPage(LoggedPage, JsonPage):
 
             def obj_code(self):
                 return IsinCode(default=NotAvailable).filter(self._product()['isin'])
+
+            def obj_stock_symbol(self):
+                return CleanText(default=NotAvailable).filter(self._product().get('symbol'))
+
+            def obj_stock_market(self):
+                exchanges = Env('exchanges')(self)
+                exchange_id = self._product()['exchangeId']
+                if exchange_id:
+                    return exchanges.get(int(exchange_id), NotAvailable)
+                return NotAvailable
 
             def validate(self, obj):
                 # Some rejected orders do not have an ID, we skip them
@@ -352,3 +401,15 @@ class HistoryPage(LoggedPage, JsonPage):
 
     def get_products(self):
         return set(d['productId'] for d in self.doc['data'])
+
+
+class ExchangesPage(JsonPage):
+    def get_stock_market_exchanges(self):
+        exchanges = {}
+        for exchange in self.doc['exchanges']:
+            market_code = exchange.get('code')
+            if market_code:
+                exchanges[exchange['id']] = market_code
+
+        assert exchanges, 'Could not fetch stock market exchanges'
+        return exchanges

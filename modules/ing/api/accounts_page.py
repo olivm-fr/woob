@@ -1,39 +1,38 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019 Sylvie Ye
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 
-from weboob.browser.pages import LoggedPage, JsonPage, HTMLPage
-from weboob.browser.elements import method, DictElement, ItemElement
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import (
+from woob.browser.pages import LoggedPage, JsonPage, HTMLPage
+from woob.browser.elements import method, DictElement, ItemElement
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Date, Eval, Lower, Format, Field, Map, Upper,
     MapIn,
 )
-from weboob.capabilities.bank import Account, AccountOwnership, Investment
-from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.capabilities.base import NotAvailable
+from woob.capabilities.bank import (
+    Account, AccountOwnership, Investment,
+    AccountOwnerType,
+)
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.capabilities.base import NotAvailable
 
 
 class Transaction(FrenchTransaction):
@@ -95,6 +94,7 @@ class AccountsPage(LoggedPage, JsonPage):
             obj_label = Dict('type/label')
             obj_type = MapIn(Dict('type/label'), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
             obj_number = CleanText(Dict('label'), replace=[(' ', '')])
+            obj_owner_type = AccountOwnerType.PRIVATE
 
             def obj_balance(self):
                 # ledgerBalance=-X and hasPositiveBalance=false -> negative balance (checking account)
@@ -225,7 +225,18 @@ class RedirectOldPage(LoggedPage, HTMLPage):
         self.get_form(name='module').submit()
 
 
-class BourseLandingPage(LoggedPage, HTMLPage):
+class BourseLandingPage(HTMLPage):
     # when going to bourse space, we land on this page, which is logged
     # that's all what this class is for: know we're logged
-    pass
+    @property
+    def logged(self):
+        return (
+            'Réessayez après vous être de nouveau authentifié'
+            not in CleanText('//div[@class="error-pages-message"]')(self.doc)
+        )
+
+
+class RedirectBourseToApi(LoggedPage, HTMLPage):
+    def submit_form(self):
+        form = self.get_form()
+        form.submit()

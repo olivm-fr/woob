@@ -2,40 +2,40 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
 from decimal import Decimal
 
-from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
-from weboob.browser.elements import ListElement, ItemElement, TableElement, DictElement, method
-from weboob.browser.filters.standard import (
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, pagination
+from woob.browser.elements import ItemElement, TableElement, DictElement, method
+from woob.browser.filters.standard import (
     CleanDecimal, CleanText, Currency, Date,
     Eval, Field, Lower, MapIn, QueryValue, Regexp,
+    Env, Base, Coalesce, Format,
 )
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.html import Attr, Link, TableCell
-from weboob.capabilities.bank import Account, AccountOwnership
-from weboob.capabilities.wealth import Investment
-from weboob.capabilities.profile import Person
-from weboob.capabilities.base import NotAvailable, NotLoaded, empty
-from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.browser.filters.json import Dict
+from woob.browser.filters.html import Attr, Link, TableCell
+from woob.capabilities.bank import Account, AccountOwnership
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.profile import Person
+from woob.capabilities.base import NotAvailable, NotLoaded, empty
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.tools.capabilities.bank.transactions import Transaction as BankTransaction, FrenchTransaction
+from woob.browser.pages import PartialHTMLPage, RawPage
 
 
 def float_to_decimal(f):
@@ -44,17 +44,29 @@ def float_to_decimal(f):
     return Decimal(str(f))
 
 
-class AccountsPage(LoggedPage, HTMLPage):
+class HomePage(LoggedPage, PartialHTMLPage):
+    pass
+
+
+class InsuranceAccountsBouncerPage(LoggedPage, RawPage):
+    pass
+
+
+class ClearSessionPage(LoggedPage, RawPage):
+    pass
+
+
+class AccountsPage(LoggedPage, JsonPage):
     @method
-    class iter_accounts(ListElement):
-        item_xpath = '//div[contains(@data-module-open-link--link, "/savings/")]'
+    class iter_accounts(DictElement):
+        item_xpath = 'activeAndTerminatedPolicies/activePolicies'
 
         class item(ItemElement):
             klass = Account
 
             def condition(self):
-                # Filter out closed accounts
-                return CleanDecimal.French('.//p[has-class("amount-card")]', default=None)(self) is not None
+                # Filter out closed accounts and accounts without balance
+                return CleanText(Dict('mainInfo'), default=None) and CleanText(Dict('status')) != 'TERMINATED'
 
             TYPES = {
                 'assurance vie': Account.TYPE_LIFE_INSURANCE,
@@ -62,20 +74,31 @@ class AccountsPage(LoggedPage, HTMLPage):
                 'epargne retraite agipi pair': Account.TYPE_PERP,
                 'epargne retraite agipi far': Account.TYPE_MADELIN,
                 'epargne retraite ma retraite': Account.TYPE_PER,
+                'epargne retraite far per': Account.TYPE_PER,
                 'novial avenir': Account.TYPE_MADELIN,
                 'epargne retraite novial': Account.TYPE_LIFE_INSURANCE,
             }
 
-            obj_id = Regexp(CleanText('.//span[has-class("small-title")]'), r'([\d/]+)')
+            obj_id = CleanText(Dict('subTitle'))
             obj_number = obj_id
-            obj_label = CleanText('.//h3[has-class("card-title")]')
-            obj_balance = CleanDecimal.French('.//p[has-class("amount-card")]', default=None)
-            obj_valuation_diff = CleanDecimal.French('.//p[@class="performance"]', default=NotAvailable)
-            obj_currency = Currency('.//p[has-class("amount-card")]')
+            obj_label = CleanText(Dict('title'))
+            obj_balance = CleanDecimal.SI(Dict('mainInfo'), default=None)
+            obj_currency = Currency(CleanText(Dict('mainInfo'), default=None))
             obj__acctype = "investment"
             obj_type = MapIn(Lower(Field('label')), TYPES, Account.TYPE_UNKNOWN)
-            obj_url = Attr('.', 'data-module-open-link--link')
+            obj__pid = CleanText(Dict('policyId'))
+            obj__aid = CleanText(Dict('advisorId'))
+            obj_url = Format(
+                '/content/espace-client/accueil/savings/retirement/contract.content-inner.pid_%s.aid_%s.html',
+                Field('_pid'),
+                Field('_aid'),
+            )
+
             obj_ownership = AccountOwnership.OWNER
+
+
+class InvestmentErrorPage(LoggedPage, RawPage):
+    pass
 
 
 class InvestmentPage(LoggedPage, HTMLPage):
@@ -158,6 +181,20 @@ class InvestmentPage(LoggedPage, HTMLPage):
     def is_detail(self):
         return bool(self.doc.xpath('//th[contains(text(), "Valeur de la part")]'))
 
+    def get_quantity(self, investment_label):
+        th_index_xpath = 'count(//table/thead//th[contains(text(), "%s")]/preceding-sibling::th)+1'
+        label_index = int(self.doc.xpath(th_index_xpath % 'Nom des supports'))
+        quantity_index = int(self.doc.xpath(th_index_xpath % 'Nombre de parts'))
+
+        for row in self.doc.xpath('//table/tbody/tr[td[2]]'):
+            if CleanText('td[%d]' % label_index)(row) == investment_label:
+                # Two numbers separated by `-`
+                return CleanDecimal.French(
+                    Regexp(CleanText('td[%d]' % quantity_index), r'(.+) - .*', default=''),
+                    default=NotAvailable,
+                )(row)
+        return NotAvailable
+
 
 class InvestmentMonAxaPage(LoggedPage, HTMLPage):
     def get_performance_url(self):
@@ -179,7 +216,7 @@ class InvestmentMonAxaPage(LoggedPage, HTMLPage):
 
             obj_label = CleanText(TableCell('label'))
             obj_code = IsinCode(CleanText(TableCell('code')), default=NotAvailable)
-            obj_code_type = IsinType(CleanText(TableCell('code')))
+            obj_code_type = IsinType(Field('code'))
             obj_asset_category = CleanText(TableCell('asset_category'))
             obj_valuation = CleanDecimal.French(TableCell('valuation'), default=NotAvailable)
 
@@ -204,7 +241,7 @@ class PerformanceMonAxaPage(LoggedPage, HTMLPage):
                 tr_position += 1
         tr_position += position_in_colspan
 
-        return '//div[@id="%s"]/table//td[a/text()="%s"]/../td[position()=%s]' % (
+        return '//div[@id="%s"]/table//td[a[normalize-space()="%s"]]/../td[position()=%s]' % (
             table_id,
             inv_label,
             tr_position,
@@ -277,6 +314,41 @@ class PerformanceMonAxaPage(LoggedPage, HTMLPage):
             return NotAvailable
 
 
+class InvestmentJsonPage(LoggedPage, JsonPage):
+    def is_error(self):
+        return Dict('status')(self.doc) == 'ERROR'
+
+    @method
+    class iter_investments(DictElement):
+        item_xpath = 'response/funds'
+
+        class item(ItemElement):
+            klass = Investment
+
+            obj_label = CleanText(Dict('label'))
+
+            def obj_quantity(self):
+                if Field('asset_category')(self) != 'EURO':
+                    return CleanDecimal.SI(Dict('sharesCount'))(self)
+                return NotAvailable
+
+            def obj_unitvalue(self):
+                if Field('asset_category')(self) not in ('EURO', 'FDCR'):
+                    return CleanDecimal.SI(Dict('unitValue'))(self)
+                return NotAvailable
+
+            obj_valuation = CleanDecimal.SI(Dict('savingsAmount/value'))
+            obj_vdate = Date(
+                CleanText(
+                    Dict('savingsAmount/date', default='')
+                ),
+                dayfirst=True,
+                default=NotAvailable
+            )
+            obj_portfolio_share = CleanDecimal.SI(Dict('percentagePolicy'))
+            obj_asset_category = CleanText(Dict('type'))
+
+
 class Transaction(FrenchTransaction):
     PATTERNS = [
         (re.compile(r'^(?P<text>souscription.*)'), FrenchTransaction.TYPE_DEPOSIT),
@@ -285,6 +357,9 @@ class Transaction(FrenchTransaction):
 
 
 class AccountDetailsPage(LoggedPage, HTMLPage):
+    def get_real_account_url(self):
+        return Attr('//div[contains(@class, "mawa-cards-item")]', 'data-url')(self.doc)
+
     def get_account_url(self, url):
         return Attr('//a[@href="%s"]' % url, 'data-url')(self.doc)
 
@@ -296,6 +371,13 @@ class AccountDetailsPage(LoggedPage, HTMLPage):
 
     def get_pid(self):
         return Attr('//div[@data-module="operations-movements"]', 'data-module-operations-movements--pid', default=None)(self.doc)
+
+    def get_pid_invest(self, acc_number):
+        return Attr(
+            '//div[contains(@data-module-card-warning-banner--pid, "%s")]' % acc_number,
+            'data-module-card-warning-banner--pid',
+            default=None
+        )(self.doc)
 
 
 class HistoryPage(LoggedPage, JsonPage):
@@ -352,13 +434,126 @@ class HistoryInvestmentsPage(LoggedPage, JsonPage):
 
 
 class ProfilePage(LoggedPage, HTMLPage):
-    def get_profile(self):
-        form = self.get_form(xpath='//div[@class="popin-card"]')
+    @method
+    class get_profile(ItemElement):
+        klass = Person
 
-        profile = Person()
+        obj_firstname = CleanText(Attr('//input[@name="party.first_name"]', 'value'))
+        obj_lastname = CleanText(Attr('//input[@name="party.preferred_last_name"]', 'value'))
+        obj_email = CleanText(
+            Attr(
+                '//form[@data-module-input-editable--field-type="email"]',
+                'data-module-input-editable--initial-input-value'
+            )
+        )
 
-        profile.name = '%s %s' % (form['party.first_name'], form['party.preferred_last_name'])
-        profile.address = '%s %s %s' % (form['mailing_address.street_line'], form['mailing_address.zip_postal_code'], form['mailing_address.locality'])
-        profile.email = CleanText('//label[@class="email-editable"]')(self.doc)
-        profile.phone = CleanText('//div[@class="info-title colorized phone-disabled"]//label', children=False)(self.doc)
-        return profile
+
+class OutremerProfilePage(ProfilePage):
+    pass
+
+
+class AccessBoursePage(JsonPage):
+    def get_cypher(self):
+        return self.doc['cypher']
+
+
+class BourseAccountsPage(LoggedPage, HTMLPage):
+    def get_cipher(self, account_number):
+        return QueryValue(
+            Link('.//a[contains(text(), "%s")]' % account_number),
+            'cipher'
+        )(self.doc)
+
+
+class WealthHistoryPage(LoggedPage, HTMLPage):
+    pass
+
+
+class FormHistoryPage(LoggedPage, HTMLPage):
+    @pagination
+    @method
+    class iter_history(TableElement):
+
+        head_xpath = '//table[@id="histo"]/thead/tr/th/a'
+        item_xpath = '//table[@id="histo"]/tbody/tr'
+
+        col_date = 'Date comptable'
+        col_label = 'Libellé opération'
+        col_isin_code = re.compile('.*ISIN.*')
+        col_quantity = 'Quantité'
+        col_value = 'Cours'
+
+        def next_page(self):
+            url = Regexp(
+                Attr('//a[contains(text(), "Suivant")]', 'onclick', default=''),
+                r'{href: "(.+)"',
+                default=NotAvailable,
+            )(self)
+
+            if url:
+                return self.page.browser.build_request(url, method='POST')
+
+        class item(ItemElement):
+            klass = BankTransaction
+
+            obj_raw = FrenchTransaction.Raw(TableCell('label'))
+            obj_date = Date(CleanText(TableCell('date')), dayfirst=True)
+
+            def obj_investments(self):
+                # List of all investments of this account
+                investments = Env('investments')(self)
+                # Isin Code of the investment that the current transaction is about
+                isin_code = IsinCode(
+                    # Isin is located in an <a> tag, inside the <tr> tag
+                    Base(TableCell('isin_code'), CleanText('.//a')),
+                    default=NotAvailable,
+                )(self)
+
+                # Either the transaction match an existing investment, or we return an empty object
+                return investments.get(isin_code, [])
+
+    def has_more_transactions(self):
+        return Coalesce(
+            CleanText('//tr[@class="odd"]/td'),
+            CleanText('//tr[@class="even"]/td'),
+            default=None,
+        )(self.doc)
+
+
+class NewInvestmentPage(LoggedPage, HTMLPage):
+
+    @method
+    class iter_investments(TableElement):
+        head_xpath = '//table[@id="valuation"]/thead/tr/th/a'
+        item_xpath = '//table[@id="valuation"]/tbody/tr'
+
+        col_isin_code = 'Code ISIN'
+        col_label = re.compile(r'Libellé valeur.*')
+        col_quantity = 'Quantité'
+        col_unitprice = 'Prix de revient'
+        col_unitvalue = re.compile('^Cours')
+        col_valuation = re.compile('.*Valorisation.*')
+        col_diff = re.compile('.*values latentes')
+
+        class item(ItemElement):
+            klass = Investment
+
+            def condition(self):
+                return CleanText(TableCell('label'))(self)
+
+            # we can have isincode with a letter in its 10 last characters
+            obj_code = IsinCode(
+                Regexp(
+                    CleanText(TableCell('isin_code')),
+                    r'[A-Z]{2}[A-Z0-9]{10}',
+                    default=NotAvailable
+                ),
+                default=NotAvailable
+            )
+            obj_code_type = IsinType(Field('code'))
+            obj_label = CleanText(TableCell('label'))
+            obj_quantity = CleanDecimal.French(TableCell('quantity'), default=NotAvailable)
+            obj_unitprice = CleanDecimal.French(TableCell('unitprice'), default=NotAvailable)
+            obj_unitvalue = CleanDecimal.French(TableCell('unitvalue'), default=NotAvailable)
+            obj_valuation = CleanDecimal.French(TableCell('valuation'))
+            obj_diff = CleanDecimal.French(TableCell('diff'))

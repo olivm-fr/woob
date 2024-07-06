@@ -2,20 +2,20 @@
 
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
 import re
@@ -23,13 +23,12 @@ from datetime import datetime
 from decimal import Decimal
 from itertools import chain
 
-from weboob.browser import URL, LoginBrowser, need_login
-from weboob.browser.pages import HTMLPage
-from weboob.capabilities.base import Currency
-from weboob.capabilities.shop import Item, Order, Payment
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
-from weboob.tools.compat import unicode
+from woob.browser import URL, LoginBrowser, need_login
+from woob.browser.pages import HTMLPage
+from woob.capabilities.base import Currency
+from woob.capabilities.shop import Item, Order, Payment
+from woob.exceptions import BrowserIncorrectPassword
+from woob.tools.capabilities.bank.transactions import AmericanTransaction as AmTr
 
 __all__ = ['VicSec']
 
@@ -89,7 +88,7 @@ class OrderPage(VicSecPage):
             amount = amnode.text_content().strip()
             pmt = Payment()
             pmt.date = self.order_date()
-            pmt.method = unicode(method)
+            pmt.method = method
             pmt.amount = amsign * AmTr.decimal_amount(amount)
             if pmt.method not in [u'Funds to be applied on backorder']:
                 yield pmt
@@ -102,8 +101,8 @@ class OrderPage(VicSecPage):
                                         re.DOTALL).group(1))
             url = 'http:' + tr.xpath('*//img/@src')[0]
             item = Item()
-            item.label = unicode(label)
-            item.url = unicode(url)
+            item.label = label
+            item.url = url
             item.price = price
             yield item
 

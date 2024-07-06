@@ -2,38 +2,36 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.elements import ItemElement, ListElement, TableElement, method
-from weboob.browser.filters.standard import (
-    CleanText, Date, Regexp, CleanDecimal, Map,
-    Field, Async, AsyncLoad, Eval, Currency,
+from woob.browser.pages import HTMLPage, LoggedPage
+from woob.browser.elements import ItemElement, ListElement, TableElement, method
+from woob.browser.filters.standard import (
+    CleanText, Date, Regexp, CleanDecimal, Field, Eval, Currency,
 )
-from weboob.browser.filters.html import Attr, AbsoluteLink, TableCell
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.wealth import Investment
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword
+from woob.browser.filters.html import Attr, TableCell, Link, HasElement
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.base import NotAvailable, empty
+from woob.exceptions import BrowserUnavailable, BrowserIncorrectPassword
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
 
 
 def MyDecimal(*args, **kwargs):
@@ -77,38 +75,38 @@ ACCOUNT_TYPES = {
 
 
 class AccountsPage(LoggedPage, HTMLPage):
+    def has_multiple_accounts(self):
+        return HasElement('//td[text()="Total de votre épargne"]')(self.doc)
+
+    def get_account_id(self):
+        return Regexp(
+            CleanText('//span[@class="regleDeCalcul"]'),
+            r'Contrat n° (\d+)'
+        )(self.doc)
+
+    def get_switch_account_form(self):
+        form = self.get_form(id='syntheseForm')
+        form['javax.faces.partial.ajax'] = 'true'
+        form['javax.faces.source'] = 'j_idt64'
+        form['javax.faces.partial.execute'] = '@all'
+        form['javax.faces.partial.render'] = 'syntheseForm'
+        form['j_idt64'] = 'j_idt64'
+        form['syntheseForm'] = 'syntheseForm'
+        return form
+
     @method
-    class iter_accounts(TableElement):
-        item_xpath = '//table[@role]/tbody/tr'
-        head_xpath = '//table[@role]/thead/tr/th'
+    class get_account(ItemElement):
 
-        col_label = u'Produit'
-        col_id = u'Numéro de contrat'
-        col_balance = re.compile(u'Montant')
-        col_currency = u'Currency'
+        klass = Account
 
-        class item(ItemElement):
-            klass = Account
-
-            load_details = Field('url') & AsyncLoad
-
-            obj_id = obj_number = CleanText(TableCell('id'), replace=[(' ', '')])
-            obj_label = CleanText(TableCell('label'))
-            obj_balance = MyDecimal(TableCell('balance'))
-            obj_url = AbsoluteLink('.//a')
-            obj_valuation_diff = Async('details') & MyDecimal(
-                '//tr[1]/td[contains(text(), "value du contrat")]/following-sibling::td'
-            )
-            obj_currency = Currency('//td[contains(@class,"donneeMontant")]')
-            obj__raw_label = Async(
-                'details',
-                CleanText('//td[contains(text(), "Option fiscale")]/following-sibling::td')
-            )
-            obj_type = Map(
-                Field('_raw_label'),
-                ACCOUNT_TYPES,
-                Account.TYPE_UNKNOWN
-            )
+        obj_id = obj_number = Regexp(
+            CleanText('//span[@class="regleDeCalcul"]'),
+            r'Contrat n° (\d+)'
+        )
+        obj_label = CleanText('//section//h1')
+        obj_balance = CleanDecimal.French('//div[table]//span[@class="ea"]')
+        obj_currency = Currency('//div[table]//span[@class="ea"]')
+        obj_url = Link('//a[text()="Situation du contrat"]')
 
 
 class TableInvestment(TableElement):
@@ -127,13 +125,12 @@ class ItemInvestment(ItemElement):
     obj_quantity = MyDecimal(TableCell('quantity', default=None))
     obj_unitvalue = MyDecimal(TableCell('unitvalue', default=None))
     obj_vdate = Date(CleanText(TableCell('vdate', default="")), dayfirst=True, default=NotAvailable)
-    obj_code = Regexp(CleanText('.//td[contains(text(), "Isin")]'), r':[\s]+([\w]+)', default=NotAvailable)
     obj__invest_type = Regexp(CleanText('.//td[contains(text(), "Type")]'), r':[\s]+([\w ]+)', default=NotAvailable)
-
-    def obj_code_type(self):
-        if Field('code')(self) == NotAvailable:
-            return NotAvailable
-        return Investment.CODE_TYPE_ISIN
+    obj_code = IsinCode(
+        Regexp(CleanText('.//td[contains(text(), "Isin")]'), r':[\s]+([\w]+)', default=NotAvailable),
+        default=NotAvailable
+    )
+    obj_code_type = IsinType(Field('code'))
 
     def obj_valuation(self):
         valuation = MyDecimal(TableCell('valuation', default=None))(self)
@@ -178,6 +175,20 @@ class DetailsPage(LoggedPage, HTMLPage):
         return super(DetailsPage, self).build_doc(content)
 
     DEBIT_WORDS = ['rachat', 'frais', u'désinvestir']
+
+    def get_account_data(self):
+        # this code is used by iter_accounts
+        # and COULD be defined in AccountsPage.iter_accounts with Async
+        # but this website disconnect us very often
+        raw_label = CleanText('//td[contains(text(), "Option fiscale")]/following-sibling::td')(self.doc)
+        xpath = '//td[./span[@id="ongletSituation:infoBullePlusMoinsValueSynthese"]]/..//span[@class="donneeMontant"]'
+        val_diff = CleanDecimal.French(xpath)(self.doc)
+        data = {
+            'valuation_diff': val_diff,
+            '_raw_label': raw_label,
+            'type': ACCOUNT_TYPES.get(raw_label, Account.TYPE_UNKNOWN),
+        }
+        return data
 
     def count_transactions(self):
         return Regexp(

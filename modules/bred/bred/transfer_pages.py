@@ -2,33 +2,31 @@
 
 # Copyright(C) 2020 Guillaume Risbourg
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import date
 import re
 
-from weboob.capabilities.bank import Recipient
-from weboob.browser.pages import LoggedPage, JsonPage
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.browser.filters.standard import (
+from woob.capabilities.bank import Recipient
+from woob.browser.pages import LoggedPage, JsonPage
+from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.filters.standard import (
     CleanText, Currency, Format, CleanDecimal, Regexp,
 )
-from weboob.browser.filters.json import Dict
+from woob.browser.filters.json import Dict
 
 
 class ListAuthentPage(LoggedPage, JsonPage):
@@ -49,6 +47,10 @@ class EmittersListPage(LoggedPage, JsonPage):
             # Nous vous précisons que votre pouvoir ne vous permet pas
             # d'effectuer des virements de ce type au débit du compte sélectionné.
             return False
+        elif code == '90600':
+            # "Votre demande de virement ne peut être prise en compte actuellement
+            # The user is probably not allowed to do transfers
+            return False
         elif code != '0':
             raise AssertionError('Unhandled code %s in transfer emitter selection' % code)
 
@@ -68,6 +70,9 @@ class RecipientListPage(LoggedPage, JsonPage):
     @method
     class iter_external_recipients(DictElement):
         item_xpath = 'content/listeComptesCExternes'
+        # The id is the iban, and exceptionally there could be the same
+        # recipient multiple times when the bic of the recipient changed
+        ignore_duplicate = True
 
         class item(ItemElement):
             klass = Recipient
@@ -101,6 +106,9 @@ class RecipientListPage(LoggedPage, JsonPage):
 
 
 class ErrorJsonPage(JsonPage):
+    def get_error_code(self):
+        return CleanText(Dict('erreur/code'))(self.doc)
+
     def get_error(self):
         error = CleanText(Dict('erreur/libelle'))(self.doc)
         if error != 'OK':
@@ -119,12 +127,15 @@ class AddRecipientPage(LoggedPage, ErrorJsonPage):
         error = self.get_error()
         if not error:
             return None
+
         # The message is some partial html in a json key, we can't use
         # the html tags to limit the search.
         text_limit = Regexp(
-            pattern=r"(?:plafond de virement est limité à|l'augmenter, au delà de) ([\d ,€]+)"
+            pattern=r"(?:plafond de virement est limité à|l'augmenter, au delà de) ([\d ,€]+)",
+            default='',
         ).filter(error)
-        return CleanDecimal.French().filter(text_limit)
+
+        return CleanDecimal.French(default=None).filter(text_limit)
 
 
 class TransferPage(LoggedPage, ErrorJsonPage):

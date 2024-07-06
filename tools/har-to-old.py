@@ -8,26 +8,37 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+from woob.tools.request import to_curl
+
 
 def write_request(entry, fd):
     entry = entry['request']
 
     # we should put the path, but since requests does not output the Host header
     # we would not know what was the host
-    fd.write(f"{entry['method']} {entry['url']} {entry['httpVersion']}\n".encode())
+    fd.write(f"{entry['method']} {entry['url']} {entry['httpVersion']}\n\n".encode())
 
     for header in entry['headers']:
         fd.write(f"{header['name']}: {header['value']}\n".encode())
 
-    fd.write(b'\n')
-
     if 'postData' in entry:
         if entry['postData'].get('x-binary'):
-            # non-standard key emitted by weboob
+            # non-standard key emitted by woob
             body = entry['postData']['text'].encode('latin-1')
         else:
             body = entry['postData']['text'].encode()
-        fd.write(body)
+        fd.write(b'\n' + body + b'\n')
+
+    if os.environ.get('WOOB_CURLIFY_REQUEST') == '1':
+        # Convert HAR to PreparedRequest format
+        entry['headers'] = {header['name']: header['value'] for header in entry['headers']}
+
+        body = entry.get('postData', {}).get('text')
+        if body:
+            entry['body'] = body
+
+        curl = to_curl(entry)
+        fd.write(b'\n' + curl.encode('utf-8') + b'\n')
 
 
 def write_response(entry, fd):
@@ -42,7 +53,8 @@ def write_body(entry, fd):
     if entry['content'].get('encoding') == 'base64':
         data = b64decode(entry['content']['text'])
     else:
-        data = entry['content']['text'].encode('utf-8')
+        data = entry['content'].get('text', '')
+        data = data.encode('utf-8')
     fd.write(data)
 
 
@@ -58,6 +70,9 @@ def guess_extension(entry):
     return ext
 
 
+NAME_MAX_LENGTH = 80
+
+
 def main():
     def extract(n, destdir):
         os.makedirs(destdir, exist_ok=True)
@@ -66,6 +81,8 @@ def main():
 
         ext = guess_extension(entry)
         name = Path(urlparse(entry['request']['url']).path).stem
+        if name:
+            name = name[:NAME_MAX_LENGTH]
         prefix = f'{destdir}/{n + 1:03d}-{entry["response"]["status"]}{name and f"-{name}"}{ext}'
 
         with open(f'{prefix}-request.txt', 'wb') as fd:

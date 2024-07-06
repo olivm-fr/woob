@@ -2,26 +2,24 @@
 
 # Copyright(C) 2012-2020  Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-from weboob.browser import PagesBrowser, URL
-from weboob.exceptions import BrowserIncorrectPassword, BrowserHTTPNotFound
-from weboob.capabilities.content import Content, Revision
+from woob.browser import PagesBrowser, URL
+from woob.exceptions import BrowserIncorrectPassword, BrowserHTTPNotFound
+from woob.capabilities.content import Content, Revision
 
 from .pages import (
     NotePage, MePage, RootPage, RevisionListPage, RevisionPage, NewNotePage,
@@ -141,7 +139,7 @@ class CodimdBrowser(PagesBrowser):
 
             # add the note to user history
             # t= is supposed to be unique? a constant works fine
-            self.socket.open(note=content.id, t='WEBOOB')
+            self.socket.open(note=content.id, t='WOOB')
             return content
 
     # deleting a note is done in /socket.io route

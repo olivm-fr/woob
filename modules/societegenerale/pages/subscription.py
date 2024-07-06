@@ -21,25 +21,25 @@
 
 from datetime import datetime
 
-from weboob.capabilities.bill import Document, DocumentTypes
-from weboob.browser.elements import DictElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, Date, Format, Field, BrowserURL, Env, Eval
-from weboob.browser.filters.json import Dict
-from weboob.browser.pages import LoggedPage, RawPage, JsonPage
+from woob.capabilities.bill import Document, DocumentTypes
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.standard import CleanText, Date, Format, Field, BrowserURL, Env, Eval
+from woob.browser.filters.json import Dict
+from woob.browser.pages import LoggedPage, RawPage, JsonPage
 
 
 def parse_from_timestamp(date, **kwargs):
     # divide by 1000 because given value is a millisecond timestamp
-    return datetime.fromtimestamp(int(date)/1000)
+    return datetime.fromtimestamp(int(date) / 1000)
 
 
 class DocumentsPage(LoggedPage, JsonPage):
     def has_documents(self):
-        return bool(self.doc['donnees']['eDocumentDto']['listCleReleveDto'])
+        return bool(self.doc['donnees']['edocumentDto']['listCleReleveDto'])
 
     @method
     class iter_documents(DictElement):
-        item_xpath = 'donnees/eDocumentDto/listCleReleveDto'
+        item_xpath = 'donnees/edocumentDto/listCleReleveDto'
 
         class item(ItemElement):
             klass = Document

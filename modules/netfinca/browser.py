@@ -2,37 +2,41 @@
 
 # Copyright(C) 2012-2019  Budget-Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
 
-from weboob.browser import LoginBrowser, URL
-from weboob.exceptions import BrowserUnavailable, ActionNeeded
+from woob.browser import LoginBrowser, URL
+from woob.exceptions import BrowserUnavailable, ActionNeeded
 
-from .pages import InvestmentsPage, AccountsPage, MarketOrdersPage
+from .pages import AccountsPage, HistoryPage, InvestmentsPage, MarketOrdersPage
 
 
 class NetfincaBrowser(LoginBrowser):
     accounts = URL(r'/netfinca-titres/servlet/com.netfinca.frontcr.synthesis.HomeSynthesis', AccountsPage)
-    investments = URL(r'/netfinca-titres/servlet/com.netfinca.frontcr.account.WalletVal\?nump=(?P<nump_id>.*)', InvestmentsPage)
+    investments = URL(
+        r'/netfinca-titres/servlet/com.netfinca.frontcr.account.WalletVal\?nump=(?P<nump_id>.*)',
+        InvestmentsPage
+    )
     market_orders = URL(r'/netfinca-titres/servlet/com.netfinca.frontcr.order.OrderList', MarketOrdersPage)
+    history = URL(r'/netfinca-titres/servlet/com.netfinca.frontcr.account.AccountHistory', HistoryPage)
 
     def do_login(self):
         raise BrowserUnavailable()
@@ -61,6 +65,45 @@ class NetfincaBrowser(LoginBrowser):
         liquidity = self.page.get_liquidity()
         if liquidity:
             yield liquidity
+
+    def go_history_page(self, nump_id, end, start, page):
+        data = {
+            'cashFilter': 'ALL',
+            'beginDayfilter': start.strftime('%d/%m/%Y'),
+            'endDayfilter': end.strftime('%d/%m/%Y'),
+            'valueFilter': 'ALL',
+            'nump': nump_id,
+            'PAGE': page,
+            'sensTri': '-',
+            'champsTri': 'HMVT_DATE',
+        }
+
+        self.history.go(data=data)
+
+    def iter_history(self, account):
+        nump_id = self.page.get_nump_id(account)
+
+        if not nump_id:
+            return
+
+        # history can be retrieved from investments page
+        self.investments.go(nump_id=nump_id)
+
+        # history is limited to 24 months
+        end = datetime.now()
+        start = end - relativedelta(years=2)
+
+        # go on main page
+        self.go_history_page(nump_id, end, start, 1)
+
+        yield from self.page.iter_history()
+
+        # handle pagination
+        next_pages = self.page.get_next_pages()
+        if next_pages:
+            for page in next_pages:
+                self.go_history_page(nump_id, end, start, page)
+                yield from self.page.iter_history()
 
     def is_account_present(self, account_id):
         # This method is used by parent modules with several perimeters

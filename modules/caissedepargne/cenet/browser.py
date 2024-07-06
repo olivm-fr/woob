@@ -1,51 +1,48 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
+import re
 import time
 from collections import Counter
 from fnmatch import fnmatch
+from urllib.parse import urlparse
 
-from weboob.browser import need_login
-from weboob.browser.url import URL
-from weboob.browser.exceptions import ClientError
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
-from weboob.capabilities.base import find_object
-from weboob.tools.capabilities.bank.transactions import (
+from requests import HTTPError, TooManyRedirects
+
+from woob.browser import need_login
+from woob.browser.url import URL
+from woob.browser.exceptions import ClientError
+from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
+from woob.capabilities.base import find_object
+from woob.tools.capabilities.bank.transactions import (
     sorted_transactions, omit_deferred_transactions, keep_only_card_transactions,
 )
-from weboob.tools.json import json
-from weboob.tools.compat import urlparse
+from woob.tools.json import json
+from woob_modules.linebourse.browser import LinebourseAPIBrowser
 
 from .pages import (
-    ErrorPage,
-    LoginPage, CenetLoginPage, CenetHomePage,
+    CenetLoginPage, CenetHomePage,
     CenetAccountsPage, CenetAccountHistoryPage, CenetCardsPage,
     CenetCardSummaryPage, SubscriptionPage, DownloadDocumentPage,
     CenetLoanPage, LinebourseTokenPage,
 )
 from ..browser import CaisseEpargneLogin
-from ..linebourse_browser import LinebourseAPIBrowser
-from ..pages import CaissedepargneKeyboard
 
 
 __all__ = ['CenetBrowser']
@@ -54,12 +51,18 @@ __all__ = ['CenetBrowser']
 class CenetBrowser(CaisseEpargneLogin):
     BASEURL = "https://www.cenet.caisse-epargne.fr"
 
+    SKIP_LOCATE_BROWSER_ON_CONFIG_VALUES = ('otp_sms',)
     STATE_DURATION = 5
 
-    account_login = URL(
-        r'/authentification/manage\?step=account&identifiant=(?P<login>.*)&account=(?P<accountType>.*)',
-        LoginPage
+    cenet_new_home = CaisseEpargneLogin.home_page.with_urls(
+        r'https://www.caisse-epargne.fr/espace-entreprise/web-b2b/callback'
     )
+
+    js_file = CaisseEpargneLogin.js_file.with_urls(
+        r'https://www.caisse-epargne.fr/espace-entreprise/web-b2b/(?P<js_file_name>[^/]+)',
+        clear=False,
+    )
+
     cenet_vk = URL(r'https://www.cenet.caisse-epargne.fr/Web/Api/ApiAuthentification.asmx/ChargerClavierVirtuel')
     cenet_home = URL(
         r'/Default.aspx$',
@@ -73,12 +76,6 @@ class CenetBrowser(CaisseEpargneLogin):
     cenet_account_coming = URL(r'/Web/Api/ApiCartesBanquaires.asmx/ChargerEnCoursCarte', CenetAccountHistoryPage)
     cenet_tr_detail = URL(r'/Web/Api/ApiComptes.asmx/ChargerDetailOperation', CenetCardSummaryPage)
     cenet_cards = URL(r'/Web/Api/ApiCartesBanquaires.asmx/ChargerCartes', CenetCardsPage)
-    error = URL(
-        r'https://.*/login.aspx',
-        r'https://.*/Pages/logout.aspx.*',
-        r'https://.*/particuliers/Page_erreur_technique.aspx.*',
-        ErrorPage,
-    )
     cenet_login = URL(
         r'https://.*/$',
         r'https://.*/default.aspx',
@@ -94,6 +91,9 @@ class CenetBrowser(CaisseEpargneLogin):
     MARKET_URL = 'https://www.caisse-epargne.offrebourse.com'
 
     def __init__(self, *args, **kwargs):
+        # This value is useful to display deferred transactions if PSU has no card but only CHECKING account
+        self.has_cards_displayed = False
+        self.accounts = None
         super(CenetBrowser, self).__init__(*args, **kwargs)
 
         dirname = self.responses_dirname
@@ -104,7 +104,6 @@ class CenetBrowser(CaisseEpargneLogin):
             self.MARKET_URL,
             logger=self.logger,
             responses_dirname=dirname,
-            weboob=self.weboob,
             proxy=self.PROXIES,
         )
 
@@ -112,54 +111,30 @@ class CenetBrowser(CaisseEpargneLogin):
         super(CenetBrowser, self).deinit()
         self.linebourse.deinit()
 
+    def set_base_url(self):
+        self.BASEURL = self.CENET_URL
+
+    def locate_browser(self, state):
+        # parent's behavior
+        if self.should_skip_locate_browser():
+            return
+
+        # otherwise, force going on home to avoid some bugs on other URL GET requests.
+        try:
+            self.cenet_home.go()
+        except (HTTPError, TooManyRedirects):
+            pass
+
     def do_login(self):
-        if self.API_LOGIN:
-            self.browser_switched = True
-            # We use CaisseEpargneLogin do_login
-            # browser_switched avoids to switch again
-            return super(CenetBrowser, self).do_login()
+        self.browser_switched = True
+        # We use CaisseEpargneLogin do_login
+        # browser_switched avoids to switch again
+        super().do_login()
 
-        data = self.login.go(login=self.username).get_response()
-
-        if len(data['account']) > 1:
-            # additional request where there is more than one
-            # connection type (called typeAccount)
-            # TODO: test all connection type values if needed
-            account_type = data['account'][0]
-            self.account_login.go(login=self.username, accountType=account_type)
-            data = self.page.get_response()
-
-        if data is None:
-            raise BrowserIncorrectPassword()
-        elif not self.nuser:
-            raise BrowserIncorrectPassword("Erreur: Numéro d'utilisateur requis.")
-
-        if data.get('authMode') == 'redirectArrimage' and self.BASEURL in data['url']:
-            # The login authentication is the same than non cenet user
-            self.browser_switched = True
-            return super(CenetBrowser, self).do_login()
-        elif data.get('authMode') != 'redirect':
-            raise BrowserIncorrectPassword()
-
-        payload = {'contexte': '', 'dataEntree': None, 'donneesEntree': "{}", 'filtreEntree': "\"false\""}
-        res = self.cenet_vk.open(data=json.dumps(payload), headers={'Content-Type': "application/json"})
-        content = json.loads(res.text)
-        d = json.loads(content['d'])
-        end = json.loads(d['DonneesSortie'])
-
-        _id = end['Identifiant']
-        vk = CaissedepargneKeyboard(end['Image'], end['NumerosEncodes'])
-        code = vk.get_string_code(self.password)
-
-        post_data = {
-            'CodeEtablissement': data['codeCaisse'],
-            'NumeroBad': self.username,
-            'NumeroUtilisateur': self.nuser,
-        }
-
-        self.location(data['url'], data=post_data, headers={'Referer': 'https://www.cenet.caisse-epargne.fr/'})
-
-        return self.page.login(self.username, self.password, self.nuser, data['codeCaisse'], _id, code)
+        # when we use CaisseEpargneLogin do_login we should reset the
+        # value of BASEURL to CENET_URL (changed in login_finalize()-CaisseEpargneLogin).
+        self.set_base_url()
+        return
 
     @need_login
     def go_linebourse(self):
@@ -185,7 +160,7 @@ class CenetBrowser(CaisseEpargneLogin):
         self.linebourse.session.headers['X-XSRF-TOKEN'] = self.session.cookies.get('XSRF-TOKEN', domain=domain)
 
     @need_login
-    def get_accounts_list(self):
+    def iter_accounts(self):
         if self.accounts is None:
             data = {
                 'contexte': '',
@@ -215,6 +190,8 @@ class CenetBrowser(CaisseEpargneLogin):
                     self.accounts.extend(shallow_parent_accounts)
 
                 cards = list(self.page.iter_cards())
+                if cards:
+                    self.has_cards_displayed = True
                 redacted_ids = Counter(card.id[:4] + card.id[-6:] for card in cards)
                 for redacted_id in redacted_ids:
                     assert redacted_ids[redacted_id] == 1, 'there are several cards with the same id %r' % redacted_id
@@ -235,11 +212,12 @@ class CenetBrowser(CaisseEpargneLogin):
             if market_accounts:
                 linebourse_account_ids = {}
                 try:
-                    self.go_linebourse()
-                    params = {'_': '{}'.format(int(time.time() * 1000))}
-                    self.linebourse.account_codes.go(params=params)
-                    if self.linebourse.account_codes.is_here():
-                        linebourse_account_ids = self.linebourse.page.get_accounts_list()
+                    if any(account._access_linebourse for account in market_accounts):
+                        self.go_linebourse()
+                        params = {'_': '{}'.format(int(time.time() * 1000))}
+                        self.linebourse.account_codes.go(params=params)
+                        if self.linebourse.account_codes.is_here():
+                            linebourse_account_ids = self.linebourse.page.get_accounts_list()
                 except AssertionError as e:
                     if str(e) != 'No linebourse space':
                         raise e
@@ -262,7 +240,7 @@ class CenetBrowser(CaisseEpargneLogin):
         return account.type in (account.TYPE_LOAN, account.TYPE_SAVINGS)
 
     @need_login
-    def get_history(self, account):
+    def iter_history(self, account):
         if self.has_no_history(account):
             return []
 
@@ -285,10 +263,13 @@ class CenetBrowser(CaisseEpargneLogin):
                 hist = self.get_history_base(account.parent, card_number=account.number)
                 return keep_only_card_transactions(hist, match_card)
 
-        # this is any other account
-        return omit_deferred_transactions(self.get_history_base(account))
+        if not self.has_cards_displayed:
+            return self.get_history_base(account)
 
-    def get_history_base(self, account, card_number=None):
+        # this is any other account
+        return omit_deferred_transactions(self.get_history_base(account, regular_account=True))
+
+    def get_history_base(self, account, card_number=None, regular_account=False):
         data = {
             'contexte': '',
             'dateEntree': None,
@@ -300,14 +281,24 @@ class CenetBrowser(CaisseEpargneLogin):
         while True:
             for tr in self.page.get_history(coming=False):
                 # yield transactions from account
-                # if account is a card, this does not include card_summary detail
-                yield tr
 
-                if tr.type == tr.TYPE_CARD_SUMMARY and card_number:
-                    # cheking if card_cummary is for this card
-                    assert tr.card, 'card summary has no card number?'
-                    if not self._matches_card(tr, card_number):
-                        continue
+                # If the account given in this method is a card, the history we just
+                # fetched from get_history() does not include card_summary detail, this will
+                # have to be fetched from specific routes.
+                # If the given account is a checking, this can be a regular checking account
+                # or the checking account linked to a card. Depending on the case, we skip
+                # or not card_summary detail, thus the regular_account check.
+                if (
+                    tr.type == tr.TYPE_CARD_SUMMARY and (
+                        card_number or re.search(r'^CB [\d\*]+ TOT DIF .*', tr.label)
+                    ) and not regular_account
+                ):
+                    if card_number:
+                        yield tr
+                        # checking if card_summary is for this card
+                        assert tr.card, 'card summary has no card number?'
+                        if not self._matches_card(tr, card_number):
+                            continue
 
                     # getting detailed transactions for card_summary
                     donneesEntree = {}
@@ -326,7 +317,10 @@ class CenetBrowser(CaisseEpargneLogin):
                     for tr in tr_detail_page.get_history():
                         tr.card = parent_tr.card
                         yield tr
-
+                else:
+                    # Insert yield here enables to skip card summary when PSU
+                    # has no card account (cf previous explanation)
+                    yield tr
             offset = self.page.next_offset()
             if not offset:
                 break
@@ -337,7 +331,7 @@ class CenetBrowser(CaisseEpargneLogin):
             self.cenet_account_history.go(json=data)
 
     @need_login
-    def get_coming(self, account):
+    def iter_coming(self, account):
         if account.type != account.TYPE_CARD:
             return []
 
@@ -357,7 +351,7 @@ class CenetBrowser(CaisseEpargneLogin):
         return sorted_transactions(trs)
 
     @need_login
-    def get_investment(self, account):
+    def iter_investments(self, account):
         if getattr(account, '_is_linebourse', False):
             try:
                 self.go_linebourse()
@@ -394,7 +388,7 @@ class CenetBrowser(CaisseEpargneLogin):
         raise NotImplementedError()
 
     @need_login
-    def iter_subscription(self):
+    def iter_subscriptions(self):
         subscriber = self.get_profile().name
         json_data = {
             'contexte': '',

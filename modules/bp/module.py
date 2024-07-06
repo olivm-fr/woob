@@ -1,41 +1,37 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Nicolas Duhamel
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from decimal import Decimal
 from datetime import timedelta
+from decimal import Decimal
 
-from weboob.capabilities.bank import CapBankTransferAddRecipient, Account, AccountNotFound, RecipientNotFound
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.contact import CapContact
-from weboob.capabilities.base import find_object, strict_find_object, NotAvailable
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.bill import (
-    CapDocument, Subscription, SubscriptionNotFound,
-    Document, DocumentNotFound,
+from woob.capabilities.bank import (
+    Account, AccountNotFound, CapBankTransferAddRecipient, RecipientNotFound, TransferBankError,
 )
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, Value, ValueTransient
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.base import NotAvailable, find_object, find_object_any_match, strict_find_object
+from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
+from woob.capabilities.contact import CapContact
+from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .browser import BPBrowser, BProBrowser
-
 
 __all__ = ['BPModule']
 
@@ -48,7 +44,7 @@ class BPModule(
     NAME = 'bp'
     MAINTAINER = u'Nicolas Duhamel'
     EMAIL = 'nicolas@jombi.fr'
-    VERSION = '2.1'
+    DEPENDENCIES = ('linebourse',)
     LICENSE = 'LGPLv3+'
     DESCRIPTION = u'La Banque Postale'
     CONFIG = BackendConfig(
@@ -62,24 +58,21 @@ class BPModule(
         ValueTransient('code'),
         ValueTransient('resume'),
     )
+    AVAILABLE_BROWSERS = {'par': BPBrowser, 'pro': BProBrowser}
+
+    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.OTHER)
 
     def create_default_browser(self):
-        b = {'par': BPBrowser, 'pro': BProBrowser}
-
-        self.BROWSER = b[self.config['website'].get()]
+        self.BROWSER = self.AVAILABLE_BROWSERS[self.config['website'].get()]
 
         return self.create_browser(
             self.config,
             self.config['login'].get(),
             self.config['password'].get(),
-            weboob=self.weboob
         )
 
     def iter_accounts(self):
         return self.browser.get_accounts_list()
-
-    def get_account(self, _id):
-        return find_object(self.browser.get_accounts_list(), id=_id, error=AccountNotFound)
 
     def iter_history(self, account):
         return self.browser.get_history(account)
@@ -114,13 +107,14 @@ class BPModule(
         if not account:
             account = strict_find_object(self.iter_accounts(), id=transfer.account_id, error=AccountNotFound)
 
-        recipient = strict_find_object(self.iter_transfer_recipients(account.id), iban=transfer.recipient_iban)
-        if not recipient:
-            recipient = strict_find_object(
-                self.iter_transfer_recipients(account.id),
-                id=transfer.recipient_id,
-                error=RecipientNotFound
-            )
+        if not account._has_transfer:
+            raise TransferBankError(message="Le compte ne permet pas l'émission de virements")
+
+        recipient = find_object_any_match(
+            self.iter_transfer_recipients(account),
+            (('id', transfer.recipient_id), ('iban', transfer.recipient_iban)),
+            error=RecipientNotFound,
+        )
 
         amount = Decimal(transfer.amount).quantize(Decimal(10) ** -2)
 
@@ -131,7 +125,7 @@ class BPModule(
 
     def transfer_check_label(self, old, new):
         old = old.encode('latin-1', errors="xmlcharrefreplace").decode('latin-1')
-        return super(BPModule, self).transfer_check_label(old, new)
+        return super().transfer_check_label(old, new)
 
     def transfer_check_date(self, old_exec_date, new_exec_date):
         return old_exec_date <= new_exec_date <= old_exec_date + timedelta(days=2)
@@ -155,9 +149,6 @@ class BPModule(
         subscription_id = _id.split('_')[0]
         subscription = self.get_subscription(subscription_id)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
-
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
 
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):
@@ -186,3 +177,12 @@ class BPModule(
 
     def iter_emitters(self):
         return self.browser.iter_emitters()
+
+    def fill_account(self, account, fields):
+        if 'ownership' in fields:
+            self.browser.fill_account_ownership(account=account)
+
+    # fillobj
+    OBJECTS = {
+        Account: fill_account,
+    }

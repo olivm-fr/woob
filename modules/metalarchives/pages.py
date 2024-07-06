@@ -2,31 +2,29 @@
 
 # Copyright(C) 2018 Quentin Defenouillere
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-from weboob.browser.pages import JsonPage, HTMLPage
-from weboob.browser.elements import ItemElement, ListElement, DictElement, method
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import (
+from woob.browser.pages import JsonPage, HTMLPage
+from woob.browser.elements import ItemElement, ListElement, DictElement, method
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
     Regexp, CleanText, Format, Env,
 )
-from weboob.browser.filters.html import Link
-from weboob.capabilities.bands import BandInfo, BandSearch, Favorite, Albums, Suggestion
+from woob.browser.filters.html import Link
+from woob.capabilities.bands import BandInfo, BandSearch, Favorite, Albums, Suggestion
 
 
 class LoginPage(HTMLPage):

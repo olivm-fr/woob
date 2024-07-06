@@ -2,27 +2,27 @@
 
 # Copyright(C) 2013-2014 Florent Fourcot
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.exceptions import BrowserBanned
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Field, DateTime, Format
-from weboob.browser.filters.html import Attr, Link
-from weboob.capabilities.bill import Subscription, Detail
+from woob.exceptions import ScrapingBlocked
+from woob.browser.pages import HTMLPage, LoggedPage, pagination
+from woob.browser.elements import ListElement, ItemElement, method
+from woob.browser.filters.standard import CleanText, CleanDecimal, Field, DateTime, Format
+from woob.browser.filters.html import Attr, Link
+from woob.capabilities.bill import Subscription, Detail
 
 
 class ErrorPage(HTMLPage):
@@ -34,7 +34,7 @@ class LoginPage(HTMLPage):
     def login(self, login, password):
         captcha = self.doc.xpath('//label[@class="label_captcha_input"]')
         if len(captcha) > 0:
-            raise BrowserBanned('Too many connections from you IP address: captcha enabled')
+            raise ScrapingBlocked('Too many connections from your IP address: captcha enabled')
 
         xpath_hidden = '//form[@id="newsletter_form"]/input[@type="hidden"]'
         hidden_id = Attr(xpath_hidden, "value")(self.doc)

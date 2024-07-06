@@ -2,69 +2,82 @@
 
 # Copyright(C) 2020      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import datetime
 
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.capabilities.base import find_object
-from weboob.capabilities.gauge import Gauge, GaugeSensor
+from woob.browser import LoginBrowser, URL, need_login
+from woob.capabilities.base import find_object
+from woob.capabilities.gauge import Gauge, GaugeSensor
 
 from .pages import (
+    LoginPage, SubscriptionPage, StatsPage,
     BillsPage, ProfilePage,
     YearlyPage, MonthlyPage, DailyPage, HourlyPage,
 )
 
 
 class EnercoopBrowser(LoginBrowser):
-    BASEURL = 'https://espace-client.enercoop.fr'
+    BASEURL = 'https://mon-espace.enercoop.fr'
 
-    login = URL('/login')
-    bills = URL(
-        r'/mon-espace/factures/',
-        r'/mon-espace/factures/\?c=(?P<id>\d+)',
-        BillsPage
+    login = URL('/clients/sign_in', LoginPage)
+    bills = URL('/factures', BillsPage)
+    profile = URL('/mon-compte', ProfilePage)
+    subscription = URL('/contrat', SubscriptionPage)
+
+    # Consumption sensor URLs
+    pre_yearly = URL(r"/consommation$", StatsPage)
+    c_yearly = URL(
+        r"/consommation/conso_glo/(?P<y1>\d{4})-(?P<y2>\d{4})$",
+        YearlyPage
     )
-
-    profile = URL(
-        r'/mon-espace/compte/',
-        r'/mon-espace/compte/\?c=(?P<id>\d+)',
-        ProfilePage
+    c_monthly = URL(
+        r"/consommation/conso_glo/(?P<year>\d{4})$",
+        MonthlyPage
     )
-
-    yearly = URL(r"https://mon-espace.enercoop.fr/(?P<contract>\d+)/conso_glo$", YearlyPage)
-    monthly = URL(r"https://mon-espace.enercoop.fr/(?P<contract>\d+)/conso_glo/(?P<year>\d{4})$", MonthlyPage)
-    daily = URL(
-        r"https://mon-espace.enercoop.fr/(?P<contract>\d+)/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})$",
+    c_daily = URL(
+        r"/consommation/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})$",
         DailyPage
     )
-    hourly = URL(
-        r"https://mon-espace.enercoop.fr/(?P<contract>\d+)/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})/(?P<day>\d{2})$",
+    c_hourly = URL(
+        r"/consommation/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})/(?P<day>\d{2})$",
         HourlyPage
     )
 
+    # Max power sensor URLs
+    p_monthly = URL(
+        r"/consommation/puissance_max/(?P<year>\d{4})$",
+        MonthlyPage
+    )
+    p_daily = URL(
+        r"/consommation/puissance_max/(?P<year>\d{4})/(?P<month>\d{2})$",
+        DailyPage
+    )
+
     def do_login(self):
-        self.login.go(data={
-            'email': self.username,
-            'password': self.password,
-        })
+        self.location("/clients/sign_in")
+        self.login.go(
+            data={
+                "ecppp_client[email]": self.username,
+                "ecppp_client[password]": self.password,
+                "authenticity_token": self.page.get_login_token(),
+            }
+        )
 
     def export_session(self):
         return {
@@ -73,25 +86,23 @@ class EnercoopBrowser(LoginBrowser):
         }
 
     @need_login
-    def iter_subscription(self):
-        self.bills.go()
-        subs = {sub.id: sub for sub in self.page.iter_other_subscriptions()}
-        if subs:
-            self.bills.go(id=next(iter(subs)))
-            subs.update({sub.id: sub for sub in self.page.iter_other_subscriptions()})
-
-            for sub in subs:
-                self.profile.go(id=sub)
-                self.page.fill_sub(subs[sub])
-
-            return subs.values()
-
-        raise NotImplementedError("how to get info when no selector?")
+    def get_profile(self):
+        self.profile.go()
+        yield self.page.get_profile()
 
     @need_login
-    def iter_documents(self, id):
-        self.bills.go(id=id)
-        return self.page.iter_documents()
+    def iter_subscription(self):
+        self.subscription.go()
+        sub = self.page.get_subscription()
+        self.profile.go()
+        self.page.fill_sub(sub)
+        yield sub
+
+    @need_login
+    def iter_documents(self, _):
+        self.bills.go()
+        for doc in self.page.iter_documents():
+            yield doc
 
     @need_login
     def download_document(self, document):
@@ -101,7 +112,7 @@ class EnercoopBrowser(LoginBrowser):
     def iter_gauges(self):
         # TODO implement for multiple contracts
         # and for disabled contracts, consumption pages won't work
-        self.profile.go()
+        self.subscription.go()
         pdl = self.page.get_pdl_number()
         return [Gauge.from_dict({
             "id": f"{pdl}",
@@ -113,14 +124,20 @@ class EnercoopBrowser(LoginBrowser):
         "yearly": "annuelle",
         "monthly": "mensuelle",
         "daily": "quotidienne",
-        "hourly": "par demie-heure",
+        "hourly": "par demie-heure ou quart d'heure",
+    }
+
+    maxpower_periods = {
+        "monthly": "mensuelle",
+        "daily": "quotidienne",
     }
 
     def iter_sensors(self, id, pattern=None):
         g = find_object(self.iter_gauges(), id=id)
         assert g
 
-        return [
+        sensors = []
+        sensors.extend([
             GaugeSensor.from_dict({
                 "id": f"{id}.c.{subid}",
                 "name": f"Consommation électrique {name}",
@@ -128,12 +145,28 @@ class EnercoopBrowser(LoginBrowser):
                 "gaugeid": id,
             })
             for subid, name in self.consumption_periods.items()
-        ]
+        ])
+        sensors.extend([
+            GaugeSensor.from_dict({
+                "id": f"{id}.p.{subid}",
+                "name": f"Puissance max {name}",
+                "unit": "kVA",
+                "gaugeid": id,
+            })
+            for subid, name in self.maxpower_periods.items()
+        ])
+        return sensors
 
     @need_login
     def iter_sensor_history(self, id):
         pdl, sensor_type, subid = id.split(".")
-        assert sensor_type == "c"
+        assert sensor_type in ("c", "p")
+        if sensor_type == "c":
+            yield from self._iter_sensor_history_c(subid)
+        elif sensor_type == "p":
+            yield from self._iter_sensor_history_p(subid)
+
+    def _iter_sensor_history_c(self, subid):
         assert subid in ("yearly", "monthly", "daily", "hourly")
 
         # can't fetch stats of today, use yesterday (and the corresponding month/year)
@@ -146,8 +179,33 @@ class EnercoopBrowser(LoginBrowser):
             else:
                 break
 
-        getattr(self, subid).go(contract=pdl, **url_args)
-        for measure in self.page.iter_sensor_history():
+        if subid == "yearly":
+            self.pre_yearly.go()
+            self.location(self.page.yearly_url())
+        else:
+            getattr(self, "c_" + subid).go(**url_args)
+
+        for measure in self.page.iter_sensor_history("conso"):
+            if measure.date.date() > max_date:
+                continue
+            yield measure
+
+    def _iter_sensor_history_p(self, subid):
+        assert subid in ("monthly", "daily")
+
+        # can't fetch stats of today, use yesterday (and the corresponding month/year)
+        max_date = datetime.date.today() - datetime.timedelta(days=1)
+
+        url_args = {}
+        for unit in ("year", "month", "day"):
+            if subid[0] != unit[0]:
+                url_args[unit] = str(getattr(max_date, unit)).zfill(2)
+            else:
+                break
+
+        getattr(self, "p_" + subid).go(**url_args)
+
+        for measure in self.page.iter_sensor_history("puissance_max"):
             if measure.date.date() > max_date:
                 continue
             yield measure

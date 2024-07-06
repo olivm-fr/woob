@@ -25,29 +25,30 @@ from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
 
-from weboob.browser import URL, need_login
-from weboob.browser import TwoFactorBrowser
-from weboob.capabilities.bill import Document, DocumentTypes
-from weboob.exceptions import (
-    BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable,
+from woob.browser import URL, need_login
+from woob.browser.mfa import TwoFactorBrowser
+from woob.capabilities.bill import Document, DocumentTypes
+from woob.exceptions import (
+    BrowserIncorrectPassword, ActionNeeded, ActionType, BrowserUnavailable,
     AppValidation, BrowserQuestion, AppValidationError, AppValidationCancelled,
-    AppValidationExpired, BrowserPasswordExpired
+    AppValidationExpired, BrowserPasswordExpired, BrowserUserBanned,
 )
-from weboob.capabilities.bank import (
+from woob.capabilities.bank import (
     Account, TransferBankError, AddRecipientStep,
     TransactionType, AccountOwnerType, Loan,
 )
-from weboob.capabilities.base import NotAvailable
-from weboob.browser.exceptions import BrowserHTTPNotFound, ClientError
-from weboob.capabilities.profile import ProfileMissing
-from weboob.tools.value import Value, ValueBool
-from weboob.tools.decorators import retry
+from woob.capabilities.base import NotAvailable
+from woob.browser.exceptions import BrowserHTTPNotFound, ClientError
+from woob.capabilities.profile import ProfileMissing
+from woob.tools.value import Value, ValueBool
+from woob.tools.decorators import retry
 
 from .pages.accounts_list import (
     AccountsMainPage, AccountDetailsPage, AccountsPage, LoansPage, HistoryPage,
     CardHistoryPage, PeaLiquidityPage, MarketOrderPage, MarketOrderDetailPage,
     AdvisorPage, HTMLProfilePage, CreditPage, CreditHistoryPage, OldHistoryPage,
     MarketPage, LifeInsurance, LifeInsuranceHistory, LifeInsuranceInvest, LifeInsuranceInvest2,
+    LifeInsuranceAPI, LifeInsuranceInvestAPI, LifeInsuranceInvestAPI2, LifeInsuranceInvestDetailsAPI,
     UnavailableServicePage, TemporaryBrowserUnavailable, RevolvingDetailsPage,
 )
 from .pages.transfer import AddRecipientPage, SignRecipientPage, TransferJson, SignTransferPage
@@ -103,13 +104,13 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
             elif reason == 'mdptmp_expire':
                 raise BrowserPasswordExpired()
             elif reason == 'acces_bloq':
-                raise BrowserUnavailable(
+                raise BrowserUserBanned(
                     "Suite à trois saisies erronées de vos codes, l'accès à vos comptes est bloqué jusqu'à demain pour des raisons de sécurité."
                 )
             elif reason in ('acces_susp', 'pas_acces_bad'):
                 # These codes are not related to any valuable messages,
                 # just "Votre accès est suspendu. Vous n'êtes pas autorisé à accéder à l'application."
-                raise BrowserUnavailable()
+                raise BrowserUserBanned()
             elif reason in ('err_is', 'err_tech'):
                 # there is message "Service momentanément indisponible. Veuillez réessayer."
                 # in SG website in that case ...
@@ -122,10 +123,16 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
 
         if not auth_method:
             self.logger.warning('No auth method available !')
-            raise ActionNeeded("Veuillez ajouter un numéro de téléphone sur votre banque et/ou activer votre Pass Sécurité.")
+            raise ActionNeeded(
+                locale="fr-FR", message="Veuillez ajouter un numéro de téléphone sur votre banque et/ou activer votre Pass Sécurité.",
+                action_type=ActionType.ENABLE_MFA,
+            )
 
         if auth_method['unavailability_reason'] == "ts_non_enrole":
-            raise ActionNeeded("Veuillez ajouter un numéro de téléphone sur votre banque.")
+            raise ActionNeeded(
+                locale="fr-FR", message="Veuillez ajouter un numéro de téléphone sur votre banque.",
+                action_type=ActionType.ENABLE_MFA,
+            )
 
         elif auth_method['unavailability_reason']:
             raise AssertionError('Unknown unavailability reason "%s" found' % auth_method['unavailability_reason'])
@@ -151,6 +158,11 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
             if terminals:
                 message += " sur l'un de vos périphériques actifs: " + ', '.join(terminals)
 
+            # We reset the current browser page. The next navigation on a '@need_login' page will trigger
+            # the verification of the logged-in status. This will fail, and enter the `do_login` procedure.
+            # Cf `need_login()` in `woob/browser/browsers.py`
+            self.page = None
+
             raise AppValidation(message)
 
         elif auth_method['type_proc'].lower() == 'auth_csa':
@@ -160,6 +172,12 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
                     '/sec/csa/send.json',
                     data={'csa_op': "auth"}
                 )
+
+                # We reset the current browser page. The next navigation on a '@need_login' page will trigger
+                # the verification of the logged-in status. This will fail, and enter the `do_login` procedure.
+                # Cf `need_login()` in `woob/browser/browsers.py`
+                self.page = None
+
                 raise BrowserQuestion(
                     Value(
                         'code',
@@ -277,9 +295,9 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     STATE_DURATION = 10
 
     # documents
-    documents = URL(r'/icd/cbo-edocument/data/get-all-prestations-edocument-authsec.json', DocumentsPage)
+    documents = URL(r'/icd/epe/data/get-all-releves-authsec.json', DocumentsPage)
     pdf_page = URL(
-        r'/icd/cbo-edocument/pdf/rce-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)'
+        r'/icd/epe/pdf/edocument-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)'
     )
     rib_pdf_page = URL(r'/com/icd-web/cbo/pdf/rib-authsec.pdf', RibPdfPage)
 
@@ -340,6 +358,23 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     )
     life_insurance_invest = URL(r'/asv/AVI/asvcns20a.html', LifeInsuranceInvest)
     life_insurance_invest_2 = URL(r'/asv/PRV/asvcns10priv.html', LifeInsuranceInvest2)
+    auth_life_insurance_api = URL(r'/icd/avd/index-authsec.html')
+    life_insurance_api = URL(
+        r'/icd/avd/data/api/v1/prestation-assurance-vie-authsec.json\?b64e200_hashIdPrestation=(?P<id_tech>.*)',
+        LifeInsuranceAPI
+    )
+    life_insurance_invest_api = URL(
+        r'/icd/avd/data/api/v1/detail-contrat-assurance-vie-authsec.json',
+        LifeInsuranceInvestAPI
+    )
+    life_insurance_invest_api_2 = URL(
+        r'/icd/avd/data/api/v1/contrat-assurance-vie-authsec.json',
+        LifeInsuranceInvestAPI2
+    )
+    life_insurance_invest_details_api = URL(
+        r'/icd/avd/data/api/v1/performances-authsec.json\?b64e200_hashIdPrestation=(?P<id_tech>.*)',
+        LifeInsuranceInvestDetailsAPI
+    )
     life_insurance_history = URL(r'/asv/AVI/asvcns2(?P<n>[0-9])c.html', LifeInsuranceHistory)
     market_orders = URL(r'/brs/suo/suivor20.html', MarketOrderPage)
     market_orders_details = URL(r'/brs/suo/suivor30.html', MarketOrderDetailPage)
@@ -645,7 +680,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     def iter_investment(self, account):
         if account.type not in (
             Account.TYPE_MARKET, Account.TYPE_LIFE_INSURANCE,
-            Account.TYPE_PEA, Account.TYPE_PERP,
+            Account.TYPE_PEA, Account.TYPE_PERP, Account.TYPE_PER,
         ):
             self.logger.debug('This account is not supported')
             return
@@ -657,9 +692,30 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
             for invest in self.page.iter_investments(account=account):
                 yield invest
 
-        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP):
-            if self.page.has_link():
-                self.life_insurance_invest.go()
+        if account.type in (Account.TYPE_LIFE_INSURANCE, Account.TYPE_PERP, Account.TYPE_PER):
+
+            self.auth_life_insurance_api.go()
+            self.life_insurance_api.go(id_tech=account._internal_id)
+
+            # Case 1: Life Insurance investment are available on the API.
+            if self.page.check_availability():
+                self.life_insurance_invest_api.go()
+                # Case 2: We need to query a different life insurance space API.
+                if not self.page.check_availability():
+                    self.life_insurance_invest_api_2.go()
+                    investments = self.page.iter_investment()
+                    self.life_insurance_invest_details_api.go(id_tech=account._internal_id)
+                    for inv in investments:
+                        self.page.fill_life_insurance_investment(obj=inv)
+                        yield inv
+                    return
+
+            # Case 3: Life insurance investments can be parsed on the website.
+            else:
+                self.account_details_page.go(params={'idprest': account._prestation_id})
+
+                if self.page.has_link():
+                    self.life_insurance_invest.go()
 
             for invest in self.page.iter_investment():
                 yield invest

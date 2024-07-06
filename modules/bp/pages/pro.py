@@ -1,35 +1,33 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
+from urllib.parse import parse_qsl, urlparse
 
-from weboob.tools.compat import parse_qsl, urlparse
-from weboob.browser.elements import DictElement, ItemElement, method
-from weboob.browser.filters.html import Attr
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import CleanText, CleanDecimal, Date, Map, Field
-from weboob.browser.pages import LoggedPage, JsonPage
-from weboob.capabilities.bank import Account
-from weboob.capabilities.profile import Company
-from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.html import Attr
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanDecimal, CleanText, Date, Format, Map
+from woob.browser.pages import JsonPage, LoggedPage
+from woob.capabilities.bank import Account, AccountOwnerType
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.profile import Company
+from woob.exceptions import ActionNeeded, ActionType, BrowserIncorrectPassword
 
 from .accounthistory import Transaction
 from .base import MyHTMLPage
@@ -102,14 +100,19 @@ class ProAccountsList(LoggedPage, JsonPage):
             obj_balance = CleanDecimal.US(Dict('solde'))
             obj_currency = 'EUR'
             obj_type = Map(Dict('type'), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)
+            obj_owner_type = AccountOwnerType.ORGANIZATION
+            obj__account_holder = NotAvailable
 
-            def obj_label(self):
-                # Comment from code of last pro website:
-                # Need to get rid of the id wherever we find it in account labels
-                # like "LIV A 0123456789N MR MOMO" (livret A) as well as
-                # "0123456789N MR MOMO" (checking account)
-                label = Dict('intituleLong')(self).replace(Field('id')(self), '')
-                return CleanText().filter(label)
+            # The intituleCourt is usually the type of account, like CCP for a checking account
+            # or LIV for a savings account.
+            # The intituleDetenteur is the owner of the account.
+            obj_label = CleanText(
+                Format(
+                    '%s %s',
+                    Dict('intituleCourt'),
+                    Dict('intituleDetenteur'),
+                )
+            )
 
 
 class ProAccountHistory(LoggedPage, JsonPage):
@@ -163,11 +166,19 @@ class RibPage(LoggedPage, MyHTMLPage):
 
 
 class RedirectAfterVKPage(MyHTMLPage):
+    def detect_encoding(self):
+        # Ignore the html level encoding detection because the document is lying
+        # header reported encoding will be automatically used instead
+        return None
+
     def check_pro_website_or_raise(self):
         error_message = CleanText('//div[@id="erreur_identifiant_particulier"]//div[has-class("textFCK")]//p')(self.doc)
         if error_message:
             website_error = "L'identifiant utilisé est celui d'un compte de Particuliers"
-            if website_error in error_message:
+            # Due to the encoding, website_error and error_message strings can be slightly
+            # different, for example 'é' can become 'Ã©'. So we decode website_error with
+            # the self.encoding encoding in the condition.
+            if website_error.encode().decode(self.encoding) in error_message:
                 raise BrowserIncorrectPassword(website_error)
             raise AssertionError('Unhandled error message: %s' % error_message)
 
@@ -183,4 +194,7 @@ class Detect2FAPage(MyHTMLPage):
             twofa_type = dict(parse_qsl(urlparse(url).query)).get('action', '')
             if twofa_type != 'NULL':  # seen so far: CERTICODE (sms), NULL (no 2fa activated by the user)
                 self.logger.info('A two factor auth is required on this connection')
-                raise ActionNeeded("Une authentification forte est requise sur votre espace client")
+                raise ActionNeeded(
+                    locale="fr-FR", message="Une authentification forte est requise sur votre espace client",
+                    action_type=ActionType.PERFORM_MFA,
+                )

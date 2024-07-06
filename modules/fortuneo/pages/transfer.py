@@ -2,40 +2,41 @@
 
 # Copyright(C) 2018      Sylvie Ye
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 import re
 from datetime import date, timedelta
 from itertools import chain
+from urllib.parse import parse_qs, urlparse
 
-from weboob.browser.pages import HTMLPage, PartialHTMLPage, LoggedPage, FormNotFound
-from weboob.browser.elements import method, ListElement, ItemElement, SkipItem, TableElement
-from weboob.browser.filters.html import Attr, Link, TableCell
-from weboob.browser.filters.standard import (
+from woob.browser.pages import FormNotFound, HTMLPage, PartialHTMLPage, LoggedPage
+from woob.browser.elements import method, ListElement, ItemElement, TableElement
+from woob.browser.filters.html import Attr, Link, TableCell
+from woob.browser.filters.standard import (
     CleanText, Date, Regexp, CleanDecimal, Currency, Field, Env,
     Map, Base,
 )
-from weboob.capabilities.bank import (
+from woob.capabilities.bank import (
     Recipient, Transfer, TransferBankError, AddRecipientBankError,
     TransferStatus, TransferFrequency, TransferDateType, Emitter,
 )
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.compat import parse_qs, urlparse
+from woob.capabilities.base import NotAvailable
+from woob.tools.json import json
 
 from .accounts_list import ActionNeededPage
 
@@ -58,11 +59,8 @@ class RecipientsPage(ActionNeededPage):
                 return Field('_recipient_name')(self)
 
             def obj_id(self):
-                iban = CleanText('./td[6]', replace=[(' ', '')])(self)
-                iban_number = re.search(r'(?<=IBAN:)(\w+)BIC', iban)
-                if iban_number:
-                    return iban_number.group(1)
-                raise SkipItem('There is no IBAN for the recipient %s' % Field('label')(self))
+                recipient_id = Regexp(CleanText('./td[3]/input[1]/@id'), r'(?<=ribFormate_compte_)(.*)')(self)
+                return recipient_id
 
             obj__recipient_name = CleanText('./td[2]')
             obj__custom_label = CleanText('./td[4]')
@@ -83,7 +81,7 @@ class RecipientsPage(ActionNeededPage):
         if not CleanText('//input[@name="codeBic"]/@value')(self.doc):
             raise AddRecipientBankError(message="Le bénéficiaire est déjà présent ou bien l'iban est incorrect")
 
-    def fill_recipient_form(self, recipient) :
+    def fill_recipient_form(self, recipient):
         form = self.get_form(id='CompteExterneActionForm')
         form['codePaysBanque'] = recipient.iban[:2]
         form['codeIban'] = recipient.iban
@@ -96,12 +94,19 @@ class RecipientsPage(ActionNeededPage):
         recipient_xpath = '//form[@id="CompteExterneActionForm"]//ul'
 
         rcpt = Recipient()
-        rcpt.label = Regexp(CleanText(
-            recipient_xpath + '/li[contains(text(), "Nom du titulaire")]', replace=[(' ', '')]
-        ), r'(?<=Nomdutitulaire:)(\w+)')(self.doc)
-        rcpt.iban = Regexp(CleanText(
-            recipient_xpath + '/li[contains(text(), "IBAN")]'
-        ), r'IBAN : ([A-Za-z]{2}[\dA-Za-z]+)')(self.doc)
+        rcpt.label = Regexp(
+            CleanText(
+                recipient_xpath + '/li[contains(text(), "Nom du titulaire")]',
+                replace=[(' ', '')]
+            ),
+            r'(?<=Nomdutitulaire:)(\w+)'
+        )(self.doc)
+        rcpt.iban = Regexp(
+            CleanText(
+                recipient_xpath + '/li[contains(text(), "IBAN")]'
+            ),
+            r'IBAN : ([A-Za-z]{2}[\dA-Za-z]+)'
+        )(self.doc)
         rcpt.id = rcpt.iban
         rcpt.category = 'Externe'
         rcpt.enabled_at = date.today() + timedelta(1)
@@ -131,40 +136,67 @@ class RecipientsPage(ActionNeededPage):
             form.url = urls[0]
         return form
 
-    def send_info_form(self):
-        try:
-            form = self.get_form(name='validation_messages_bloquants')
-        except FormNotFound:
-            return False
-        else:
-            form.submit()
-            return True
+    def get_phone_number(self):
+        return Regexp(
+            CleanText('//span[@id="secu_forte_otp_padding_left"]'),
+            r'code sécurité au (.+?)\.',
+        )(self.doc).strip()
 
 
-class RecipientSMSPage(LoggedPage, PartialHTMLPage):
+class ConfirmRecipientPage(LoggedPage, PartialHTMLPage):
     def on_load(self):
         if not self.doc.xpath('//input[@id="otp"]') and not self.doc.xpath('//div[@class="confirmationAjoutCompteExterne"]'):
-            raise AddRecipientBankError(message=CleanText('//div[@id="aidesecuforte"]/p[contains("Nous vous invitons")]')(self.doc))
+            raise AddRecipientBankError(
+                message=CleanText('//div[@id="aidesecuforte"]/p[contains("Nous vous invitons")]')(self.doc)
+            )
 
     def build_doc(self, content):
-        content = '<form>' + content.decode('latin-1') + '</form>'
-        return super(RecipientSMSPage, self).build_doc(content.encode('latin-1'))
-
-    def get_send_code_form_input(self):
-        return self.get_form()
+        return super().build_doc(b'<form>' + content + b'</form>')
 
     def is_code_expired(self):
         return self.doc.xpath('//label[contains(text(), "Le code sécurité est expiré. Veuillez saisir le nouveau code reçu")]')
 
     def rcpt_after_sms(self):
-        return self.doc.xpath('//div[@class="confirmationAjoutCompteExterne"]\
-            /h2[contains(text(), "ajout de compte externe a bien été prise en compte")]')
+        return self.doc.xpath(
+            '//div[@class="confirmationAjoutCompteExterne"]'
+            + '/h2[contains(text(), "ajout de compte externe a bien été prise en compte")]'
+        )
 
     def get_error(self):
-        return CleanText('//form[@id="CompteExterneActionForm"]//p[@class="container error"]//label[@class="error"]')(self.doc)
+        return CleanText(
+            '//form//p[@class="container error"]//label[@class="error"]'
+        )(self.doc)
+
+
+class OTPSMSPage(LoggedPage, PartialHTMLPage):
+    def get_send_code_form(self):
+        return self.get_form()
+
+    def build_doc(self, content):
+        return super().build_doc(b'<form>' + content + b'</form>')
+
+    def get_phone_number(self):
+        return Regexp(
+            CleanText('//span[@id="secu_forte_otp_padding_left"]'),
+            r'code sécurité au (.+?)\.',
+        )(self.doc).strip()
 
 
 class RegisterTransferPage(LoggedPage, HTMLPage):
+    @method
+    class fill_tpp_account_id(ItemElement):
+        def obj__tpp_id(self):
+            accounts_list = Regexp(
+                CleanText('//script[contains(text(), "listeComptesADebiter")]'),
+                r'listeComptesADebiter = (.*}]); var listeComptesACrediter',
+                default='[]'
+            )(self)
+            accounts_list = json.loads(accounts_list)
+            for account in accounts_list:
+                if account['numero'] == self.obj.id:
+                    return account.get('numeroContratTopaze', NotAvailable)
+            return NotAvailable
+
     @method
     class iter_internal_recipients(ListElement):
         item_xpath = '//select[@name="compteACrediter"]/option[not(@selected)]'
@@ -208,13 +240,44 @@ class RegisterTransferPage(LoggedPage, HTMLPage):
         for account in self.doc.xpath('//select[@name="compteACrediter"]/option[not(@selected)]'):
             recipient_transfer_id = CleanText('./@value')(account)
 
-            if (recipient.id == recipient_transfer_id
+            if (
+                recipient.id == recipient_transfer_id
                 or recipient.id in CleanText('.', replace=[(' ', '')])(account)
             ):
                 return recipient_transfer_id
 
-    def fill_transfer_form(self, account, recipient, amount, label, exec_date):
+        # Sometimes, we obtained the equivalent of 'hashRib' in the recipients
+        # list on the page, but we actually need the 'hashIban'. We need to get
+        # the correspondances table from the embedded Javascript code, then
+        # try the other code.
+        for script_tag in self.doc.xpath(
+            '//script[contains(., "var listeComptesACrediter")]',
+        ):
+            raw_creditor_list = Regexp(
+                CleanText('.'),
+                r'var listeComptesACrediter = (.+?}\]);',
+                default=None,
+            )(script_tag)
+
+            try:
+                creditor_list = json.loads(raw_creditor_list)
+            except ValueError:
+                continue
+
+            for creditor in creditor_list:
+                if 'hashRib' in creditor and creditor['hashRib'] == recipient.id:
+                    return creditor['hashIban']
+
+    def fill_transfer_form_and_get_used_recipient_id(self, account, recipient, amount, label, exec_date):
+        """
+        The used recipient transfer ID can be different from the one stored inside the recipient params, in the case where
+        the recipient ID is a hashRib, we need to give the hashIban that is fetched from an association table.
+        In order to allow sanity check later on during the transfer execution process, we return the used recipient ID
+        to make sure it is not changed in between pages.
+        """
         recipient_transfer_id = self.get_recipient_transfer_id(recipient)
+        # We make sure that we got an actual recipient ID
+        # If it's not the case, we cannot go further
         assert recipient_transfer_id
 
         form = self.get_form(id='SaisieVirementForm')
@@ -236,12 +299,16 @@ class RegisterTransferPage(LoggedPage, HTMLPage):
         form['libelleVirementSaisie'] = label.encode(self.encoding, errors='xmlcharrefreplace').decode(self.encoding)
         form.submit()
 
+        return recipient_transfer_id
+
 
 class ValidateTransferPage(LoggedPage, HTMLPage):
     def on_load(self):
         errors_msg = (
             CleanText('//form[@id="SaisieVirementForm"]/p[has-class("error")]/label')(self.doc),  # may be deprecated
-            CleanText('//div[@id="error" and @class="erreur_texte"]/p[contains(text(), "n\'est pas autorisé")]')(self.doc),
+            CleanText(
+                '//div[@id="error" and @class="erreur_texte"]/p[contains(text(), "n\'est pas autorisé")]'
+            )(self.doc),
             CleanText('//form[@id="SaisieVirementForm"]//label[has-class("error")]')(self.doc),
             CleanText('//div[@id="error"]/p[@class="erreur_texte1"]')(self.doc),
         )
@@ -255,10 +322,12 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
 
     def check_transfer_data(self, transfer_data):
         for t_data in transfer_data:
-            assert t_data in transfer_data[t_data], '%s not found in transfer summary %s' % (t_data, transfer_data[t_data])
+            assert t_data in transfer_data[t_data], ('{} not found in transfer summary {}'
+                                                     .format(t_data, transfer_data[t_data]))
 
-    def handle_response(self, account, recipient, amount, label, exec_date):
+    def handle_response(self, account, recipient, amount, label, exec_date, used_recipient_id):
         summary_xpath = '//div[@id="as_verifVirement.do_"]//ul'
+        transfer_form = self.get_form(id='SaisieVirementForm')
 
         transfer = Transfer()
 
@@ -266,9 +335,13 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
             account.id: CleanText(
                 summary_xpath + '/li[contains(text(), "Compte à débiter")]'
             )(self.doc),
-            recipient.id: CleanText(
-                summary_xpath + '/li[contains(text(), "Compte à créditer")]', replace=[(' ', '')]
-            )(self.doc),
+            # For recipient ID we check that the ID (hashIban) hasn't changed between pages
+            # The value displayed to the user is an obfuscated IBAN, not a hashIban
+            # So we get the value from the real hidden form instead of the user-friendly div
+            #
+            # We cannot match the hashRib to the hashIban the same way as on the
+            # transfer_page, as the correspondance table is no longer present here.
+            used_recipient_id: transfer_form.get('compteACrediter'),
             recipient._recipient_name: CleanText(
                 summary_xpath + '/li[contains(text(), "Nom du bénéficiaire")]'
             )(self.doc),
@@ -280,6 +353,8 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
         transfer.account_label = account.label
         transfer.account_iban = account.iban
 
+        # The hashrib is stored in the transfer (not hashiban) because this is the hashrib we
+        # get in the iter recipient
         transfer.recipient_id = recipient.id
         transfer.recipient_label = recipient.label
         transfer.recipient_iban = recipient.iban
@@ -289,9 +364,12 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
         transfer.amount = CleanDecimal(
             Regexp(CleanText(summary_xpath + '/li[contains(text(), "Montant")]'), r'((\d+)\.?(\d+)?)')
         )(self.doc)
-        transfer.exec_date = Date(Regexp(CleanText(
-            summary_xpath + '/li[contains(text(), "Date de virement")]'
-        ), r'(\d+/\d+/\d+)'), dayfirst=True)(self.doc)
+        transfer.exec_date = Date(
+            Regexp(
+                CleanText(summary_xpath + '/li[contains(text(), "Date de virement")]'),
+                r'(\d+/\d+/\d+)'),
+            dayfirst=True
+        )(self.doc)
 
         return transfer
 
@@ -302,6 +380,15 @@ class ValidateTransferPage(LoggedPage, HTMLPage):
 
 
 class ConfirmTransferPage(LoggedPage, HTMLPage):
+    def build_doc(self, content):
+        return super().build_doc(b'<form>' + content + b'</form>')
+
+    def get_send_code_form(self):
+        try:
+            return self.get_form(id='SaisieVirementForm')
+        except FormNotFound:
+            return None
+
     def confirm_transfer(self):
         confirm_transfer_url = '/fr/prive/mes-comptes/compte-courant/realiser-operations/effectuer-virement/confirmer-saisie-virement.jsp'
         self.browser.location(self.browser.BASEURL + confirm_transfer_url, data={'operationTempsReel': 'true'})
@@ -309,6 +396,15 @@ class ConfirmTransferPage(LoggedPage, HTMLPage):
     def transfer_confirmation(self, transfer):
         if self.doc.xpath('//div[@class="confirmation_virement"]/h2[contains(text(), "virement a bien été enregistrée")]'):
             return transfer
+        raise AssertionError('Transfer confirmation message not found inside the transfer confirmation page')
+
+    def is_code_expired(self):
+        return self.doc.xpath('//label[contains(text(), "Le code sécurité est expiré. Veuillez saisir le nouveau code reçu")]')
+
+    def get_error(self):
+        return CleanText(
+            '//form//p[@class="container error"]//label[@class="error"]'
+        )(self.doc)
 
 
 class BaseIterTransfers(TableElement):
@@ -367,7 +463,7 @@ class TransferListPage(LoggedPage, HTMLPage):
             FREQUENCY_MAPPING = {
                 'Mensuelle': TransferFrequency.MONTHLY,
                 'Trimestrielle': TransferFrequency.QUARTERLY,
-                'Semestrielle': TransferFrequency.BIANNUAL,
+                'Semestrielle': TransferFrequency.SEMIANNUALLY,
                 'Annuelle': TransferFrequency.YEARLY,
             }
 

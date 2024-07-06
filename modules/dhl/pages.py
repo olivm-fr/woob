@@ -2,28 +2,27 @@
 
 # Copyright(C) 2015      Matthieu Weber
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re, json
 
 from dateutil.parser import parse as parse_date
 
-from weboob.tools.compat import unicode
-from weboob.browser.pages import JsonPage, HTMLPage
-from weboob.capabilities.parcel import Parcel, Event, ParcelNotFound
+from woob.browser.pages import JsonPage, HTMLPage
+from woob.capabilities.parcel import Parcel, Event, ParcelNotFound
 
 
 class DHLExpressSearchPage(JsonPage):
@@ -116,13 +115,13 @@ class DeutschePostDHLSearchPage(HTMLPage):
     def build_html_event(self, index, dd, dt):
         event = Event(index)
         event.date = parse_date(dd.text[0:19], dayfirst=True, fuzzy=True)
-        event.location = unicode(dd.text[20:])
-        event.activity = unicode(dt.text)
+        event.location = dd.text[20:]
+        event.activity = dt.text
         return event
 
     def build_json_event(self, index, ev):
         event = Event(index)
         event.date = parse_date(ev["datum"])
-        event.location = unicode(ev.get("ort", ""))
-        event.activity = unicode(ev["status"])
+        event.location = ev.get("ort", "")
+        event.activity = ev["status"]
         return event

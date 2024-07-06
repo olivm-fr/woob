@@ -2,39 +2,38 @@
 
 # Copyright(C) 2018      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import timedelta
 
-from weboob.browser.pages import HTMLPage, LoggedPage, JsonPage
-from weboob.browser.filters.standard import CleanText, DateTime
-from weboob.exceptions import BrowserIncorrectPassword
-from weboob.capabilities.calendar import BaseCalendarEvent, STATUS
-from weboob.capabilities.bill import (
+from woob.browser.elements import method, ItemElement, DictElement
+from woob.browser.pages import HTMLPage, LoggedPage, JsonPage
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanText, DateTime, Format, Date, BrowserURL, Field
+from woob.exceptions import BrowserIncorrectPassword
+from woob.capabilities.calendar import BaseCalendarEvent, STATUS
+from woob.capabilities.bill import (
     Subscription, Document, DocumentTypes,
 )
-from weboob.tools.date import new_date, parse_date
-from weboob.tools.compat import urljoin
+from woob.tools.date import new_date, parse_date
 
 
 class LoginPage(HTMLPage):
     def do_login(self, username, password):
-        form = self.get_form(nr=0)
+        form = self.get_form(xpath='//form[@action="/identity/login"]')
         form['UserName'] = username
         form['Password'] = password
         form.submit()
@@ -118,22 +117,39 @@ class CalendarPage(LoggedPage, JsonPage):
 
 
 class SubscriptionPage(LoggedPage, JsonPage):
-    def get_subscription(self):
-        sub = Subscription()
-        sub.id = str(self.doc['data']['id'])
-        sub.subscriber = sub.label = self.doc['header']['principal']
-        return sub
+    @method
+    class get_subscription(ItemElement):
+        klass = Subscription
+
+        obj_id = CleanText(Dict('data/employeeNumber'))
+        obj_label = Field('id')
+        obj_subscriber = CleanText(Dict('header/principal'))
+        obj__owner_id = Dict('data/id')
+
+    def get_id_card_document(self):
+        iddoc = Document()
+        els = self.doc['data']['extendedData']['e_iddocuments']
+        for el in els:
+            value = el['value']['e_iddocuments_document']['value']
+            # CNI: Carte national d'identité
+            if 'CNI' in value['name']:
+                iddoc.id = value['id']
+                iddoc.label, iddoc.format = value['name'].rsplit('.', 1)
+                iddoc.url = value['href']
+                return iddoc
 
 
 class DocumentsPage(LoggedPage, JsonPage):
-    def iter_documents(self, subid):
-        for d in self.doc['data']['items']:
-            doc = Document()
-            doc.id = '%s_%s' % (subid, d['id'])
-            doc._docid = d['id']
-            doc.label = d['import']['name']
-            doc.date = parse_date(d['import']['endDate'])
-            doc.url = urljoin(self.url, '/pagga/download/%s' % doc._docid)
-            doc.type = DocumentTypes.BILL
-            doc.format = 'pdf'
-            yield doc
+    @method
+    class iter_documents(DictElement):
+        item_xpath = 'data/items'
+
+        class item(ItemElement):
+            klass = Document
+
+            obj_id = CleanText(Dict('id'))
+            obj_label = Format('Fiche de paie %s', CleanText(Dict('import/name')))
+            obj_date = Date(CleanText(Dict('import/endDate')))
+            obj_url = BrowserURL('download_document', document_id=Field('id'))
+            obj_type = DocumentTypes.PAYSLIP
+            obj_format = 'pdf'

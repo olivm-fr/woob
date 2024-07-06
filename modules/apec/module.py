@@ -2,27 +2,27 @@
 
 # Copyright(C) 2013      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from collections import OrderedDict
 
-from weboob.capabilities.job import BaseJobAdvert
-from weboob.tools.backend import Module, BackendConfig
-from weboob.capabilities.job import CapJob
-from weboob.tools.value import Value
+from woob.capabilities.job import BaseJobAdvert
+from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.job import CapJob
+from woob.tools.value import Value
 from .browser import ApecBrowser
 from .job import APEC_CONTRATS, APEC_EXPERIENCE
 
@@ -34,7 +34,8 @@ class ApecModule(Module, CapJob):
     DESCRIPTION = u'apec website'
     MAINTAINER = u'Bezleputh'
     EMAIL = 'carton_ben@yahoo.fr'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    LICENSE = 'AGPLv3+'
 
     BROWSER = ApecBrowser
 

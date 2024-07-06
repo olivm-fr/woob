@@ -2,30 +2,30 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.recipe import Recipe
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.image import BaseImage, Thumbnail
-from weboob.browser.elements import ItemElement, ListElement, method
-from weboob.browser.pages import HTMLPage
-from weboob.browser.filters.standard import (
+from woob.capabilities.recipe import Recipe
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.image import BaseImage, Thumbnail
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.pages import HTMLPage
+from woob.browser.filters.standard import (
     CleanText, Env, Regexp, Type, Join, Eval,
 )
-from weboob.browser.filters.html import XPath
+from woob.browser.filters.html import XPath
 
 
 class ResultsPage(HTMLPage):
@@ -33,19 +33,15 @@ class ResultsPage(HTMLPage):
     """
     @method
     class iter_recipes(ListElement):
-        item_xpath = '//div[@id="searchlist"]/ul/li'
+        item_xpath = '//div[@class="col-md-8"]'
 
         class item(ItemElement):
             klass = Recipe
 
-            def condition(self):
-                return Regexp(CleanText('./h3/a/@href'), 'https://www.supertoinette.com/(recette)/\d*/.*',
-                              default=None)(self)
+            obj_id = Regexp(CleanText('./h2/a/@href'), 'https://www.supertoinette.com/recette/(.*).html')
 
-            obj_id = Regexp(CleanText('./h3/a/@href'), 'https://www.supertoinette.com/recette/(.*).html', default=None)
-
-            obj_title = CleanText('./h3/a')
-            obj_short_description = CleanText('./p')
+            obj_title = CleanText('./h2/a')
+            obj_short_description = CleanText('./p[@class="description"]')
 
 
 class RecipePage(HTMLPage):
@@ -56,20 +52,22 @@ class RecipePage(HTMLPage):
     class get_recipe(ItemElement):
         klass = Recipe
 
-        obj_id = Env('_id')
+        obj_id = Env('id')
         obj_title = CleanText('//h1')
-        obj_preparation_time = Type(Regexp(CleanText('//li[@class="time"]/span'), ".* (\d*) min"), type=int)
+        obj_preparation_time = Type(Regexp(CleanText('//i[has-class("fa-utensil-spoon")]/following-sibling::span'),
+                                           r".* (\d*) min"), type=int)
 
-        obj_cooking_time = Type(Regexp(CleanText('//li[@class="time-cooking"]/span'), ".* (\d*) min"), type=int)
+        obj_cooking_time = Type(Regexp(CleanText('//i[has-class("fa-burn")]/following-sibling::span'),
+                                       r".* (\d*) min"), type=int)
 
         def obj_nb_person(self):
-            nb_pers = Regexp(CleanText('//div[@class="row ingredients"]/div/p'),
-                             '.*pour (\d+) personnes', default=0)(self)
+            nb_pers = Regexp(CleanText('//div[has-class("ingredients")]/div/p'),
+                             r'.*pour (\d+) personnes', default=0)(self)
             return [nb_pers] if nb_pers else NotAvailable
 
         def obj_ingredients(self):
             i = []
-            ingredients = XPath('//ul[@class="ingredientsList"]/li',
+            ingredients = XPath('//ul[has-class("ingredientsList")]/li',
                                 default=[])(self)
             for ingredient in ingredients:
                 i.append(CleanText('.')(ingredient))

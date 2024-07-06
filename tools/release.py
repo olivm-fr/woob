@@ -8,7 +8,7 @@ import sys
 import datetime
 from subprocess import check_call, check_output
 
-from weboob.tools.misc import to_unicode
+from woob.tools.misc import to_unicode
 
 WORKTREE = 'release_tmp'
 
@@ -21,24 +21,22 @@ def make_tarball(tag, wheel):
     assert os.path.isdir(WORKTREE)
     os.chdir(WORKTREE)
 
-    check_call([sys.executable, 'setup.py'] +
-               ['sdist',
-                '--keep',
-                '--dist-dir', '../dist'])
+    check_call([sys.executable, '-m', 'build', '--sdist', '-o', '../dist'])
     if wheel:
-        check_call([sys.executable, 'setup.py'] +
-                   ['bdist_wheel',
-                    '--keep',
-                    '--dist-dir', '../dist'])
+        check_call([sys.executable, '-m', 'build', '--wheel', '-o', '../dist'])
 
     # Clean up the temporary worktree
     os.chdir(os.pardir)
     check_call(['git', 'worktree', 'remove', '--force', WORKTREE])
     assert not os.path.isdir(WORKTREE)
 
-    files = ['dist/weboob-%s.tar.gz' % tag]
+    files = ['dist/woob-%s.tar.gz' % tag]
     if wheel:
-        files.append('dist/weboob-%s-py2.py3-none-any.whl' % tag)
+        wheel_filename = 'dist/woob-%s-py3-none-any.whl' % tag
+        check_call(['twine', 'check', wheel_filename])
+
+        files.append(wheel_filename)
+
     for f in files:
         if not os.path.exists(f):
             raise Exception('Generated file not found at %s' % f)
@@ -60,7 +58,7 @@ def get_caps(module, config):
     try:
         return sorted(c for c in config[module]['capabilities'].split() if c != 'CapCollection')
     except KeyError:
-        return ['**** FILL ME **** (running weboob update could help)']
+        return ['**** FILL ME **** (running woob config update could help)']
 
 def new_modules(start, end):
     os.chdir(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -106,7 +104,7 @@ def domain(path):
         return 'General: Core'
     if dirs[0] == 'man' or path == 'tools/py3-compatible.modules':
         return None
-    if dirs[0] == 'weboob':
+    if dirs[0] in ('weboob', 'woob'):
         try:
             if dirs[1] in ('core', 'tools'):
                 return 'General: Core'
@@ -151,10 +149,6 @@ def commitinfo(commithash):
     if not domains or len(domains) > 5:
         domains = set(['Unknown'])
 
-    if 'Unknown' not in domains:
-        # When the domains are known, hide the title prefixes
-        title = re.sub(r'^(?:[\w\./\s]+:|\[[\w\./\s]+\])\s*', '', title, flags=re.UNICODE)
-
     return title, tuple(sorted(domains))
 
 
@@ -167,7 +161,7 @@ def previous_version():
 
 
 def prepare(start, end, version):
-    print('Weboob %s (%s)\n' % (version, datetime.date.today().strftime('%Y-%m-%d')))
+    print('Woob %s (%s)\n' % (version, datetime.date.today().strftime('%Y-%m-%d')))
     print(changelog(start, end))
 
 

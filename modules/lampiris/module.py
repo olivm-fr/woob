@@ -2,28 +2,29 @@
 
 # Copyright(C) 2017      Phyks (Lucas Verney)
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.tools.backend import BackendConfig, Module
-from weboob.tools.value import Value, ValueBackendPassword
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bill import Bill, CapDocument, DocumentNotFound, SubscriptionNotFound, Subscription
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
+from woob.capabilities.base import find_object
+from woob.capabilities.bill import (
+    Bill, CapDocument, DocumentNotFound, SubscriptionNotFound, Subscription,
+    DocumentTypes, DocumentCategory,
+)
 
 from .browser import LampirisBrowser
 
@@ -37,7 +38,7 @@ class LampirisModule(Module, CapDocument):
     MAINTAINER = u'Phyks (Lucas Verney)'
     EMAIL = 'phyks@phyks.me'
     LICENSE = 'LGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
     CONFIG = BackendConfig(
         Value(
@@ -51,6 +52,8 @@ class LampirisModule(Module, CapDocument):
     )
 
     BROWSER = LampirisBrowser
+    accepted_document_types = (DocumentTypes.BILL,)
+    document_categories = {DocumentCategory.ENERGY}
 
     def create_default_browser(self):
         return self.create_browser(

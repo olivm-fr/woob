@@ -2,27 +2,25 @@
 
 # Copyright(C) 2017      ZeHiro
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.tools.backend import Module
-from weboob.capabilities.housing import CapHousing, Housing
-
+from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.housing import CapHousing, Housing, HousingPhoto
+from woob.tools.value import Value
 from .browser import AvendrealouerBrowser
 
 
@@ -35,44 +33,34 @@ class AvendrealouerModule(Module, CapHousing):
     MAINTAINER = 'ZeHiro'
     EMAIL = 'public@abossy.fr'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
 
     BROWSER = AvendrealouerBrowser
+    CONFIG = BackendConfig(
+        Value('datadome_cookie_search', label='Cookie datadome de la page de recherche', default=''),
+        Value('datadome_cookie_detail', label='Cookie datadome de la page de détail', default=''))
+
+    def create_default_browser(self):
+        return self.create_browser(self.config['datadome_cookie_search'].get(),
+                                   self.config['datadome_cookie_detail'].get())
 
     def get_housing(self, housing):
-        """
-        Get an housing from an ID.
-
-        :param housing: ID of the housing
-        :type housing: str
-        :rtype: :class:`Housing` or None if not found.
-        """
         return self.browser.get_housing(housing)
 
     def search_city(self, pattern):
-        """
-        Search a city from a pattern.
-
-        :param pattern: pattern to search
-        :type pattern: str
-        :rtype: iter[:class:`City`]
-        """
         return self.browser.get_cities(pattern)
 
     def search_housings(self, query):
-        """
-        Search housings.
-
-        :param query: search query
-        :type query: :class:`Query`
-        :rtype: iter[:class:`Housing`]
-        """
         return self.browser.search_housings(query)
 
     def fill_housing(self, housing, fields):
-        if 'photos' in fields and housing.photos:
-            for photo in housing.photos:
-                photo.data = self.browser.open(photo.url)
+        if len(fields) > 0:
+            housing = self.browser.get_housing(housing.id)
         return housing
 
-    OBJECTS = {Housing: fill_housing}
+    def fill_photo(self, photo, fields):
+        if 'data' in fields and photo.url and not photo.data:
+            photo.data = self.browser.open(photo.url).content
+        return photo
+
+    OBJECTS = {Housing: fill_housing, HousingPhoto: fill_photo}

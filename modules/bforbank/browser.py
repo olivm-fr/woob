@@ -1,45 +1,48 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Baptiste Delpey
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
 import datetime
 
+from dateutil import tz
 from dateutil.relativedelta import relativedelta
 
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, AppValidationError, BrowserQuestion
-from weboob.browser import TwoFactorBrowser, URL, need_login
-from weboob.capabilities.bank import Account, AccountNotFound
-from weboob.capabilities.base import empty
-from weboob.tools.capabilities.bank.transactions import sorted_transactions
-from weboob.tools.decorators import retry
-from weboob.tools.capabilities.bank.investments import create_french_liquidity
-from weboob.tools.compat import unicode
-from weboob.tools.value import Value
+from woob.exceptions import (
+    ActionNeeded, ActionType, AppValidationError, BrowserIncorrectPassword,
+    BrowserQuestion, BrowserUnavailable, BrowserUserBanned,
+)
+from woob.browser import URL, need_login
+from woob.browser.mfa import TwoFactorBrowser
+from woob.browser.exceptions import ServerError
+from woob.capabilities.bank import Account, AccountNotFound
+from woob.capabilities.base import empty
+from woob.tools.capabilities.bank.transactions import sorted_transactions
+from woob.tools.decorators import retry
+from woob.tools.capabilities.bank.investments import create_french_liquidity
+from woob.tools.value import Value
+from woob_modules.spirica.browser import SpiricaBrowser
 
 from .pages import (
     LoginPage, ErrorPage, AccountsPage, HistoryPage, LoanHistoryPage, RibPage,
     LifeInsuranceList, LifeInsuranceIframe, LifeInsuranceRedir,
     BoursePage, CardHistoryPage, CardPage, UserValidationPage, BourseActionNeeded,
-    BourseDisconnectPage, ProfilePage, BfBKeyboard, SendTwoFAPage,
+    BourseDisconnectPage, ProfilePage, BfBKeyboard, SendTwoFAPage, MaintenancePage,
 )
-from .spirica_browser import SpiricaBrowser
 
 
 class BforbankBrowser(TwoFactorBrowser):
@@ -54,6 +57,10 @@ class BforbankBrowser(TwoFactorBrowser):
         r'https://secure.bforbank.com/connexion-client/service/login\?urlBack=',
         LoginPage
     )
+    maintenance = URL(
+        r'/maintenance.html',
+        MaintenancePage
+    )
     user_validation = URL(
         r'/profil-client/',
         r'/connaissance-client/',
@@ -62,15 +69,16 @@ class BforbankBrowser(TwoFactorBrowser):
     home = URL('/espace-client/$', AccountsPage)
     rib = URL(
         '/espace-client/rib',
-        r'/espace-client/rib/(?P<id>\d+)',
+        r'/espace-client/rib/(?P<id>[^/]+)$',
         RibPage
     )
     loan_history = URL('/espace-client/livret/consultation.*', LoanHistoryPage)
     history = URL('/espace-client/consultation/operations/.*', HistoryPage)
-    coming = URL(r'/espace-client/consultation/operationsAVenir/(?P<account>\d+)$', HistoryPage)
+    coming = URL(r'/espace-client/consultation/operationsAVenir/(?P<account>[^/]+)$', HistoryPage)
     card_history = URL('espace-client/consultation/encoursCarte/.*', CardHistoryPage)
-    card_page = URL(r'/espace-client/carte/(?P<account>\d+)$', CardPage)
+    card_page = URL(r'/espace-client/carte/(?P<account>[^/]+)$', CardPage)
 
+    lifeinsurance = URL(r'/espace-client/assuranceVie/(?P<account_code>\d+)')
     lifeinsurance_list = URL(r'/client/accounts/lifeInsurance/lifeInsuranceSummary.action', LifeInsuranceList)
     lifeinsurance_iframe = URL(
         r'https://(?:www|client).bforbank.com/client/accounts/lifeInsurance/consultationDetailSpirica.action',
@@ -105,16 +113,29 @@ class BforbankBrowser(TwoFactorBrowser):
     __states__ = ('tokenDto', 'anrtoken', 'refresh_token',)
 
     ERROR_MAPPING = {
-        'error.compte.bloque': ActionNeeded('Compte bloqué'),
+        'error.compte.bloque': BrowserUserBanned(
+            'Suite à trois tentatives erronées, votre compte a été bloqué. Votre compte sera de nouveau disponible au bout de 24h.'
+        ),
         'error.alreadySend': AppValidationError(
             'Merci de patienter 3 minutes avant de demander un nouveau code de sécurité.'
         ),
         'alreadySent': AppValidationError(
             'Merci de patienter 3 minutes avant de demander un nouveau code de sécurité.'
         ),
-        'error.authentification': BrowserIncorrectPassword(),
+        'error.authentification': BrowserIncorrectPassword(
+            'Les informations saisies sont incorrectes, merci de vous authentifier à nouveau. Au bout de trois tentatives erronées, votre compte sera bloqué.'
+        ),
         'codeNotMatch': BrowserIncorrectPassword(
-            'Le code de sécurité saisi ne correspond pas à celui qui vous a été envoyé.'
+            message='Le code de sécurité saisi ne correspond pas à celui qui vous a été envoyé. Au bout de trois tentatives erronées, votre compte sera bloqué.',
+            bad_fields=['code'],
+        ),
+        'error.technical': BrowserUnavailable(),
+        'error.anrlocked': BrowserUserBanned(
+            'Suite à trois tentatives erronées, vous ne pouvez plus recevoir de code par SMS pour valider les opérations sensibles. Cette fonctionnalité sera de nouveau disponible dans 24h.'
+        ),
+        # not a typo
+        'accoundLocked': BrowserUserBanned(
+            'Suite à trois tentatives erronées, vous ne pouvez plus recevoir de code par SMS pour valider les opérations sensibles. Cette fonctionnalité sera de nouveau disponible dans 24h.'
         ),
     }
 
@@ -124,7 +145,6 @@ class BforbankBrowser(TwoFactorBrowser):
         super(BforbankBrowser, self).__init__(config, username, password, *args, **kwargs)
         self.birthdate = self.config['birthdate'].get()
         self.accounts = None
-        self.weboob = kwargs['weboob']
         self.tokenDto = None
         self.anrtoken = None
         self.refresh_token = {}
@@ -144,7 +164,10 @@ class BforbankBrowser(TwoFactorBrowser):
 
     def get_expire(self):
         if self.refresh_token.get('expires'):
-            return unicode(datetime.datetime.fromtimestamp(self.refresh_token['expires']))
+            expires = datetime.datetime.fromtimestamp(
+                self.refresh_token['expires'], tz.tzlocal()
+            ).replace(microsecond=0).isoformat()
+            return expires
         return super(BforbankBrowser, self).get_expire()
 
     def handle_errors(self, error, clear_twofa=False):
@@ -178,13 +201,25 @@ class BforbankBrowser(TwoFactorBrowser):
             raise BrowserQuestion(
                 Value(
                     'code',
-                    label='Un SMS contenant un code à 4 chiffres a été communiqué sur votre téléphone portable')
+                    label='Un SMS contenant un code vous a été envoyé sur votre téléphone portable')
             )
 
         # When we try to login, the server return a json, if no error occurred
         # `error` will be None otherwise it will be filled with the content of
         # the error.
+        # With the exception of wrongpass errors for which the content
+        # of the error is an empty string.
         error = result.get('errorMessage')
+        if result.get('errorCode') == 'BindException' and not error:
+            '''
+            As found in '/connexion-client/js/wsso.js'
+
+            var handleException = function (err) {
+            if (err.errorCode === 'BindException') {
+                handleTechnicalError("error.authentification");
+            '''
+            error = 'error.authentification'
+
         self.handle_errors(error)
 
         # We must go home after login otherwise do_login will be done twice.
@@ -193,7 +228,10 @@ class BforbankBrowser(TwoFactorBrowser):
         if self.user_validation.is_here():
             # We are sometimes redirected to a page asking to verify the client's info.
             # The page is blank before JS so the action needed message is hard-coded.
-            raise ActionNeeded('Vérification de vos informations personnelles')
+            raise ActionNeeded(
+                locale="fr-FR", message="Vérification de vos informations personnelles",
+                action_type=ActionType.FILL_KYC,
+            )
 
     def start_login(self):
         """
@@ -274,14 +312,27 @@ class BforbankBrowser(TwoFactorBrowser):
             self.home.go()
             accounts = list(self.page.iter_accounts(name=owner_name))
             if self.page.RIB_AVAILABLE:
-                self.rib.go().populate_rib(accounts)
+                # Start here, then we'll go from account's special page, for each account
+                self.rib.go()
+                for account in accounts:
+                    # Check if rib page exists for that account before trying to reach it.
+                    if self.page.has_account_listed(account):
+                        try:
+                            self.rib.go(id=account._url_code)
+                        except ServerError:
+                            # For some people, trying to go to the rib page for a saving account leads to a error 500.
+                            # Reproduced on the navigator: although the account can be picked in the dropdown menu,
+                            # rib page is unavailable. If so we just skip 'populate_rib'.
+                            continue
+                        else:
+                            self.page.populate_rib(account)
 
             self.accounts = []
             for account in accounts:
                 self.accounts.append(account)
 
                 if account.type == Account.TYPE_CHECKING:
-                    self.card_page.go(account=account.id)
+                    self.card_page.go(account=account._url_code)
                     if self.page.has_no_card():
                         continue
                     cards = self.page.get_cards(account.id)
@@ -370,7 +421,7 @@ class BforbankBrowser(TwoFactorBrowser):
     @need_login
     def get_coming(self, account):
         if account.type == Account.TYPE_CHECKING:
-            self.coming.go(account=account.id)
+            self.coming.go(account=account._url_code)
             return self.page.get_operations()
         elif account.type == Account.TYPE_CARD:
             self.location(account.url.replace('operations', 'encoursCarte') + '/%s' % account._index)
@@ -383,7 +434,7 @@ class BforbankBrowser(TwoFactorBrowser):
             raise NotImplementedError()
 
     def goto_lifeinsurance(self, account):
-        self.location('https://client.bforbank.com/espace-client/assuranceVie')
+        self.lifeinsurance.go(account_code=account._url_code)
         self.lifeinsurance_list.go()
 
     @retry(AccountNotFound, tries=5)
@@ -431,7 +482,7 @@ class BforbankBrowser(TwoFactorBrowser):
 
     def get_bourse_account(self, account):
         owner_name = self.get_profile().name.upper().split(' ', 1)[1]
-        self.bourse_login.go(id=account.id)  # "login" to bourse page
+        self.location(account.url)
 
         self.bourse.go()
         assert self.bourse.is_here()
@@ -460,9 +511,8 @@ class BforbankBrowser(TwoFactorBrowser):
 
             self.location(bourse_account._market_link)
             assert self.bourse.is_here()
-            invs = list(self.page.iter_investment())
+            invs = list(self.page.iter_investment(account_currency=account.currency))
             # _especes is set during BoursePage accounts parsing. BoursePage
-            # inherits from lcl module BoursePage
             if bourse_account._especes:
                 invs.append(create_french_liquidity(bourse_account._especes))
 

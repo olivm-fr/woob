@@ -2,79 +2,81 @@
 
 # Copyright(C) 2020       Simon Bordeyne
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+from urllib.parse import urljoin
 
-from datetime import date
-
-from weboob.browser.pages import HTMLPage, LoggedPage, RawPage
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.capabilities.bill import (
+from woob.browser.pages import HTMLPage, LoggedPage, RawPage
+from woob.browser.elements import ListElement, ItemElement, method
+from woob.capabilities.bill import (
     Subscription, Document, DocumentTypes,
 )
-from weboob.browser.filters.standard import (
+from woob.browser.filters.standard import (
     CleanText, Field, Format,
     Regexp, Date, Env, FilterError,
 )
-from weboob.browser.filters.html import Attr, Link
-from weboob.tools.compat import urljoin
+from woob.browser.filters.html import Attr, Link
 
 
 class BankStatementsPage(LoggedPage, HTMLPage):
-    @property
-    def account_keys(self):
-        for el in self.doc.xpath('//select[@id="FiltersType_account"]//option'):
-            # the first line is just here to tell the user to choose an account. Value is ""
-            if el.values()[0]:
-                yield el.values()[0]
-
-    def submit_form(self, **data):
-        defaults = {
-            'filterIsin': '',
-            'type': 'cc',
-            'fromDate': '01/01/1970',  # epoch, so we fetch as much as possible
-            'toDate': date.today().strftime("%d/%m/%Y"),
-        }
-        defaults.update(data)
-
-        form = self.get_form(name="FiltersType")
-        for key, value in defaults.items():
-            form['FiltersType[%s]' % key] = value
-        return form.submit().page
-
     @method
-    class get_subscription(ItemElement):
-        klass = Subscription
+    class iter_subscriptions(ListElement):
+        item_xpath = '//div[@id="FiltersType_accountsKeys"]//label'
 
-        def obj__statement_type(self):
-            value = Attr('//select[@id="FiltersType_type"]//option[(@selected)]', 'value', default='cc')(self)
-            if value == 'cc':
-                return 'ccs'
-            return value
+        class item(ItemElement):
+            klass = Subscription
 
-        obj__account_key = Attr('//select[@id="FiltersType_account"]//option[(@selected)]', 'value')
+            obj__account_key = Attr('.//input', 'value')
+            # we must catch id's formed like "1234********5678" and "12345678912" but we must be careful
+            # and avoid catching digits that can be in the label (which is in the same div as the id)
+            # hence the 11 characters minimum condition which corresponds to the minimum length of id
+            obj_id = Regexp(CleanText('.'), r'(?:^|-)\s*([\d\*]{11,})\s*(?:-|$)')
+            obj_subscriber = CleanText('//div[@id="dropdown-profile"]//div[has-class("user__username")]')
 
-        obj_id = Regexp(CleanText('//select[@id="FiltersType_account"]//option[(@selected)]'), r'(\d+)')
-        obj_subscriber = CleanText('//span[contains(@class, "user__username pull-left")]')
-        obj_label = obj_id
+            def obj_label(self):
+                _id = Field('id')(self)
+                subscriber = Field('subscriber')(self)
+                label = CleanText('.')(self)
+
+                # label looks like: sequence1 - sequence2 - sequence3
+                # but may contains more or less sequence
+                values = [el.strip(' -') for el in label.split(' -' ) if el.strip(' -') != '']
+                position = values.index(_id)
+                if position >= 0:
+                    # obj_id is inside it, we remove it from label, since it's gotten in obj_id
+                    values.pop(position)
+
+                # and sometimes subscriber is inside, but can contains other text like: MR ...
+                # or a - in subscriber (for some firstname), but not in label
+                if len(values) > 1:
+                    # sometimes parts of subscriber name are in label too ("Cpte Courant John" for example)
+                    # so if there's only one element (not all label sequences are made of the same number of elements)
+                    # and that element has parts of subscriber name in it, we get an empty label
+                    for idx, value in enumerate(values):
+                        subscriber_values = subscriber.split()
+                        # in subscriber it's in Title but in uppercase in label
+                        if any(val.lower() in value.lower() for val in subscriber_values):
+                            values.pop(idx)
+                            break
+
+                return ' - '.join(values)
 
     @method
     class iter_documents(ListElement):
-        item_xpath = '//table/tbody/tr'
+        item_xpath = '//table[has-class("documents__table")]/tbody/tr'
 
         def store(self, obj):
             # This code enables doc_id when there
@@ -94,19 +96,22 @@ class BankStatementsPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Document
 
-            obj_id = Format('%s_%s%s', Env('subid'), Field('date'), Env('statement_type'))
+            obj_id = Format('%s_%s', Env('subid'), Field('date'))
             obj_type = DocumentTypes.STATEMENT
-            obj_url = Link('.//td[1]/a')
-            obj_format = CleanText('.//td[2]')
-            obj_label = CleanText('.//td[1]/a')
+            obj_url = Link('.//td[2]/a')
+            obj_label = CleanText('.//td[2]/a')
+
+            def obj_format(self):
+                if 'file-pdf' in Attr('.//td[1]/svg/use', 'xlink:href', default='')(self):
+                    return 'pdf'
 
             def obj_date(self):
                 try:
-                    return Date(CleanText('.//td[3]'), dayfirst=True)(self)
+                    return Date(CleanText('.//td[4]'), dayfirst=True)(self)
                 except FilterError:
                     # in some cases, there is no day (for example, with Relevés espèces for some action accounts)
                     # in this case, we return the first day of the given year and month
-                    return Date(CleanText('.//td[3]'), strict=False)(self).replace(day=1)
+                    return Date(CleanText('.//td[4]'), strict=False)(self).replace(day=1)
 
 
 class BankIdentityPage(LoggedPage, HTMLPage):
@@ -118,16 +123,19 @@ class BankIdentityPage(LoggedPage, HTMLPage):
             klass = Document
 
             def condition(self):
-                return Env('subid')(self) == Regexp(CleanText('.//td[1]/a'), r'(\d+)')(self)
+                return Env('subid')(self) == Regexp(CleanText('.//td[2]/a'), r'(\d+)')(self)
 
             obj_id = Format('%s_RIB', Env('subid'))
 
             def obj_url(self):
-                link = Link('.//td[1]/a')(self)
+                link = Link('.//td[2]/a')(self)
                 return urljoin(self.page.url, urljoin(link, 'telecharger'))
 
-            obj_format = CleanText('.//td[2]')
-            obj_label = CleanText('.//td[1]/a')
+            def obj_format(self):
+                if 'file-pdf' in Attr('.//td[1]/svg/use', 'xlink:href', default='')(self):
+                    return 'pdf'
+
+            obj_label = CleanText('.//td[2]/a')
             obj_type = DocumentTypes.RIB
 
 

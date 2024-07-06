@@ -1,32 +1,33 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2012-2020  Budget Insight
+# Copyright(C) 2012 Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
-from weboob.browser.pages import HTMLPage, LoggedPage, RawPage
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, Regexp
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.html import Attr
-from weboob.capabilities.bill import DocumentTypes, Bill, Subscription
-from weboob.capabilities.profile import Profile
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.date import parse_french_date
+from woob.browser.pages import HTMLPage, LoggedPage, RawPage
+from woob.browser.filters.standard import (
+    CleanDecimal, CleanText, Env, Format, Regexp,
+    Field, Eval, QueryValue, Slugify, Date,
+)
+from woob.browser.elements import ListElement, ItemElement, method
+from woob.browser.filters.html import Link
+from woob.capabilities.bill import DocumentTypes, Bill, Subscription, Document
+from woob.capabilities.profile import Profile
+from woob.capabilities.base import NotAvailable
+from woob.tools.date import parse_french_date
 
 
 class LoginPage(HTMLPage):
@@ -88,14 +89,16 @@ class DocumentsPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Bill
 
-            obj_id = Format('%s_%s', Env('subid'), Regexp(Attr('./span[1]/a', 'href'),
-                                                          r'(?<=.facture=)([^*]+)'))
-            obj_url = Attr('./span[1]/a', 'href', default=NotAvailable)
+            obj_id = Format(
+                '%s_%s',
+                Env('subid'),
+                QueryValue(Field("url"), "no_facture")
+            )
+            obj_url = Link("./span[1]/a", default=NotAvailable)
             obj_date = Env('date')
             obj_format = 'pdf'
             obj_label = Format("Facture %s", CleanText("./span[2]"))
-            obj_type = DocumentTypes.BILL
-            obj_price = CleanDecimal(CleanText('./span[has-class("last")]'), replace_dots=True)
+            obj_total_price = CleanDecimal.French('./span[has-class("last")]')
             obj_currency = 'EUR'
 
             def parse(self, el):
@@ -114,3 +117,34 @@ class ProfilePage(LoggedPage, HTMLPage):
     def set_address(self, profile):
         assert len(self.doc.xpath('//p/strong[contains(text(), " ")]')) == 1, 'There are several addresses.'
         profile.address = CleanText('//p/strong[contains(text(), " ")]')(self.doc) or NotAvailable
+
+
+class ContractPage(LoggedPage, HTMLPage):
+    @method
+    class iter_documents(ListElement):
+        item_xpath = (
+            '//div[has-class("monabo")]//ul[has-class("no_arrow")]/li[not(@class)]//a'
+        )
+
+        class item(ItemElement):
+            klass = Document
+            obj_url = Link(".")
+            obj_date = Date(
+                CleanText(
+                    'ancestor::div[contains(@class, "monabo")]//strong/span[@class="red"]'
+                ),
+                dayfirst=True,
+            )
+            obj_id = Format(
+                "%s_%s_%s",
+                Env("subscription_id"),
+                Eval(lambda t: t.strftime("%Y%m%d"), Field("date")),
+                Slugify(Regexp(Field("url"), r"([^/]+)\.pdf")),
+            )
+            obj_type = DocumentTypes.CONTRACT
+            obj_label = Format(
+                "%s (%s)",
+                CleanText("ancestor::li"),
+                Regexp(Field("url"), r"([^/]+)\.pdf"),
+            )
+            obj_format = "pdf"

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2021      Romain Bignon
 #
 # This file is part of a woob module.
@@ -25,20 +23,20 @@ from urllib.parse import quote_plus
 
 from dateutil.relativedelta import relativedelta
 
-from weboob.browser.browsers import need_login
-from weboob.browser.url import URL
-from weboob.browser.exceptions import ClientError
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bank import (
-    RecipientNotFound, AddRecipientStep, AddRecipientBankError,
-    Recipient, TransferBankError, AccountOwnerType,
+from woob.browser.browsers import need_login
+from woob.browser.url import URL
+from woob.browser.exceptions import ClientError
+from woob.capabilities.base import find_object
+from woob.capabilities.bank import (
+    RecipientNotFound, AddRecipientStep, AddRecipientBankError, Recipient,
+    TransferBankError, AccountOwnerType, NoAccountsException,
 )
-from weboob.exceptions import (
-    BrowserPasswordExpired, BrowserUnavailable, NoAccountsException,
+from woob.exceptions import (
+    BrowserPasswordExpired, BrowserUnavailable,
 )
-from weboob.tools.decorators import retry
-from weboob.tools.value import Value
-from weboob.tools.json import json
+from woob.tools.decorators import retry
+from woob.tools.value import Value
+from woob.tools.json import json
 
 from .pages import (
     ChangePassPage, InscriptionPage, ErrorPage, MarketAccountsDetailsPage, MarketAccountsPage, UselessPage,
@@ -93,7 +91,7 @@ class SGPEBrowser(SocieteGeneraleLogin):
         '/icd/npe/data/operationFuture/getListeDesCartesAvecOperationsAVenir-authsec.json', CardsInformation2Page
     )
     deferred_card = URL(
-        r'/icd/gkb/data/getCartesPourPm-authsec.json\?b64e200_idPPouPM=(?P<card_id>\w+)',
+        r'/icd/gkb/data/getCartesPourPm-authsec.json\?b64e200_idPPouPM=(?P<card_id>.+)',
         DeferredCardJsonPage
     )
 

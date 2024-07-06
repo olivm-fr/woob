@@ -1,51 +1,53 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
+import re
 
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.browser.elements import ItemElement, DictElement, method
-from weboob.browser.pages import LoggedPage, HTMLPage, JsonPage
-from weboob.browser.filters.standard import (
+from woob.capabilities.base import NotAvailable, empty
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import Investment
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.pages import LoggedPage, HTMLPage, JsonPage, XMLPage, RawPage
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Date,
     Field, MapIn, Eval, Lower,
 )
-from weboob.browser.filters.json import Dict
-from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.browser.filters.json import Dict
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
 
 
-class LoginPage(HTMLPage):
-    def login(self, username, password):
-        form = self.get_form(nr=0)
-        form['_58_redirect'] = '/accueil-connect'
-        form['_58_login'] = username.encode('utf-8')
-        form['_58_password'] = password.encode('utf-8')
-        form.submit()
+class LoginPage(RawPage):
+    def build_doc(self, content):
+        if re.compile(r'^<.*>.*</.*>$').match(content.decode()):
+            return XMLPage.build_doc(self, self.response.content)
+        return JsonPage.build_doc(self, content)
 
+    def get_access_token(self):
+        if isinstance(self.doc, dict):
+            return Dict('accessToken')(self.doc)
+        return CleanText('//accessToken')(self.doc)
 
-class WrongpassPage(HTMLPage):
-    pass
+    def get_error_message(self):
+        if isinstance(self.doc, dict):
+            return Dict('message')(self.doc)
+        return CleanText('//message')(self.doc)
 
 
 class InfoPage(LoggedPage, HTMLPage):
@@ -63,6 +65,8 @@ ACCOUNT_TYPES = {
     'frontière efficiente': Account.TYPE_LIFE_INSURANCE,
     'cristalliance vie': Account.TYPE_LIFE_INSURANCE,
     'article 82': Account.TYPE_LIFE_INSURANCE,
+    'intencial horizon': Account.TYPE_LIFE_INSURANCE,
+    'intencial archipel': Account.TYPE_LIFE_INSURANCE,
     'liberalys retraite': Account.TYPE_PER,
     'perspective génération': Account.TYPE_PER,
     'perp': Account.TYPE_PERP,

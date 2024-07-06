@@ -1,35 +1,30 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.browser import AbstractBrowser, URL
+# flake8: compatible
 
-from .pages import LoginPage
+from woob_modules.cmes.browser import CmesBrowser
 
 
 __all__ = ['GroupamaesBrowser']
 
 
-class GroupamaesBrowser(AbstractBrowser):
-    PARENT = 'cmes'
+class GroupamaesBrowser(CmesBrowser):
+    login = CmesBrowser.login.with_urls(r'/groupama-es/(?P<client_space>.*)fr/identification/authentification.html')
+    mfa = CmesBrowser.mfa.with_urls(r'/groupama-es/espace-client/fr/epargnants/premiers-pas/authentification-forte/index.html')
 
-    login = URL('/groupama-es/(?P<client_space>.*)fr/identification/authentification.html', LoginPage)
-
-    def __init__(self, login, password, baseurl, subsite, *args, **kwargs):
-        self.weboob = kwargs['weboob']
-        super(GroupamaesBrowser, self).__init__(login, password, baseurl, subsite, *args, **kwargs)
+    client_space = 'espace-client/'

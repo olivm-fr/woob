@@ -1,34 +1,31 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Nicolas Duhamel
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals, division
-
 import re
-from io import BytesIO
 
-from weboob.exceptions import BrowserUnavailable, BrowserIncorrectPassword, NoAccountsException, ActionNeeded
-from weboob.browser.pages import LoggedPage
-from weboob.browser.filters.html import Link
-from weboob.browser.filters.standard import CleanText, Regexp
-from weboob.tools.captcha.virtkeyboard import VirtKeyboard
+from woob.browser.filters.standard import CleanText, Lower, Regexp
+from woob.browser.pages import HTMLPage, LoggedPage, JsonPage
+from woob.exceptions import (
+    ActionNeeded, ActionType, BrowserIncorrectPassword,
+    BrowserUnavailable, ParseError,
+)
+from woob.capabilities.bank import NoAccountsException
 
 from .base import MyHTMLPage
 
@@ -38,85 +35,72 @@ class UnavailablePage(MyHTMLPage):
         raise BrowserUnavailable()
 
 
-class Keyboard(VirtKeyboard):
-    symbols = {
-        '0': ('daa52d75287bea58f505823ef6c8b96c', 'e5d6dc589f00e7ec3ba0e45a1fee1220'),
-        '1': ('f5da96c2592803a8cdc5a928a2e4a3b0', '9732b03ce3bdae7a44df9a7b4e092a07'),
-        '2': ('9ff78367d5cb89cacae475368a11e3af', '3b4387242c42bd39dbc263eac0718a49'),
-        '3': ('908a0a42a424b95d4d885ce91bc3d920', '14fa1e5083fa0a0c0cded72a2139921b'),
-        '4': ('3fc069f33b801b3d0cdce6655a65c0ac', '72792dbef888f1176f1974c86a94a084'),
-        '5': ('58a2afebf1551d45ccad79fad1600fc3', '1e9ddf1e5a12ebaeaea26cca6f752a87'),
-        '6': ('7fedfd9e57007f2985c3a1f44fb38ea1', '4e3a917198e89a2c16b9379f9a33f2a1'),
-        '7': ('389b8ef432ae996ac0141a2fcc7b540f', '33b90787a8014667b2acd5493e5641d2'),
-        '8': ('bf357ff09cc29ea544991642cd97d453', 'e4b30e90bbc2c26c2893120c8adc9d64'),
-        '9': ('b744015eb89c1b950e13a81364112cd6', 'b400c35438960de101233b9c846cd5eb'),
-    }
-
-    color = (0xff, 0xff, 0xff)
-
-    def __init__(self, page):
-        img_url = (
-            Regexp(CleanText('//style'), r'background:url\((.*?)\)', default=None)(page.doc)
-            or Regexp(CleanText('//script'), r'IMG_ALL = "(.*?)"', default=None)(page.doc)
-        )
-
-        size = 252
-        if not img_url:
-            img_url = page.doc.xpath('//img[@id="imageCVS"]')[0].attrib['src']
-            size = 146
-
-        coords = {}
-
-        x, y, width, height = (0, 0, size // 4, size // 4)
-        for i, _ in enumerate(page.doc.xpath('//div[@id="imageclavier"]//button')):
-            code = '%02d' % i
-            coords[code] = (x + 4, y + 4, x + width - 8, y + height - 8)
-            if (x + width + 1) >= size:
-                y += height + 1
-                x = 0
-            else:
-                x += width + 1
-
-        data = page.browser.open(img_url).content
-        VirtKeyboard.__init__(self, BytesIO(data), coords, self.color)
-
-        self.check_symbols(self.symbols, page.browser.responses_dirname)
-
-    def get_symbol_code(self, md5sum):
-        code = VirtKeyboard.get_symbol_code(self, md5sum)
-        return '%02d' % int(code.split('_')[-1])
-
-    def get_string_code(self, string):
-        code = ''
-        for c in string:
-            code += self.get_symbol_code(self.symbols[c])
-        return code
-
-    def get_symbol_coords(self, coords):
-        # strip borders
-        x1, y1, x2, y2 = coords
-        return VirtKeyboard.get_symbol_coords(self, (x1 + 3, y1 + 3, x2 - 3, y2 - 3))
-
-
 class LoginPage(MyHTMLPage):
     def login(self, login, pwd):
-        vk = Keyboard(self)
+        # we need to get iscd data from js file to complete the login form.
+        dasti_js = self.browser.open('https://d21j9nkdg2p3wo.cloudfront.net/321226/dasti.js').text
+        iscd = re.match(r'.*j=\"(\w{52})\".*', dasti_js).group(1)
 
         form = self.get_form(name='formAccesCompte')
-        form['password'] = vk.get_string_code(pwd)
+        form['password'] = self.get_password_from_virtualkeyboard(pwd)
         form['username'] = login
+        form['iscdName'] = iscd
+        form['cltName'] = '1'
         form.submit()
+
+    def get_password_from_virtualkeyboard(self, password):
+        # Virtual keyboard is composed of buttons filled randomly with numbers from 0 to 9,
+        # each digit of the password is replaced by the index of the corresponding button.
+        vk = {}
+        buttons = CleanText('//div[@data-tb-cvd-id="password"]/div/button/text()')(self.doc)
+
+        for index, elt in enumerate(buttons.replace(' ', '')):
+            vk[elt] = str(index)
+
+        code = ''
+        for number in password:
+            code += vk[number]
+
+        return code
+
+
+class PostLoginPage(HTMLPage):
+    def get_error_message(self):
+        # This error is contained in a very simple HTML page,
+        # inside a font tag, child of an h1 tag.
+        return CleanText('//h2[@id="title"]')(self.doc)
+
+
+class LienJavascript(HTMLPage):
+
+    def is_here(self):
+        try:
+            Regexp(
+                CleanText('//html/head/script[@type="text/javascript"]'),
+                r'^top.location.replace\(..*.\);$')(self.doc)
+            return True
+        except ParseError:
+            return False
+
+    def on_load(self):
+        if self.is_here():
+            url = Regexp(
+                CleanText('//script[@type="text/javascript"]'),
+                r'top.location.replace\(.(.*).\)')(self.doc)
+            self.browser.location(url)
 
 
 class repositionnerCheminCourant(LoggedPage, MyHTMLPage):
+    is_here = True
+
     def on_load(self):
-        super(repositionnerCheminCourant, self).on_load()
+        super().on_load()
         response = self.browser.open("https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/securite/authentification/initialiser-identif.ea")
         if isinstance(response.page, Initident):
             response.page.on_load()
         if "vous ne disposez pas" in response.text:
             raise BrowserIncorrectPassword("No online banking service for these ids")
-        if 'Nous vous invitons à renouveler votre opération ultérieurement' in response.text:
+        if 'invitons à renouveler votre opération ultérieurement' in response.text:
             raise BrowserUnavailable()
 
 
@@ -128,9 +112,11 @@ class PersonalLoanRoutagePage(LoggedPage, MyHTMLPage):
 
 class Initident(LoggedPage, MyHTMLPage):
     def on_load(self):
-        self.browser.open("https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/securite/authentification/verifierMotDePasse-identif.ea")
-        if self.doc.xpath("""//span[contains(text(), "L'identifiant utilisé est celui d'une Entreprise ou d'une Association")]"""):
-            raise BrowserIncorrectPassword("L'identifiant utilisé est celui d'une Entreprise ou d'une Association")
+        message = CleanText(
+            """//p[contains(text(), "L'identifiant utilisé est celui d'une Entreprise ou d'une Association")]"""
+        )(self.doc)
+        if message:
+            raise BrowserIncorrectPassword(message, bad_fields=['website'])
         no_accounts = CleanText('//div[@class="textFCK"]')(self.doc)
         if no_accounts:
             raise NoAccountsException(no_accounts)
@@ -138,9 +124,11 @@ class Initident(LoggedPage, MyHTMLPage):
 
 
 class CheckPassword(LoggedPage, MyHTMLPage):
+    is_here = True
+
     def on_load(self):
         MyHTMLPage.on_load(self)
-        self.browser.location("https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/comptesCommun/synthese_assurancesEtComptes/init-synthese.ea")
+        self.browser.location("https://voscomptesenligne.labanquepostale.fr/voscomptes/canalXHTML/securite/authentification/retourDSP2-identif.ea")
 
 
 class BadLoginPage(MyHTMLPage):
@@ -160,15 +148,21 @@ class TwoFAPage(MyHTMLPage):
             self.browser.login_without_2fa()
 
     def get_auth_method(self):
-        status_message = CleanText('//div[@class="textFCK"]')(self.doc)
+
+        status_message = CleanText('//div[contains(@id, "DSP2") and @class="mtm"]')(self.doc)
+
         if re.search(
                 'avez pas de solution d’authentification forte'
-                + "|avez pas encore activé votre service gratuit d'authentification forte",
+                + '|une authentification forte est désormais nécessaire'
+                + "|avez pas encore activé votre service gratuit d'authentification forte"
+                + '|Cette validation vous sera ensuite demandée tous les 90 jours'
+                + '|authentification forte n’a pas encore été activée',
                 status_message
         ):
             return 'no2fa'
         elif re.search(
                 'Une authentification forte via Certicode Plus vous'
+                + '|Cette étape supplémentaire est obligatoire pour accéder à votre Espace Client Internet.'
                 + '|vous rendre sur l’application mobile La Banque Postale',
                 status_message
         ):
@@ -185,26 +179,48 @@ class TwoFAPage(MyHTMLPage):
         ):
             raise BrowserUnavailable(status_message)
         elif (
+            "bloqué si vous n'avez pas de solution d'authentification forte"
+            in status_message.lower()
+        ):
+            # Pour plus de sécurité, l'accès à votre Espace client Internet requiert une authentification forte tous les 90 jours,
+            # En application de la Directive Européenne sur les Services de Paiement (DSP2).
+            # Cette étape supplémentaire est obligatoire pour accéder à votre Espace client Internet.
+            # Dès le 25 avril 2022, l'accès à votre Espace client sera bloqué si vous n'avez pas de solution d'authentification forte
+            raise ActionNeeded(status_message)
+        elif "authentification forte n'a pas encore été activée" in status_message.lower():
+            # Vous ne pouvez pas accéder aux fonctionnalités de votre Espace client car l'authentification forte
+            # n'a pas encore été activée. Pour plus de sécurité, l'accès à votre Espace client Internet requiert
+            # une authentification forte à réaliser tous les 90 jours, en application de la Directive européenne
+            # sur les Services de Paiement (DSP2). etc...
+            short_message = CleanText('(//div[@class="textFCK"])[1]//p[1]')(self.doc)
+            if short_message:
+                # short_message is the first sentence only
+                raise ActionNeeded(short_message, locale='fr-FR', action_type=ActionType.ENABLE_MFA)
+            # just in case the short message is not present
+            raise ActionNeeded(status_message, locale='fr-FR', action_type=ActionType.ENABLE_MFA)
+        elif (
             'votre Espace Client Internet requiert une authentification forte tous les 90 jours'
             in status_message
         ):
-            # Only first sentence explains 'why', the rest is 'how'
+            # short_message takes only the first sentence of status_message to avoid
+            # some verbose explanations about how to set the SCA
             short_message = CleanText('(//div[@class="textFCK"])[1]//p[1]')(self.doc)
-            url = Link('//div[@class="certicode_footer"]/a')(self.doc)
-            if not url:
+            if short_message:
                 raise ActionNeeded(
                     "Une authentification forte est requise sur votre espace client : %s" % short_message
                 )
             else:
                 # raise an error to avoid silencing other no2fa/2fa messages
-                raise AssertionError("No 2FA case to skip, or new 2FA case to trigger")
+                raise AssertionError("New 2FA case to trigger")
         raise AssertionError('Unhandled login message: "%s"' % status_message)
 
-    def get_skip_twofa_url(self):
-        return Link('//div[@class="certicode_footer"]/a[contains(text(), "Poursuivre")]', default=None)(self.doc)
+
+class Polling2FA(JsonPage):
+    pass
 
 
 class Validated2FAPage(MyHTMLPage):
+    is_here = True
     pass
 
 
@@ -227,3 +243,8 @@ class SmsPage(MyHTMLPage):
 class DecoupledPage(MyHTMLPage):
     def get_decoupled_message(self):
         return CleanText('//div[@class="textFCK"]/p[contains(text(), "Validez votre authentification")]')(self.doc)
+
+
+class NoTerminalPage(MyHTMLPage):
+    def has_no_terminal(self):
+        return 'aucun terminal trouve' in Lower('//span[@id="deviceSelected"]', transliterate=True)(self.doc)

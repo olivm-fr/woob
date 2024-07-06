@@ -2,32 +2,30 @@
 
 # Copyright(C) 2019      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-from weboob.browser.elements import ItemElement, method, DictElement
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.standard import (
+from woob.browser.elements import ItemElement, method, DictElement
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Date,
 )
-from weboob.browser.pages import HTMLPage, CsvPage, LoggedPage
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account, Transaction
-from weboob.exceptions import BrowserIncorrectPassword
+from woob.browser.pages import HTMLPage, CsvPage, LoggedPage
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bank import Account, Transaction
+from woob.exceptions import BrowserIncorrectPassword
 
 
 MAIN_ID = '_lendosphere_'
@@ -35,7 +33,7 @@ MAIN_ID = '_lendosphere_'
 
 class LoginPage(HTMLPage):
     def do_login(self, username, password):
-        form = self.get_form(id='new_user')
+        form = self.get_form(id='session-new-form')
         form['user[email]'] = username
         form['user[password]'] = password
         form.submit()
@@ -89,6 +87,6 @@ class GSummaryPage(LoggedPage, HTMLPage):
         obj_id = MAIN_ID
         obj_currency = 'EUR'
         obj_number = NotAvailable
-        obj_type = Account.TYPE_MARKET
+        obj_type = Account.TYPE_CROWDLENDING
         obj_label = 'Lendosphere'
-        obj__invested = CleanDecimal.French('//tr[td[contains(text(),"Echéances restantes")]]/td[last()]')
+        obj__invested = CleanDecimal.French('//tr[td[contains(text(),"chéances restantes")]]/td[last()]')

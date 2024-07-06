@@ -1,41 +1,39 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019 Sylvie Ye
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from collections import OrderedDict, Counter
 from functools import wraps
 import re
 
-from weboob.browser import LoginBrowser, URL, StatesMixin, need_login
-from weboob.exceptions import BrowserIncorrectPassword, ActionNeeded, AuthMethodNotImplemented
-from weboob.browser.exceptions import ClientError, ServerError, HTTPNotFound
-from weboob.capabilities.bank import (
+from woob.browser import LoginBrowser, URL, StatesMixin, need_login
+from woob.exceptions import (
+    BrowserIncorrectPassword, ActionNeeded, ActionType, AuthMethodNotImplemented,
+)
+from woob.browser.exceptions import ClientError, ServerError, HTTPNotFound
+from woob.capabilities.bank import (
     Account, TransferBankError, TransferInvalidAmount,
     AddRecipientStep, RecipientInvalidOTP,
     AddRecipientTimeout, AddRecipientBankError, RecipientInvalidIban,
 )
-from weboob.capabilities.bill import Subscription
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.value import Value
+from woob.capabilities.bill import Subscription
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.value import Value
 
 from .api import (
     LoginPage, AccountsPage, HistoryPage, ComingPage, AccountInfoPage,
@@ -43,11 +41,11 @@ from .api import (
     ProfilePage, LifeInsurancePage, InvestTokenPage,
     AddRecipientPage, OtpChannelsPage, ConfirmOtpPage,
 )
-from .api.accounts_page import RedirectOldPage, BourseLandingPage
+from .api.accounts_page import RedirectOldPage, BourseLandingPage, RedirectBourseToApi
 from .api.profile_page import UselessProfilePage
 from .api.login import StopPage, ActionNeededPage
 from .api.documents import StatementsPage
-from .boursedirect_browser import BourseDirectBrowser
+from .boursedirect_browser import IngBourseDirectBrowser
 
 
 def start_with_main_site(func):
@@ -89,6 +87,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
 
     # wealth
     api_to_bourse = URL(r'/saveinvestapi/v1/bourse/redirect/uid/(?P<account_uid>.+)')
+    redirect_bourse_to_api = URL(r'/saveinvestapi/v1/bourse/redirect/goto', RedirectBourseToApi)
     invest_token_page = URL(r'/secure/api-v1/saveInvest/token/generate', InvestTokenPage)
     life_insurance = URL(r'/saveinvestapi/v1/lifeinsurance/contract/(?P<account_uid>)', LifeInsurancePage)
     bourse_to_api = URL(r'https://bourse.ing.fr/priv/redirectIng.php\?pageIng=INFO')
@@ -127,7 +126,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         if dirname:
             dirname += '/bourse'
         kwargs['responses_dirname'] = dirname
-        self.bourse = BourseDirectBrowser(None, None, **kwargs)
+        self.bourse = IngBourseDirectBrowser(None, None, **kwargs)
 
         self.transfer_data = None
         self.need_reload_state = None
@@ -205,7 +204,10 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
             self.session.headers['Ingdf-Auth-Token'] = self.auth_token
             self.session.cookies.set('ingdfAuthToken', self.auth_token, domain='m.ing.fr')
         else:
-            raise ActionNeeded("Vous devez réaliser la double authentification sur le portail internet")
+            raise ActionNeeded(
+                locale="fr-FR", message="Vous devez réaliser la double authentification sur le portail internet",
+                action_type=ActionType.ENABLE_MFA,
+            )
 
         # to be on logged page, to avoid relogin
         self.accounts.go()
@@ -253,9 +255,14 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
                 if account.balance != 0:
                     # Prefer do an open() NOT to set the life insurance url as next Referer.
                     # If the Referer doesn't point to /secure, the site might do error 500...
+                    # Sometimes this call returns a HTTP error 500 for no apparent reason (the Bearer
+                    # token doesn't seem to be in cause since with the same token the first call can work,
+                    # the second can fail but the third can still succeed) and the "Accept: application/json"
+                    # is a guess of what might be wrong since this call returns only json data
                     page = self.life_insurance.open(
                         account_uid=account._uid,
                         headers={
+                            'Accept': 'application/json',
                             'Authorization': 'Bearer %s' % self.get_invest_token(),
                         }
                     )
@@ -267,12 +274,14 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
                 continue
 
             self.go_bourse(account)
-            bourse_accounts = list(self.bourse.iter_accounts_but_insurances())
+            bourse_accounts = list(self.bourse.iter_accounts())
 
             for bourse_account in bourse_accounts:
                 # bourse number is in format 111TI11111119999EUR
                 # where XXXX9999 is the corresponding API account number
                 common = re.search(r'(\d{4})[A-Z]{3}$', bourse_account.number).group(1)
+                if common not in api_by_number:
+                    continue
                 account = api_by_number[common]
                 account.balance = bourse_account.balance  # fresher balance
                 account._bourse_id = bourse_account.id
@@ -363,6 +372,15 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
             account.iban = self.page.get_iban()
 
     @need_login
+    def go_to_bourse_landing_page(self, account):
+        self.api_to_bourse.go(
+            account_uid=account._uid,
+            headers={'Authorization': 'Bearer %s' % self.get_invest_token()}
+        )
+        bourse_url = self.response.json()['url']
+        self.location(bourse_url, data='')
+
+    @need_login
     def go_bourse(self, account):
         if 'bourse.ing.fr' in self.url:
             self.logger.debug('already on bourse site')
@@ -371,13 +389,18 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
         assert account.type in (Account.TYPE_PEA, Account.TYPE_MARKET)
 
         self.logger.debug('going to bourse site')
-        self.api_to_bourse.go(
-            account_uid=account._uid,
-            headers={'Authorization': 'Bearer %s' % self.get_invest_token()}
-        )
-        bourse_url = self.response.json()['url']
-
-        self.location(bourse_url, data='')
+        try:
+            self.go_to_bourse_landing_page(account)
+        except ClientError as e:
+            # Sometimes a 403 can appear with a message asking to reconnect and retry while trying to access
+            # the bourse's landing page
+            if (
+                e.response.status_code == 403 and self.bourse_landing.match(e.request.url)
+                and not BourseLandingPage(self, e.response).logged
+            ):
+                self.go_to_bourse_landing_page(account)
+            else:
+                raise
 
         self.bourse.session.cookies.update(self.session.cookies)
         self.bourse.location(self.url)
@@ -398,6 +421,9 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
                 self.location(self.absurl('/secure', base=True))
                 self.accounts.go()
             else:
+                if self.redirect_bourse_to_api.is_here():
+                    self.page.submit_form()
+
                 self.logger.info('bourse_to_api did work, hurray!')
 
     ############# CapWealth #############
@@ -414,6 +440,7 @@ class IngAPIBrowser(LoginBrowser, StatesMixin):
             self.go_main_site()
             page = self.life_insurance.open(
                 account_uid=account._uid, headers={
+                    'Accept': 'application/json',
                     'Authorization': 'Bearer %s' % self.get_invest_token(),
                 }
             )

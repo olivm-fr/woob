@@ -2,23 +2,23 @@
 
 # Copyright(C) 2013      Bezleputh
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.browser import PagesBrowser, URL
+from woob.browser import PagesBrowser, URL
 
 from .pages import ListStationsPage
 
@@ -29,7 +29,7 @@ __all__ = ['VlilleBrowser']
 class VlilleBrowser(PagesBrowser):
 
     BASEURL = 'https://www.ilevia.fr'
-    list_page = URL('/cms/vlille/les-stations-cartographies/', ListStationsPage)
+    list_page = URL('/cms/institutionnel/velo/stations-vlille/', ListStationsPage)
 
     def get_station_list(self):
         return self.list_page.go().get_station_list()

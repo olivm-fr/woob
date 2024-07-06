@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Alexandre Flament
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,6 +15,7 @@
 
 from __future__ import print_function
 
+import shutil
 import subprocess
 import requests
 import os
@@ -25,8 +23,8 @@ import re
 
 import ConfigParser
 
-from weboob.core import Weboob
-from weboob.capabilities.video import CapVideo
+from woob.core import Woob
+from woob.capabilities.video import CapVideo
 
 # hack to workaround bash redirection and encoding problem
 import sys
@@ -62,9 +60,9 @@ class Downloadboob(object):
         self.links_directory = links_directory
         self.backend_name = backend_name
         self.backend = None
-        self.weboob = Weboob()
-        self.weboob.load_backends(modules=[self.backend_name])
-        self.backend = self.weboob.get_backend(self.backend_name)
+        self.woob = Woob()
+        self.woob.load_backends(modules=[self.backend_name])
+        self.backend = self.woob.get_backend(self.backend_name)
 
     def purge(self):
         if not os.path.isdir(self.links_directory):
@@ -195,11 +193,9 @@ class Downloadboob(object):
             return 4
 
         def check_exec(executable):
-            with open(os.devnull, 'w') as devnull:
-                process = subprocess.Popen(['which', executable], stdout=devnull)
-                if process.wait() != 0:
-                    print('Please install "%s"' % executable, file=sys.stderr)
-                    return False
+            if not shutil.which(executable):
+                print('Please install "%s"' % executable, file=sys.stderr)
+                return False
             return True
 
         dest = self.get_filename(video)
@@ -235,7 +231,7 @@ class Downloadboob(object):
         self.set_linkname(video)
 
     def read_url(self, url):
-        r = requests.get(url, stream=True)
+        r = requests.get(url, stream=True, timeout=30)
         return r.iter_lines()
 
 

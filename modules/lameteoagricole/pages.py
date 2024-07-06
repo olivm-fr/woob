@@ -2,33 +2,31 @@
 
 # Copyright(C) 2017      Vincent A
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import date, time, datetime, timedelta
+from urllib.parse import quote
 
-from weboob.browser.elements import method, ListElement, ItemElement
-from weboob.browser.filters.standard import CleanText, Field
-from weboob.browser.pages import HTMLPage
-from weboob.capabilities.weather import City, Forecast, Temperature, Current, Direction
-from weboob.tools.compat import quote
+from woob.browser.elements import method, ListElement, ItemElement
+from woob.browser.filters.standard import CleanText, Field
+from woob.browser.pages import HTMLPage, XMLPage
+from woob.capabilities.weather import City, Forecast, Temperature, Current, Direction
 
 
-class CitiesPage(HTMLPage):
+class CitiesPage(XMLPage):
     ENCODING = 'utf-8'
 
     @method
@@ -70,7 +68,7 @@ class WeatherPage(HTMLPage):
             speed_text = self.get_cell(self.titles['Vitesse Moy. du vent'], n)
         else:
             speed_text = self.get_cell(self.titles['Vitesse moyenne du vent'], n)
-        obj.wind_speed = int(speed_text.replace('km/h', '').strip())
+        obj.wind_speed = float(speed_text.replace('km/h', '').strip())
 
         if 'Probabilité de précipitations' in self.titles:
             txt = self.get_cell(self.titles['Probabilité de précipitations'], n)
@@ -86,7 +84,8 @@ class HourPage(WeatherPage):
         return CleanText('//table[@id="meteoHour"]/tr[{row}]/td[{col}]'.format(row=row + 1, col=col + 1))(self.doc)
 
     def get_img_cell(self, row, col):
-        return CleanText('//table[@id="meteoHour"]/tr[{row}]/td[{col}]/img/@alt'.format(row=row + 1, col=col + 1))(self.doc)
+        return CleanText('//table[@id="meteoHour"]/tr[{row}]/td[{col}]/img/@alt'.format(row=row + 1,
+                                                                                        col=col + 1))(self.doc)
 
     def get_current(self):
         fore = next(iter(self.iter_forecast()))
@@ -115,7 +114,7 @@ class HourPage(WeatherPage):
             day_str = new_day_str
             obj.date = datetime.combine(d, t)
 
-            obj.low = obj.high = temp(int(self.get_cell(self.titles['T° (ressentie)'], n).split('°')[0]))
+            obj.low = obj.high = temp(float(self.get_cell(self.titles['T° (ressentie)'], n).split('°')[0]))
             self.fill_base(obj, n)
 
             yield obj
@@ -123,10 +122,13 @@ class HourPage(WeatherPage):
 
 class Days5Page(WeatherPage):
     def get_cell(self, row, col):
-        return CleanText('//table[@id="meteo2"]/tr[2]/td[{col}]/table/tr[{row}]/td'.format(row=row + 1, col=col + 1))(self.doc)
+        return CleanText('//table[@id="meteo2"]/tr[2]/td[{col}]/table/tr[{row}]/td'.format(row=row + 1,
+                                                                                           col=col + 1))(self.doc)
 
     def get_img_cell(self, row, col):
-        return CleanText('//table[@id="meteo2"]/tr[2]/td[{col}]/table/tr[{row}]/td//img/@alt'.format(row=row + 1, col=col + 1))(self.doc)
+        return CleanText(
+            '//table[@id="meteo2"]/tr[2]/td[{col}]/table/tr[{row}]/td//img/@alt'.format(row=row + 1,
+                                                                                        col=col + 1))(self.doc)
 
     def iter_forecast(self):
         d = date.today()
@@ -137,11 +139,11 @@ class Days5Page(WeatherPage):
 
         for n in range(1, len(self.doc.xpath('//table[@id="meteo2"]/tr[1]/td'))):
             obj = Forecast()
-            obj.low = temp(int(self.get_cell(self.titles['Température Mini'], n).rstrip('°')))
+            obj.low = temp(float(self.get_cell(self.titles['Température Mini'], n).rstrip('°')))
 
             high_text = self.get_cell(self.titles['Température Maxi'], n).rstrip('°')
             if high_text != '-':
-                obj.high = temp(int(high_text))
+                obj.high = temp(float(high_text))
 
             obj.date = d
             self.fill_base(obj, n)
@@ -152,10 +154,13 @@ class Days5Page(WeatherPage):
 
 class Days10Page(WeatherPage):
     def get_cell(self, row, col):
-        return CleanText('(//table[@id="meteo2"]//td/table)[{col}]/tr[{row}]/td'.format(row=row + 1, col=col + 1))(self.doc)
+        return CleanText('(//table[@id="meteo2"]//td/table)[{col}]/tr[{row}]/td'.format(row=row + 1,
+                                                                                        col=col + 1))(self.doc)
 
     def get_img_cell(self, row, col):
-        return CleanText('(//table[@id="meteo2"]//td/table)[{col}]/tr[{row}]/td//img/@alt'.format(row=row + 1, col=col + 1))(self.doc)
+        return CleanText(
+            '(//table[@id="meteo2"]//td/table)[{col}]/tr[{row}]/td//img/@alt'.format(row=row + 1,
+                                                                                     col=col + 1))(self.doc)
 
     def iter_forecast(self):
         d = date.today() + timedelta(5)
@@ -167,8 +172,8 @@ class Days10Page(WeatherPage):
         cols = len(self.doc.xpath('//table[@id="meteo2"]//td/table'))
         for n in range(1, cols):
             obj = Forecast()
-            obj.low = temp(int(self.get_cell(self.titles['Température Mini'], n).rstrip('°C')))
-            obj.high = temp(int(self.get_cell(self.titles['Température Maxi'], n).rstrip('°C')))
+            obj.low = temp(float(self.get_cell(self.titles['Température Mini'], n).rstrip('°C')))
+            obj.high = temp(float(self.get_cell(self.titles['Température Maxi'], n).rstrip('°C')))
             obj.date = d
             self.fill_base(obj, n)
 

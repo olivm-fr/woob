@@ -2,36 +2,39 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
 
-from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
-from weboob.browser.elements import ItemElement, ListElement, DictElement, TableElement, method
-from weboob.browser.filters.standard import CleanText, Date, Format, CleanDecimal, Eval, Env, Field
-from weboob.browser.filters.html import Attr, Link, TableCell
-from weboob.browser.filters.json import Dict
-from weboob.exceptions import BrowserPasswordExpired, ActionNeeded
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
-from weboob.capabilities.base import NotAvailable, empty
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.capabilities.bank.investments import is_isin_valid
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from woob.browser.elements import ItemElement, ListElement, DictElement, TableElement, method
+from woob.browser.filters.standard import (
+    CleanText, Date, Format, CleanDecimal,
+    Eval, Env, Field, Map,
+)
+from woob.browser.filters.html import Attr, Link, TableCell
+from woob.browser.filters.json import Dict
+from woob.exceptions import BrowserPasswordExpired, ActionNeeded
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import (
+    Investment, MarketOrder, MarketOrderType, MarketOrderDirection,
+)
+from woob.capabilities.base import NotAvailable, empty
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.capabilities.bank.investments import is_isin_valid, IsinCode
 
 
 def MyDecimal(*args, **kwargs):
@@ -84,14 +87,20 @@ class ChangePassPage(LoggedPage, HTMLPage):
 
 
 class HandlePasswordsPage(BinckPage):
-    def on_load(self):
-        token = self.get_token()
-        self.browser.postpone_passwords.go(headers=token, method='POST')
-        self.browser.home_page.go()
+    def has_action_needed(self):
+        return CleanText('//script[@id="createcredentials-template"]')(self.doc)
 
 
 class PostponePasswords(LoggedPage, HTMLPage):
     pass
+
+
+class PersonalInfoPage(LoggedPage, HTMLPage):
+    def get_message(self):
+        # The website has both the message asking for info and the message of validation in the same xpath
+        # The validation message is hidden with js. We take the first one.
+        return CleanText('//div[@id="PersonalInformationOverviewLogin"]/div[@class="width75" and position()=1]/h1')(self.doc)
+
 
 class LogonFlowPage(HTMLPage):
     def on_load(self):
@@ -130,7 +139,7 @@ class AccountsPage(BinckPage):
         class item(ItemElement):
             klass = Account
 
-            obj_id = Attr('.', 'data-account-number')
+            obj_id = obj_number = Attr('.', 'data-account-number')
             obj_balance = MyDecimal('.//div[contains(text(), "Total des avoirs")]/following::strong[1]')
             obj__liquidity = MyDecimal('.//div[contains(text(), "Espèces")]/following::strong[1]')
 
@@ -259,6 +268,41 @@ class InvestDetailPage(LoggedPage, HTMLPage):
         if is_isin_valid(code):
             return code, Investment.CODE_TYPE_ISIN
         return NotAvailable, NotAvailable
+
+
+MARKET_ORDER_TYPES = {
+    'Limité': MarketOrderType.LIMIT,
+    'Marché': MarketOrderType.MARKET,
+}
+
+MARKET_ORDER_DIRECTIONS = {
+    'Achat': MarketOrderDirection.BUY,
+    'Vente': MarketOrderDirection.SALE,
+}
+
+class MarketOrdersPage(LoggedPage, JsonPage):
+    def count_total_pages(self):
+        return Dict('NoOfPages')(self.doc)
+
+    @method
+    class iter_market_orders(DictElement):
+        item_xpath = 'Orders'
+
+        class item(ItemElement):
+            klass = MarketOrder
+
+            obj_id = CleanText(Dict('AccountOrderId'))
+            obj_label = CleanText(Dict('SecurityName'))
+            obj_state = CleanText(Dict('OrderStatus'))
+            obj_validity_date = Date(Dict('EndDate'), dayfirst=True)
+            obj_order_type = Map(CleanText(Dict('PriceCondition')), MARKET_ORDER_TYPES, MarketOrderType.UNKNOWN)
+            obj_direction = Map(CleanText(Dict('Action')), MARKET_ORDER_DIRECTIONS, MarketOrderDirection.UNKNOWN)
+            obj_stock_market = CleanText(Dict('QuoteIndicator/ExchangeSegmentName'))
+            obj_code = IsinCode(CleanText(Dict('Isin')))
+            obj_quantity = CleanDecimal(Dict('ExecutedNumber'), default=NotAvailable)
+            obj_unitprice = CleanDecimal.French(Dict('Cost'), default=NotAvailable)
+            obj_ordervalue = CleanDecimal.French(Dict('LimitAmount'), default=NotAvailable)
+            obj_date = obj_unitvalue = obj_currency = NotAvailable  # No available information for these attributes
 
 
 class Transaction(FrenchTransaction):

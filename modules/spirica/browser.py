@@ -2,34 +2,33 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from requests import ConnectionError
 from requests.exceptions import ProxyError
 
-from weboob.browser import LoginBrowser, URL, need_login
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
-from weboob.browser.exceptions import ServerError
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Per, PerVersion
+from woob.browser import LoginBrowser, URL, need_login
+from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
+from woob.browser.exceptions import ServerError, LoggedOut
+from woob.browser.retry import retry_on_logout
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import Per, PerVersion
 
 from .pages import LoginPage, AccountsPage, DetailsPage, MaintenancePage
 
@@ -48,6 +47,7 @@ class SpiricaBrowser(LoginBrowser):
         self.cache = {}
         self.cache['invs'] = {}
         self.transaction_page = None
+        self.accounts_ids_list = []
 
     def do_login(self):
         try:
@@ -67,20 +67,64 @@ class SpiricaBrowser(LoginBrowser):
     def get_subscription_list(self):
         return iter([])
 
+    @retry_on_logout()
+    @need_login
+    def go_to_details_page(self, account):
+        self.location(account.url)
+        if self.login.is_here():
+            raise LoggedOut()
+
+    def is_new_account(self):
+        # in this website we make a request and get the first account
+        # then another request to get the second, then then ...
+        # after iterating over all accounts, the website returns again the first account
+        self.accounts.go()
+        seen_accounts_ids = list(self.page.get_account_id())
+        switch_account_form = self.page.get_switch_account_form()
+
+        switch_account_form.submit()
+        account_id = self.page.get_account_id()
+        while account_id not in seen_accounts_ids:
+            seen_accounts_ids.append(account_id)
+            if account_id not in self.accounts_ids_list:
+                return True
+            switch_account_form.submit()
+            account_id = self.page.get_account_id()
+
+        return False
+
+    def get_account(self):
+        account = self.page.get_account()
+        self.go_to_details_page(account)
+        data = self.page.get_account_data()
+        account.valuation_diff = data['valuation_diff']
+        account._raw_label = data['_raw_label']
+        account.type = data['type']
+
+        if account.type == Account.TYPE_PER:
+            per = Per.from_dict(account.to_dict())
+            if account._raw_label == 'PERIN':
+                per.version = PerVersion.PERIN
+            else:
+                self.logger.warning('Unhandled PER version: %s', account._raw_label)
+                per.version = NotAvailable
+            return per
+        else:
+            return account
+
     @need_login
     def iter_accounts(self):
         self.accounts.go()
-        for account in self.page.iter_accounts():
-            if account.type == Account.TYPE_PER:
-                per = Per.from_dict(account.to_dict())
-                if account._raw_label == 'PERIN':
-                    per.version = PerVersion.PERIN
-                else:
-                    self.logger.warning('Unhandled PER version: %s', account._raw_label)
-                    per.version = NotAvailable
-                yield per
-            else:
+        if self.page.has_multiple_accounts():
+            # We have no means whatsoever to know how many accounts there are on the user space.
+            # On the website, you can only, click on "Sélectionner un autre contrat",
+            # this allows us to switch to another contract on the website.
+            while self.accounts_ids_list == [] or self.is_new_account():
+                account = self.get_account()
+                self.accounts_ids_list.append(account.id)
                 yield account
+        else:
+            yield self.get_account()
 
     @need_login
     def iter_investment(self, account):

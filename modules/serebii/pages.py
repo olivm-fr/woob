@@ -2,33 +2,31 @@
 
 # Copyright(C) 2019-2020 Célande Adrien
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import re
 
 from itertools import chain
 
-from weboob.browser.pages import HTMLPage
-from weboob.browser.elements import TableElement, ListElement, ItemElement, method
-from weboob.browser.filters.html import TableCell, AbsoluteLink, Attr
-from weboob.browser.filters.standard import CleanText, Regexp, Field, Map, CleanDecimal
-from weboob.capabilities.base import NotLoaded, empty
-from weboob.capabilities.rpg import (
+from woob.browser.pages import HTMLPage
+from woob.browser.elements import TableElement, ListElement, ItemElement, method
+from woob.browser.filters.html import TableCell, AbsoluteLink, Attr
+from woob.browser.filters.standard import CleanText, Regexp, Field, Map, CleanDecimal
+from woob.capabilities.base import NotLoaded, empty
+from woob.capabilities.rpg import (
     Character, Skill, SkillType, SkillTarget, SkillCategory, CharacterClass, CollectableItem,
 )
 

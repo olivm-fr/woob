@@ -1,102 +1,43 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2012-2020  Budget Insight
+# Copyright(C) 2012-2023  Powens
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+# flake8: compatible
 
 import hashlib
 import re
 
-from weboob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage, RawPage
-from weboob.browser.filters.standard import (
-    CleanText, Env, Field, Regexp, Format, Date, Coalesce,
+from woob.browser.pages import HTMLPage, LoggedPage, pagination, JsonPage, RawPage
+from woob.browser.filters.standard import (
+    CleanText, Env, Field, Regexp, Format, Date,
 )
-from weboob.browser.filters.json import Dict
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.browser.filters.html import Attr
-from weboob.browser.filters.javascript import JSVar, JSValue
-from weboob.capabilities.address import PostalAddress
-from weboob.capabilities.bill import DocumentTypes, Document, Subscription
-from weboob.capabilities.profile import Person
-from weboob.capabilities.base import NotAvailable
-from weboob.tools.date import parse_french_date
+from woob.browser.filters.json import Dict
+from woob.browser.elements import ListElement, ItemElement, method
+from woob.browser.filters.html import Attr, HasElement
+from woob.capabilities.address import PostalAddress
+from woob.capabilities.bill import DocumentTypes, Document, Subscription
+from woob.capabilities.profile import Person
+from woob.capabilities.base import NotAvailable
+from woob.tools.date import parse_french_date
+from woob_modules.franceconnect.pages import AuthorizePage
 
 
-class LoginAccessPage(HTMLPage):
-
-    def __init__(self, *args, **kwargs):
-        super(LoginAccessPage, self).__init__(*args, **kwargs)
-        self.url_contexte = None
-        self.url_login_mot_de_passe = None
-
-    def login(self, login, password, url):
-        form = self.get_form(id='formulairePrincipal')
-        form.url = url
-        form['spi'] = login
-        form['pwd'] = password
-        form.submit()
-
-    def on_load(self):
-        self.url_contexte = JSVar(
-            CleanText("//script[contains(text(), 'urlContexte')]"), var="urlContexte"
-        )(self.doc)
-        self.url_login_mot_de_passe = JSVar(
-            CleanText("//script[contains(text(), 'urlLoginMotDePasse')]"),
-            var="urlLoginMotDePasse",
-        )(self.doc)
-
-
-class MessageResultPage(HTMLPage):
-    """Consolidate behaviour of message-passing pages."""
-    def on_load(self):
-        js = self.doc.xpath("//script")
-        if js:
-            parameters = JSValue(CleanText("."), nth=0)(js[0])
-            args = parameters.split(",")
-            assert len(args) == 2
-            self.message = args[0]
-            self.value = args[1]
-
-    def handle_message(self):
-        if self.message == "ctx":
-            if self.value == "LMDP":
-                return True
-        elif self.message == "ok":
-            return self.value
-        return False
-
-
-class GetContextePage(MessageResultPage):
-    pass
-
-
-class LoginAELPage(MessageResultPage):
-    def is_login_successful(self):
-        is_login_ok = CleanText('//head/title')(self.doc) == 'lmdp'
-        if not is_login_ok:
-            return 'wrong login'
-
-        state = Regexp(CleanText('//script'), r"parent.postMessage\('(.*?),.*\)")(self.doc)
-        if state != 'ok':
-            return 'wrong password'
-
-    def get_redirect_url(self):
-        return Regexp(CleanText('//body/script'), r"postMessage\('ok,(.*)',")(self.doc)
+class FCAuthorizePage(AuthorizePage):
+    def is_ameli_disabled(self):
+        return HasElement('//button[@id="fi-ameli" and @disabled="disabled"]')(self.doc)
 
 
 class ImpotsPage(HTMLPage):
@@ -155,9 +96,13 @@ class ProfilePage(LoggedPage, HTMLPage):
         obj_firstname = CleanText('//span[@id="prenom"]')
         obj_lastname = CleanText('//span[@id="nom"]')
         obj_email = CleanText('//div[span[contains(text(), "Adresse électronique")]]/following-sibling::div/span')
-        obj_mobile = CleanText('//div[span[text()="Téléphone portable"]]/following-sibling::div/span', default=NotAvailable)
+        obj_mobile = CleanText(
+            '//div[span[text()="Téléphone portable"]]/following-sibling::div/span',
+            default=NotAvailable
+        )
         obj_phone = CleanText('//div[span[text()="Téléphone fixe"]]/following-sibling::div/span', default=NotAvailable)
         obj_birth_date = Date(CleanText('//span[@id="datenaissance"]'), parse_func=parse_french_date)
+        obj_birth_place = CleanText('//span[@id="lieunaissance"]')
 
         class obj_postal_address(ItemElement):
             klass = PostalAddress
@@ -169,10 +114,9 @@ class ProfilePage(LoggedPage, HTMLPage):
 
             def parse(self, obj):
                 full_address = CleanText('//span[@id="adressepostale"]')(self)
-                m = re.search(r'([\w ]+) (\d{5}) ([\w ]+)', full_address)
-                if not m:
-                    self.env['full_address'] = full_address
-                else:
+                self.env['full_address'] = full_address
+                m = re.search(r'(\d{1,4}.*) (\d{5}) (.*)', full_address)
+                if m:
                     street, postal_code, city = m.groups()
                     self.env['street'] = street
                     self.env['postal_code'] = postal_code
@@ -196,10 +140,12 @@ class DocumentsPage(LoggedPage, HTMLPage):
             if previous_year:
                 previous_year = int(Regexp(None, r'(\d{4})').filter(previous_year))
 
-                current_year = int(Regexp(CleanText(
-                    '//li[has-class("blocAnnee") and has-class("selected")]/a',
-                    children=False
-                ), r'(\d{4})')(self.page.doc))
+                current_year = int(
+                    Regexp(
+                        CleanText('//li[has-class("blocAnnee") and has-class("selected")]/a', children=False),
+                        r'(\d{4})',
+                    )(self.page.doc)
+                )
 
                 if previous_year >= current_year:
                     # if previous year is 'something 2078' website return page of current year
@@ -225,9 +171,9 @@ class DocumentsPage(LoggedPage, HTMLPage):
 
             obj_date = Date(Env('date'))
             obj_label = Env('label')
-            obj_type = DocumentTypes.INCOME_TAX
+            obj_type = DocumentTypes.NOTICE
             obj_format = 'pdf'
-            obj_url = Format('/enp/ensu/Affichage_Document_PDF?idEnsua=%s', Field('_idEnsua'))
+            obj_url = Format('/enp/Affichage_Document_PDF?idEnsua=%s', Field('_idEnsua'))
 
             def parse(self, el):
                 label_ct = CleanText('./div[has-class("texte")][has-class("visible-xs")]')
@@ -235,16 +181,10 @@ class DocumentsPage(LoggedPage, HTMLPage):
                 self.env['label'] = label_ct(self)
 
                 if not date:
-                    # exclude n° to not take n° 2555123456 as year 2555
-                    # or if there is absolutely no date written in html for this document
-                    # when label is "Mise en demeure de payer" for example
                     # take just the year in current page
-                    year = Coalesce(
-                        Regexp(label_ct, r'\b(\d{4})\b', default=NotAvailable),
-                        CleanText(
-                            '//li[has-class("blocAnnee") and has-class("selected")]/a',
-                            children=False, default=NotAvailable,
-                        )
+                    year = CleanText(
+                        '//li[has-class("blocAnnee") and has-class("selected")]/a',
+                        children=False, default=NotAvailable,
                     )(self)
 
                     if 'sur les revenus de' in self.env['label']:

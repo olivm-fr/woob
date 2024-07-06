@@ -1,35 +1,33 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2011-2012  Romain Bignon, Laurent Bachelier
+# Copyright(C) 2011-2021  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from datetime import datetime, timedelta
 
-from weboob.capabilities.image import Thumbnail
-from weboob.capabilities.video import BaseVideo
-from weboob.capabilities.collection import Collection
+from woob.capabilities.image import Thumbnail
+from woob.capabilities.video import BaseVideo
+from woob.capabilities.collection import Collection
 
-from weboob.browser.pages import HTMLPage, JsonPage
-from weboob.browser.elements import ItemElement, ListElement, method, DictElement
-from weboob.browser.filters.standard import CleanText, Regexp, Format, Field, Env
-from weboob.browser.filters.html import CleanHTML
-from weboob.browser.filters.json import Dict
+from woob.browser.pages import HTMLPage, JsonPage
+from woob.browser.elements import ItemElement, ListElement, method, DictElement
+from woob.browser.filters.standard import CleanText, Regexp, Format, Field, Env
+from woob.browser.filters.html import CleanHTML
+from woob.browser.filters.json import Dict
 
 
 def parse_duration(text):

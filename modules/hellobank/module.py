@@ -1,44 +1,39 @@
-# -*- coding: utf-8 -*-
-
-# Copyright(C) 2012-2020  Budget Insight
+# Copyright(C) 2023 Powens
 #
-# This file is part of a weboob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This file is part of a woob module.
+#
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-
-from __future__ import unicode_literals
+# flake8: compatible
 
 import re
 from decimal import Decimal
 
-from weboob.capabilities.bank import (
+from woob.capabilities.bank import (
     CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound,
     TransferInvalidLabel,
 )
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.base import find_object, strict_find_object
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import ValueBackendPassword, ValueBool
-from weboob.capabilities.bill import (
-    Subscription, CapDocument, SubscriptionNotFound, DocumentNotFound, Document,
-    DocumentTypes,
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.profile import CapProfile
+from woob.capabilities.base import find_object, strict_find_object
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import ValueBackendPassword, ValueBool, ValueTransient
+from woob.capabilities.bill import (
+    Subscription, CapDocument, DocumentNotFound, Document, DocumentTypes,
 )
-
-from .browser import HelloBank
-
+from woob_modules.bnp.pp.browser import HelloBank
 
 __all__ = ['HelloBankModule']
 
@@ -47,14 +42,17 @@ class HelloBankModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPro
     NAME = 'hellobank'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    DEPENDENCIES = ('bnp',)
     LICENSE = 'AGPLv3+'
-    DESCRIPTION = 'BNP Paribas'
+    DESCRIPTION = 'Hello bank (BNP Paribas)'
     CONFIG = BackendConfig(
-        ValueBackendPassword('login',      label=u'Numéro client', masked=False),
-        ValueBackendPassword('password',   label=u'Code secret', regexp='^(\d{6})$'),
-        ValueBool('rotating_password',     label=u'Automatically renew password every 100 connections', default=False),
-        ValueBool('digital_key',           label=u'User with digital key have to add recipient with digital key', default=False))
+        ValueBackendPassword('login', label='Numéro client', masked=False),
+        ValueBackendPassword('password', label='Code secret', regexp=r'^(\d{6})$'),
+        ValueBool('rotating_password', label='Automatically renew password every 100 connections', default=False),
+        ValueBool('digital_key', label='User with digital key have to add recipient with digital key', default=False),
+        ValueTransient('request_information'),
+    )
     BROWSER = HelloBank
 
     accepted_document_types = (
@@ -65,7 +63,7 @@ class HelloBankModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPro
     )
 
     def create_default_browser(self):
-        return self.create_browser(self.config, weboob=self.weboob)
+        return self.create_browser(self.config)
 
     def iter_resources(self, objs, split_path):
         if Account in objs:
@@ -77,13 +75,6 @@ class HelloBankModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPro
 
     def iter_accounts(self):
         return self.browser.iter_accounts()
-
-    def get_account(self, _id):
-        account = self.browser.get_account(_id)
-        if account:
-            return account
-        else:
-            raise AccountNotFound()
 
     def iter_history(self, account):
         return self.browser.iter_history(account)
@@ -107,7 +98,7 @@ class HelloBankModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPro
 
     def new_recipient(self, recipient, **params):
         # Recipient label has max 70 chars.
-        recipient.label = ' '.join(w for w in re.sub('[^0-9a-zA-Z-,\.: ]+', '', recipient.label).split())[:70]
+        recipient.label = ' '.join(w for w in re.sub(r'[^0-9a-zA-Z-,\.: ]+', '', recipient.label).split())[:70]
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
@@ -122,7 +113,11 @@ class HelloBankModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPro
 
         recipient = strict_find_object(self.iter_transfer_recipients(account.id), iban=transfer.recipient_iban)
         if not recipient:
-            recipient = strict_find_object(self.iter_transfer_recipients(account.id), id=transfer.recipient_id, error=RecipientNotFound)
+            recipient = strict_find_object(
+                self.iter_transfer_recipients(account.id),
+                id=transfer.recipient_id,
+                error=RecipientNotFound
+            )
 
         assert account.id.isdigit()
         # quantize to show 2 decimals.
@@ -153,9 +148,6 @@ class HelloBankModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapPro
 
     def get_profile(self):
         return self.browser.get_profile()
-
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
 
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):

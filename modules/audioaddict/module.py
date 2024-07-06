@@ -2,30 +2,28 @@
 
 # Copyright(C) 2013 Pierre Mazière
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-from weboob.capabilities.radio import CapRadio, Radio
-from weboob.capabilities.audiostream import BaseAudioStream
-from weboob.tools.capabilities.streaminfo import StreamInfo
-from weboob.capabilities.collection import CapCollection, Collection
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value
-from weboob.browser.browsers import APIBrowser
+from woob.capabilities.radio import CapRadio, Radio
+from woob.capabilities.audiostream import BaseAudioStream
+from woob.tools.capabilities.streaminfo import StreamInfo
+from woob.capabilities.collection import CapCollection, Collection
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value
+from woob.browser.browsers import APIBrowser
 import time
 
 __all__ = ['AudioAddictModule']
@@ -36,14 +34,14 @@ __all__ = ['AudioAddictModule']
 #
 # AudioAddict playlists do not seem to be appreciated by mplayer
 # VLC plays them successfully, therefore I advice to set the media_player
-# option to another player in the ~/.config/weboob/radioob config file:
+# option to another player in the ~/.config/woob/radioob config file:
 # [ROOT]
 # media_player = your_non_mplayer_player
 class AudioAddictModule(Module, CapRadio, CapCollection):
     NAME = 'audioaddict'
     MAINTAINER = u'Pierre Mazière'
     EMAIL = 'pierre.maziere@gmx.com'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = u'Internet radios powered by audioaddict.com services'
     LICENSE = 'AGPLv3+'
     BROWSER = APIBrowser

@@ -1,43 +1,41 @@
 # coding: utf-8
 # Copyright(C) 2012-2020  Budget Insight
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-from __future__ import division
 
 import datetime
 import json
 import time
 
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
-from weboob.tools.capabilities.bank.investments import is_isin_valid
-from weboob.browser.elements import ItemElement, TableElement, DictElement, method
-from weboob.browser.pages import HTMLPage, JsonPage, LoggedPage
-from weboob.browser.filters.standard import (
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import Investment
+from woob.tools.capabilities.bank.investments import is_isin_valid
+from woob.browser.elements import ItemElement, TableElement, DictElement, method
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from woob.browser.filters.standard import (
     CleanText, CleanDecimal, Regexp, Currency, Field, Env,
 )
-from weboob.browser.filters.html import TableCell, Link
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.javascript import JSVar
-from weboob.exceptions import BrowserUnavailable
+from woob.browser.filters.html import TableCell, Link
+from woob.browser.filters.json import Dict
+from woob.browser.filters.javascript import JSVar
+from woob.exceptions import BrowserUnavailable
 
 
 class LogonInvestmentPage(LoggedPage, HTMLPage):
@@ -355,7 +353,8 @@ class RetrieveAccountsPage(LoggedPage, JsonPage):
 
             obj_currency = Currency(Dict('currencyAccountCode'))
             obj_balance = CleanDecimal(
-                Dict('accountFilterMultipleCurrencyInformation/0/accountMarketValueAmount')
+                Dict('accountFilterMultipleCurrencyInformation/0/accountMarketValueAmount', default=None),
+                default=NotAvailable,
             )
 
 
@@ -549,7 +548,7 @@ class ScpiInvestmentPage(LoggedPage, HTMLPage):
     def go_scpi_detail_page(self):
         is_on_detail_page = self.doc.xpath('//a[contains(text(), "Quantité")]')
         if not is_on_detail_page:
-            invest_element = self.doc.xpath('//table//a')
+            invest_element = self.doc.xpath('//table//a[@class="csAct"]')
             assert len(invest_element) == 1
             self.browser.location('https://www.hsbc.fr' + CleanText('./@href')(invest_element[0]))
 

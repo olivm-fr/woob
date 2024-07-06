@@ -2,31 +2,28 @@
 
 # Copyright(C) 2013 Julien Veyssier
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <https://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
+from html import unescape
 import re
 
-from weboob.browser import PagesBrowser, URL
-from weboob.browser.profiles import Wget
-from weboob.exceptions import BrowserHTTPNotFound
-from weboob.capabilities.base import NotAvailable, NotLoaded
-from weboob.capabilities.cinema import Movie, Person
-from weboob.tools.compat import unicode, html_unescape
+from woob.browser import PagesBrowser, URL
+from woob.browser.profiles import Wget
+from woob.capabilities.base import NotAvailable, NotLoaded
+from woob.capabilities.cinema import Movie, Person
 
 from .pages import PersonPage, MovieCrewPage, BiographyPage,  ReleasePage
 
@@ -36,60 +33,53 @@ __all__ = ['ImdbBrowser']
 
 
 class ImdbBrowser(PagesBrowser):
-    BASEURL = 'http://www.imdb.com'
+    BASEURL = 'https://www.imdb.com'
     PROFILE = Wget()
 
-    movie_crew = URL(r'/title/tt[0-9]*/fullcredits.*', MovieCrewPage)
-    release = URL(r'/title/tt[0-9]*/releaseinfo.*', ReleasePage)
-    bio = URL(r'/name/nm[0-9]*/bio.*', BiographyPage)
-    person = URL(r'/name/nm[0-9]*/*', PersonPage)
+    movie_crew = URL(r'/title/(?P<id>tt[0-9]*)/fullcredits.*', MovieCrewPage)
+    release = URL(r'/title/(?P<id>tt[0-9]*)/releaseinfo.*', ReleasePage)
+    bio = URL(r'/name/(?P<id>nm[0-9]*)/bio.*', BiographyPage)
+    person = URL(r'/name/(?P<id>nm[0-9]*)/*', PersonPage)
 
     def iter_movies(self, pattern):
-        res = self.open('http://www.imdb.com/xml/find?json=1&nr=1&tt=on', params={'q': pattern})
+        res = self.open(f'https://v2.sg.media-imdb.com/suggestion/titles/{pattern[0]}/{pattern}.json')
         jres = res.json()
-        for cat in ['title_popular', 'title_exact', 'title_approx']:
-            if cat in jres:
-                for m in jres[cat]:
-                    tdesc = unicode(m['title_description'])
-                    if '<a' in tdesc and '>' in tdesc:
-                        short_description = u'%s %s' % (tdesc.split('<')[
-                                                        0].strip(', '), tdesc.split('>')[1].split('<')[0])
-                    else:
-                        short_description = tdesc.strip(', ')
-                    movie = Movie(m['id'], html_unescape(m['title']))
-                    movie.other_titles = NotLoaded
-                    movie.release_date = NotLoaded
-                    movie.duration = NotLoaded
-                    movie.short_description = html_unescape(short_description)
-                    movie.pitch = NotLoaded
-                    movie.country = NotLoaded
-                    movie.note = NotLoaded
-                    movie.roles = NotLoaded
-                    movie.all_release_dates = NotLoaded
-                    movie.thumbnail_url = NotLoaded
-                    yield movie
+
+        for m in jres['d']:
+            movie = Movie(m['id'], m['l'])
+            movie.other_titles = NotLoaded
+            movie.release_date = NotLoaded
+            movie.duration = NotLoaded
+            movie.short_description = NotLoaded
+            movie.pitch = NotLoaded
+            movie.country = NotLoaded
+            movie.note = NotLoaded
+            movie.roles = NotLoaded
+            movie.all_release_dates = NotLoaded
+            movie.thumbnail_url = m['i']['imageUrl']
+            yield movie
 
     def iter_persons(self, pattern):
-        res = self.open('http://www.imdb.com/xml/find?json=1&nr=1&nm=on', params={'q': pattern})
+        res = self.open(f'https://v2.sg.media-imdb.com/suggestion/names/{pattern[0]}/{pattern}.json')
         jres = res.json()
-        for cat in ['name_popular', 'name_exact', 'name_approx']:
-            if cat in jres:
-                for p in jres[cat]:
-                    person = Person(p['id'], html_unescape(unicode(p['name'])))
-                    person.real_name = NotLoaded
-                    person.birth_place = NotLoaded
-                    person.birth_date = NotLoaded
-                    person.death_date = NotLoaded
-                    person.gender = NotLoaded
-                    person.nationality = NotLoaded
-                    person.short_biography = NotLoaded
-                    person.short_description = html_unescape(p['description'])
-                    person.roles = NotLoaded
-                    person.thumbnail_url = NotLoaded
-                    yield person
+
+        for p in jres['d']:
+            person = Person(p['id'], p['l'])
+            person.real_name = NotLoaded
+            person.birth_place = NotLoaded
+            person.birth_date = NotLoaded
+            person.death_date = NotLoaded
+            person.gender = NotLoaded
+            person.nationality = NotLoaded
+            person.short_biography = NotLoaded
+            person.short_description = NotLoaded
+            person.roles = NotLoaded
+            if 'i' in p:
+                person.thumbnail_url = p['i']['imageUrl']
+            yield person
 
     def get_movie(self, id):
-        res = self.open('http://www.omdbapi.com/?apikey=b7c56eb5&i=%s&plot=full' % id)
+        res = self.open(f'https://www.omdbapi.com/?apikey=b7c56eb5&i={id}&plot=full')
         if res is not None:
             jres = res.json()
         else:
@@ -109,11 +99,11 @@ class ImdbBrowser(PagesBrowser):
 
         if 'Title' not in jres:
             return
-        title = html_unescape(unicode(jres['Title'].strip()))
+        title = unescape(str(jres['Title'].strip()))
         if 'Poster' in jres:
-            thumbnail_url = unicode(jres['Poster'])
+            thumbnail_url = str(jres['Poster'])
         if 'Director' in jres:
-            short_description = unicode(jres['Director'])
+            short_description = str(jres['Director'])
         if 'Genre' in jres:
             for g in jres['Genre'].split(', '):
                 genres.append(g)
@@ -146,15 +136,15 @@ class ImdbBrowser(PagesBrowser):
         if 'Country' in jres:
             country = u''
             for c in jres['Country'].split(', '):
-                country += '%s, ' % c
+                country += f'{c}, '
             country = country[:-2]
         if 'Plot' in jres:
-            pitch = unicode(jres['Plot'])
+            pitch = str(jres['Plot'])
         if 'imdbRating' in jres and 'imdbVotes' in jres:
-            note = u'%s/10 (%s votes)' % (jres['imdbRating'], jres['imdbVotes'])
+            note = f'{jres["imdbRating"]}/10 ({jres["imdbVotes"]} votes)'
         for r in ['Actors', 'Director', 'Writer']:
-            if '%s' % r in jres.keys():
-                roles['%s' % r] = [('N/A',e) for e in jres['%s' % r].split(', ')]
+            if f'{r}' in jres.keys():
+                roles[f'{r}'] = [('N/A',e) for e in jres[f'{r}'].split(', ')]
 
         movie = Movie(id, title)
         movie.other_titles = other_titles
@@ -171,42 +161,39 @@ class ImdbBrowser(PagesBrowser):
         return movie
 
     def get_person(self, id):
-        try:
-            self.location('http://www.imdb.com/name/%s' % id)
-        except BrowserHTTPNotFound:
-            return
+        self.person.go(id=id)
         assert self.person.is_here()
         return self.page.get_person(id)
 
     def get_person_biography(self, id):
-        self.location('http://www.imdb.com/name/%s/bio' % id)
+        self.bio.go(id=id)
         assert self.bio.is_here()
         return self.page.get_biography()
 
     def iter_movie_persons(self, movie_id, role):
-        self.location('http://www.imdb.com/title/%s/fullcredits' % movie_id)
+        self.movie_crew.go(id=movie_id)
         assert self.movie_crew.is_here()
         for p in self.page.iter_persons(role):
             yield p
 
     def iter_person_movies(self, person_id, role):
-        self.location('http://www.imdb.com/name/%s' % person_id)
+        self.person.go(id=person_id)
         assert self.person.is_here()
         return self.page.iter_movies(role)
 
     def iter_person_movies_ids(self, person_id):
-        self.location('http://www.imdb.com/name/%s' % person_id)
+        self.person.go(id=person_id)
         assert self.person.is_here()
         for movie in self.page.iter_movies_ids():
             yield movie
 
     def iter_movie_persons_ids(self, movie_id):
-        self.location('http://www.imdb.com/title/%s/fullcredits' % movie_id)
+        self.movie_crew.go(id=movie_id)
         assert self.movie_crew.is_here()
         for person in self.page.iter_persons_ids():
             yield person
 
     def get_movie_releases(self, id, country):
-        self.location('http://www.imdb.com/title/%s/releaseinfo' % id)
+        self.release.go(id=id)
         assert self.release.is_here()
         return self.page.get_movie_releases(country)

@@ -2,23 +2,23 @@
 
 # Copyright(C) 2012 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.browser import PagesBrowser, URL
-from weboob.capabilities.base import UserError
+from woob.browser import PagesBrowser, URL
+from woob.capabilities.base import UserError
 from .pages import IndexPage, ComparisonResultsPage, ShopInfoPage
 
 
@@ -27,12 +27,11 @@ __all__ = ['PrixCarburantsBrowser']
 
 class PrixCarburantsBrowser(PagesBrowser):
     BASEURL = 'https://www.prix-carburants.gouv.fr'
-
     TOKEN = None
 
     result_page = URL('/recherche/', ComparisonResultsPage)
-    shop_page = URL('/itineraire/infos/(?P<_id>\d+)', ShopInfoPage)
-    index_page = URL('/', IndexPage)
+    shop_page = URL(r'/itineraire/infos/(?P<_id>\d+)', ShopInfoPage)
+    index_page = URL('/$', IndexPage)
 
     def iter_products(self):
         return self.index_page.go().iter_products()
@@ -40,22 +39,28 @@ class PrixCarburantsBrowser(PagesBrowser):
     def get_token(self):
         self.TOKEN = self.index_page.stay_or_go().get_token()
 
-    def iter_prices(self, zipcode, product):
+    def iter_prices(self, zipcode, town, product):
         if self.TOKEN is None:
             self.get_token()
 
         data = {
-            '_recherche_recherchertype[localisation]': '%s' % zipcode,
-            '_recherche_recherchertype[choix_carbu]': '%s' % product.id,
-            '_recherche_recherchertype[_token]': '%s' % self.TOKEN, }
+            'rechercher[localisation]': '%s' % zipcode or town,
+            'rechercher[choix_carbu][]': '%s' % product.id,
+            'rechercher[_token]': '%s' % self.TOKEN,
+            'rechercher[geolocalisation_long]': '',
+            'rechercher[geolocalisation_lat]': '',
+            'rechercher[departement]': '',
+            'rechercher[type_enseigne]': ''
+        }
 
+        # self.session.headers['Content-Type'] = 'application/x-www-form-urlencoded'
         self.index_page.go(data=data)
 
         if not self.result_page.is_here():
             raise UserError('Bad zip or product')
 
         if not product.name:
-            product.name = self.page.get_product_name()
+            product.name = self.page.get_product_name(product.id)
 
         return self.page.iter_results(product=product)
 

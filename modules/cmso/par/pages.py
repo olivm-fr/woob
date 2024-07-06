@@ -2,24 +2,22 @@
 
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 import re
 import json
@@ -28,28 +26,55 @@ from collections import OrderedDict
 
 import requests
 
-from weboob.exceptions import BrowserUnavailable
-from weboob.browser.pages import HTMLPage, JsonPage, RawPage, LoggedPage, pagination
-from weboob.browser.elements import DictElement, ItemElement, TableElement, SkipItem, method
-from weboob.browser.filters.standard import (
-    CleanText, Upper, Date, Regexp, Format, CleanDecimal, Filter, Env, Slugify,
-    Field, Currency, Map, Base, MapIn, Coalesce, DateTime,
+from woob.exceptions import BrowserUnavailable
+from woob.browser.pages import HTMLPage, JsonPage, RawPage, LoggedPage, pagination
+from woob.browser.elements import DictElement, ItemElement, TableElement, SkipItem, method
+from woob.browser.filters.standard import (
+    CleanText, Upper, Lower, Date, Regexp, Format, CleanDecimal, Filter, Env, Slugify,
+    Field, Currency, Map, Base, MapIn, Coalesce, MultiJoin, DateTime,
 )
-from weboob.browser.filters.json import Dict
-from weboob.browser.filters.html import Attr, Link, TableCell, AbsoluteLink
-from weboob.browser.exceptions import ServerError
-from weboob.capabilities.bank import Account, Loan, AccountOwnership
-from weboob.capabilities.wealth import Investment, MarketOrder, MarketOrderDirection, MarketOrderType
-from weboob.capabilities.contact import Advisor
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.profile import Profile
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.exceptions import ParseError
-from weboob.tools.capabilities.bank.investments import IsinCode, IsinType
-from weboob.tools.compat import unicode
-from weboob.tools.date import parse_french_date
+from woob.browser.filters.json import Dict
+from woob.browser.filters.html import Attr, Link, TableCell, AbsoluteLink
+from woob.browser.exceptions import ServerError
+from woob.capabilities.bank import Account, Loan, AccountOwnership
+from woob.capabilities.bank.wealth import Investment, MarketOrder, MarketOrderDirection, MarketOrderType
+from woob.capabilities.contact import Advisor
+from woob.capabilities.base import NotAvailable, empty
+from woob.capabilities.profile import Profile
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.exceptions import ParseError
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
+from woob.tools.date import parse_french_date
+from woob.tools.decorators import retry
 
 from .transfer_pages import get_recipient_id_hash
+
+
+ACCOUNT_TYPES = OrderedDict(
+    [
+        ('courant', Account.TYPE_CHECKING),
+        ('pee', Account.TYPE_PEE),
+        ('epargne en actions', Account.TYPE_PEA),
+        ('pea', Account.TYPE_PEA),
+        ('p.e.a.', Account.TYPE_PEA),
+        ('preference', Account.TYPE_LOAN),
+        ('livret', Account.TYPE_SAVINGS),
+        ('vie', Account.TYPE_LIFE_INSURANCE),
+        ('previ_option', Account.TYPE_LIFE_INSURANCE),
+        ('avantage capitalisation', Account.TYPE_LIFE_INSURANCE),
+        ('actions', Account.TYPE_MARKET),
+        ('titres', Account.TYPE_MARKET),
+        ('ldd cm', Account.TYPE_SAVINGS),
+        ('librissime', Account.TYPE_SAVINGS),
+        ('epargne logement', Account.TYPE_SAVINGS),
+        ('plan bleu', Account.TYPE_SAVINGS),
+        ('capital plus', Account.TYPE_SAVINGS),
+        ('capital expansion', Account.TYPE_DEPOSIT),
+        ('carte', Account.TYPE_CARD),
+        ('previ-retraite', Account.TYPE_PERP),
+        ('cifo', Account.TYPE_MARKET),
+    ]
+)
 
 
 class LoginPage(JsonPage):
@@ -80,29 +105,16 @@ class ChangeSpacePage(LoggedPage, JsonPage):
         return Dict('accessToken')(self.doc)
 
 
+class AccessTokenPage(JsonPage):
+    def get_access_token(self):
+        return Dict('access_token')(self.doc)
+
+
+class TriggerSMSPage(RawPage):
+    pass
+
+
 class AccountsPage(LoggedPage, JsonPage):
-    TYPES = OrderedDict([
-        ('courant', Account.TYPE_CHECKING),
-        ('pee', Account.TYPE_PEE),
-        ('epargne en actions', Account.TYPE_PEA),
-        ('pea', Account.TYPE_PEA),
-        ('p.e.a.', Account.TYPE_PEA),
-        ('preference', Account.TYPE_LOAN),
-        ('livret', Account.TYPE_SAVINGS),
-        ('vie', Account.TYPE_LIFE_INSURANCE),
-        ('previ_option', Account.TYPE_LIFE_INSURANCE),
-        ('avantage capitalisation', Account.TYPE_LIFE_INSURANCE),
-        ('actions', Account.TYPE_MARKET),
-        ('titres', Account.TYPE_MARKET),
-        ('ldd cm', Account.TYPE_SAVINGS),
-        ('librissime', Account.TYPE_SAVINGS),
-        ('epargne logement', Account.TYPE_SAVINGS),
-        ('plan bleu', Account.TYPE_SAVINGS),
-        ('capital plus', Account.TYPE_SAVINGS),
-        ('capital expansion', Account.TYPE_DEPOSIT),
-        ('carte', Account.TYPE_CARD),
-        ('previ-retraite', Account.TYPE_PERP),
-    ])
 
     def get_keys(self):
         """Returns the keys for which the value is a list or dict"""
@@ -125,7 +137,7 @@ class AccountsPage(LoggedPage, JsonPage):
         numbers = {}
         for key in keys:
             if isinstance(self.doc[key], dict):
-                keys_ = [k for k in self.doc[key] if isinstance(k, unicode)]
+                keys_ = [k for k in self.doc[key] if isinstance(k, str)]
                 contracts = [v for k in keys_ for v in self.doc[key][k]]
             else:
                 contracts = [v for v in self.doc[key]]
@@ -154,7 +166,9 @@ class AccountsPage(LoggedPage, JsonPage):
             selector = self.item_xpath.split('/')
             for sub_element in selector:
                 if isinstance(self.el, dict) and self.el and sub_element == '*':
-                    self.el = next(iter(self.el.values()))  # replace self.el with its first value
+                    # In this case we have to flatten the dict to make it into a list
+                    # Ex: {1: ['a', 'b'], 2: ['c', 'd']} -> ['a', 'b', 'c', 'd']
+                    self.el = sum(self.el.values(), [])
                 if sub_element == '*':
                     continue
                 self.el = self.el[sub_element]
@@ -168,7 +182,8 @@ class AccountsPage(LoggedPage, JsonPage):
                 return "LIVRET" not in Dict('accountType')(self.el)
 
             obj_id = Dict('numeroContratSouscrit')
-            obj_label = Upper(Dict('lib'))
+            obj__lib = Dict('lib')
+            obj_label = Upper(MultiJoin(Dict('lib'), Field('_owner_name'), pattern=' '))
             obj_currency = Dict('deviseCompteCode')
             obj_coming = CleanDecimal(Dict('AVenir', default=None), default=NotAvailable)
             # Iban is available without last 5 numbers, or by sms
@@ -177,6 +192,11 @@ class AccountsPage(LoggedPage, JsonPage):
             # Need this to match with internal recipients
             # and to do transfer
             obj__bic = Dict('bic', default=NotAvailable)
+            obj_type = Map(
+                Lower(Dict('accountType', default='')),
+                ACCOUNT_TYPES,
+                Account.TYPE_UNKNOWN,
+            )
 
             def obj__owner_name(self):
                 co_owner_name = CleanText(Dict('nomCotitulaire', default=''))(self)
@@ -202,8 +222,10 @@ class AccountsPage(LoggedPage, JsonPage):
                 iban = Dict('iban', default=None)(self)
                 if not iban:
                     return NotAvailable
+                # The fields used here should match the ones used in
+                # RecipientsListPage.iter_int_recipients
                 return get_recipient_id_hash(
-                    Field('label')(self),
+                    Upper(Dict('lib'))(self),
                     Field('_owner_name')(self),
                     iban,
                 )
@@ -217,9 +239,6 @@ class AccountsPage(LoggedPage, JsonPage):
             # It can have revolving credit on this page
             def obj__total_amount(self):
                 return CleanDecimal(Dict('grantedAmount', default=None), default=NotAvailable)(self)
-
-            def obj_type(self):
-                return self.page.TYPES.get(Dict('accountType', default=None)(self).lower(), Account.TYPE_UNKNOWN)
 
             def obj_ownership(self):
                 if Dict('accountListType')(self) == 'COMPTE_MANDATAIRE':
@@ -269,7 +288,7 @@ class AccountsPage(LoggedPage, JsonPage):
             class item(ItemElement):
                 klass = Account
 
-                obj_label = Upper(Dict('libelleContrat'))
+                obj_label = Upper(MultiJoin(Dict('libelleContrat'), Field('_owner_name'), pattern=' '))
                 obj_balance = CleanDecimal(Dict('solde', default="0"))
                 obj_currency = 'EUR'
                 obj_coming = CleanDecimal(Dict('AVenir', default=None), default=NotAvailable)
@@ -294,9 +313,9 @@ class AccountsPage(LoggedPage, JsonPage):
                         return Slugify(Format('%s-%s', Dict('libelleContrat'), Dict('nomTitulaire')))(self)
 
                 def obj_type(self):
-                    for key in self.page.TYPES:
+                    for key in ACCOUNT_TYPES:
                         if key in Env('type_label')(self).lower():
-                            return self.page.TYPES[key]
+                            return ACCOUNT_TYPES[key]
                     return Account.TYPE_UNKNOWN
 
                 def obj_ownership(self):
@@ -380,6 +399,13 @@ class AccountsPage(LoggedPage, JsonPage):
             # obj_rate = can't find the info on website except pdf :(
 
             # Dates scraped are timestamp, to remove last '000' we divide by 1000
+            def obj_subscription_date(self):
+                timestamp = Dict('dateDebut', default=None)(self)
+                if timestamp:
+                    return datetime.date.fromtimestamp(timestamp / 1000)
+                return NotAvailable
+
+            # Dates scraped are timestamp, to remove last '000' we divide by 1000
             def obj_maturity_date(self):
                 # Key not always available, when revolving credit not yet consummed
                 timestamp = Dict('dateFin', default=None)(self)
@@ -423,6 +449,9 @@ class Transaction(FrenchTransaction):
 class HistoryPage(LoggedPage, JsonPage):
     def has_deferred_cards(self):
         return Dict('pendingDeferredDebitCardList/currentMonthCardList', default=None)(self.doc)
+
+    def get_exception_code(self):
+        return Dict('exception/code', default=None)(self.doc)
 
     def get_keys(self):
         if 'exception' in self.doc:
@@ -470,13 +499,46 @@ class HistoryPage(LoggedPage, JsonPage):
                         return self.default_or_raise(ParseError('Element %r not found' % self.selector))
 
             obj_date = FromTimestamp(Dict('dateOperation', default=NotAvailable), default=NotAvailable)
-            obj_raw = Transaction.Raw(Dict('libelleCourt'))
+            obj_raw = Transaction.Raw(Field('_label_full'))
             obj_vdate = Date(Dict('dateValeur', NotAvailable), dayfirst=True, default=NotAvailable)
-            obj_amount = CleanDecimal(Dict('montantEnEuro'), default=NotAvailable)
+            obj_amount = CleanDecimal.SI(Dict('montantEnEuro', default=NotAvailable), default=NotAvailable)
             obj_id = Dict('clefDomirama', default='')
             # 'operationId' is different between each session, we use it to avoid duplicates on a unique
             # session
             obj__operationid = Dict('operationId', default='')
+
+            obj__label_short = Dict('libelleCourt')
+            obj__label_extra = Dict('libelleLong', default=NotAvailable)
+
+            def obj__label_full(self):
+                """
+                All transactions have a short label, some have a long label too.
+                If the long label is available, it is provided through an extra
+                field to concatenate with the short label.
+
+                The extra label is a string using the following format:
+                " |   Lorem Ipsum (…)"
+                When shown on the website, the " |  " part at the beginning is
+                replaced with the short label. With the previous example it
+                would be shown like:
+                "Short Label Lorem Ipsum (…)"
+                """
+                label_short = Field('_label_short')(self)
+                label_extra = Field('_label_extra')(self)
+
+                # If no long label is provided, return only the short one
+                if not label_extra:
+                    return label_short
+
+                # If the extra label does not use the expected format,
+                # ignore it and only return the short one
+                # TODO - When this happens, it might be worth logging a warning.
+                if not label_extra.startswith(' |  '):
+                    return label_short
+
+                # Compute the long label from the short one and the extra one
+                # label_extra[4:] is the extra label minus the leading " |   "
+                return '%s%s' % (label_short, label_extra[4:])
 
             def parse(self, el):
                 key = Env('key', default=None)(self)
@@ -488,6 +550,8 @@ class HistoryPage(LoggedPage, JsonPage):
                     self.obj._deferred_date = self.FromTimestamp().filter(deferred_date)
 
             def validate(self, obj):
+                if empty(obj.amount):
+                    return False
                 if Env('last_trs', default=None)(self):
                     # keep only current month transactions
                     today = datetime.date.today()
@@ -529,6 +593,7 @@ class LifeinsurancePage(LoggedPage, HTMLPage):
             obj_balance = CleanDecimal.French(TableCell('balance'))
             obj_currency = Currency(TableCell('balance'))
             obj_type = Account.TYPE_LIFE_INSURANCE
+            obj__index = NotAvailable
 
             def obj_url(self):
                 return AbsoluteLink(TableCell('id')(self)[0].xpath('.//a'), default=NotAvailable)(self)
@@ -616,7 +681,7 @@ MARKET_ORDER_TYPES = {
 
 
 class MarketPage(LoggedPage, HTMLPage):
-    def find_account(self, account_id):
+    def find_account(self, account):
         # Depending on what we're fetching (history, invests or orders),
         # the parameter to choose the account has a different name.
         if 'carnetOrdre' in self.url:
@@ -625,22 +690,47 @@ class MarketPage(LoggedPage, HTMLPage):
             param_name = 'indiceCompte'
         # first name and last name may not be ordered the same way on market site...
 
-        def get_ids(ref, account_id, param_name):
+        def get_ids(ref, account, param_name):
+            def matching_owners_names(account, row_owner):
+                # there can be different owners on a same space
+                # we check the owner fullname is the same than the owner of the accounts
+                # example:
+                # account._owner_name = "NICOLAS VERGNAC"
+                # row_owner = "VERGNAC NICOLAS"
+                # first & last name are reversed, that's why we split the string containing the fullname and sort it
+                # note: a rare occurence of an account with two owners:
+                #  - account._owner_name: COMPTE TITRES ORDINAIRE J DOE / O DOE
+                #  - row_owner: DOE JOHN
+
+                owner_name_split = sorted(account._owner_name.split())
+                row_owner_split = sorted(row_owner.split())
+
+                if account.ownership != AccountOwnership.CO_OWNER:
+                    return owner_name_split == row_owner_split
+
+                for element in row_owner_split:
+                    if element in owner_name_split:
+                        return True
+                return False
+
             # Market account IDs contain 3 parts:
             # - the first 5 and last 2 digits identify the account
             # - the 9 digits in the middle identify the owner of the account
             # These info are separated on the page so we need to get them from the id to match the account.
-            owner_id = account_id[5:14]
-            account_number = '%s%s' % (account_id[:5], account_id[-2:])
-            for a in self.doc.xpath('//a[contains(@%s, "%s")]' % (ref, param_name)):
+            owner_id = account.id[5:14]
+            account_number = '%s%s' % (account.id[:5], account.id[-2:])
+            for acc in self.doc.xpath('//a[contains(@%s, "%s")]' % (ref, param_name)):
                 self.logger.debug("get investment from %s" % ref)
-                number = CleanText('./ancestor::td/preceding-sibling::td')(a).replace(' ', '')
+                number = Coalesce(
+                    CleanText('./ancestor::td/preceding-sibling::td', children=False),
+                    CleanText('(./ancestor::td/preceding-sibling::td)[last()]'),
+                )(acc).replace(' ', '')
                 # Some lines contain the owner of the accounts on the following lines, we use it for matching
-                row_owner = CleanText('(./ancestor::tr/preceding-sibling::tr[@class="LnMnTiers"])[last()]')(a)
-                if owner_id not in row_owner:
+                row_owner = CleanText('(./ancestor::tr/preceding-sibling::tr[@class="LnMnTiers"])[last()]')(acc)
+                if not matching_owners_names(account, row_owner):
                     continue
-                if number in (account_id, account_number):
-                    index = re.search(r'%s[^\d]+(\d+).*idRacine' % param_name, Attr('.', ref)(a)).group(1)
+                if number in (account.id, account_number):
+                    index = re.search(r'%s[^\d]+(\d+).*idRacine' % param_name, Attr('.', ref)(acc)).group(1)
                     return [index, owner_id, number]
 
         # Check if history is present
@@ -649,17 +739,19 @@ class MarketPage(LoggedPage, HTMLPage):
 
         ref = CleanText(self.doc.xpath('//a[contains(@href, "%s")]' % param_name))(self)
         if not ref:
-            return get_ids('onclick', account_id, param_name)
+            return get_ids('onclick', account, param_name)
         else:
-            return get_ids('href', account_id, param_name)
+            return get_ids('href', account, param_name)
 
-    def go_account(self, account_id):
+    @retry(requests.exceptions.ReadTimeout)
+    def go_account(self, account):
         if 'carnetOrdre' in self.url:
             param_name = 'idCompte'
         else:
             param_name = 'indiceCompte'
 
-        ids = self.find_account(account_id)
+        ids = self.find_account(account)
+
         if not ids:
             return
 
@@ -667,7 +759,7 @@ class MarketPage(LoggedPage, HTMLPage):
         form[param_name] = ids[0]
         form['idRacine'] = ids[1]
         try:
-            return form.submit()
+            return form.submit(timeout=60)
         except ServerError:
             return False
 
@@ -847,8 +939,6 @@ class AdvisorPage(LoggedPage, JsonPage):
 
 
 class ProfilePage(LoggedPage, JsonPage):
-    # be careful, this page is used in CmsoProBrowser too!
-
     @method
     class get_profile(ItemElement):
         klass = Profile

@@ -23,16 +23,16 @@ from logging import error
 import re
 from io import BytesIO
 
-from weboob.browser.elements import ItemElement, SkipItem, TableElement, method
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Field, Format, Base, Regexp
-from weboob.browser.filters.html import Link, TableCell
-from weboob.capabilities.bank.wealth import Investment
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
-from weboob.tools.json import json
-from weboob.capabilities.bank import Account
-from weboob.capabilities.base import NotAvailable
+from woob.browser.elements import ItemElement, SkipItem, TableElement, method
+from woob.browser.pages import HTMLPage, LoggedPage
+from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Field, Format, Base, Regexp
+from woob.browser.filters.html import Link, TableCell
+from woob.capabilities.bank.wealth import Investment
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
+from woob.tools.json import json
+from woob.capabilities.bank import Account
+from woob.capabilities.base import NotAvailable
 
 from ..captcha import Captcha, TileError
 from ..pages.login import LoginPage as LoginParPage, PasswordPage
@@ -239,7 +239,7 @@ class MarketAccountsPage(LoggedPage, HTMLPage):
             '//table[//tr/td[text()="Référence du compte"]]//tr[4]/td|'
             + '//table[//tr/td[text()="Référence du compte"]]//tr[3]/td[@rowspan=2]'
         )
-        item_xpath = '//table[//tr/td[text()="Référence du compte"]]//tr[position()>=5]'
+        item_xpath = '//table[//tr/td[text()="Référence du compte"]]//tr[position()>=5 and not(descendant::i)]'
 
         col_id = 'Référence du compte'
         col_label = 'Libellé'

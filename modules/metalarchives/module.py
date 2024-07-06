@@ -2,28 +2,26 @@
 
 # Copyright(C) 2018 Quentin Defenouillere
 #
-# This file is part of weboob.
+# This file is part of woob.
 #
-# weboob is free software: you can redistribute it and/or modify
+# woob is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# weboob is distributed in the hope that it will be useful,
+# woob is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with weboob. If not, see <http://www.gnu.org/licenses/>.
+# along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from __future__ import unicode_literals
 
-
-from weboob.capabilities.bands import CapBands, BandNotFound
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
+from woob.capabilities.bands import CapBands, BandNotFound
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword
 
 
 from .browser import MetalArchivesBrowser
@@ -36,7 +34,7 @@ class MetalarchivesModule(Module, CapBands):
     MAINTAINER = 'Quentin Defenouillère'
     EMAIL = 'quentin.defenouillere@gmail.com'
     LICENSE = 'LGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
     BROWSER = MetalArchivesBrowser
 
     CONFIG = BackendConfig(

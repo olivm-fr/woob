@@ -1,46 +1,49 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
+import requests
 
-from weboob.browser import AbstractBrowser, LoginBrowser, URL, need_login
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Per
-from weboob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, ActionNeeded
+from woob.browser import LoginBrowser, URL, need_login
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import Per
+from woob.exceptions import BrowserIncorrectPassword, ActionNeeded, BrowserUnavailable
+from woob_modules.s2e.browser import BnppereBrowser as _BnppereBrowser
+
 from .pages import (
-    LoginPage, LoginErrorPage, ProfilePage, ErrorPage, AccountPage, AccountSwitchPage,
-    InvestmentPage, TermPage, UnexpectedPage, HistoryPage,
+    LoginPage, LoginStep2Page, LoginErrorPage, ProfilePage,
+    AccountPage, AccountSwitchPage,
+    InvestmentPage, TermPage, HistoryPage,
 )
 
 
-class BnppereBrowser(AbstractBrowser):
-    PARENT = 's2e'
-    PARENT_ATTR = 'package.browser.BnppereBrowser'
+class BnppereBrowser(_BnppereBrowser):
+    pass
 
 
 class VisiogoBrowser(LoginBrowser):
     BASEURL = 'https://visiogo.bnpparibas.com/'
+    TIMEOUT = 30.0
 
-    login_page = URL(r'https://authentication.bnpparibas.com/en/Account/Login\?ReturnUrl=https://visiogo.bnpparibas.com/fr-FR', LoginPage)
-    login_error = URL(r'https://authentication.bnpparibas.com.*ErrorNoValidAffiliation', LoginErrorPage)
-    error_page = URL(r'https://authentication.bnpparibas.com/en/account/login\?ReturnUrl=.+', ErrorPage)
-    error_page2 = URL(r'https://authentication.bnpparibas.com/Error\?Code=500', UnexpectedPage)
+    login_page = URL(r'https://authentication.bnpparibas.com/ind_auth/Account/Login\?ReturnUrl=.+', LoginPage)
+    login_second_step = URL(
+        r'https://authentication.bnpparibas.com/ind_auth/connect/authorize/callback',
+        LoginStep2Page
+    )
+    login_error = URL(r'https://authentication.bnpparibas.com/ind_auth/Account/Login$', LoginErrorPage)
     term_page = URL(r'/Home/TermsOfUseApproval', TermPage)
     account_page = URL(r'/GlobalView/Synthesis', AccountPage)
     account_switch = URL(r'/Contract/_ChangeAffiliation', AccountSwitchPage)
@@ -56,7 +59,7 @@ class VisiogoBrowser(LoginBrowser):
         super(VisiogoBrowser, self).__init__(*args, **kwargs)
 
     def do_login(self):
-        self.login_page.go()
+        self.go_home()
         self.page.login(self.username, self.password)
 
         if self.login_error.is_here():
@@ -64,21 +67,26 @@ class VisiogoBrowser(LoginBrowser):
             if 'affiliation status' in message:
                 # 'Your affiliation status no longer allows you to connect to your account.'
                 raise ActionNeeded(message)
-            assert False, 'Unknown error on LoginErrorPage: %s.' % message
+            elif 'incorrect' in message:
+                raise BrowserIncorrectPassword(message)
+            raise AssertionError('Unknown error on LoginErrorPage: %s.' % message)
+
+        assert self.login_second_step.is_here(), 'Should be on the page of the second step of login'
+
+        # for some users the website is unavailable
+        # we are in a redirection loop on '/Account/LogOff'
+        try:
+            max_redirects = self.session.max_redirects
+            self.session.max_redirects = 10
+            self.page.send_form()
+        except requests.exceptions.TooManyRedirects:
+            raise BrowserUnavailable()
+        finally:
+            # set the redirection limit back to default
+            self.session.max_redirects = max_redirects
 
         if self.term_page.is_here():
             raise ActionNeeded()
-
-        if self.error_page.is_here() or self.error_page2.is_here():
-            alert = self.page.get_error()
-            if "account has not been activated" in alert:
-                raise ActionNeeded(alert)
-            elif "unexpected" in alert:
-                raise BrowserUnavailable(alert)
-            elif "password" in alert:
-                raise BrowserIncorrectPassword(alert)
-            else:
-                assert False
 
     @need_login
     def iter_accounts(self):

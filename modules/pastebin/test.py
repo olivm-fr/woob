@@ -1,25 +1,25 @@
 # -*- coding: utf-8 -*-
 
-# Copyright(C) 2011-2014 Laurent Bachelier
+# Copyright(C) 2011-2021 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.base import NotLoaded
-from weboob.capabilities.paste import PasteNotFound
-from weboob.tools.test import BackendTest, SkipTest
+from woob.capabilities.base import NotLoaded
+from woob.capabilities.paste import PasteNotFound
+from woob.tools.test import BackendTest, SkipTest
 
 from .browser import LimitExceeded
 
@@ -49,7 +49,7 @@ class PastebinTest(BackendTest):
     def test_post(self):
         # we cannot test public pastes, as the website sometimes forces them as private
         # there seems to be a very low post per day limit, even when logged in
-        p = self.backend.new_paste(None, title=u'ouiboube', contents=u'Weboob Test', public=False)
+        p = self.backend.new_paste(None, title=u'ouiboube', contents=u'Woob Test', public=False)
         try:
             self.backend.post_paste(p, max_age=600)
         except LimitExceeded:
@@ -63,7 +63,7 @@ class PastebinTest(BackendTest):
 
     def test_specialchars(self):
         # post a paste and get the contents through the HTML response
-        p1 = self.backend.new_paste(None, title=u'ouiboube', contents=u'Weboob <test>¿¡', public=False)
+        p1 = self.backend.new_paste(None, title=u'ouiboube', contents=u'Woob <test>¿¡', public=False)
         try:
             self.backend.post_paste(p1, max_age=600)
         except LimitExceeded:

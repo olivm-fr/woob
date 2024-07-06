@@ -2,33 +2,32 @@
 
 # Copyright(C) 2014      Roger Philibert
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import datetime
+
 from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 from dateutil.tz import tzlocal
 
-from weboob.tools.compat import unicode
-from weboob.capabilities.messages import CapMessages, CapMessagesPost, Thread, Message
-from weboob.capabilities.dating import CapDating, Optimization
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword
-from weboob.tools.log import getLogger
+from woob.capabilities.messages import CapMessages, CapMessagesPost, Thread, Message
+from woob.capabilities.dating import CapDating, Optimization
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword
+from woob.tools.log import getLogger
 
 from .browser import TinderBrowser, FacebookBrowser
 
@@ -86,7 +85,7 @@ class TinderModule(Module, CapMessages, CapMessagesPost, CapDating):
     MAINTAINER = u'Roger Philibert'
     EMAIL = 'roger.philibert@gmail.com'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
+    VERSION = '3.6'
     CONFIG = BackendConfig(Value('username',                label='Facebook email'),
                            ValueBackendPassword('password', label='Facebook password'),
                            Value('location',                label='Location (example: 49.6008457,6.129709)', default=''))
@@ -104,7 +103,7 @@ class TinderModule(Module, CapMessages, CapMessagesPost, CapDating):
     # ---- CapDating methods -----------------------
 
     def init_optimizations(self):
-        self.add_optimization('PROFILE_WALKER', ProfilesWalker(self.weboob.scheduler, self.storage, self.browser))
+        self.add_optimization('PROFILE_WALKER', ProfilesWalker(self.woob.scheduler, self.storage, self.browser))
 
     # ---- CapMessages methods ---------------------
 
@@ -130,7 +129,7 @@ class TinderModule(Module, CapMessages, CapMessagesPost, CapDating):
             signature += u'\n\n%s' % thread['person'].get('bio', '')
 
             t.root = Message(thread=t, id=1, title=t.title,
-                             sender=unicode(thread['person']['name']),
+                             sender=str(thread['person']['name']),
                              receivers=[self.browser.my_name],
                              date=parse_date(thread['created_date']),
                              content=u'Match!',
@@ -147,10 +146,10 @@ class TinderModule(Module, CapMessages, CapMessagesPost, CapDating):
                 msg = Message(thread=t,
                               id=msg['timestamp'],
                               title=t.title,
-                              sender=unicode(self.browser.my_name if msg['from'] == self.browser.my_id else thread['person']['name']),
-                              receivers=[unicode(self.browser.my_name if msg['to'] == self.browser.my_id else thread['person']['name'])],
+                              sender=str(self.browser.my_name if msg['from'] == self.browser.my_id else thread['person']['name']),
+                              receivers=[str(self.browser.my_name if msg['to'] == self.browser.my_id else thread['person']['name'])],
                               date=parse_date(msg['sent_date']),
-                              content=unicode(msg['message']),
+                              content=str(msg['message']),
                               children=[],
                               parent=parent,
                               signature=signature if msg['to'] == self.browser.my_id else u'',

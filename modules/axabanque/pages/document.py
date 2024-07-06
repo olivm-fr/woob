@@ -2,60 +2,81 @@
 
 # Copyright(C) 2010-2017 Théo Dorée
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.browser.filters.standard import CleanText, Env, Regexp, Format, Date
-from weboob.browser.elements import ListElement, ItemElement, method
-from weboob.capabilities.bill import Document
-from weboob.tools.date import parse_french_date
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import BrowserURL, CleanText, Date, Env, Eval, Field, Format, Map
+from woob.browser.pages import JsonPage, LoggedPage
+from woob.capabilities.bill import Document, DocumentTypes, Subscription
 
 
-class DocumentsPage(LoggedPage, HTMLPage):
+class SubscriptionsPage(LoggedPage, JsonPage):
     @method
-    class get_documents(ListElement):
-        item_xpath = '//div[has-class("mawa-cards-item dashboard-item")]'
+    class iter_subscriptions(DictElement):
+        class item(ItemElement):
+            klass = Subscription
 
+            obj_id = Dict('sourceContractId')
+
+            # there can be several "participants" but no matter what _contract_id is,
+            # list of related documents will be the same, so we can simply take the first one
+            obj__contract_id = Dict('participants/0/id')  # CAUTION non persistant
+            obj_subscriber = Format(
+                '%s %s',
+                CleanText(Dict('participants/0/firstName')),
+                CleanText(Dict('participants/0/lastName')),
+            )
+
+
+DOCUMENT_TYPES = {
+    'Relevé de compte': DocumentTypes.STATEMENT,
+    'e-relevés': DocumentTypes.STATEMENT,
+}
+
+
+class MyDictElement(DictElement):
+    # obj.id is based on documentName field, but we can have several documents with same name
+    # their pdf is really not the same, so it's really different documents
+    # we have to add a number to obj.id in that case
+    #  document_name
+    #  document_name-2
+    #  document_name-3
+    # etc...
+    def store(self, obj):
+        _id = obj.id
+        n = 1
+        while _id in self.objects:
+            n += 1
+            _id = f'{obj.id}-{n}'
+        obj.id = _id
+        self.objects[obj.id] = obj
+        return obj
+
+
+class DocumentsPage(LoggedPage, JsonPage):
+    @method
+    class iter_documents(MyDictElement):
         class item(ItemElement):
             klass = Document
 
-            obj_id = Format(
-                '%s_%s',
-                Env('subid'),
-                Regexp(CleanText('./@data-module-open-link--link'), '#/details/(.*)'),
-            )
+            obj_id = Format('%s_%s', Env('subid'), Field('_doc_name'))
+            obj_label = CleanText(Dict('documentName'))
+            obj_date = Date(CleanText(Dict('depositDate')))
+            obj_type = Map(Dict('typeLabel'), DOCUMENT_TYPES, DocumentTypes.OTHER)
+            obj_url = BrowserURL('document_pdf', contract_id=Env('contract_id'), document_id=Dict('documentId'))
+            obj__doc_name = Eval(lambda v: v.strip('.pdf'), Dict('documentName'))
             obj_format = 'pdf'
-            # eg when formatted (not complete list):
-            # - Situation de contrat suite à réajustement automatique Assurance Vie N° XXXXXXXXXX
-            # - Lettre d'information client Assurance Vie N° XXXXXXXXXX
-            # - Attestation de rachat partiel Assurance Vie N° XXXXXXXXXXXXXX
-            obj_label = Format(
-                '%s %s %s',
-                CleanText('.//h3[@class="card-title"]'),
-                CleanText('.//div[@class="sticker-content"]//strong'),
-                CleanText('.//p[@class="contract-info"]'),
-            )
-            obj_date = Date(CleanText('.//p[@class="card-date"]'), parse_func=parse_french_date)
-            obj_type = 'document'
-            obj__download_id = Regexp(CleanText('./@data-url'), r'.did_(.*?)\.')
-
-
-class DownloadPage(LoggedPage, HTMLPage):
-    def create_document(self):
-        form = self.get_form(xpath='//form[has-class("form-download-pdf")]')
-        form.submit()

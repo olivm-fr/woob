@@ -1,64 +1,64 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2017 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
-
-import re
-from decimal import Decimal
-
-from weboob.capabilities.bank import CapBankTransferAddRecipient, AccountNotFound, Account, RecipientNotFound
-from weboob.capabilities.wealth import CapBankWealth
-from weboob.capabilities.bill import (
-    CapDocument, Subscription, SubscriptionNotFound,
-    Document, DocumentNotFound, DocumentTypes,
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.base import find_object
+from woob.capabilities.bill import (
+    CapDocument, Document, DocumentNotFound,
+    DocumentTypes, Subscription,
 )
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.contact import CapContact
-from weboob.capabilities.profile import CapProfile
-from weboob.capabilities.base import find_object
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .proxy_browser import ProxyBrowser
 
 __all__ = ['CaisseEpargneModule']
 
 
-class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapDocument, CapContact, CapProfile):
+class CaisseEpargneModule(Module, CapBankWealth, CapDocument):
     NAME = 'caissedepargne'
     MAINTAINER = 'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
+    DEPENDENCIES = ('linebourse',)
     DESCRIPTION = 'Caisse d\'Épargne'
     LICENSE = 'LGPLv3+'
     BROWSER = ProxyBrowser
+
+    auth_type = {
+        'part': 'Particulier',
+        'pp': 'Personne protégée',
+        'pro': 'Professionnel',
+        'ent': 'Entreprise',
+    }
     CONFIG = BackendConfig(
         ValueBackendPassword('login', label='Identifiant client', masked=False),
-        ValueBackendPassword('password', label='Code personnel', regexp=r'\d+'),
+        ValueBackendPassword('password', label='Mot de passe', regexp=r'\d+'),
         Value('nuser', label='User ID (optional)', default='', regexp=r'[A-Z0-9]{0,8}'),
-        ValueTransient('emv_otp', regexp=r'\d{8}'),
+        Value('auth_type', label='Type de compte', choices=auth_type, default=''),
+        ValueTransient('otp_emv', regexp=r'\d{8}'),
+        ValueTransient('otp_sms', regexp=r'\d{8}'),
+        ValueTransient('resume'),
         ValueTransient('request_information'),
     )
 
-    accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.OTHER,)
+    accepted_document_types = (DocumentTypes.STATEMENT,)
 
     def create_default_browser(self):
         return self.create_browser(
@@ -66,73 +66,7 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
             config=self.config,
             username=self.config['login'].get(),
             password=self.config['password'].get(),
-            weboob=self.weboob
         )
-
-    def iter_accounts(self):
-        for account in self.browser.get_accounts_list():
-            yield account
-        for account in self.browser.get_loans_list():
-            yield account
-
-    def get_account(self, _id):
-        return find_object(self.iter_accounts(), id=_id, error=AccountNotFound)
-
-    def iter_history(self, account):
-        return self.browser.get_history(account)
-
-    def iter_coming(self, account):
-        return self.browser.get_coming(account)
-
-    def iter_investment(self, account):
-        return self.browser.get_investment(account)
-
-    def iter_market_orders(self, account):
-        return self.browser.iter_market_orders(account)
-
-    def iter_contacts(self):
-        return self.browser.get_advisor()
-
-    def get_profile(self):
-        return self.browser.get_profile()
-
-    def iter_transfer_recipients(self, origin_account):
-        if not isinstance(origin_account, Account):
-            origin_account = self.get_account(origin_account)
-        return self.browser.iter_recipients(origin_account)
-
-    def init_transfer(self, transfer, **params):
-        if 'otp_sms' in params or 'resume' in params:
-            return self.browser.otp_validation_continue_transfer(transfer, **params)
-
-        self.logger.info('Going to do a new transfer')
-        transfer.label = re.sub(r"[^0-9A-Z/?:().,'+ -]+", '', transfer.label.upper())
-        transfer.label = re.sub(r'\s+', ' ', transfer.label)
-        if transfer.account_iban:
-            account = find_object(self.iter_accounts(), iban=transfer.account_iban, error=AccountNotFound)
-        else:
-            account = find_object(self.iter_accounts(), id=transfer.account_id, error=AccountNotFound)
-
-        if transfer.recipient_iban:
-            recipient = find_object(
-                self.iter_transfer_recipients(account.id), iban=transfer.recipient_iban,
-                error=RecipientNotFound
-            )
-        else:
-            recipient = find_object(
-                self.iter_transfer_recipients(account.id), id=transfer.recipient_id,
-                error=RecipientNotFound
-            )
-
-        transfer.amount = transfer.amount.quantize(Decimal(10) ** -2)
-
-        return self.browser.init_transfer(account, recipient, transfer)
-
-    def execute_transfer(self, transfer, **params):
-        return self.browser.execute_transfer(transfer)
-
-    def new_recipient(self, recipient, **params):
-        return self.browser.new_recipient(recipient, **params)
 
     def iter_resources(self, objs, split_path):
         if Account in objs:
@@ -142,16 +76,23 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
             self._restrict_level(split_path)
             return self.iter_subscription()
 
-    def get_subscription(self, _id):
-        return find_object(self.iter_subscription(), id=_id, error=SubscriptionNotFound)
+    # CapBank
+    def iter_accounts(self):
+        return self.browser.iter_accounts()
 
-    def get_document(self, _id):
-        subscription_id = _id.split('_')[0]
-        subscription = self.get_subscription(subscription_id)
-        return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
+    def iter_history(self, account):
+        return self.browser.iter_history(account)
 
+    def iter_coming(self, account):
+        return self.browser.iter_coming(account)
+
+    # CapBankWealth
+    def iter_investment(self, account):
+        return self.browser.iter_investments(account)
+
+    # CapDocument
     def iter_subscription(self):
-        return self.browser.iter_subscription()
+        return self.browser.iter_subscriptions()
 
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):
@@ -159,20 +100,13 @@ class CaisseEpargneModule(Module, CapBankWealth, CapBankTransferAddRecipient, Ca
 
         return self.browser.iter_documents(subscription)
 
-    def iter_transfers(self, account):
-        for tr in self.browser.iter_transfers(account):
-            if account and account.id != tr.account_id:
-                continue
-            yield tr
+    def get_document(self, _id):
+        subid = _id.rsplit('_', 1)[0]
+        subscription = self.get_subscription(subid)
+
+        return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 
     def download_document(self, document):
         if not isinstance(document, Document):
             document = self.get_document(document)
-
-        if document.url is NotAvailable:
-            return
-
         return self.browser.download_document(document)
-
-    def iter_emitters(self):
-        return self.browser.iter_emitters()

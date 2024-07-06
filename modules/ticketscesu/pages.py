@@ -2,30 +2,28 @@
 
 # Copyright(C) 2019      Antoine BOSSY
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
-
-from __future__ import unicode_literals
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from weboob.browser.elements import method, ItemElement, ListElement, SkipItem
-from weboob.browser.filters.standard import CleanDecimal, CleanText, Field, Format, Date
-from weboob.browser.filters.html import Attr
-from weboob.browser.pages import HTMLPage, LoggedPage
-from weboob.capabilities.bank import Account, Transaction
-from weboob.capabilities.base import NotAvailable
+from woob.browser.elements import method, ItemElement, ListElement, SkipItem
+from woob.browser.filters.standard import CleanDecimal, CleanText, Field, Format, Date
+from woob.browser.filters.html import Attr
+from woob.browser.pages import HTMLPage, LoggedPage
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.base import NotAvailable
 
 
 class LoginPage(HTMLPage):
@@ -41,19 +39,16 @@ class ProfilePage(HTMLPage):
 
 
 class AccountsPage(LoggedPage, HTMLPage):
-    def go_to_transaction_page(self, page):
-        form = self.get_form('//form[@id="frmMain"]')
-        form['%s.x' % page] = 1
-        form['%s.y' % page] = 1
-        form.submit()
-
     @method
-    class get_accounts(ListElement):
+    class iter_accounts(ListElement):
         item_xpath = '//tr[has-class("ItemH23")]'
 
         class item(ItemElement):
             klass = Account
 
+            # TODO: control all these attributes
+
+            # obj_type = '??????'
             obj_id = CleanText('./td[position()=2]')
             obj_balance = CleanDecimal('./td[position()=6]', replace_dots=True)
             obj_label = Format('Millésime %s', Field('id'))
@@ -62,12 +57,20 @@ class AccountsPage(LoggedPage, HTMLPage):
 
             obj__page = Attr('./td//input', 'name')
 
+    def go_to_transactions_page(self, page):
+        form = self.get_form('//form[@id="frmMain"]')
+        form[f'{page}.x'] = 1
+        form[f'{page}.y'] = 1
+        form.submit()
+
     @method
-    class get_transactions(ListElement):
+    class iter_transactions(ListElement):
         item_xpath = '//tr[has-class("ItemH23")]'
 
         class item(ItemElement):
             klass = Transaction
+
+            # TODO: control all these attributes
 
             def obj_date(self):
                 maybe_date = CleanText('./td[position()=2]')(self)

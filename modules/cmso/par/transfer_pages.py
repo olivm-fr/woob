@@ -2,37 +2,35 @@
 
 # Copyright(C) 2019      Sylvie Ye
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
-
-from __future__ import unicode_literals
 
 from hashlib import md5
 import datetime as dt
 
-from weboob.browser.pages import JsonPage, LoggedPage
-from weboob.browser.elements import DictElement, ItemElement, method
-from weboob.browser.filters.standard import (
+from woob.browser.pages import JsonPage, LoggedPage
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.standard import (
     CleanText, Currency, CleanDecimal, Env,
     Format, Upper,
 )
-from weboob.browser.filters.json import Dict
-from weboob.capabilities.bank import Recipient, Transfer, TransferBankError, Emitter
-from weboob.capabilities.base import NotAvailable
+from woob.browser.filters.json import Dict
+from woob.capabilities.bank import Recipient, Transfer, TransferBankError, Emitter
+from woob.capabilities.base import NotAvailable
 
 
 def get_recipient_id_hash(label, name, iban):
@@ -83,6 +81,8 @@ class RecipientsListPage(LoggedPage, JsonPage):
             def obj_id(self):
                 # There is nothing beside the account label and owner name
                 # that we can use to create an unique id.
+                # The fields used here should match the ones used in
+                # AccountsPage.iter_accounts
                 return get_recipient_id_hash(
                     Dict('label')(self),
                     Dict('personName')(self),

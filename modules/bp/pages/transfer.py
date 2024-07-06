@@ -1,43 +1,39 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Nicolas Duhamel
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 from datetime import datetime
+from urllib.parse import urljoin
 
-from weboob.capabilities.bank import (
-    TransferBankError, Transfer, Recipient, AccountNotFound,
-    AddRecipientBankError, Emitter,
+from woob.browser.elements import DictElement, ItemElement, ListElement, SkipItem, method
+from woob.browser.filters.html import Attr, Link
+from woob.browser.filters.javascript import JSVar
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanDecimal, CleanText, Currency, Date, Env, Format, Regexp
+from woob.browser.pages import JsonPage, LoggedPage, PartialHTMLPage
+from woob.capabilities.bank import (
+    AccountNotFound, AddRecipientBankError, Emitter, Recipient, Transfer, TransferBankError,
 )
-from weboob.capabilities.base import find_object, empty, NotAvailable
-from weboob.browser.pages import LoggedPage, PartialHTMLPage
-from weboob.browser.filters.standard import CleanText, Env, Regexp, Date, CleanDecimal, Currency, Format
-from weboob.browser.filters.html import Attr, Link
-from weboob.browser.filters.javascript import JSVar
-from weboob.browser.elements import ListElement, ItemElement, method, SkipItem
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.capabilities.bank.iban import is_iban_valid
-from weboob.tools.compat import urljoin
-from weboob.exceptions import BrowserUnavailable
+from woob.capabilities.base import NotAvailable, empty, find_object
+from woob.exceptions import BrowserUnavailable
+from woob.tools.capabilities.bank.iban import is_iban_valid
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
 from .base import MyHTMLPage
 
@@ -64,7 +60,7 @@ class TransferChooseAccounts(LoggedPage, MyHTMLPage):
     @method
     class iter_recipients(ListElement):
         def condition(self):
-            return any(self.env['account_id'] in CleanText('.')(option) for option in self.page.doc.xpath('//select[@id="donneesSaisie.idxCompteEmetteur"]/option'))
+            return any(self.env['account_id'] in Attr('.', 'value')(option) for option in self.page.doc.xpath('//select[@id="donneesSaisie.idxCompteEmetteur"]/option'))
 
         item_xpath = '//select[@id="idxCompteReceveur"]/option'
 
@@ -104,20 +100,20 @@ class TransferChooseAccounts(LoggedPage, MyHTMLPage):
                 else:
                     self.env['category'] = 'Externe'
 
+                _id = CleanText(Attr('.', 'value'))(el)
+                if _id == self.env['account_id']:
+                    raise SkipItem()
+                self.env['id'] = _id
+
                 if self.env['category'] == 'Interne':
-                    _id = CleanText(Attr('.', 'value'))(el)
-                    if _id == self.env['account_id']:
-                        raise SkipItem()
                     try:
                         account = find_object(self.page.browser.get_accounts_list(), id=_id, error=AccountNotFound)
-                        self.env['id'] = _id
                         self.env['label'] = account.label
                         self.env['iban'] = account.iban
                     except AccountNotFound:
                         # Some internal recipients cannot be parsed on the website and so, do not
                         # appear in the iter_accounts. We can still do transfer to those accounts
                         # because they have an internal id (internal id = id that is not an iban).
-                        self.env['id'] = _id
                         self.env['iban'] = NotAvailable
                         raw_label = CleanText('.')(el)
                         if '-' in raw_label:
@@ -134,23 +130,31 @@ class TransferChooseAccounts(LoggedPage, MyHTMLPage):
                     self.env['bank_name'] = 'La Banque Postale'
 
                 else:
-                    self.env['id'] = self.env['iban'] = Regexp(CleanText('.'), '- (.*?) -')(el).replace(' ', '')
-                    self.env['label'] = Regexp(CleanText('.'), '- (.*?) - (.*)', template='\\2')(el).strip()
+                    self.env['iban'] = _id
+                    raw_label = CleanText('.')(el).strip()
+                    # Normally, a beneficiary label looks like that:
+                    # <option value="FR932004...3817">CCP - FR 93 2004...38 17        - MR JOHN DOE</option>
+                    # but sometimes, the label is short, as it can be customized by customers:
+                    # <option value="FR932004...3817">JOHNJOHN</option>
+                    self.env['bank_name'] = NotAvailable
 
-                    first_part = CleanText('.')(el).split('-')[0].strip()
-                    if first_part in ['CCP', 'PEL']:
-                        self.env['bank_name'] = 'La Banque Postale'
+                    label_parts = raw_label.split(' - ', 2)
+                    if len(label_parts) == 3 and label_parts[1].replace(' ', '') == _id:
+                        if label_parts[0].strip() in ['CCP', 'PEL', 'LJ', 'CEL', 'LDDS']:
+                            self.env['bank_name'] = 'La Banque Postale'
+                        self.env['label'] = label_parts[2].strip()
                     else:
-                        self.env['bank_name'] = NotAvailable
+                        self.env['label'] = raw_label
 
-                if self.env['id'] in self.parent.objects:  # user add two recipients with same iban...
+                if self.env['id'] in self.parent.objects:
+                    # user add two recipients with same iban...
                     raise SkipItem()
 
     def init_transfer(self, account_id, recipient_value, amount):
         matched_values = [
             Attr('.', 'value')(option)
             for option in self.doc.xpath('//select[@id="donneesSaisie.idxCompteEmetteur"]/option')
-            if account_id in CleanText('.')(option)
+            if account_id in Attr('.', 'value')(option)
         ]
         assert len(matched_values) == 1
         form = self.get_form(xpath='//form[@class="choix-compte"]')
@@ -218,11 +222,22 @@ class CompleteTransfer(LoggedPage, CheckTransferError):
 
 
 class Loi6902TransferPage(LoggedPage, MyHTMLPage):
+    ENCODING = 'iso-8859-15'
+
+    def detect_encoding(self):
+        # Ignore the html level encoding detection because the document is lying
+        # header reported encoding will be automatically used instead
+        return None
+
     def get_popup_message(self):
         return Format(
             '%s %s',
-            CleanText('//div[@id="pop_up_virement_epargne_loi_6902_inter_haut"]//p'),
-            CleanText('//div[@id="pop_up_virement_epargne_loi_6902_inter_milieu"]//p')
+            CleanText(
+                '//div[@id="pop_up_virement_epargne_loi_6902_inter_haut" or @id="pop_up_virement_epargne_loi_6902_intra_haut"]//div[@class="textFCK"]'
+            ),
+            CleanText(
+                '//div[@id="pop_up_virement_epargne_loi_6902_inter_milieu" or @id="pop_up_virement_epargne_loi_6902_intra_milieu"]//div[@class="textFCK"]'
+            )
         )(self.doc)
 
 
@@ -265,15 +280,23 @@ class TransferConfirm(LoggedPage, CheckTransferError):
         error_msg = CleanText('//div[@id="blocErreur"]')(self.doc)
         if error_msg:
             raise TransferBankError(message=error_msg)
+        # handle 'Opération engageante - Code personnel périmé' error
+        response_title = CleanText('//h1[@class="title-level1"]')(self.doc)
+        if 'Code personnel périmé' in response_title:
+            raise TransferBankError(message=response_title)
 
-        account_txt = CleanText(
-            '//form//h3[contains(text(), "débiter")]//following::span[1]', replace=[(' ', '')]
-        )(self.doc)
+        # There used to be a check for the debit account here; however,
+        # the transfer confirmation and summary no longer contain the
+        # identifier of the debit account, and the label is different,
+        # so it is difficult to identify that the selected account is the
+        # right one with certainty, so we choose not to check this for now.
+        #
+        # The recipient check appears to still work though, so we keep this
+        # one.
         recipient_txt = CleanText(
             '//form//h3[contains(text(), "créditer")]//following::span[1]', replace=[(' ', '')]
         )(self.doc)
 
-        assert transfer.account_id in account_txt, 'Something went wrong'
         assert transfer.recipient_id in recipient_txt, 'Something went wrong'
 
         exec_date = Date(
@@ -365,6 +388,7 @@ class TransferSummary(LoggedPage, CheckTransferError):
 
 class CreateRecipient(LoggedPage, MyHTMLPage):
     def on_load(self):
+        super(CreateRecipient, self).on_load()
         if self.doc.xpath('//h1[contains(text(), "Service Désactivé")]'):
             raise BrowserUnavailable(CleanText('//p[img[@title="attention"]]/text()')(self.doc))
 
@@ -422,6 +446,11 @@ class ConfirmPage(CheckErrorsPage):
             if device_choice_url:
                 return device_choice_url.group(1)
 
+    def get_error_message(self):
+        # Example message here:
+        # "Votre code personnel Certicode Plus est arrivé à échéance. [...]"
+        return CleanText('//div[@class="textFCK"]', default='')(self.doc)
+
     def set_browser_form(self):
         form = self.get_form(name='SaisieOTP')
         self.browser.sms_form = dict((k, v) for k, v in form.items() if v)
@@ -461,3 +490,17 @@ class CerticodePlusSubmitDevicePage(LoggedPage, MyHTMLPage):
 
 class RcptSummary(CheckErrorsPage):
     pass
+
+
+class ProTransferChooseAccounts(LoggedPage, JsonPage):
+    @method
+    class iter_emitters(DictElement):
+        item_xpath = 'groupesComptes/0/comptes'
+
+        class item(ItemElement):
+            klass = Emitter
+
+            obj_id = Dict('numero')
+            obj_balance = CleanDecimal.US(Dict('solde'))
+            obj_label = Dict('intitule')
+            obj_currency = 'EUR'

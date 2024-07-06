@@ -2,26 +2,25 @@
 
 # Copyright(C) 2010-2011 Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.collection import Collection
-from weboob.capabilities.base import UserError
-from weboob.capabilities import NotAvailable
-from weboob.browser import PagesBrowser, URL
-from weboob.tools.compat import unicode
+from woob.capabilities.collection import Collection
+from woob.capabilities.base import UserError
+from woob.capabilities import NotAvailable
+from woob.browser import PagesBrowser, URL
 
 from .pages import ArteJsonPage, GuidePage
 from .video import VERSION_VIDEO, LANG, QUALITY
@@ -95,7 +94,7 @@ class ArteBrowser(PagesBrowser):
 
     def get_arte_generic_subsites(self, split_path, subsite):
         for item in subsite.values:
-            yield Collection(split_path + [unicode(item.get('id'))], unicode(item.get('label')))
+            yield Collection(split_path + [str(item.get('id'))], str(item.get('label')))
 
     def get_video(self, id, video=None):
         video = self.webservice.go(__lang=self.lang['site'], vid=id).get_video(obj=video)
@@ -125,12 +124,12 @@ class ArteBrowser(PagesBrowser):
                 if baseurl not in line:
                     link = u'%s/%s' % (baseurl, line.replace('\n', ''))
                 else:
-                    link = unicode(line.replace('\n', ''))
+                    link = str(line.replace('\n', ''))
                 links_by_quality.append(link)
 
         if len(links_by_quality):
             try:
                 return links_by_quality[self.quality.get('order')]
-            except:
+            except (IndexError, TypeError):
                 return links_by_quality[0]
         return NotAvailable

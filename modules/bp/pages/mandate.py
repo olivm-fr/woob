@@ -1,37 +1,32 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Baptiste Delpey
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 # flake8: compatible
 
-from __future__ import unicode_literals
-
 import re
 
-from weboob.browser.pages import LoggedPage, HTMLPage, pagination
-from weboob.browser.elements import TableElement, ItemElement, method
-from weboob.browser.filters.html import Link, Attr, TableCell
-from weboob.browser.filters.standard import (
-    CleanText, CleanDecimal, Regexp, Format, Currency,
-)
-from weboob.capabilities.base import NotAvailable
-from weboob.capabilities.bank import Account
-from weboob.capabilities.wealth import Investment
+from woob.browser.elements import ItemElement, TableElement, method
+from woob.browser.filters.html import Attr, Link, TableCell
+from woob.browser.filters.standard import CleanDecimal, CleanText, Currency, Field, Format, Lower, Regexp
+from woob.browser.pages import HTMLPage, LoggedPage, pagination
+from woob.capabilities.bank import Account
+from woob.capabilities.bank.wealth import Investment
+from woob.capabilities.base import NotAvailable
+from woob.tools.capabilities.bank.investments import IsinCode, IsinType
 
 
 class PreMandate(LoggedPage, HTMLPage):
@@ -77,6 +72,7 @@ class MandateAccountsList(LoggedPage, HTMLPage):
             obj_balance = CleanDecimal(TableCell('valorisation'), replace_dots=True)
             obj_url = Link(TableCell('id'))
             obj_iban = NotAvailable
+            obj__account_holder = Lower(CleanText(TableCell('name')))
 
             def obj_url(self):
                 td = TableCell('id')(self)[0]
@@ -96,11 +92,12 @@ class Myiter_investments(TableElement):
 class MyInvestItem(ItemElement):
     klass = Investment
 
-    obj_code = CleanText(TableCell('isin'))
+    obj_code = IsinCode(TableCell('isin'), default=NotAvailable)
+    obj_code_type = IsinType(Field('code'))
     obj_label = CleanText(TableCell('label'))
-    obj_quantity = CleanDecimal(TableCell('quantity'), replace_dots=True)
-    obj_unitvalue = CleanDecimal(TableCell('unitvalue'), replace_dots=True)
-    obj_valuation = CleanDecimal(TableCell('valuation'), replace_dots=True)
+    obj_quantity = CleanDecimal.French(TableCell('quantity'))
+    obj_unitvalue = CleanDecimal.French(TableCell('unitvalue'))
+    obj_valuation = CleanDecimal.French(TableCell('valuation'))
 
 
 class MandateLife(LoggedPage, HTMLPage):

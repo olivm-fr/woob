@@ -2,26 +2,26 @@
 
 # Copyright(C) 2011  Romain Bignon
 #
-# This file is part of a weboob module.
+# This file is part of a woob module.
 #
-# This weboob module is free software: you can redistribute it and/or modify
+# This woob module is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This weboob module is distributed in the hope that it will be useful,
+# This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Affero General Public License for more details.
 #
 # You should have received a copy of the GNU Affero General Public License
-# along with this weboob module. If not, see <http://www.gnu.org/licenses/>.
+# along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.capabilities.base import empty
-from weboob.capabilities.video import CapVideo, BaseVideo
-from weboob.capabilities.collection import CapCollection, CollectionNotFound, Collection
-from weboob.tools.backend import Module
-from weboob.tools.capabilities.video.ytdl import video_info
+from woob.capabilities.base import empty
+from woob.capabilities.video import CapVideo, BaseVideo
+from woob.capabilities.collection import CapCollection, CollectionNotFound, Collection
+from woob.tools.backend import Module
+from woob.tools.capabilities.video.ytdl import video_info
 
 from .browser import PluzzBrowser
 
@@ -33,7 +33,7 @@ class PluzzModule(Module, CapVideo, CapCollection):
     NAME = 'francetelevisions'
     MAINTAINER = u'Romain Bignon'
     EMAIL = 'romain@weboob.org'
-    VERSION = '2.1'
+    VERSION = '3.6'
     DESCRIPTION = u'France Télévisions video website'
     LICENSE = 'AGPLv3+'
     BROWSER = PluzzBrowser
