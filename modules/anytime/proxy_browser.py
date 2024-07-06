@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with weboob. If not, see <http://www.gnu.org/licenses/>.
 
-from weboob.browser.switch import SwitchingBrowser
+from woob.browser.switch import SwitchingBrowser
 
 from .browser import AnytimeBrowser, AnytimeApiBrowser
 

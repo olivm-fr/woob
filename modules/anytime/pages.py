@@ -21,10 +21,10 @@ from __future__ import unicode_literals
 
 import re
 
-from weboob.browser.filters.standard import CleanText
-from weboob.browser.pages import PartialHTMLPage
-from weboob.tools.capabilities.bank.transactions import FrenchTransaction
-from weboob.tools.date import parse_french_date
+from woob.browser.filters.standard import CleanText
+from woob.browser.pages import PartialHTMLPage
+from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.tools.date import parse_french_date
 
 
 class BankTransaction(FrenchTransaction):

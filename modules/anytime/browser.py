@@ -22,15 +22,15 @@ from __future__ import unicode_literals
 import base64, re
 from decimal import Decimal
 
-from weboob.browser import URL, need_login, StatesMixin
-from weboob.browser.browsers import APIBrowser, PagesBrowser
-from weboob.browser.exceptions import ClientError
-from weboob.capabilities.bank import Account, AccountNotFound
-from weboob.capabilities.base import NotAvailable, find_object
-from weboob.capabilities.bill import Subscription, Document
-from weboob.exceptions import BrowserIncorrectPassword, BrowserQuestion, NeedInteractiveFor2FA
-from weboob.tools.date import datetime
-from weboob.tools.value import Value
+from woob.browser import URL, need_login, StatesMixin
+from woob.browser.browsers import APIBrowser, PagesBrowser
+from woob.browser.exceptions import ClientError
+from woob.capabilities.bank import Account, AccountNotFound
+from woob.capabilities.base import NotAvailable, find_object
+from woob.capabilities.bill import Subscription, Document
+from woob.exceptions import BrowserIncorrectPassword, BrowserQuestion, NeedInteractiveFor2FA
+from woob.tools.date import datetime
+from woob.tools.value import Value
 from .pages import TransactionsPage, BankTransaction
 
 __all__ = ['AnytimeBrowser']

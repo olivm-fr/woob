@@ -21,12 +21,12 @@ from __future__ import unicode_literals
 
 import sys
 
-from weboob.capabilities.bank import CapBank
-from weboob.capabilities.base import find_object
-from weboob.capabilities.bill import CapDocument, SubscriptionNotFound, Subscription, Document, DocumentNotFound
+from woob.capabilities.bank import CapBank
+from woob.capabilities.base import find_object
+from woob.capabilities.bill import CapDocument, SubscriptionNotFound, Subscription, Document, DocumentNotFound
 
-from weboob.tools.backend import Module, BackendConfig
-from weboob.tools.value import Value, ValueBackendPassword, ValueTransient
+from woob.tools.backend import Module, BackendConfig
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .proxy_browser import ProxyBrowser
 
