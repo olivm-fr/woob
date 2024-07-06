@@ -60,12 +60,6 @@ class AXABanqueModule(Module, CapBankWealth, CapBankTransfer, CapDocument, CapPr
     accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.OTHER)
 
     def create_default_browser(self):
-
-        # Bugfix the [SSL: WRONG_SIGNATURE_TYPE] wrong signature type (_ssl.c:1108)  error
-        # It's an ugly workaround, to be removed as soon as Axa fixes their servers !
-        import requests
-        requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS = 'DEFAULT@SECLEVEL=1'
-
         login = self.config['login'].get()
         if login.isdigit():
             self.BROWSER = ProxyBrowser

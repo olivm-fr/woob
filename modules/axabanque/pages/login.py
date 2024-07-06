@@ -25,7 +25,7 @@ from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Coalesce
 
 
-class LoginPage(HTMLPage):
+class LoginPage(JsonPage):
     def check_error(self):
         return (not Dict('errors', default=None)(self.doc)) is False
 
