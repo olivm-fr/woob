@@ -99,15 +99,22 @@ COMINGS_TYPES = {
 
 class Transaction(FrenchTransaction):
     PATTERNS = [
-        (re.compile(r'^CARTE (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
-        (re.compile(r'^(?P<text>(PRLV|PRELEVEMENTS).*)'), FrenchTransaction.TYPE_ORDER),
-        (re.compile(r'^(?P<text>RET DAB.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
-        (re.compile(r'^(?P<text>ECH.*)'), FrenchTransaction.TYPE_LOAN_PAYMENT),
-        (re.compile(r'^(?P<text>VIR.*)'), FrenchTransaction.TYPE_TRANSFER),
-        (re.compile(r'^(?P<text>ANN.*)'), FrenchTransaction.TYPE_PAYBACK),
-        (re.compile(r'^(?P<text>(VRST|VERSEMENT).*)'), FrenchTransaction.TYPE_DEPOSIT),
-        (re.compile(r'^(?P<text>CHQ.*)'), FrenchTransaction.TYPE_CHECK),
-        (re.compile(r'^(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^RET(RAIT) DAB (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
+        (re.compile(r'^(CARTE|CB ETRANGER|CB) (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
+        (
+            re.compile(r'^(?P<category>VIR(EMEN)?T? (SEPA|INST)?(RECU|FAVEUR)?)( /FRM)?(?P<text>.*)'),
+            FrenchTransaction.TYPE_TRANSFER,
+        ),
+        (re.compile(r'^PRLV (?P<text>.*)( \d+)?$'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^(CHQ|CHEQUE) .*$'), FrenchTransaction.TYPE_CHECK),
+        (re.compile(r'^(AGIOS /|FRAIS) (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(CONVENTION \d+ |F )?COTIS(ATION)? (?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^(F|R)-(?P<text>.*)'), FrenchTransaction.TYPE_BANK),
+        (re.compile(r'^REMISE (?P<text>.*)'), FrenchTransaction.TYPE_DEPOSIT),
+        (re.compile(r'^(?P<text>.*)( \d+)? QUITTANCE .*'), FrenchTransaction.TYPE_ORDER),
+        (re.compile(r'^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'), FrenchTransaction.TYPE_UNKNOWN),
+        (re.compile(r'^ACHATS (CARTE|CB)'), FrenchTransaction.TYPE_CARD_SUMMARY),
+        (re.compile(r'^ANNUL (?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK),
     ]
 
 
