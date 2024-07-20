@@ -30,8 +30,9 @@ from woob.browser.mfa import TwoFactorBrowser
 from woob.capabilities.bill import Document, DocumentTypes
 from woob.exceptions import (
     BrowserIncorrectPassword, ActionNeeded, ActionType, BrowserUnavailable,
-    AppValidation, BrowserQuestion, AppValidationError, AppValidationCancelled,
+    AppValidation, AppValidationError, AppValidationCancelled,
     AppValidationExpired, BrowserPasswordExpired, BrowserUserBanned,
+    OTPSentType, SentOTPQuestion,
 )
 from woob.capabilities.bank import (
     Account, TransferBankError, AddRecipientStep,
@@ -87,6 +88,17 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
             # or we will launch another one with that URL
             state.pop('url', None)
         super(SocieteGeneraleTwoFactorBrowser, self).load_state(state)
+
+    def clear_init_cookies(self):
+        # Keep the 2FA cookie(s) to prevent a 2FA trigger
+        cookies_to_keep = []
+        for cookie in self.session.cookies:
+            if cookie.name.startswith('NAVID-'):
+                cookies_to_keep.append(cookie)
+        super().clear_init_cookies()
+        if len(cookies_to_keep) > 0:
+            for cookie in cookies_to_keep:
+                self.session.cookies.set_cookie(cookie)
 
     def check_password(self):
         if not self.password.isdigit() or len(self.password) not in (6, 7):
@@ -178,11 +190,11 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
                 # Cf `need_login()` in `woob/browser/browsers.py`
                 self.page = None
 
-                raise BrowserQuestion(
-                    Value(
-                        'code',
-                        label='Entrez le Code Sécurité reçu par SMS sur le numéro ' + auth_method['ts']
-                    )
+                raise SentOTPQuestion(
+                    field_name='code',
+                    medium_type=OTPSentType.SMS,
+                    medium_label=auth_method['ts'],
+                    message='Entrez le Code Sécurité reçu par SMS sur le numéro ' + auth_method['ts'],
                 )
 
             self.logger.warning('Unknown CSA method "%s" found', auth_method['mod'])
@@ -293,6 +305,7 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
 class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     BASEURL = 'https://particuliers.sg.fr'
     STATE_DURATION = 10
+    TWOFA_DURATION = 60 * 24 * 90
 
     # documents
     documents = URL(r'/icd/epe/data/get-all-releves-authsec.json', DocumentsPage)
