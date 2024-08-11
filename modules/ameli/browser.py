@@ -116,6 +116,20 @@ class AmeliBrowser(TwoFactorBrowser):
             "otp_email": self.handle_otp,
         }
 
+    def locate_browser(self, state):
+        # If already on error page, we try a new login.
+        if "url" in state and self.error_page.match(state["url"]):
+            return
+        try:
+            super().locate_browser(state)
+        # BrowserUnavailable - especially with `Oups... votre compte ameli est momentanément
+        #  indisponible. Il sera de retour en pleine forme très bientôt.`
+        # can be seen when reaching a detail page AND login session is expired.
+        # Thus we try a new login.
+        except BrowserUnavailable as exc:
+            self.logger.debug("We hit a BrowserUnavailable during locate_browser -> we try a new login: %s", exc)
+            return
+
     def init_login(self):
         """
         Method to implement initiation of login on website.

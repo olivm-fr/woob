@@ -114,12 +114,18 @@ class CtPage(RawPage):
         return re.search(r"_ct:(.*)", self.text).group(1)
 
 
-class RedirectPage(LoggedPage, HTMLPage):
+class AmeliPortalManagerLoggedPage:
+    @property
+    def logged(self):
+        return not bool(self.doc.xpath('//div[has-class("tetiere-connexion")]'))
+
+
+class RedirectPage(AmeliPortalManagerLoggedPage, HTMLPage):
     REFRESH_MAX = 0
     REFRESH_XPATH = '//meta[@http-equiv="refresh"]'
 
 
-class CguPage(LoggedPage, HTMLPage):
+class CguPage(AmeliPortalManagerLoggedPage, HTMLPage):
     def get_cgu_message(self):
         return CleanText('//div[@class="page_nouvelles_cgus"]/p')(self.doc)
 
@@ -131,7 +137,7 @@ class ErrorPage(HTMLPage):
         raise BrowserUnavailable(unescape(CleanText('//div[@class="mobile"]/p')(self.doc)))
 
 
-class SubscriptionPage(LoggedPage, HTMLPage):
+class SubscriptionPage(AmeliPortalManagerLoggedPage, HTMLPage):
     def get_subscription(self):
         sub = Subscription()
         # DON'T TAKE social security number for id because it's a very confidential data, take birth date instead
@@ -212,7 +218,7 @@ class DocumentsDetailsPage(LoggedPage, PartialHTMLPage):
                 return parse_french_date(day_month + " " + year)
 
 
-class DocumentsFirstSummaryPage(LoggedPage, HTMLPage):
+class DocumentsFirstSummaryPage(AmeliPortalManagerLoggedPage, HTMLPage):
 
     @method
     class iter_documents(ListElement):
