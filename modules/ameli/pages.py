@@ -17,14 +17,30 @@
 
 # flake8: compatible
 
+import calendar
 import re
 from hashlib import sha1
 from html import unescape
 
+from babel.dates import format_date
+
 from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import Attr, Link
+from woob.browser.filters.javascript import JSValue
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Env, Field, Format, Regexp
+from woob.browser.filters.standard import (
+    CleanDecimal,
+    CleanText,
+    Coalesce,
+    Currency,
+    Date,
+    Env,
+    Eval,
+    Field,
+    Format,
+    Map,
+    Regexp,
+)
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, PartialHTMLPage, RawPage
 from woob.capabilities.address import PostalAddress
 from woob.capabilities.base import NotAvailable
@@ -222,29 +238,38 @@ class DocumentsFirstSummaryPage(AmeliPortalManagerLoggedPage, HTMLPage):
 
     @method
     class iter_documents(ListElement):
-        item_xpath = '//ul[@id="unordered_list"]//li[@class="rowdate" and .//span[@class="blocTelecharger"]]'
+        item_xpath = '//ul[@id="unordered_list"]//div[@class="blocParMois"]'
 
         class item(ItemElement):
             klass = Document
 
             obj_type = DocumentTypes.BILL
-            obj_label = Format("%s %s", CleanText('.//span[@class="libelle"]'), CleanText('.//span[@class="mois"]'))
-            obj_url = Link('.//div[@class="col-telechargement"]//a')
+            obj_label = Format(
+                "%s %s",
+                CleanText('.//div[@class="ReleveMensuelElementFlexSpaceBetween"]//p'),
+                CleanText('.//p[@class="moisDecompte"]'),
+            )
             obj_format = "pdf"
+            obj_url = JSValue(Attr('.//div[has-class("boutonTelechargement")]', "onclick"))
 
             def obj_date(self):
-                year = Regexp(CleanText('.//span[@class="mois"]'), r"(\d+)")(self)
-                month = Regexp(CleanText('.//span[@class="mois"]'), r"(\D+)")(self)
+                year = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\d+)")(self)
+                month = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\D+)")(self)
 
                 dt = parse_french_date(month + " " + year)
                 last_day_of_month = calendar.monthrange(dt.year, dt.month)[1]
                 return dt.replace(day=last_day_of_month)
 
             def obj_id(self):
-                year = Regexp(CleanText('.//span[@class="mois"]'), r"(\d+)")(self)
-                month = Regexp(CleanText('.//span[@class="mois"]'), r"(\D+)")(self)
+                year = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\d+)")(self)
+                month = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\D+)")(self)
 
                 return "{}_{}".format(Env("subid")(self), parse_french_date(month + " " + year).strftime("%Y%m"))
+
+
+LIBELLE_NATURE_PRESTATION = {
+    "Releve Mensuel": "Relevé mensuel",
+}
 
 
 class DocumentsLastSummaryPage(LoggedPage, JsonPage):
@@ -253,9 +278,8 @@ class DocumentsLastSummaryPage(LoggedPage, JsonPage):
     class iter_documents(DictElement):
 
         def find_elements(self):
-            for doc in self.el["listeDecomptes"]:
-                if doc["montant"]:
-                    yield doc
+            for paiement in self.el.get("listePaiements", []):
+                yield from paiement.get("listeLignesPaiements", [])
 
         class item(ItemElement):
             klass = Document
@@ -263,18 +287,17 @@ class DocumentsLastSummaryPage(LoggedPage, JsonPage):
             obj_type = DocumentTypes.BILL
             obj_url = Dict("urlPDF")
             obj_format = "pdf"
-            obj_label = Format("Relevé mensuel %s", CleanText(Dict("mois")))
+            obj__nature = CleanText(Dict("libelleNaturePrestation"))
+            obj_label = Format(
+                "%s %s",
+                Map(Field("_nature"), LIBELLE_NATURE_PRESTATION, Field("_nature")),
+                Eval(lambda x: format_date(x, "MMMM yyyy", locale="fr"), Field("date")),
+            )
 
             def obj_date(self):
-                year = Regexp(CleanText(Dict("mois")), r"(\d+)")(self)
-                month = Regexp(CleanText(Dict("mois")), r"(\D+)")(self)
-
-                dt = parse_french_date(month + " " + year)
+                dt = parse_french_date(CleanText(Dict("datePaiement"))(self))
                 last_day_of_month = calendar.monthrange(dt.year, dt.month)[1]
                 return dt.replace(day=last_day_of_month)
 
             def obj_id(self):
-                year = Regexp(CleanText(Dict("mois")), r"(\d+)")(self)
-                month = Regexp(CleanText(Dict("mois")), r"(\D+)")(self)
-
-                return "{}_{}".format(Env("subid")(self), parse_french_date(month + " " + year).strftime("%Y%m"))
+                return "{}_{}".format(Env("subid")(self), (Field("date")(self)).strftime("%Y%m"))

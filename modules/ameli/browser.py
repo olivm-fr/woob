@@ -35,7 +35,7 @@ from woob.exceptions import (
     OTPSentType,
     SentOTPQuestion,
 )
-from woob.tools.capabilities.bill.documents import merge_iterators
+from woob.tools.capabilities.bill.documents import merge_iterators, sorted_documents
 
 from .pages import (
     AmeliConnectOpenIdPage,
@@ -327,7 +327,8 @@ class AmeliBrowser(TwoFactorBrowser):
     @need_login
     def iter_documents(self, subscription):
         yield from merge_iterators(
-            self._iter_details_documents(subscription), self._iter_summary_documents(subscription)
+            sorted_documents(self._iter_details_documents(subscription)),
+            sorted_documents(self._iter_summary_documents(subscription)),
         )
 
     @need_login
