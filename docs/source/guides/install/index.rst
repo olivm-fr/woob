@@ -11,6 +11,17 @@ You can use ``pip`` to install the latest `woob package <https://pypi.org/projec
 
     $ pip install woob
 
+From Pipx
+=========
+
+To install woob system wide, we recommand to use ``pipx``.
+
+    $ pipx install woob
+
+When a module requires a dependence, you have to use the pipx inject command. For example:
+
+    $ pipx inject woob python-jose
+
 
 From source code
 ================
