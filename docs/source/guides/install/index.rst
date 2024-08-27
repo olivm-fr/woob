@@ -18,6 +18,10 @@ To install woob system wide, we recommand to use ``pipx``.
 
     $ pipx install woob
 
+To install latest version from main branch
+
+    $ pipx install git+https://gitlab.com/woob/woob.git
+
 When a module requires a dependence, you have to use the pipx inject command. For example:
 
     $ pipx inject woob python-jose
