@@ -22,10 +22,19 @@ To install latest version from main branch
 
     $ pipx install git+https://gitlab.com/woob/woob.git
 
-When a module requires a dependence, you have to use the pipx inject command. For example:
+Many modules require some dependencies, you suggest to inject these modules :
 
+    $ pipx inject woob prettytable
     $ pipx inject woob python-jose
-
+    $ pipx inject woob feedparser
+    $ pipx inject woob selenium
+    $ pipx inject woob geopy
+    $ pipx inject woob cryptography
+    $ pipx inject woob pycryptodome
+    $ pipx inject woob xlrd
+    $ pipx inject woob cloudscraper
+    $ pipx inject woob jwt
+    $ pipx inject woob openai
 
 From source code
 ================
