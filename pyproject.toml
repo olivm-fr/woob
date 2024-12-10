@@ -54,6 +54,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+docs = [
+    "cloudscraper",
+    "feedparser",
+    "selenium",
+    "sphinx",
+    "sphinx-autodoc-typehints",
+    "sphinxcontrib-jquery",
+]
 tests = [
     "prettytable==3.6.0",
     "responses==0.23.1",
@@ -174,3 +182,8 @@ commands = [
     ["python", "-m", "build"],
     ["twine", "check", "dist/*"],
 ]
+
+[tool.tox.env.docs]
+allowlist_externals = ["make"]
+extras = ["docs", "tests"]
+commands = [["make", "-C", "docs", "html"]]
