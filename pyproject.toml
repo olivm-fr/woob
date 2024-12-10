@@ -147,7 +147,7 @@ include = ["woob", "woob.*", "weboob"]
 
 [tool.tox]
 requires = ["tox>=4.21"]
-env_list = ["py39", "py310", "py311", "py312", "py313", "build"]
+env_list = ["py39", "py310", "py311", "py312", "py313", "bandit", "build"]
 
 [tool.tox.env_run_base]
 deps = [
@@ -156,6 +156,14 @@ deps = [
 ]
 extras = ["tests"]
 commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules"]]
+
+[tool.tox.env.bandit]
+deps = ["bandit"]
+commands = [
+    ["bandit", "-r", "woob"],
+    ["bandit", "-r", "modules"],
+    ["bandit", "-r", "contrib"],
+]
 
 [tool.tox.env.build]
 deps = [
