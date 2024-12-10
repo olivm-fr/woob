@@ -53,6 +53,12 @@ dependencies = [
     "deprecated",
 ]
 
+[project.optional-dependencies]
+tests = [
+    "prettytable==3.6.0",
+    "responses==0.23.1",
+]
+
 [project.scripts]
 woob = "woob.launcher:Launcher.run"
 
@@ -62,6 +68,9 @@ woob = "woob.launcher:Launcher.run"
 "Homepage" = "https://woob.tech"
 "Release notes" = "https://gitlab.com/woob/woob/-/releases"
 "Source" = "https://gitlab.com/woob/woob"
+
+[tool.black]
+line-length = 120
 
 [tool.commitizen]
 name = "cz_conventional_commits"
@@ -136,5 +145,14 @@ testpaths = [
 [tool.setuptools.packages.find]
 include = ["woob", "woob.*", "weboob"]
 
-[tool.black]
-line-length = 120
+[tool.tox]
+requires = ["tox>=4.21"]
+env_list = ["py39", "py310", "py311", "py312", "py313"]
+
+[tool.tox.env_run_base]
+deps = [
+    "pytest",
+    "pytest-cov",
+]
+extras = ["tests"]
+commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules"]]

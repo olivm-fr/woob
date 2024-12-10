@@ -2,6 +2,7 @@
 *.egg-info
 *.pyc
 .mypy.out
+/.tox
 /localconfig
 /localenv
 all-requirements.txt
