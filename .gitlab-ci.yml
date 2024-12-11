@@ -31,6 +31,12 @@ stages:
   before_script:
     - python -m pip install pre-commit
 
+.tox:
+  <<: *except-default
+  image: python:3.9
+  before_script:
+    - python -m pip install --upgrade tox
+
 pre-commit mypy:
   stage: lint
   extends: .pre-commit
@@ -75,13 +81,10 @@ lint strict:
       codequality: gl-qa-report-flake8-strict.json
 
 bandit:
-  extends: .python_version
   stage: lint
+  extends: .tox
   script:
-    - pip install bandit>=1.8.1
-    - bandit -r woob
-    - bandit -r modules
-    - bandit -r contrib
+    - tox run -e bandit
 
 check modules:
   stage: test
@@ -91,10 +94,9 @@ check modules:
 
 test:
   stage: test
-  extends: .python_version
+  extends: .tox
   script:
-    - ./tools/run_tests.sh --no-modules
-    - coverage xml -o coverage.xml -i
+    - tox run -e py39 -- -sv --cov-report=xml:coverage.xml
   artifacts:
     reports:
       coverage_report:
@@ -103,17 +105,15 @@ test:
 
 doc:
   stage: doc
-  extends: .python_version
+  extends: .tox
   script:
-    - make docs
+    - tox run -e docs
 
 build:
   stage: build
-  extends: .python_version
+  extends: .tox
   script:
-    - pip install build twine
-    - python -m build
-    - twine check dist/*.whl
+    - tox run -e build
 
 local install:
   stage: build

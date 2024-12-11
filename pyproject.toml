@@ -189,7 +189,7 @@ deps = [
     "pytest-cov",
 ]
 extras = ["tests"]
-commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules"]]
+commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules", {replace = "posargs", default = [], extend = true}]]
 
 [tool.tox.env.bandit]
 deps = ["bandit"]
