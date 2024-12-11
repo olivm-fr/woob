@@ -32,8 +32,8 @@ docs:
 
 all-requirements.txt: pyproject.toml
 	pip install -U pip-tools
-	pip-compile --resolver=backtracking --no-emit-index-url -o all-requirements.txt --all-extras pyproject.toml
+	pip-compile --resolver=backtracking --no-emit-index-url -o $@ --all-extras $<
 
 sync-deps: all-requirements.txt
 	pip install -U pip-tools
-	pip-sync all-requirements.txt
+	pip-sync $<
