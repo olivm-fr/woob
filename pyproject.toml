@@ -84,6 +84,14 @@ tests = [
     "prettytable==3.6.0",
     "responses==0.23.1",
 ]
+typing = [
+    "mypy",
+    "types-pyyaml",
+    "types-requests",
+    "types-setuptools",
+    "types-simplejson",
+    "types-termcolor",
+]
 
 [project.scripts]
 woob = "woob.launcher:Launcher.run"
