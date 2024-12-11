@@ -32,7 +32,7 @@ docs:
 
 all-requirements.txt: pyproject.toml
 	pip install -U pip-tools
-	pip-compile --resolver=backtracking --no-emit-index-url -o all-requirements.txt pyproject.toml requirements-dev.txt
+	pip-compile --resolver=backtracking --no-emit-index-url -o all-requirements.txt --all-extras pyproject.toml
 
 sync-deps: all-requirements.txt
 	pip install -U pip-tools
