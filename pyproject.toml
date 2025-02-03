@@ -45,7 +45,7 @@ dependencies = [
     "unidecode",
     "Pillow",
     "Babel",
-    "packaging ~= 23.0",
+    "packaging >=23.0, <25",
     "pycountry",
     "rich ~= 13.0",
     "termcolor",
