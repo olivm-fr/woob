@@ -125,7 +125,7 @@ Woob is a wide project which has several backends and applications, and changes 
 How it works
 ------------
 
-You need `nose <http://nose.readthedocs.org/en/latest/>`_ installed.
+You need `pytest <https://docs.pytest.org/>`_ installed.
 
 To run the automated tests, use this script::
 
@@ -146,6 +146,10 @@ If a module name is passed as argument, only this module will be tested. For exa
 To test with a Python 3 interpreter, set the ``-3`` flag (before all other arguments)::
 
     $ tools/run_tests.sh -3
+
+Alternatively, you can use tox::
+
+    $ tox run
 
 Write a test case
 -----------------
