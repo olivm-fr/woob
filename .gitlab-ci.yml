@@ -37,6 +37,18 @@ stages:
   before_script:
     - python -m pip install --upgrade tox
 
+.tox_py_matrix:
+  extends: .tox
+  parallel:
+    matrix:
+      - PYTHON_VERSION:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+  image: python:$PYTHON_VERSION
+
 pre-commit mypy:
   stage: lint
   extends: .pre-commit
@@ -94,9 +106,9 @@ check modules:
 
 test:
   stage: test
-  extends: .tox
+  extends: .tox_py_matrix
   script:
-    - tox run -e py39 -- -sv --cov-report=xml:coverage.xml
+    - tox run -e py${PYTHON_VERSION//.} -- -sv --cov-report=xml:coverage.xml
   artifacts:
     reports:
       coverage_report:
