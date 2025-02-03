@@ -32,14 +32,46 @@ specific module, the first line of your commit message should read
 Check your patch
 ----------------
 
-You can run these scripts to be sure your patch doesn't break anything::
+As the project codebase is pretty large, having a consistent developer experience (coding style, etc) is primordial.
+
+Woob uses `pre-commit <https://pre-commit.com/>`_ to apply most of the project's policies to your commits.
+These checks are also executed on the `Gitlab CI <https://gitlab.com/woob/woob/pipelines>`_ but
+having pre-commit installed locally allows getting feedback as soon as possible.
+
+To use pre-commit, install it either from your package manager or from pip and
+enable it to manage git hooks in your checkout::
+
+    $ pre-commit install
+    pre-commit installed at .git/hooks/commit-msg
+    pre-commit installed at .git/hooks/pre-commit
+
+After this, you may work with git as usual and it will trigger registered hooks as appropriate.
+
+The project also provides `tox <https://tox.wiki/>`_ configuration to easily run tests and
+other development tools in a reproducible manner.
+Like pre-commit, tox is used in the Gitlab CI so creating merge request should be a walk in the park.
+
+To use tox, install it either from your package manager or from pip and run it. No extra setup is required.
+
+.. code-block::
+
+    $ tox run
+    [...]
+      py311: SKIP (0.05 seconds)
+      py312: OK (42.41=setup[23.54]+cmd[18.87] seconds)
+      py313: OK (27.14=setup[13.95]+cmd[13.19] seconds)
+      bandit: OK (51.00=setup[13.18]+cmd[4.88,32.38,0.56] seconds)
+      build: OK (20.17=setup[14.62]+cmd[5.04,0.52] seconds)
+      congratulations :) (141.48 seconds)
+
+You can also run these scripts to be sure your patch doesn't break anything::
 
     $ tools/pyflakes.sh
     $ tools/woob_lint.sh
     $ tools/run_tests.sh yourmodulename  # or without yourmodulename to test everything
 
-Perhaps you should also write or fix tests. These tests are automatically run by
-`Gitlab CI <https://gitlab.com/woob/woob/pipelines>`_ at each commit and merge requests.
+Perhaps you should also write or fix tests.
+These tests are automatically run by Gitlab CI at each commit and merge requests.
 
 Create a merge request or send a patch
 --------------------------------------
