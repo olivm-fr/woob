@@ -25,6 +25,21 @@ stages:
     - python -m pip install --upgrade pip setuptools
     - python -m pip install --upgrade -e . --group dev
 
+.python_matrix:
+  <<: *except-default
+  parallel:
+    matrix:
+      - PYTHON_VERSION:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+  image: python:$PYTHON_VERSION
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install --upgrade -e . --group dev
+
 .pre-commit:
   <<: *except-default
   image: python:3.9
@@ -100,7 +115,7 @@ bandit:
 
 check modules:
   stage: test
-  extends: .python_version
+  extends: .python_matrix
   script:
     - .ci/check_modules.sh
 
@@ -129,6 +144,6 @@ build:
 
 local install:
   stage: build
-  extends: .python_version
+  extends: .python_matrix
   script:
     - ./tools/local_install.sh --local-modules ~/bin
