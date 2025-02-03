@@ -18,7 +18,7 @@ stages:
   except:
     - tags
 
-.python_version:
+.python_version: &python-base-env
   <<: *except-default
   image: python:3.9
   before_script:
@@ -26,9 +26,9 @@ stages:
     - python -m pip install --upgrade -e . --group dev
 
 .python_matrix:
-  <<: *except-default
+  <<: [*except-default, *python-base-env]
   parallel:
-    matrix:
+    matrix: &python-support-matrix
       - PYTHON_VERSION:
           - "3.9"
           - "3.10"
@@ -36,32 +36,21 @@ stages:
           - "3.12"
           - "3.13"
   image: python:$PYTHON_VERSION
-  before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install --upgrade -e . --group dev
 
 .pre-commit:
-  <<: *except-default
-  image: python:3.9
+  <<: [*except-default, *python-base-env]
   before_script:
     - python -m pip install pre-commit
 
 .tox:
-  <<: *except-default
-  image: python:3.9
+  <<: [*except-default, *python-base-env]
   before_script:
     - python -m pip install --upgrade tox
 
 .tox_py_matrix:
   extends: .tox
   parallel:
-    matrix:
-      - PYTHON_VERSION:
-          - "3.9"
-          - "3.10"
-          - "3.11"
-          - "3.12"
-          - "3.13"
+    matrix: *python-support-matrix
   image: python:$PYTHON_VERSION
 
 pre-commit mypy:
