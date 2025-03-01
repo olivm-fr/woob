@@ -15,10 +15,14 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
+from collections.abc import Iterator
 from datetime import date, datetime, time, timedelta
 
 # because we don't want to import this file by "import json"
 from decimal import Decimal
+from typing import Any
 
 
 __all__ = ["json", "mini_jsonpath"]
@@ -36,7 +40,7 @@ except ImportError:
 from woob.capabilities.base import BaseObject, NotAvailable, NotLoaded
 
 
-def mini_jsonpath(node, path):
+def mini_jsonpath(node: str | dict[Any, Any], path: str) -> Iterator[Any]:
     """
     Evaluates a dot separated path against JSON data. Path can contains
     star wilcards. Always returns a generator.
@@ -52,15 +56,23 @@ def mini_jsonpath(node, path):
     [13, 42, 128]
     """
 
-    def iterkeys(i):
-        return range(len(i)) if isinstance(i, list) else i
+    def iterkeys(i: dict[Any, Any] | list[Any]) -> list[int] | list[str]:
+        # Wildcard operator applies to objects and arrays
+        # https://www.rfc-editor.org/rfc/rfc9535.html#name-semantics-4
+        if isinstance(i, list):
+            return list(range(len(i)))
+        return list(i.keys())
 
-    def cut(s):
-        p = s.split(".", 1) if s else [None]
-        return p + [None] if len(p) == 1 else p
+    def cut(s: str | None) -> tuple[str, str | None] | tuple[None, None]:
+        if s:
+            p = (s.split(".", 1) + [None])[:2]
+            # mypy has trouble analyzing tuple size even with assertion assistance
+            return tuple(p)  # type: ignore[return-value]
+        return (None, None)
 
     if isinstance(node, str):
         node = json.loads(node)
+    assert not isinstance(node, str)
 
     queue = [(node, cut(path))]
     while queue:
@@ -72,8 +84,10 @@ def mini_jsonpath(node, path):
             keys = iterkeys(node)
         elif type(node) not in (dict, list) or name not in node:
             continue
+        elif isinstance(node, list):
+            keys = [int(name)]
         else:
-            keys = [int(name) if type(node) is list else name]
+            keys = [name]
         for k in keys:
             queue.append((node[k], cut(rest)))
 
@@ -87,13 +101,13 @@ class WoobEncoder(json.JSONEncoder):
     '{"id": "1234@my", "url": null}'
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         # avoid simplejson internal Decimal handling
         if "use_decimal" in kwargs:
             kwargs["use_decimal"] = False
         super().__init__(*args, **kwargs)
 
-    def default(self, o):
+    def default(self, o: Any) -> Any:
         if o is NotAvailable:
             return None
         elif o is NotLoaded:
