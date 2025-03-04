@@ -22,7 +22,6 @@ from hashlib import sha256
 from woob.browser import URL, need_login
 from woob.browser.browsers import ClientError, ServerError
 from woob.capabilities.bank import Account
-from woob.capabilities.bill import Subscription
 from woob.tools.decorators import retry
 from woob_modules.cmso.par.browser import CmsoParBrowser
 
