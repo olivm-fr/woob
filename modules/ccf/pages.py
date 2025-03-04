@@ -44,10 +44,11 @@ class RibPage(LoggedPage, JsonPage):
 
 
 ACCOUNT_TYPES = {
-        "CHECKING": AccountType.CHECKING,
-        "STOCK": AccountType.PEA,
-        "HAV": AccountType.LIFE_INSURANCE,
+    "CHECKING": AccountType.CHECKING,
+    "STOCK": AccountType.PEA,
+    "HAV": AccountType.LIFE_INSURANCE,
 }
+
 
 class AccountsPage(LoggedPage, JsonPage):
     @method
@@ -68,14 +69,17 @@ class AccountsPage(LoggedPage, JsonPage):
 
             # woob bill ls compat
             obj__lib = Field("label")
-            obj__owner = Format("%s %s",
-                    Dict('participants/0/firstName'),
-                    Dict('participants/0/lastName'),
+            obj__owner = Format(
+                "%s %s",
+                Dict("participants/0/firstName"),
+                Dict("participants/0/lastName"),
             )
             obj__owner_name = Field("_owner")
 
 
-class Balance: pass
+class Balance:
+    pass
+
 
 class BalancePage(LoggedPage, JsonPage):
     @method
@@ -88,10 +92,10 @@ class BalancePage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Balance
 
-            obj_amount = CleanDecimal.SI(Dict('balanceAmount/amount'))
-            obj_currency = Dict('balanceAmount/currency')
+            obj_amount = CleanDecimal.SI(Dict("balanceAmount/amount"))
+            obj_currency = Dict("balanceAmount/currency")
 
-            obj_refDate = Date(Dict('referenceDate'))
+            obj_refDate = Date(Dict("referenceDate"))
             obj_balType = Dict("balanceType")
 
 
@@ -107,6 +111,7 @@ class SubscriptionsPage(LoggedPage, JsonPage):
             # there can be several "participants" but no matter what _contract_id is,
             # list of related documents will be the same, so we can simply take the first one
             obj__contract_id = Dict("participants/0/id")  # CAUTION non persistant
+
             def obj_subscriber(self):
                 def key_participants(participant):
                     role = participant.get("role", None)
@@ -114,7 +119,7 @@ class SubscriptionsPage(LoggedPage, JsonPage):
                         role_idx = 0
                     else:
                         role_idx = 1
-                    return '%s-%s-%s' % (role_idx, participant.get("lastName"), participant.get("firstName"))
+                    return "%s-%s-%s" % (role_idx, participant.get("lastName"), participant.get("firstName"))
 
                 result = ""
                 for participant in sorted(Dict("participants")(self), key=key_participants):

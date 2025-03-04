@@ -41,18 +41,11 @@ class CCFBrowser(CmsoParBrowser):
     # for accounts list & balance. Like modules/allianzbanque/browser.py
     # We should probably extract a common browser.
 
-
     # accounts_: note the trailing underscore
     # don't override super.accounts, used indirectly by get_ibans_from_ribs
-    accounts_ = URL(
-        r"/distri-account-api/api/v1/persons/me/accounts", AccountsPage
-    )
-    balance = URL(
-        r"/distri-account-api/api/v1/customers/me/accounts/(?P<account_id>.*)/balances", BalancePage
-    )
-    subscriptions = URL(
-        r"/distri-account-api/api/v1/customers/me/accounts", SubscriptionsPage
-    )
+    accounts_ = URL(r"/distri-account-api/api/v1/persons/me/accounts", AccountsPage)
+    balance = URL(r"/distri-account-api/api/v1/customers/me/accounts/(?P<account_id>.*)/balances", BalancePage)
+    subscriptions = URL(r"/distri-account-api/api/v1/customers/me/accounts", SubscriptionsPage)
     documents = URL(r"/documentapi/api/v2/documents\?type=RELEVE$", DocumentsPage)
     document_pdf = URL(r"/documentapi/api/v2/documents/(?P<document_id>.*)/content\?database=(?P<database>.*)")
     rib_details = URL(r"/domiapi/oauth/json/accounts/recupererRib$", RibPage)
@@ -115,8 +108,8 @@ class CCFBrowser(CmsoParBrowser):
     @need_login
     def get_subscription_list(self):
         params = {
-            'types': 'CHECKING',
-            'roles': 'TIT,COT',
+            "types": "CHECKING",
+            "roles": "TIT,COT",
         }
         self.subscriptions.go(params=params)
         return self.page.iter_subscriptions()
@@ -142,14 +135,14 @@ class CCFBrowser(CmsoParBrowser):
         for account in accounts_list:
             account._original_id = account.id
             self.update_iban(account)
-        return { account.id: account.iban for account in accounts_list }
+        return {account.id: account.iban for account in accounts_list}
 
     @need_login
     def iter_accounts(self):
         ibans = self.get_ibans_from_ribs()
 
         go_accounts = retry(ClientError, tries=5)(self.accounts_.go)
-        go_accounts(params={'types': 'CHECKING,SAVING'})
+        go_accounts(params={"types": "CHECKING,SAVING"})
 
         accounts_list = list(self.page.iter_accounts())
         for account in accounts_list:
