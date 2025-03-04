@@ -33,7 +33,7 @@ from woob.browser.filters.standard import (
     Regexp,
 )
 from woob.browser.pages import JsonPage, LoggedPage
-from woob.capabilities.bank import Account, AccountType, AccountOwnerType, AccountOwnership
+from woob.capabilities.bank import Account, AccountOwnership, AccountOwnerType, AccountType
 from woob.capabilities.bill import Document, DocumentTypes, Subscription
 from woob.tools.capabilities.bank.transactions import FrenchTransaction
 
