@@ -119,7 +119,7 @@ class SubscriptionsPage(LoggedPage, JsonPage):
                         role_idx = 0
                     else:
                         role_idx = 1
-                    return "%s-%s-%s" % (role_idx, participant.get("lastName"), participant.get("firstName"))
+                    return "{}-{}-{}".format(role_idx, participant.get("lastName"), participant.get("firstName"))
 
                 result = ""
                 for participant in sorted(Dict("participants")(self), key=key_participants):
