@@ -18,23 +18,13 @@ To install woob system wide, we recommand to use ``pipx``.
 
     $ pipx install woob
 
-To install latest version from main branch
+To install the development version
 
     $ pipx install git+https://gitlab.com/woob/woob.git
 
 Many modules require some dependencies, you suggest to inject these modules :
 
-    $ pipx inject woob prettytable
-    $ pipx inject woob python-jose
-    $ pipx inject woob feedparser
-    $ pipx inject woob selenium
-    $ pipx inject woob geopy
-    $ pipx inject woob cryptography
-    $ pipx inject woob pycryptodome
-    $ pipx inject woob xlrd
-    $ pipx inject woob cloudscraper
-    $ pipx inject woob jwt
-    $ pipx inject woob openai
+    $ pipx inject woob prettytable python-jose feedparser selenium geopy cryptography pycryptodome xlrd cloudscraper jwt openai
 
 From source code
 ================
