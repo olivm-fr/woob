@@ -642,7 +642,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
         }
         try:
             self.account_iban.go(space=self.space, params=params)
-        except (ClientError, ServerError):
+        except (ClientError, ServerError, HTTPNotFound):
             self.logger.warning('Request to IBAN failed for account id "%s"', woob_account_id)
             return NotAvailable
 
