@@ -61,7 +61,13 @@ class AccountsPage(LoggedPage, JsonPage):
             obj_currency = Dict("currency")
 
             obj_type = Map(Dict("type"), ACCOUNT_TYPES, AccountType.UNKNOWN)
-            obj_ownership = AccountOwnership.OWNER
+
+            def obj_ownership(self):
+                if len(Dict("participants")(self)) > 1:
+                    return AccountOwnership.CO_OWNER
+                else:
+                    return AccountOwnership.OWNER
+
             obj_owner_type = AccountOwnerType.PRIVATE
 
             obj__type = Dict("type")
