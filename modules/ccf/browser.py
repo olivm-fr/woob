@@ -16,11 +16,11 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import random
+from base64 import b64encode
 from datetime import date
+from hashlib import sha256
 
 from dateutil.relativedelta import relativedelta
-from base64 import b64encode
-from hashlib import sha256
 
 from woob.browser import URL, need_login
 from woob.browser.browsers import ClientError, ServerError
