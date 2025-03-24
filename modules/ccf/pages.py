@@ -82,6 +82,9 @@ class AccountsPage(LoggedPage, JsonPage):
             )
             obj__owner_name = Field("_owner")
 
+    def fill_coming(self, account):
+        account.coming = CleanDecimal.US(Dict("all"))(self.doc)
+
 
 class Balance:
     pass

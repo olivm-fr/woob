@@ -16,6 +16,9 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import random
+from datetime import date
+
+from dateutil.relativedelta import relativedelta
 from base64 import b64encode
 from hashlib import sha256
 
@@ -40,6 +43,10 @@ class CCFBrowser(CmsoParBrowser):
     # for accounts list & balance. Like modules/allianzbanque/browser.py
     # We should probably extract a common browser.
 
+    balances_comings = URL(
+        r"/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/total-upcoming-transactions",
+        AccountsPage,
+    )
     # accounts_: note the trailing underscore
     # don't override super.accounts, used indirectly by get_ibans_from_ribs
     accounts_ = URL(r"/distri-account-api/api/v1/persons/me/accounts", AccountsPage)
@@ -151,6 +158,9 @@ class CCFBrowser(CmsoParBrowser):
             account.iban = ibans.get(account.id)
             if account.iban:
                 account.number = account.iban.account_code
+            date_to = (date.today() + relativedelta(days=5)).strftime("%Y-%m-%dT11:00:00.000Z")
+            self.balances_comings.go(account_id=account.id, params={"dateTo": date_to})
+            self.page.fill_coming(account)
 
         return accounts_list
 
