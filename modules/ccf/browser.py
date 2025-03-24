@@ -47,6 +47,9 @@ class CCFBrowser(CmsoParBrowser):
         r"/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/total-upcoming-transactions",
         AccountsPage,
     )
+    transactions = URL(
+        r"/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/transactions", TransactionsPage
+    )
     # accounts_: note the trailing underscore
     # don't override super.accounts, used indirectly by get_ibans_from_ribs
     accounts_ = URL(r"/distri-account-api/api/v1/persons/me/accounts", AccountsPage)
@@ -55,9 +58,6 @@ class CCFBrowser(CmsoParBrowser):
     documents = URL(r"/documentapi/api/v2/documents\?type=RELEVE$", DocumentsPage)
     document_pdf = URL(r"/documentapi/api/v2/documents/(?P<document_id>.*)/content\?database=(?P<database>.*)")
     rib_details = URL(r"/domiapi/oauth/json/accounts/recupererRib$", RibPage)
-    transactions = URL(
-        r"/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/transactions", TransactionsPage
-    )
 
     def __init__(self, *args, **kwargs):
         # most of url return 403 without this origin header
