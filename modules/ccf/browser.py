@@ -149,6 +149,8 @@ class CCFBrowser(CmsoParBrowser):
             balance = list(self.page.iter_balances())[0]
             account.balance = balance.amount
             account.iban = ibans.get(account.id)
+            if account.iban:
+                account.number = account.iban.account_code
 
         return accounts_list
 
