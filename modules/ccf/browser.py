@@ -161,6 +161,7 @@ class CCFBrowser(CmsoParBrowser):
             date_to = (date.today() + relativedelta(days=5)).strftime("%Y-%m-%dT11:00:00.000Z")
             self.balances_comings.go(account_id=account.id, params={"dateTo": date_to})
             self.page.fill_coming(account)
+            account._original_id = account.id
 
         return accounts_list
 
