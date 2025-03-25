@@ -158,7 +158,7 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
 
             headers = {
                 "content-type": "application/json",
-                "accept": "application/json"
+                "accept": "application/json",
             }
             self.location("https://login.orange.fr/api/access", json={}, headers=headers)
 
