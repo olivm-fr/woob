@@ -37,6 +37,12 @@ class PasswordPage(JsonPage):
             # The password expired message on the website is fetched from a javascript file.
             return "Votre mot de passe actuel n’est pas suffisamment sécurisé et doit être renforcé."
 
+    def get_idme_error_message(self):
+        #b'{"nextStep":"redirect","data":{"location":"https://r.orange.fr/r/Oerreur_403?ref=euiidme"}}'
+        if self.doc.get("data").get("location") == "https://r.orange.fr/r/Oerreur_403?ref=euiidme":
+            # The password expired message on the website is fetched from a javascript file.
+            return "Idme Authentication error."
+
 
 class ManageCGI(HTMLPage):
     pass
