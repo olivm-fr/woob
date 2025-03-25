@@ -284,7 +284,7 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
                 subscriptions[sub.id] = sub
                 subscription_id_list.append(sub.id)
             nb_sub = self.page.doc["totalContracts"]
-        except (ServerError, HTTPNotFound):
+        except (ClientError, ServerError, HTTPNotFound):
             pass
 
         try:
