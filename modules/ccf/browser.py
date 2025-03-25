@@ -153,7 +153,7 @@ class CCFBrowser(CmsoParBrowser):
         accounts_list = list(self.page.iter_accounts())
         for account in accounts_list:
             self.balance.go(account_id=account.id)
-            balance = list(self.page.iter_balances())[0]
+            balance = list(self.page.iter_balances())[0 if account.type == Account.TYPE_CHECKING else 1]  # valorisation
             account.balance = balance.amount
             account.iban = ibans.get(account.id)
             if account.iban:
