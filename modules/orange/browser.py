@@ -28,6 +28,7 @@ from woob.capabilities import NotAvailable
 from woob.capabilities.bill import Subscription
 from woob.exceptions import (
     ActionNeeded,
+    AuthMethodNotImplemented,
     BrowserIncorrectPassword,
     BrowserPasswordExpired,
     BrowserUnavailable,
