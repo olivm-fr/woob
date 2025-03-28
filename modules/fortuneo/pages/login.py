@@ -18,9 +18,27 @@
 # flake8: compatible
 
 from woob.browser.filters.html import Attr
+from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Coalesce
-from woob.browser.pages import HTMLPage
+from woob.browser.pages import HTMLPage, JsonPage, RawPage
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserUserBanned
+
+
+class EnvPage(JsonPage):
+    def api_key(self):
+        return Dict("apigeeApiKey")(self.doc)
+
+    def api_url(self):
+        return Dict("apigeeUrl")(self.doc)
+
+
+class LoginLandingPage(HTMLPage):
+    def is_here(self):
+        return (CleanText('//title[text() = "Fortuneo"]')(self.doc)) and (CleanText('//div[@id="layout"]')(self.doc))
+
+
+class AuthorizePage(RawPage):
+    pass
 
 
 class LoginPage(HTMLPage):

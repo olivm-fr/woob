@@ -18,12 +18,16 @@
 
 # flake8: compatible
 
+import base64
 import json
 import re
+import secrets
 import time
 from datetime import datetime, timedelta
+from hashlib import sha256
+from urllib.parse import parse_qsl, urlparse
 
-from woob.browser import URL, need_login
+from woob.browser import URL, OAuth2PKCEMixin, need_login
 from woob.browser.exceptions import ClientError
 from woob.browser.filters.standard import RegexpError
 from woob.browser.mfa import TwoFactorBrowser
@@ -46,6 +50,7 @@ from woob.exceptions import (
 from woob.tools.capabilities.bank.bank_transfer import sorted_transfers
 from woob.tools.capabilities.bank.investments import create_french_liquidity
 from woob.tools.capabilities.bank.transactions import sorted_transactions
+from woob.tools.decorators import retry
 from woob.tools.value import Value
 
 from .pages.accounts_list import (
@@ -63,7 +68,7 @@ from .pages.accounts_list import (
     ProfilePageCSV,
     SecurityPage,
 )
-from .pages.login import LoginPage, TwoFaPage, UnavailablePage
+from .pages.login import AuthorizePage, EnvPage, LoginLandingPage, LoginPage, TwoFaPage, UnavailablePage
 from .pages.transfer import (
     ConfirmRecipientPage,
     ConfirmTransferPage,
@@ -78,10 +83,17 @@ from .pages.transfer import (
 __all__ = ["FortuneoBrowser"]
 
 
-class FortuneoBrowser(TwoFactorBrowser):
+class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
     HAS_CREDENTIALS_ONLY = True
     BASEURL = "https://mabanque.fortuneo.fr"
     STATE_DURATION = 5
+
+    env_page = URL(r"/env.json", EnvPage)
+    landing_page = URL(r"/mon-espace(#session_id=(?P<account_id>.*))?", LoginLandingPage)
+    _authorize = URL(r"https://api.fortuneo.fr/oauth-pkce/authorize", AuthorizePage)
+    _authorization_code = URL(r"https://api.fortuneo.fr/oauth-pkce/authorization-code", AuthorizePage)
+    _access_token = URL(r"https://api.fortuneo.fr/oauth-pkce/token", AuthorizePage)
+    checkaccess = URL(r"/checkacces", AuthorizePage)
 
     login_page = URL(r".*identification\.jsp.*", LoginPage)
     twofa_page = URL(
@@ -162,6 +174,7 @@ class FortuneoBrowser(TwoFactorBrowser):
     )
 
     need_reload_state = None
+    authorization_code_uri = None
 
     __states__ = ["need_reload_state", "add_recipient_form", "sms_form", "execute_transfer_form"]
 
@@ -171,10 +184,24 @@ class FortuneoBrowser(TwoFactorBrowser):
         self.action_needed_processed = False
         self.add_recipient_form = None
         self.sms_form = None
+        self._fetch_auth_parameters()
 
         self.AUTHENTICATION_METHODS = {
             "code": self.handle_sms,
         }
+
+    @retry(BrowserUnavailable)
+    def _fetch_auth_parameters(self):
+        self.env_page.go()
+        self.client_id = self.page.api_key()
+        self.api_url = self.page.api_url()
+
+    def do_login(self):
+        self.AUTHORIZATION_URI = self._authorize.with_base(self.api_url).build(browser=self)
+        self.authorization_code_uri = self._authorization_code.with_base(self.api_url).build(browser=self)
+        self.ACCESS_TOKEN_URI = self._access_token.with_base(self.api_url).build(browser=self)
+        self.redirect_uri = self.landing_page.build()
+        super().do_login()
 
     def init_login(self):
         self.first_login_step()
@@ -194,6 +221,67 @@ class FortuneoBrowser(TwoFactorBrowser):
             raise BrowserQuestion(Value("code", label="Entrez le code reçu par SMS"))
 
         self.last_login_step()
+
+    def code_verifier(self, bytes_number: int = 64) -> str:
+        return "".join(["0" + secrets.token_hex(4).lstrip("0") for x in range(28)])
+
+    def code_challenge(self, verifier: str) -> str:
+        digest = sha256(verifier.encode("utf8")).digest()
+        return base64.standard_b64encode(digest).decode("ascii")
+
+    def build_authorization_parameters(self):
+        params = super().build_authorization_parameters()
+        params.update(
+            {
+                "response_type": "code",
+                "error_uri": self.redirect_uri,
+            }
+        )
+        return params
+
+    def build_access_token_parameters(self, values: dict) -> dict:
+        params = super().build_access_token_parameters(values)
+        params.update(
+            {
+                "rememberMe": "true",
+            }
+        )
+        del params["client_secret"]
+        return params
+
+    def get_referrer(self, oldurl, newurl):
+        if (
+            (self.ACCESS_TOKEN_URI and newurl.startswith(self.ACCESS_TOKEN_URI))
+            or (self.AUTHORIZATION_URI and newurl.startswith(self.AUTHORIZATION_URI))
+            or (self.authorization_code_uri and newurl.startswith(self.authorization_code_uri))
+        ):
+            return "https://mabanque.fortuneo.fr/"
+        else:
+            return super().get_referrer(oldurl, newurl)
+
+    def update_token(self, auth_response: dict):
+        pass
+
+    @retry(BrowserUnavailable)
+    def request_authorization(self):
+        self.session.cookies.clear()
+
+        self.location(self.build_authorization_uri())
+        location_params = dict(parse_qsl(urlparse(self.url).fragment))
+        self.session_id = location_params["session_id"]
+
+        self.location(
+            self.authorization_code_uri,
+            params={"session_id": self.session_id},
+            data={"access_code": self.username, "password": self.password, "space": "PART"},
+            allow_redirects=False,
+        )
+        redirect_uri = self.response.headers.get("Location")
+        if redirect_uri:
+            location_params = dict(parse_qsl(urlparse(redirect_uri).fragment))
+            self.code = location_params["code"]
+            self.request_access_token({"code": self.code})
+            self.checkaccess.go(data={})
 
     def first_login_step(self):
         if not self.login_page.is_here():
