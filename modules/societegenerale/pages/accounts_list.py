@@ -523,7 +523,7 @@ def parse_outgoing_transfer_transaction(line: str | None) -> dict[str, str | BIC
 
     Maps transaction fields to respective dictionary keys.
     The returned dictionary contains a BIC and IBAN entry with respective
-    bjects from schwifty package. They are provided on a best effort basis and
+    objects from schwifty package. They are provided on a best effort basis and
     depend on the quality of data in schwifty.
 
     Examples:
