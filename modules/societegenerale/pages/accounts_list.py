@@ -776,7 +776,8 @@ class TransactionItemElement(ItemElement):
                 # On societe generale recipients are immediatly available.
                 recipient.enabled_at = datetime.datetime.now().replace(microsecond=0)
                 recipient.currency = "EUR"
-                recipient.bank_name = recipient.iban.bank_name
+                if recipient.iban:
+                    recipient.bank_name = recipient.iban.bank_name
                 self.env["recipient"] = recipient
 
         return
