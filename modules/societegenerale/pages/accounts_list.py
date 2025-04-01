@@ -148,6 +148,7 @@ class AccountsMainPage(HTMLLoggedPage):
                 "LIVRET": Account.TYPE_SAVINGS,
             }
 
+            obj_bank_name = "SG"
             obj_id = obj_number = CleanText(TableCell("id"), replace=[(" ", "")])
             obj_label = CleanText('.//span[@class="TypeCompte"]')
             obj_balance = MyDecimal(TableCell("balance"))
@@ -236,6 +237,7 @@ class AccountsPage(JsonBasePage):
                 "TITULAIRE": AccountOwnership.OWNER,
             }
 
+            obj_bank_name = "SG"
             obj_id = obj_number = CleanText(Dict("numeroCompteFormate"), replace=[(" ", "")])
             obj_label = Dict("labelToDisplay")
             obj_iban = Dict("iban")
