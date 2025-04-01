@@ -615,7 +615,7 @@ def parse_outgoing_transfer_transaction(line: str | None) -> dict[str, str | BIC
         tr_data["BIC"] = bic
 
     if m := re.search(
-        r"(?P<recipient>.+) (?P<day>\d{2}) (?P<month>\d{2}) "
+        r"(?P<recipient>.+) (?:(?P<day>\d{2}) (?P<month>\d{2}) )?"
         r"(?:SG (?P<branchid>\d+)|BQ (?P<bankid>\d+|\w+)) CPT (?P<acctid>\w+)",
         tr_data["POUR"],
     ):
