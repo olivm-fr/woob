@@ -42,7 +42,7 @@ from woob.capabilities.bank import (
     TransferStep,
 )
 from woob.capabilities.bank.wealth import CapBankWealth
-from woob.capabilities.base import empty, find_object
+from woob.capabilities.base import NotAvailable, NotLoaded, empty, find_object
 from woob.capabilities.captcha import exception_to_job
 from woob.capabilities.profile import CapProfile
 from woob.core.bcall import CallErrors
@@ -136,13 +136,15 @@ class OfxFormatter(IFormatter):
             stmtrs = message.find(".//CCSTMTRS")
 
         else:
-            bank_acct_from = [E.BANKID(account.iban.bank_code)]
-            if account.iban.branch_code:
-                bank_acct_from.append(E.BRANCHID(account.iban.branch_code))
-            bank_acct_from.append(E.ACCTID(account.iban.account_code))
-            bank_acct_from.append(E.ACCTTYPE(self.TYPES_ACCTS[self.account_type]))
-            if account.iban.national_checksum_digits:
-                bank_acct_from.append(E.ACCTKEY(account.iban.national_checksum_digits))
+            bank_acct_from = []
+            if account.iban and (account.iban != NotLoaded) and (account.iban != NotAvailable):
+                bank_acct_from = [E.BANKID(account.iban.bank_code)]
+                if account.iban.branch_code:
+                    bank_acct_from.append(E.BRANCHID(account.iban.branch_code))
+                bank_acct_from.append(E.ACCTID(account.iban.account_code))
+                bank_acct_from.append(E.ACCTTYPE(self.TYPES_ACCTS[self.account_type]))
+                if account.iban.national_checksum_digits:
+                    bank_acct_from.append(E.ACCTKEY(account.iban.national_checksum_digits))
 
             message = E.BANKMSGSRSV1(
                 E.STMTTRNRS(
