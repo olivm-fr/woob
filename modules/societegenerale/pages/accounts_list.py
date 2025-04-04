@@ -33,6 +33,7 @@ from woob.browser.filters.standard import (
     CleanDecimal,
     CleanText,
     Coalesce,
+    CountryCode,
     Currency,
     Date,
     Env,
@@ -42,9 +43,13 @@ from woob.browser.filters.standard import (
     Lower,
     Map,
     MapIn,
+    MultiJoin,
     Regexp,
+    Title,
+    Upper,
 )
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, XMLPage, pagination
+from woob.capabilities.address import PostalAddress
 from woob.capabilities.bank import Account, AccountOwnership, Loan, NoAccountsException, Recipient
 from woob.capabilities.bank.wealth import (
     Investment,
@@ -1508,6 +1513,63 @@ class HTMLProfilePage(HTMLLoggedPage):
         profile.email = CleanText('//span[@id="currentEmail"]')(self.doc)
 
         return profile
+
+
+class IdentityPage(JsonBasePage):
+    def get_profile(self):
+        profile = Person()
+        profile.lastname = Upper(Coalesce(Dict("donnees/nomUsage"), Dict("donnees/nomNaissance"), NotAvailable))(
+            self.doc
+        )
+        profile.firstname = Title(Dict("donnees/prenom", default=NotAvailable))(self.doc)
+        profile.name = f"{profile.firstname} {profile.lastname}"
+        profile.children = CleanDecimal(Dict("donnees/nombreEnfants"), default=NotAvailable)(self.doc)
+        profile.matrimonial = Dict("donnees/situationMaritale", default=NotAvailable)(self.doc)
+        profile.job = Dict("donnees/activite", default=NotAvailable)(self.doc)
+        profile.socioprofessional_category = Dict("donnees/categorieProfessionnelle", default=NotAvailable)(self.doc)
+        return profile
+
+
+class ContactDetailsPage(JsonBasePage):
+    def fill_profile(self, obj):
+        for phone in Dict("donnees/detailTelephones/telephones", default=[])(self.doc):
+            if not Dict("erreur", default=False)(phone) and Dict("valide", default=True)(phone):
+                numero = CleanText(Dict("numero"), default=None, replace=[(" ", "")])(phone)
+                if numero:
+                    typ = Dict("nature")(phone)
+                    if typ == "MOBILE":
+                        obj.mobile = numero
+                    elif typ == "DOMICILE":
+                        obj.phone = numero
+                    elif typ == "PROFESSIONNEL":
+                        obj.professional_phone = numero
+
+        location = PostalAddress()
+
+        ad1 = CleanText(Dict("donnees/adresse/complementAdresse1"), default=None)(self.doc)
+        ad2 = CleanText(Dict("donnees/adresse/complementAdresse2"), default=None)(self.doc)
+        num = CleanText(Dict("donnees/adresse/numeroEtVoie"), default=None)(self.doc)
+
+        adrs = []
+        if ad1:
+            adrs.append(ad1)
+        if ad2:
+            adrs.append(ad2)
+        if num:
+            adrs.append(num)
+
+        location.street = ", ".join(adrs)
+        location.postal_code = CleanText(Dict("donnees/adresse/codePostal", default=NotAvailable))(self.doc)
+        location.city = MultiJoin(
+            CleanText(Dict("donnees/adresse/serviceDistribution"), default=NotAvailable),
+            CleanText(Dict("donnees/adresse/ville"), default=NotAvailable),
+        )(self.doc)
+        location.country = CleanText(Dict("donnees/adresse/pays", default=NotAvailable))(self.doc)
+        location.country_code = CountryCode().filter(location.country)
+
+        obj.postal_address = location
+
+        obj.email = CleanText(Dict("donnees/email", default=NotAvailable))(self.doc)
 
 
 class UnavailableServicePage(LoggedPage, HTMLPage):

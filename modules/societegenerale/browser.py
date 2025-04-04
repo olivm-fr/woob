@@ -54,10 +54,11 @@ from .pages.accounts_list import (
     AccountsPage,
     AdvisorPage,
     CardHistoryPage,
+    ContactDetailsPage,
     CreditHistoryPage,
     CreditPage,
     HistoryPage,
-    HTMLProfilePage,
+    IdentityPage,
     LifeInsurance,
     LifeInsuranceAPI,
     LifeInsuranceHistory,
@@ -411,7 +412,8 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
 
     # Profile
     advisor = URL(r"/icd/pon/data/get-contacts.xml", AdvisorPage)
-    html_profile_page = URL(r"/com/dcr-web/dcr/dcr-coordonnees.html", HTMLProfilePage)
+    identity_page = URL(r"/icd/mpl/data/identite/consultation-authsec.json", IdentityPage)
+    contact_details_page = URL(r"/icd/mpl/data/coordonnees/consultation-authsec.json", ContactDetailsPage)
 
     bad_login = URL(r"/acces/authlgn.html", r"/error403.html", BadLoginPage)
     reinit = URL(r"/acces/changecodeobligatoire.html", r"/swm/swm-changemdpobligatoire.html", ReinitPasswordPage)
@@ -965,8 +967,11 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
 
     @need_login
     def get_profile(self):
-        self.html_profile_page.go()
-        return self.page.get_profile()
+        self.identity_page.go()
+        profile = self.page.get_profile()
+        self.contact_details_page.go()
+        self.page.fill_profile(profile)
+        return profile
 
     @need_login
     def iter_subscription(self):
