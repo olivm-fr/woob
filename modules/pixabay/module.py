@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Vincent A
 #
 # This file is part of a woob module.
@@ -19,19 +17,19 @@
 
 
 from woob.capabilities.file import LICENSES
-from woob.capabilities.image import CapImage, BaseImage, Thumbnail
-from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.image import BaseImage, CapImage, Thumbnail
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import PixabayBrowser
 
 
-__all__ = ['PixabayModule']
+__all__ = ["PixabayModule"]
 
 
 class Img(BaseImage):
     def __init__(self, *args):
-        super(Img, self).__init__(*args)
+        super().__init__(*args)
         self._page_url = None
 
     @classmethod
@@ -44,25 +42,26 @@ class Img(BaseImage):
 
 
 class PixabayModule(Module, CapImage):
-    NAME = 'pixabay'
-    DESCRIPTION = u'Pixabay photo search'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "pixabay"
+    DESCRIPTION = "Pixabay photo search"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = PixabayBrowser
 
-    CONFIG = BackendConfig(Value('username',                label='Username (only for full-size images)', default=''),
-                           ValueBackendPassword('password', label='Password', default=''),
-                           ValueBackendPassword('api_key',  label='API key (optional)', default='', noprompt=True))
+    CONFIG = BackendConfig(
+        Value("username", label="Username (only for full-size images)", default=""),
+        ValueBackendPassword("password", label="Password", default=""),
+        ValueBackendPassword("api_key", label="API key (optional)", default="", noprompt=True),
+    )
 
     def create_default_browser(self):
-        key = self.config['api_key'].get()
-        username = self.config['username'].get()
+        key = self.config["api_key"].get()
+        username = self.config["username"].get()
         if username:
-            return self.BROWSER(key, username,
-                                self.config['password'].get())
+            return self.BROWSER(key, username, self.config["password"].get())
         else:
             return self.BROWSER(key, None, None)
 
@@ -70,12 +69,12 @@ class PixabayModule(Module, CapImage):
         return self.get_image(_id)
 
     def _build_image(self, d):
-        img = Img(str(d['id']))
-        img.title = d['tags']
-        img.author = d['user']
-        img.thumbnail = Thumbnail(d['previewURL'])
-        img.url = d['webformatURL']
-        img._page_url = d['pageURL']
+        img = Img(str(d["id"]))
+        img.title = d["tags"]
+        img.author = d["user"]
+        img.thumbnail = Thumbnail(d["previewURL"])
+        img.url = d["webformatURL"]
+        img._page_url = d["pageURL"]
         img.license = LICENSES.COPYRIGHT
         return img
 
@@ -95,18 +94,18 @@ class PixabayModule(Module, CapImage):
             yield self._build_image(d)
 
     def fill_img(self, obj, fields):
-        if 'data' in fields:
+        if "data" in fields:
             if self.has_login():
                 obj.data = self.browser.download_image(obj.page_url)
             else:
                 obj.data = self.browser.open(obj.url).content
-        if 'thumbnail' in fields:
+        if "thumbnail" in fields:
             if not obj.thumbnail.data:
                 obj.thumbnail.data = self.browser.open(obj.thumbnail.url).content
         return obj
 
     def fill_thumb(self, obj, fields):
-        if 'data' in fields:
+        if "data" in fields:
             obj.data = self.browser.open(obj.url).content
         return obj
 

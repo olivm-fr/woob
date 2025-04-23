@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -21,7 +19,7 @@ from woob.tools.test import BackendTest
 
 
 class VlilleTest(BackendTest):
-    MODULE = 'vlille'
+    MODULE = "vlille"
 
     def test_vlille(self):
         _ = list(self.backend.iter_gauges())

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017-2021 Romain Bignon
 #
 # This file is part of a woob module.
@@ -25,16 +23,16 @@ from .browser import SprungeBrowser, SprungePaste
 
 
 class SprungeModule(Module, BasePasteModule):
-    NAME = 'sprunge'
-    MAINTAINER = u'Laurent Bachelier'
-    EMAIL = 'laurent@bachelier.name'
-    VERSION = '3.6'
-    DESCRIPTION = u'Sprunge text sharing tool'
-    LICENSE = 'AGPLv3+'
+    NAME = "sprunge"
+    MAINTAINER = "Laurent Bachelier"
+    EMAIL = "laurent@bachelier.name"
+    VERSION = "3.7"
+    DESCRIPTION = "Sprunge text sharing tool"
+    LICENSE = "AGPLv3+"
     BROWSER = SprungeBrowser
 
     EXPIRATIONS = {
-        False: 'f',
+        False: "f",
     }
 
     def new_paste(self, *args, **kwargs):

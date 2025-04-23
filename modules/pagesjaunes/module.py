@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.contact import CapDirectory, Place
+from woob.tools.backend import Module
 
 from .browser import PagesjaunesBrowser
 
 
-__all__ = ['PagesjaunesModule']
+__all__ = ["PagesjaunesModule"]
 
 
 class PagesjaunesModule(Module, CapDirectory):
-    NAME = 'pagesjaunes'
-    DESCRIPTION = 'Pages Jaunes'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "pagesjaunes"
+    DESCRIPTION = "Pages Jaunes"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = PagesjaunesBrowser
 
@@ -41,7 +39,7 @@ class PagesjaunesModule(Module, CapDirectory):
         return self.browser.search_contacts(query)
 
     def fill_contact(self, obj, fields):
-        if 'opening' in fields:
+        if "opening" in fields:
             self.browser.fill_hours(obj)
 
     OBJECTS = {

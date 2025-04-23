@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import AirparifModule
 
 
-__all__ = ['AirparifModule']
+__all__ = ["AirparifModule"]

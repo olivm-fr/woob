@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -26,17 +24,17 @@ class WikiEditPage(BaseHTMLPage):
 
     def set_source(self, data, message):
         form = self.get_form(nr=1)
-        form['content[text]'] = data
+        form["content[text]"] = data
         if message:
-            form['content[comments]'] = message
+            form["content[comments]"] = message
         form.submit()
 
     def get_authenticity_token(self):
-        form = self.get_form(id='wiki_form')
-        return form['authenticity_token']
+        form = self.get_form(id="wiki_form")
+        return form["authenticity_token"]
 
     def get_submit(self):
-        return self.get_form(id='wiki_form')
+        return self.get_form(id="wiki_form")
 
 
 class WikiPage(BaseHTMLPage):

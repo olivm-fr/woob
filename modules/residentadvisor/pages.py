@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Alexandre Morignot
 #
 # This file is part of a woob module.
@@ -18,14 +16,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.calendar import CATEGORIES, STATUS, TICKET
+from datetime import timedelta
+
 from woob.browser.elements import ItemElement, ListElement, method
 from woob.browser.filters.html import Attr, CleanHTML, Link
-from woob.browser.filters.standard import CleanDecimal, CleanText, Date, CombineDate, DateTime, Regexp, Time, Type
+from woob.browser.filters.standard import CleanDecimal, CleanText, CombineDate, Date, DateTime, Regexp, Time, Type
 from woob.browser.pages import HTMLPage
-from woob.capabilities.calendar import BaseCalendarEvent
-
-from datetime import timedelta
+from woob.capabilities.calendar import CATEGORIES, STATUS, TICKET, BaseCalendarEvent
 
 
 class BasePage(HTMLPage):
@@ -37,8 +34,8 @@ class BasePage(HTMLPage):
 class LoginPage(BasePage):
     def login(self, username, password):
         form = self.get_form()
-        form['UsernameOrEmailAddress'] = username
-        form['Password'] = password
+        form["UsernameOrEmailAddress"] = username
+        form["Password"] = password
         form.submit()
 
 
@@ -51,21 +48,32 @@ class ListPage(BasePage):
             klass = BaseCalendarEvent
 
             obj_url = Link('./div[@class="bbox"]/h1/a')
-            obj_id = Regexp(Link('./div[@class="bbox"]/h1/a'), r'aspx\?(.+)')
+            obj_id = Regexp(Link('./div[@class="bbox"]/h1/a'), r"aspx\?(.+)")
             obj_location = CleanText('./div[@class="bbox"]/span/a')
-            obj_start_date = DateTime(Attr('.//time', 'datetime'))
-            obj_summary = Regexp(Attr('./div[@class="bbox"]/h1/a', 'title'), r'details of (.+)')
+            obj_start_date = DateTime(Attr(".//time", "datetime"))
+            obj_summary = Regexp(Attr('./div[@class="bbox"]/h1/a', "title"), r"details of (.+)")
             obj_category = CATEGORIES.CONCERT
             obj_status = STATUS.CONFIRMED
 
     def get_country_id(self, country):
-        return Regexp(Link('//li[@id="liCountry"]/ul/li/a[./text()="%s"]' % country, default=''), r'ai=([^&]+)&?', default=None)(self.doc)
+        return Regexp(
+            Link('//li[@id="liCountry"]/ul/li/a[./text()="%s"]' % country, default=""), r"ai=([^&]+)&?", default=None
+        )(self.doc)
 
     def get_city_id(self, city):
-        return Regexp(Link('//li[@id="liArea"]/ul/li/a[./text()="%s"]' % city, default=''), r'ai=([^&]+)&?', default=None)(self.doc)
+        return Regexp(
+            Link('//li[@id="liArea"]/ul/li/a[./text()="%s"]' % city, default=""), r"ai=([^&]+)&?", default=None
+        )(self.doc)
 
     def get_country_id_next_to(self, country_id):
-        return Regexp(Link('//li[@id="liCountry"]/ul/li[./a[contains(@href, "ai=%s&")]]/following-sibling::li/a' % country_id, default=''), r'ai=([^&]+)&?', default=None)(self.doc)
+        return Regexp(
+            Link(
+                '//li[@id="liCountry"]/ul/li[./a[contains(@href, "ai=%s&")]]/following-sibling::li/a' % country_id,
+                default="",
+            ),
+            r"ai=([^&]+)&?",
+            default=None,
+        )(self.doc)
 
 
 class EventPage(BasePage):
@@ -75,8 +83,10 @@ class EventPage(BasePage):
 
         obj_summary = CleanText('//div[@id="sectionHead"]/h1')
         obj_description = CleanHTML('//div[@id="event-item"]/div[3]/p[2]')
-        obj_price = CleanDecimal(Regexp(CleanText('//aside[@id="detail"]/ul/li[3]'), r'Cost /[^\d]*([\d ,.]+).', default=''), default=None)
-        obj_location = Regexp(CleanText('//aside[@id="detail"]/ul/li[2]'), r'Venue / (.+)')
+        obj_price = CleanDecimal(
+            Regexp(CleanText('//aside[@id="detail"]/ul/li[3]'), r"Cost /[^\d]*([\d ,.]+).", default=""), default=None
+        )
+        obj_location = Regexp(CleanText('//aside[@id="detail"]/ul/li[2]'), r"Venue / (.+)")
         obj_booked_entries = Type(CleanText('//h1[@id="MembersFavouriteCount"]'), type=int)
         obj_status = STATUS.CONFIRMED
         obj_category = CATEGORIES.CONCERT
@@ -84,23 +94,23 @@ class EventPage(BasePage):
         _date = Date(CleanText('//aside[@id="detail"]/ul/li[1]/a[1]'))
 
         def obj_start_date(self):
-            start_time = Time(Regexp(CleanText('//aside[@id="detail"]/ul/li[1]'), r'(\d{2}:\d{2}) -'))(self)
+            start_time = Time(Regexp(CleanText('//aside[@id="detail"]/ul/li[1]'), r"(\d{2}:\d{2}) -"))(self)
             return CombineDate(self._date, start_time)(self)
 
         def obj_end_date(self):
-            end_time = Time(Regexp(CleanText('//aside[@id="detail"]/ul/li[1]'), r'- (\d{2}:\d{2})'))(self)
+            end_time = Time(Regexp(CleanText('//aside[@id="detail"]/ul/li[1]'), r"- (\d{2}:\d{2})"))(self)
 
             end_date = CombineDate(self._date, end_time)(self)
             if end_date > self.obj_start_date():
-                end_date += timedelta(days = 1)
+                end_date += timedelta(days=1)
 
             return end_date
 
         def obj_ticket(self):
-            li_class = Attr('//li[@id="tickets"]//li[1]', 'class', default=None)(self)
+            li_class = Attr('//li[@id="tickets"]//li[1]', "class", default=None)(self)
 
             if li_class:
-                if li_class == 'closed':
+                if li_class == "closed":
                     return TICKET.CLOSED
                 else:
                     return TICKET.AVAILABLE
@@ -111,14 +121,14 @@ class EventPage(BasePage):
 class SearchPage(BasePage):
     @method
     class get_events(ListElement):
-        item_xpath = '//main/ul/li/section/div/div/ul/li'
+        item_xpath = "//main/ul/li/section/div/div/ul/li"
 
         class item(ItemElement):
             klass = BaseCalendarEvent
 
-            obj_url = Link('./a[1]')
-            obj_id = Regexp(Link('./a[1]'), r'\?(\d+)')
-            obj_summary = CleanText('./a[1]')
-            obj_start_date = Date(CleanText('./span[1]'))
+            obj_url = Link("./a[1]")
+            obj_id = Regexp(Link("./a[1]"), r"\?(\d+)")
+            obj_summary = CleanText("./a[1]")
+            obj_start_date = Date(CleanText("./span[1]"))
             obj_category = CATEGORIES.CONCERT
             obj_status = STATUS.CONFIRMED

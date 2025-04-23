@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2014      Florent Fourcot
 #
 # This file is part of a woob module.
@@ -19,14 +17,15 @@
 
 import re
 
-from woob.capabilities.parcel import Event, ParcelNotFound, Parcel
-from woob.browser import PagesBrowser, URL
-from woob.browser.pages import HTMLPage, JsonPage
-from woob.browser.profiles import Firefox
-
 from dateutil.parser import parse as parse_date
 
-__all__ = ['ColissimoBrowser']
+from woob.browser import URL, PagesBrowser
+from woob.browser.pages import HTMLPage, JsonPage
+from woob.browser.profiles import Firefox
+from woob.capabilities.parcel import Event, Parcel, ParcelNotFound
+
+
+__all__ = ["ColissimoBrowser"]
 
 
 class MainPage(HTMLPage):
@@ -42,11 +41,8 @@ class TrackingPage(JsonPage):
 
     STATUSES = {
         re.compile(
-            r"remis au gardien ou"
-            + r"|Votre colis est livré"
-            + r"|Votre courrier a été distribué à l'adresse"
+            r"remis au gardien ou" + r"|Votre colis est livré" + r"|Votre courrier a été distribué à l'adresse"
         ): Parcel.STATUS_ARRIVED,
-
         re.compile(
             r"pas encore pris en charge par La Poste"
             + r"|a été déposé dans un point postal"
@@ -58,7 +54,7 @@ class TrackingPage(JsonPage):
         if self.doc.get("shipment", {}).get("idShip", None) != _id:
             raise ParcelNotFound(f"Parcel ID {_id} not found.")
         p = Parcel(_id)
-        events = [self.build_event(i, item) for i, item in enumerate(self.doc['shipment']['event'])]
+        events = [self.build_event(i, item) for i, item in enumerate(self.doc["shipment"]["event"])]
         p.history = events
 
         first = events[0]
@@ -82,11 +78,11 @@ class TrackingPage(JsonPage):
 
 
 class ColissimoBrowser(PagesBrowser):
-    BASEURL = 'https://www.laposte.fr'
+    BASEURL = "https://www.laposte.fr"
     PROFILE = Firefox()
 
-    main_url = URL('/outils/suivre-vos-envois\?code=(?P<_id>.*)', MainPage)
-    tracking_url = URL('https://api.laposte.fr/ssu/v1/suivi-unifie/idship/(?P<_id>.*)', TrackingPage)
+    main_url = URL(r"/outils/suivre-vos-envois\?code=(?P<_id>.*)", MainPage)
+    tracking_url = URL(r"https://api\.laposte\.fr/ssu/v1/suivi-unifie/idship/(?P<_id>.*)", TrackingPage)
 
     def get_tracking_info(self, _id):
         self.main_url.stay_or_go(_id=_id)

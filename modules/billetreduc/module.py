@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.calendar import CATEGORIES, CapCalendarEvent
 from woob.tools.backend import Module
-from woob.capabilities.calendar import CapCalendarEvent, CATEGORIES
 
 from .browser import BilletreducBrowser
 
 
-__all__ = ['BilletreducModule']
+__all__ = ["BilletreducModule"]
 
 
 class BilletreducModule(Module, CapCalendarEvent):
-    NAME = 'billetreduc'
-    DESCRIPTION = u'BilletReduc discount ticket reservation'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "billetreduc"
+    DESCRIPTION = "BilletReduc discount ticket reservation"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = BilletreducBrowser
 

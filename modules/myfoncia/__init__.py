@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Phyks (Lucas Verney)
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import MyFonciaModule
 
 
-__all__ = ['MyFonciaModule']
+__all__ = ["MyFonciaModule"]

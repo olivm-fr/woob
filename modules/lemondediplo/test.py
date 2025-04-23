@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021      Bezleputh
 #
 # This file is part of a woob module.
@@ -24,7 +22,7 @@ from woob.tools.test import BackendTest
 
 
 class LemondediploTest(BackendTest):
-    MODULE = u'lemondediplo'
+    MODULE = "lemondediplo"
 
     def generic_test(self):
         _ = list(self.backend.iter_threads())
@@ -33,7 +31,7 @@ class LemondediploTest(BackendTest):
         self.assertTrue(t.root is not None)
 
     def test_blogs(self):
-        _ = list(self.backend.iter_resources([Thread], ['blogs']))
+        _ = list(self.backend.iter_resources([Thread], ["blogs"]))
         assert len(_)
 
         _ = self.backend.fillobj(_[-1])
@@ -44,7 +42,7 @@ class LemondediploTest(BackendTest):
         self.assertTrue(_.root.content)
 
     def test_archives(self):
-        _ = list(self.backend.iter_resources([Thread], [datetime.today().strftime('%Y-%m')]))
+        _ = list(self.backend.iter_resources([Thread], [datetime.today().strftime("%Y-%m")]))
         assert len(_)
 
         _ = self.backend.fillobj(_[-1])

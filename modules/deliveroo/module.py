@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2022  Budget Insight
 #
 # This file is part of a woob module.
@@ -19,30 +17,34 @@
 
 # flake8: compatible
 
+from woob.capabilities.base import NotAvailable, find_object
 from woob.capabilities.bill import (
-    CapDocument, Subscription, Document, DocumentNotFound,
-    DocumentTypes, DocumentCategory,
+    CapDocument,
+    Document,
+    DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
 )
-from woob.capabilities.base import find_object, NotAvailable
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import DeliverooBrowser
 
 
-__all__ = ['DeliverooModule']
+__all__ = ["DeliverooModule"]
 
 
 class DeliverooModule(Module, CapDocument):
     NAME = "deliveroo"
-    DESCRIPTION = u"Deliveroo"
-    MAINTAINER = u"Jean Walrave"
-    EMAIL = u"jwalrave@budget-insight.com"
-    LICENSE = 'LGPLv3+'
-    VERSION = "3.6"
+    DESCRIPTION = "Deliveroo"
+    MAINTAINER = "Jean Walrave"
+    EMAIL = "jwalrave@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        Value('login', label='Adresse email'),
-        ValueBackendPassword('password', label='Mot de passe'),
+        Value("login", label="Adresse email"),
+        ValueBackendPassword("password", label="Mot de passe"),
     )
 
     BROWSER = DeliverooBrowser
@@ -50,15 +52,13 @@ class DeliverooModule(Module, CapDocument):
     document_categories = {DocumentCategory.FOOD}
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config['login'].get(), self.config['password'].get()
-        )
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_subscription(self):
         return self.browser.get_subscription_list()
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019-2020 Célande Adrien
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.rpg import CapRPG
+from woob.tools.backend import Module
 
 from .browser import SerebiiBrowser
 
 
-__all__ = ['SerebiiModule']
+__all__ = ["SerebiiModule"]
 
 
 class SerebiiModule(Module, CapRPG):
-    NAME = 'serebii'
-    DESCRIPTION = 'This website collects any data about Pokémon games.'
-    MAINTAINER = 'Célande Adrien'
-    EMAIL = 'celande.adrien@gmail.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "serebii"
+    DESCRIPTION = "This website collects any data about Pokémon games."
+    MAINTAINER = "Célande Adrien"
+    EMAIL = "celande.adrien@gmail.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = SerebiiBrowser
 

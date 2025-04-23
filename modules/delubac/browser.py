@@ -19,26 +19,26 @@
 
 import re
 
-from woob.browser import URL, need_login, LoginBrowser
-from woob.exceptions import BrowserIncorrectPassword, ActionNeeded, ActionType
+from woob.browser import URL, LoginBrowser, need_login
+from woob.exceptions import ActionNeeded, ActionType, BrowserIncorrectPassword
 from woob.tools.capabilities.bank.transactions import sorted_transactions
 
-from .pages import LoginPage, LoginResultPage, AccountsPage, HistoryPage
+from .pages import AccountsPage, HistoryPage, LoginPage, LoginResultPage
 
 
-__all__ = ['DelubacBrowser']
+__all__ = ["DelubacBrowser"]
 
 
 class DelubacBrowser(LoginBrowser):
-    BASEURL = 'https://www.edelubac.com'
+    BASEURL = "https://www.edelubac.com"
 
-    login = URL(r'/josso/signon/entLogin.jsp', LoginPage)
-    login_result = URL(r'/josso/signon/entKbvLogin.do', LoginResultPage)
-    accounts = URL(r'/consultation/action/private/consultation/synthese/comptes.do', AccountsPage)
+    login = URL(r"/josso/signon/entLogin.jsp", LoginPage)
+    login_result = URL(r"/josso/signon/entKbvLogin.do", LoginResultPage)
+    accounts = URL(r"/consultation/action/private/consultation/synthese/comptes.do", AccountsPage)
     transactions = URL(
-        r'/consultation/action/private/consultation/search/index.do',
-        r'consultation/action/private/consultation/search/resOperations.do',
-        HistoryPage
+        r"/consultation/action/private/consultation/search/index.do",
+        r"consultation/action/private/consultation/search/resOperations.do",
+        HistoryPage,
     )
 
     def do_login(self):
@@ -48,31 +48,31 @@ class DelubacBrowser(LoginBrowser):
         if self.login_result.is_here():
             error_msg = self.page.get_error()
             error_snippets = (
-                'mot de passe est incorrect',
-                'your password is incorrect',
+                "mot de passe est incorrect",
+                "your password is incorrect",
             )
-            error_patterns = re.compile('|'.join(error_snippets))
+            error_patterns = re.compile("|".join(error_snippets))
             if re.search(error_patterns, error_msg):
                 raise BrowserIncorrectPassword(error_msg)
 
             sca_message = self.page.get_sca_message()
             sca_snippets = (
-                'authentification forte',
-                'authentication is required',
+                "authentification forte",
+                "authentication is required",
             )
-            sca_patterns = re.compile('|'.join(sca_snippets))
+            sca_patterns = re.compile("|".join(sca_snippets))
             if re.search(sca_patterns, sca_message):
                 raise ActionNeeded(
-                    locale="fr-FR", message="Vous devez réaliser la double authentification sur le portail internet.",
+                    locale="fr-FR",
+                    message="Vous devez réaliser la double authentification sur le portail internet.",
                     action_type=ActionType.PERFORM_MFA,
                 )
-            raise AssertionError("Unhandled error at login: {}".format(error_msg))
+            raise AssertionError(f"Unhandled error at login: {error_msg}")
 
     @need_login
     def iter_accounts(self):
         self.accounts.go()
-        for account in self.page.iter_accounts():
-            yield account
+        yield from self.page.iter_accounts()
 
     @need_login
     def iter_history(self, account):
@@ -80,5 +80,4 @@ class DelubacBrowser(LoginBrowser):
         self.page.search_transactions_form(account)
         if self.page.has_no_transaction():
             return
-        for tr in sorted_transactions(self.page.iter_history()):
-            yield tr
+        yield from sorted_transactions(self.page.iter_history())

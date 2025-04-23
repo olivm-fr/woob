@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -25,26 +23,26 @@ from woob.tools.backend import Module
 from .browser import MarmitonBrowser
 
 
-__all__ = ['MarmitonModule']
+__all__ = ["MarmitonModule"]
 
 
 class MarmitonModule(Module, CapRecipe):
-    NAME = 'marmiton'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '3.6'
-    DESCRIPTION = u'Marmiton French recipe website'
-    LICENSE = 'AGPLv3+'
+    NAME = "marmiton"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "julien.veyssier@aiur.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Marmiton French recipe website"
+    LICENSE = "AGPLv3+"
     BROWSER = MarmitonBrowser
 
     def get_recipe(self, id):
         return self.browser.get_recipe(id)
 
     def iter_recipes(self, pattern):
-        return self.browser.iter_recipes(quote_plus(pattern.encode('utf-8')))
+        return self.browser.iter_recipes(quote_plus(pattern.encode("utf-8")))
 
     def fill_recipe(self, recipe, fields):
-        if 'nb_person' in fields or 'instructions' in fields or 'picture' in fields:
+        if "nb_person" in fields or "instructions" in fields or "picture" in fields:
             recipe = self.browser.get_recipe(recipe.id, recipe)
         return recipe
 

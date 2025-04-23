@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,14 +16,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 import re
 
-from woob.tools.misc import get_bytes_size
-from woob.capabilities.torrent import Torrent
-from woob.capabilities.base import NotAvailable
-
 from woob.browser.elements import ItemElement, ListElement, method
-from woob.browser.pages import HTMLPage, pagination
-from woob.browser.filters.standard import Regexp, CleanText, CleanDecimal, Format
 from woob.browser.filters.html import AbsoluteLink
+from woob.browser.filters.standard import CleanDecimal, CleanText, Format, Regexp
+from woob.browser.pages import HTMLPage, pagination
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.torrent import Torrent
+from woob.tools.misc import get_bytes_size
 
 
 class SearchPage(HTMLPage):
@@ -37,17 +34,19 @@ class SearchPage(HTMLPage):
 
         class item(ItemElement):
             klass = Torrent
-            obj_id = Regexp(CleanText('.//a[has-class("list_tor_title")]/@href'), '/(.*)\.torrent\.html$', '\\1')
+            obj_id = Regexp(CleanText('.//a[has-class("list_tor_title")]/@href'), r"/(.*)\.torrent\.html$", "\\1")
             obj_name = CleanText('.//a[has-class("list_tor_title")]')
             obj_seeders = CleanDecimal('.//b[has-class("green")]/text()', default=0)
             obj_leechers = CleanDecimal('.//b[has-class("red")]/text()', default=0)
-            obj_filename = Format('%s.torrent', obj_name)
+            obj_filename = Format("%s.torrent", obj_name)
             obj_url = AbsoluteLink('.//a[@title="Download torrent"]')
 
             def obj_size(self):
-                rawsize = Regexp(CleanText('.//div[has-class("list_tor_right")]/p[1]/span[1]'), 'Size: (.*)$', '\\1')(self)
-                nsize = float(re.sub(r'[A-Za-z]', '', rawsize))
-                usize = re.sub(r'[.0-9 ]', '', rawsize).upper()
+                rawsize = Regexp(CleanText('.//div[has-class("list_tor_right")]/p[1]/span[1]'), "Size: (.*)$", "\\1")(
+                    self
+                )
+                nsize = float(re.sub(r"[A-Za-z]", "", rawsize))
+                usize = re.sub(r"[.0-9 ]", "", rawsize).upper()
                 size = get_bytes_size(nsize, usize)
                 return size
 
@@ -58,24 +57,30 @@ class TorrentPage(HTMLPage):
         klass = Torrent
         obj_name = CleanText('.//div[@id="middle_content"]/h1')
         obj_description = CleanText('//div[@id="descriptionContent"]', default=NotAvailable)
-        obj_id = Regexp(CleanText('//div[@id="middle_content"]/a[@title="Download torrent"]/@href'), '/(.*)\.torrent', '\\1')
+        obj_id = Regexp(
+            CleanText('//div[@id="middle_content"]/a[@title="Download torrent"]/@href'), r"/(.*)\.torrent", "\\1"
+        )
         obj_url = AbsoluteLink('//div[@id="middle_content"]/a[@title="Download torrent"]')
-        obj_filename = Format('%s.torrent', obj_name)
+        obj_filename = Format("%s.torrent", obj_name)
+
         def obj_size(self):
             rawsize = CleanText('//div[has-class("files")]/../h5')(self)
-            s = rawsize.split(',')[-1].replace(')', '')
-            nsize = float(re.sub(r'[A-Za-z]', '', s))
-            usize = re.sub(r'[.0-9 ]', '', s).upper()
+            s = rawsize.split(",")[-1].replace(")", "")
+            nsize = float(re.sub(r"[A-Za-z]", "", s))
+            usize = re.sub(r"[.0-9 ]", "", s).upper()
             size = get_bytes_size(nsize, usize)
             return size
+
         def obj_files(self):
             res = []
             for f in self.xpath('//div[has-class("files")]//div[not(has-class("wrapper"))]'):
                 res.append(CleanText(f)(self))
             return res
+
         obj_seeders = CleanDecimal('//div[has-class("sl_block")]/b[1]', default=0)
         obj_leechers = CleanDecimal('//div[has-class("sl_block")]/b[2]', default=0)
         obj_magnet = CleanText('.//a[has-class("magnet")]/@href')
+
 
 class HomePage(HTMLPage):
     pass

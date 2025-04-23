@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -18,12 +16,12 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.capabilities.parcel import ParcelNotFound
+from woob.tools.test import BackendTest
 
 
 class GLSTest(BackendTest):
-    MODULE = 'gls'
+    MODULE = "gls"
 
     def test_gls(self):
         self.assertRaises(ParcelNotFound, self.backend.get_parcel_tracking, "foo")

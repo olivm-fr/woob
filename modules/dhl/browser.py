@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -18,24 +16,24 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import DHLExpressSearchPage, DeutschePostDHLSearchPage
+from .pages import DeutschePostDHLSearchPage, DHLExpressSearchPage
 
 
 class DHLExpressBrowser(PagesBrowser):
-    BASEURL = 'https://www.dhl.com'
+    BASEURL = "https://www.dhl.com"
 
-    search_page = URL('/shipmentTracking\?AWB=(?P<id>.+)', DHLExpressSearchPage)
+    search_page = URL(r"/shipmentTracking\?AWB=(?P<id>.+)", DHLExpressSearchPage)
 
     def get_tracking_info(self, _id):
         return self.search_page.go(id=_id).get_info(_id)
 
 
 class DeutschePostDHLBrowser(PagesBrowser):
-    BASEURL = 'https://nolp.dhl.de'
+    BASEURL = "https://nolp.dhl.de"
 
-    search_page = URL('/nextt-online-public/set_identcodes.do\?lang=en&idc=(?P<id>.+)', DeutschePostDHLSearchPage)
+    search_page = URL(r"/nextt-online-public/set_identcodes\.do\?lang=en&idc=(?P<id>.+)", DeutschePostDHLSearchPage)
 
     def get_tracking_info(self, _id):
         return self.search_page.go(id=_id).get_info(_id)

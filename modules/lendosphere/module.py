@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -17,35 +15,35 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword
 from woob.capabilities.bank.wealth import CapBankWealth
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword
 
 from .browser import LendosphereBrowser
 
 
-__all__ = ['LendosphereModule']
+__all__ = ["LendosphereModule"]
 
 
 class LendosphereModule(Module, CapBankWealth):
-    NAME = 'lendosphere'
-    DESCRIPTION = 'Lendosphere'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "lendosphere"
+    DESCRIPTION = "Lendosphere"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = LendosphereBrowser
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Email', masked=False),
-        ValueBackendPassword('password', label='Mot de passe'),
+        ValueBackendPassword("login", label="Email", masked=False),
+        ValueBackendPassword("password", label="Mot de passe"),
     )
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['login'].get(),
-            self.config['password'].get(),
+            self.config["login"].get(),
+            self.config["password"].get(),
         )
 
     def iter_accounts(self):

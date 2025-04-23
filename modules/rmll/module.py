@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Guilhem Bonnefille
 #
 # This file is part of a woob module.
@@ -17,24 +15,24 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.video import CapVideo, BaseVideo
 from woob.capabilities.collection import CapCollection, Collection
+from woob.capabilities.video import BaseVideo, CapVideo
 from woob.tools.backend import Module
 
 from .browser import RmllBrowser
 from .video import RmllVideo
 
 
-__all__ = ['RmllModule']
+__all__ = ["RmllModule"]
 
 
 class RmllModule(Module, CapVideo, CapCollection):
-    NAME = 'rmll'
-    MAINTAINER = u'Guyou'
-    EMAIL = 'guilhem.bonnefille@gmail.com'
-    VERSION = '3.6'
-    DESCRIPTION = 'Videos from RMLL'
-    LICENSE = 'AGPLv3+'
+    NAME = "rmll"
+    MAINTAINER = "Guyou"
+    EMAIL = "guilhem.bonnefille@gmail.com"
+    VERSION = "3.7"
+    DESCRIPTION = "Videos from RMLL"
+    LICENSE = "AGPLv3+"
 
     BROWSER = RmllBrowser
 
@@ -50,10 +48,10 @@ class RmllModule(Module, CapVideo, CapCollection):
 
     def fill_video(self, video, fields):
         self.logger.debug("Fill video %s for fields %s", video.id, fields)
-        if fields != ['thumbnail']:
+        if fields != ["thumbnail"]:
             # if we don't want only the thumbnail, we probably want also every fields
             video = self.browser.get_video(video.id, video)
-        if 'thumbnail' in fields and video and video.thumbnail:
+        if "thumbnail" in fields and video and video.thumbnail:
             video.thumbnail.data = self.browser.open(video.thumbnail.url).content
 
         return video
@@ -62,14 +60,12 @@ class RmllModule(Module, CapVideo, CapCollection):
         if BaseVideo in objs:
             if len(split_path) == 0:
                 # Add fake Collection
-                yield Collection(['latest'], u'Latest')
-            if len(split_path) == 1 and split_path[0] == 'latest':
-                for video in self.browser.get_latest_videos():
-                    yield video
+                yield Collection(["latest"], "Latest")
+            if len(split_path) == 1 and split_path[0] == "latest":
+                yield from self.browser.get_latest_videos()
             else:
                 channel_videos = self.browser.get_channel_videos(split_path)
                 if channel_videos:
-                    for content in channel_videos:
-                        yield content
+                    yield from channel_videos
 
     OBJECTS = {RmllVideo: fill_video}

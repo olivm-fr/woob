@@ -23,12 +23,13 @@ import os
 import traceback
 
 import lxml.etree
+
 from woob.browser.filters import standard
 
 
 class Error(SyntaxError):
     def __init__(self, file, line, message):
-        super(Error, self).__init__('%s:%s: %s' % (file, line, message))
+        super().__init__(f"{file}:{line}: {message}")
         self.file = file
         self.line = line
 
@@ -38,18 +39,23 @@ def do_visits(*funcs):
         for func in funcs:
             func(self, node)
         self.generic_visit(node)
+
     return wrapper
 
 
 class Visitor(ast.NodeVisitor):
     def __init__(self, file, *args, **kwargs):
-        self.warnings = kwargs.pop('warnings', False)
-        super(Visitor, self).__init__(*args, **kwargs)
+        self.warnings = kwargs.pop("warnings", False)
+        super().__init__(*args, **kwargs)
         self.file = file
 
         self.filters = []
-        self.filters.extend(f for f in dir(standard) if isinstance(getattr(standard, f), type) and issubclass(getattr(standard, f), standard.CleanText))
-        self.filters.extend(['Regexp', 'XPath', 'Attr', 'Link'])
+        self.filters.extend(
+            f
+            for f in dir(standard)
+            if isinstance(getattr(standard, f), type) and issubclass(getattr(standard, f), standard.CleanText)
+        )
+        self.filters.extend(["Regexp", "XPath", "Attr", "Link"])
 
         self.element_context = []
 
@@ -60,19 +66,22 @@ class Visitor(ast.NodeVisitor):
             raise Error(self.file, lineno, exc)
 
         if self.warnings:
-            if not s.lstrip('(').startswith('.') and len(self.element_context) >= 2:
-                if self.element_context[-1] == 'ItemElement' and self.element_context[-2] in ('TableElement', 'ListElement'):
-                    print('%s:%s: probable missing "." at start of XPath' % (self.file, lineno))
+            if not s.lstrip("(").startswith(".") and len(self.element_context) >= 2:
+                if self.element_context[-1] == "ItemElement" and self.element_context[-2] in (
+                    "TableElement",
+                    "ListElement",
+                ):
+                    print(f'{self.file}:{lineno}: probable missing "." at start of XPath')
 
     def _item_xpath(self, node):
         try:
-            target, = node.targets
+            (target,) = node.targets
         except ValueError:
             return
-        if not isinstance(target, ast.Name) or target.id != 'item_xpath':
+        if not isinstance(target, ast.Name) or target.id != "item_xpath":
             return
         try:
-            if self.element_context[-1] not in ('TableElement', 'ListElement'):
+            if self.element_context[-1] not in ("TableElement", "ListElement"):
                 return
         except IndexError:
             return
@@ -86,7 +95,7 @@ class Visitor(ast.NodeVisitor):
     def _xpath_call(self, node):
         if not isinstance(node.func, ast.Attribute):
             return
-        if node.func.attr != 'xpath':
+        if node.func.attr != "xpath":
             return
         try:
             if not isinstance(node.args[0], ast.Str):
@@ -115,7 +124,7 @@ class Visitor(ast.NodeVisitor):
         has_element = False
 
         for basenode in node.bases:
-            if isinstance(basenode, ast.Name) and basenode.id in ('ListElement', 'ItemElement', 'TableElement'):
+            if isinstance(basenode, ast.Name) and basenode.id in ("ListElement", "ItemElement", "TableElement"):
                 self.element_context.append(basenode.id)
                 has_element = True
                 break
@@ -129,23 +138,24 @@ class Visitor(ast.NodeVisitor):
 def search_py(root):
     for path, dirs, files in os.walk(root):
         dirs.sort()
-        for f in fnmatch.filter(files, '*.py'):
+        for f in fnmatch.filter(files, "*.py"):
             yield os.path.join(path, f)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Check XPath definitions")
-    parser.add_argument('-w', '--warnings', action='store_true')
+    parser.add_argument("-w", "--warnings", action="store_true")
     args = parser.parse_args()
 
-    modpath = os.getenv('WOOB_MODULES', os.path.normpath(os.path.dirname(__file__) + '/../modules'))
+    modpath = os.getenv("WOOB_MODULES", os.path.normpath(os.path.dirname(__file__) + "/../modules"))
     for fn in search_py(modpath):
         with open(fn) as fd:
             try:
                 node = ast.parse(fd.read(), fn)
             except SyntaxError as exc:
-                print('In file', fn)
+                print("In file", fn)
                 traceback.print_exc(exc)
         try:
             Visitor(fn, warnings=args.warnings).visit(node)

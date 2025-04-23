@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2021 Christophe Benz, Romain Bignon
 #
 # This file is part of a woob module.
@@ -21,23 +19,23 @@
 
 from woob.capabilities.base import empty
 from woob.capabilities.image import Thumbnail
-from woob.capabilities.video import CapVideo, BaseVideo
+from woob.capabilities.video import BaseVideo, CapVideo
 from woob.tools.backend import Module
 from woob.tools.capabilities.video.ytdl import video_info
 
 from .browser import YoutubeBrowser
 
 
-__all__ = ['YoutubeModule']
+__all__ = ["YoutubeModule"]
 
 
 class YoutubeModule(Module, CapVideo):
-    NAME = 'youtube'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    VERSION = '3.6'
-    DESCRIPTION = 'YouTube video streaming website'
-    LICENSE = 'LGPLv3+'
+    NAME = "youtube"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    VERSION = "3.7"
+    DESCRIPTION = "YouTube video streaming website"
+    LICENSE = "LGPLv3+"
     BROWSER = YoutubeBrowser
 
     def _set_video_attrs(self, video):
@@ -58,14 +56,14 @@ class YoutubeModule(Module, CapVideo):
         return video_info(id_or_url)
 
     def fill_video(self, video, fields):
-        if 'thumbnail' in fields and video.thumbnail:
+        if "thumbnail" in fields and video.thumbnail:
             video.thumbnail.data = self.browser.open(video.thumbnail.url).content
-        if 'url' in fields:
+        if "url" in fields:
             self._set_video_attrs(video)
         return video
 
     def fill_thumb(self, thumb, fields):
-        if 'data' in fields:
+        if "data" in fields:
             thumb.data = self.browser.open(thumb.url).content
 
     OBJECTS = {

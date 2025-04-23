@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      James GALT
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import AmundiModule
 
 
-__all__ = ['AmundiModule']
+__all__ = ["AmundiModule"]

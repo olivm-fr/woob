@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import ExplorimmoModule
 
 
-__all__ = ['ExplorimmoModule']
+__all__ = ["ExplorimmoModule"]

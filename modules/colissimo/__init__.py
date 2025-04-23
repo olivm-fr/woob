@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013  Florent Fourcot
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import ColissimoModule
 
 
-__all__ = ['ColissimoModule']
+__all__ = ["ColissimoModule"]

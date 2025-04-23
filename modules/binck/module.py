@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
 #
 # This file is part of a woob module.
@@ -18,32 +16,32 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword
 from woob.capabilities.bank.wealth import CapBankWealth
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword
 
 from .browser import BinckBrowser
 
 
-__all__ = ['BinckModule']
+__all__ = ["BinckModule"]
 
 
 class BinckModule(Module, CapBankWealth):
-    NAME = 'binck'
-    DESCRIPTION = u'Binck'
-    MAINTAINER = u'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "binck"
+    DESCRIPTION = "Binck"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-            ValueBackendPassword('login', label='Identifiant', masked=False),
-            ValueBackendPassword('password', label='Mot de passe')
+        ValueBackendPassword("login", label="Identifiant", masked=False),
+        ValueBackendPassword("password", label="Mot de passe"),
     )
 
     BROWSER = BinckBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

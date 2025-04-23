@@ -1,5 +1,4 @@
 "NewspaperLibeModule init"
-# -*- coding: utf-8 -*-
 
 # Copyright(C) 2013  Florent Fourcot
 #
@@ -21,4 +20,4 @@
 from .module import NewspaperLibeModule
 
 
-__all__ = ['NewspaperLibeModule']
+__all__ = ["NewspaperLibeModule"]

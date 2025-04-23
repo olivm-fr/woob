@@ -24,18 +24,14 @@ from PIL import Image, ImageFilter
 
 from woob.browser.filters.html import Attr, Link
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import (
-    CleanText, Coalesce, Regexp,
-)
+from woob.browser.filters.standard import CleanText, Coalesce, Regexp
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage, XMLPage
 from woob.capabilities import NotAvailable
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from woob.tools.captcha.virtkeyboard import SplitKeyboard
-from woob_modules.caissedepargne.pages import (
-    AuthenticationMethodPage as _AuthenticationMethodPage,
-    JsFilePage as _JsFilePage,
-    LoginTokensPage as _LoginTokensPage,
-)
+from woob_modules.caissedepargne.pages import AuthenticationMethodPage as _AuthenticationMethodPage
+from woob_modules.caissedepargne.pages import JsFilePage as _JsFilePage
+from woob_modules.caissedepargne.pages import LoginTokensPage as _LoginTokensPage
 
 
 class LoggedOut(Exception):
@@ -46,16 +42,16 @@ class BrokenPageError(Exception):
     pass
 
 
-class BasePage(object):
-    ENCODING = 'iso-8859-15'
+class BasePage:
+    ENCODING = "iso-8859-15"
 
     def is_error(self):
-        for script in self.doc.xpath('//script'):
+        for script in self.doc.xpath("//script"):
             if script.text is not None and (
                 "Le service est momentanément indisponible" in script.text
                 or "Le service est temporairement indisponible" in script.text
                 or "Votre abonnement ne vous permet pas d'accéder à ces services" in script.text
-                or 'Merci de bien vouloir nous en excuser' in script.text
+                or "Merci de bien vouloir nous en excuser" in script.text
             ):
                 return True
 
@@ -73,8 +69,8 @@ class MyHTMLPage(BasePage, HTMLPage):
     def build_doc(self, data, *args, **kwargs):
         # XXX FUCKING HACK BECAUSE BANQUE POPULAIRE ARE NASTY AND INCLUDE NULL
         # BYTES IN DOCUMENTS.
-        data = data.replace(b'\x00', b'')
-        return super(MyHTMLPage, self).build_doc(data, *args, **kwargs)
+        data = data.replace(b"\x00", b"")
+        return super().build_doc(data, *args, **kwargs)
 
 
 class RedirectErrorPage(HTMLPage):
@@ -93,16 +89,16 @@ class AuthorizeErrorPage(HTMLPage):
 class ErrorPage(LoggedPage, MyHTMLPage):
     def on_load(self):
         if CleanText('//pre[contains(text(), "unexpected error")]')(self.doc):
-            raise BrowserUnavailable('An unexpected error has occured.')
+            raise BrowserUnavailable("An unexpected error has occured.")
         if CleanText('//script[contains(text(), "momentanément indisponible")]')(self.doc):
             raise BrowserUnavailable("Le service est momentanément indisponible")
         elif CleanText('//h1[contains(text(), "Cette page est indisponible")]')(self.doc):
-            raise BrowserUnavailable('Cette page est indisponible')
-        return super(ErrorPage, self).on_load()
+            raise BrowserUnavailable("Cette page est indisponible")
+        return super().on_load()
 
     def get_token(self):
         try:
-            buf = self.doc.xpath('//body/@onload')[0]
+            buf = self.doc.xpath("//body/@onload")[0]
         except IndexError:
             return
         else:
@@ -113,7 +109,7 @@ class ErrorPage(LoggedPage, MyHTMLPage):
 
 class UnavailablePage(LoggedPage, MyHTMLPage):
     def on_load(self):
-        h1 = CleanText('//h1[1]')(self.doc)
+        h1 = CleanText("//h1[1]")(self.doc)
         if "est indisponible" in h1:
             raise BrowserUnavailable(h1)
         body = CleanText(".")(self.doc)
@@ -128,25 +124,42 @@ class UnavailablePage(LoggedPage, MyHTMLPage):
 
 class NewLoginPage(HTMLPage):
     def get_main_js_file_url(self):
-        return Attr('//script[contains(@src, "main.")]', 'src')(self.doc)
+        return Attr('//script[contains(@src, "main.")]', "src")(self.doc)
 
 
 class JsFilePage(_JsFilePage):
     def get_client_id(self):
-        return Regexp(pattern=r'{authenticated:{clientId:"([^"]+)"').filter(self.text)
+        return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
 
     def get_user_info_client_id(self):
-        return Regexp(pattern=r'anonymous:{clientId:"([^"]+)"').filter(self.text)
+        return Regexp(
+            pattern=r'https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token",resourceServerUrl:"https://www.rs-ano-bad-ib.banquepopulaire.fr",clientId:"([^"]+)"'
+        ).filter(self.text)
+
+
+class RootDashBoardPage(HTMLPage):
+    def get_main_js_file_url_and_version(self):
+        match = re.search(r"main-[A-Z0-9]{8}\.js\?v=\d+\.\d+\.\d+", self.text).group(0)
+        if match:
+            left_part, right_part = match.split("?v=")
+            return left_part, right_part
+        raise BrowserUnavailable("Could not find main js file url into RootDashBoardPage, please raise an issue")
 
 
 class JsFilePageEspaceClient(_JsFilePage):
-    def get_client_id(self):
-        return Regexp(
-            pattern=r'onfig:{authenticatedGatewayThreeLeggedAuthenticationAsUrl:[a-zA-Z]{2},clientId:"([^"]+)"').filter(
-                self.text)
+    def getChunkList(self):
+        return re.findall(r"chunk-[A-Z0-9]{8}.js", self.text)
 
-    def get_user_info_client_id(self):
-        return Regexp(pattern=r'{clientCredentialConfig:{clientId:"([^"]+)"').filter(self.text)
+
+class JsFilePageEspaceClientChunk(_JsFilePage):
+    def contains_client_id(self):
+        return bool(re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text))
+
+    def get_client_id(self):
+        match_e = re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text).group(0)
+        client_id = re.search(r"[a-z0-9-]{36}", match_e).group(0)
+
+        return client_id
 
 
 class SynthesePage(JsonPage):
@@ -165,52 +178,61 @@ class AuthorizePage(JsonPage):
         # response body is given, so we get a decode error.
         # handle this page can assure the continuity of the login
         try:
-            return super(AuthorizePage, self).build_doc(content)
+            return super().build_doc(content)
         except ValueError:
             return {}
 
     def get_next_url(self):
-        return Dict('action')(self.doc)
+        return Dict("action")(self.doc)
 
     def get_payload(self):
-        return Dict('parameters/SAMLRequest')(self.doc)
+        return Dict("parameters/SAMLRequest")(self.doc)
 
 
 class LoginTokensPage(_LoginTokensPage):
     def get_access_token(self):
-        return Dict('parameters/access_token', default=None)(self.doc)
+        return Dict("parameters/access_token", default=None)(self.doc)
+
+    def get_code(self):
+        return Dict("parameters/code", default=None)(self.doc)
 
     def get_access_expire(self):
-        return Dict('parameters/expires_in', default=None)(self.doc)
+        return Dict("parameters/expires_in", default=None)(self.doc)
 
 
 class InfoTokensPage(JsonPage):
-    pass
+    def get_access_token(self):
+        value = Dict("access_token", default=None)(self.doc)
+        return value
+
+    def get_access_expire(self):
+        value = Dict("expires_in", default=None)(self.doc)
+        return value
 
 
 class AuthenticationMethodPage(_AuthenticationMethodPage):
     def get_next_url(self):
-        return Dict('response/saml2_post/action')(self.doc)
+        return Dict("response/saml2_post/action")(self.doc)
 
     def get_payload(self):
-        return Dict('response/saml2_post/samlResponse', default=NotAvailable)(self.doc)
+        return Dict("response/saml2_post/samlResponse", default=NotAvailable)(self.doc)
 
     def is_new_login(self):
         # We check here if we are doing a new login
-        return bool(Dict('step/phase/state', default=NotAvailable)(self.doc))
+        return bool(Dict("step/phase/state", default=NotAvailable)(self.doc))
 
     def get_status(self):
-        return Dict('response/status', default=NotAvailable)(self.doc)
+        return Dict("response/status", default=NotAvailable)(self.doc)
 
     def get_security_level(self):
-        return Dict('step/phase/securityLevel', default='')(self.doc)
+        return Dict("step/phase/securityLevel", default="")(self.doc)
 
     def get_error_msg(self):
         return Coalesce(
-            Dict('phase/notifications/0', default=None),
-            Dict('phase/previousResult', default=None),
-            Dict('response/status', default=None),
-            default=None
+            Dict("phase/notifications/0", default=None),
+            Dict("phase/previousResult", default=None),
+            Dict("response/status", default=None),
+            default=None,
         )(self.doc)
 
     def login_errors(self, error, otp_type=None):
@@ -220,55 +242,54 @@ class AuthenticationMethodPage(_AuthenticationMethodPage):
             error_msg = self.get_error_msg()
             if error_msg:
                 if otp_type is not None:
-                    if 'otp_sms_invalid' in error_msg and otp_type == 'SMS':
-                        raise BrowserIncorrectPassword('Code SMS erroné')
-                    if 'FAILED_AUTHENTICATION' in error_msg and otp_type == 'EMV':
+                    if "otp_sms_invalid" in error_msg and otp_type == "SMS":
+                        raise BrowserIncorrectPassword("Code SMS erroné")
+                    if "FAILED_AUTHENTICATION" in error_msg and otp_type == "EMV":
                         raise BrowserIncorrectPassword("Code d'authentification erroné")
-                raise AssertionError('Unhandled error message: %s' % error_msg)
+                raise AssertionError("Unhandled error message: %s" % error_msg)
 
         return super().login_errors(error)
 
 
 class AuthenticationStepPage(AuthenticationMethodPage):
     def get_status(self):
-        return Coalesce(
-            Dict('response/status', default=NotAvailable),
-            Dict('phase/state', default=NotAvailable)
-        )(self.doc)
+        return Coalesce(Dict("response/status", default=NotAvailable), Dict("phase/state", default=NotAvailable))(
+            self.doc
+        )
 
     def get_next_url(self):
-        return Dict('response/saml2_post/action')(self.doc)
+        return Dict("response/saml2_post/action")(self.doc)
 
     def get_payload(self):
-        return Dict('response/saml2_post/samlResponse')(self.doc)
+        return Dict("response/saml2_post/samlResponse")(self.doc)
 
     def get_phone_number(self):
-        return Dict(f'validationUnits/0/{self.validation_unit_id}/0/phoneNumber')(self.doc)
+        return Dict(f"validationUnits/0/{self.validation_unit_id}/0/phoneNumber")(self.doc)
 
     def get_devices(self):
-        return Dict(f'validationUnits/0/{self.validation_unit_id}/0/devices')(self.doc)
+        return Dict(f"validationUnits/0/{self.validation_unit_id}/0/devices")(self.doc)
 
     def get_time_left(self):
-        return Dict(f'validationUnits/0/{self.validation_unit_id}/0/requestTimeToLive')(self.doc)
+        return Dict(f"validationUnits/0/{self.validation_unit_id}/0/requestTimeToLive")(self.doc)
 
     def authentication_status(self):
-        return Dict('response/status', default=None)(self.doc)
+        return Dict("response/status", default=None)(self.doc)
 
     def is_authentication_successful(self):
-        return Dict('response/status', default=None)(self.doc) == "AUTHENTICATION_SUCCESS"
+        return Dict("response/status", default=None)(self.doc) == "AUTHENTICATION_SUCCESS"
 
 
 class AppValidationPage(XMLPage):
     def get_status(self):
-        return CleanText('//response/status')(self.doc)
+        return CleanText("//response/status")(self.doc)
 
 
 class LoginPage(MyHTMLPage):
     def on_load(self):
-        h1 = CleanText('//h1[1]')(self.doc)
+        h1 = CleanText("//h1[1]")(self.doc)
 
-        if h1.startswith('Le service est moment'):
-            text = CleanText('//h4[1]')(self.doc) or h1
+        if h1.startswith("Le service est moment"):
+            text = CleanText("//h4[1]")(self.doc) or h1
             raise BrowserUnavailable(text)
 
         if not self.browser.no_login:
@@ -277,33 +298,37 @@ class LoginPage(MyHTMLPage):
 
 class BPOVirtKeyboard(SplitKeyboard):
     char_to_hash = {
-        '0': '66ec79b200706e7f9c14f2b6d35dbb05',
-        '1': ('529819241cce382b429b4624cb019b56', '0ea8c08e52d992a28aa26043ffc7c044'),
-        '2': 'fab68678204198b794ce580015c8637f',
-        '3': '3fc5280d17cf057d1c4b58e4f442ceb8',
-        '4': (
-            'dea8800bdd5fcaee1903a2b097fbdef0', 'e413098a4d69a92d08ccae226cea9267',
-            '61f720966ccac6c0f4035fec55f61fe6', '2cbd19a4b01c54b82483f0a7a61c88a1',
+        "0": "66ec79b200706e7f9c14f2b6d35dbb05",
+        "1": ("529819241cce382b429b4624cb019b56", "0ea8c08e52d992a28aa26043ffc7c044"),
+        "2": "fab68678204198b794ce580015c8637f",
+        "3": "3fc5280d17cf057d1c4b58e4f442ceb8",
+        "4": (
+            "dea8800bdd5fcaee1903a2b097fbdef0",
+            "e413098a4d69a92d08ccae226cea9267",
+            "61f720966ccac6c0f4035fec55f61fe6",
+            "2cbd19a4b01c54b82483f0a7a61c88a1",
         ),
-        '5': 'ff1909c3b256e7ab9ed0d4805bdbc450',
-        '6': '7b014507ffb92a80f7f0534a3af39eaa',
-        '7': '7d598ff47a5607022cab932c6ad7bc5b',
-        '8': ('4ed28045e63fa30550f7889a18cdbd81', '88944bdbef2e0a49be9e0c918dd4be64'),
-        '9': 'dd6317eadb5a0c68f1938cec21b05ebe',
+        "5": "ff1909c3b256e7ab9ed0d4805bdbc450",
+        "6": "7b014507ffb92a80f7f0534a3af39eaa",
+        "7": "7d598ff47a5607022cab932c6ad7bc5b",
+        "8": ("4ed28045e63fa30550f7889a18cdbd81", "88944bdbef2e0a49be9e0c918dd4be64"),
+        "9": "dd6317eadb5a0c68f1938cec21b05ebe",
     }
-    codesep = ' '
+    codesep = " "
 
     def __init__(self, browser, images):
         code_to_filedata = {}
         for img_item in images:
-            img_content = browser.location(img_item['uri']).content
+            img_content = browser.location(img_item["uri"]).content
             img = Image.open(BytesIO(img_content))
-            img = img.filter(ImageFilter.UnsharpMask(
-                radius=2,
-                percent=150,
-                threshold=3,
-            ))
-            img = img.convert('L', dither=None)
+            img = img.filter(
+                ImageFilter.UnsharpMask(
+                    radius=2,
+                    percent=150,
+                    threshold=3,
+                )
+            )
+            img = img.convert("L", dither=None)
 
             def threshold_func(x):
                 if x < 20:
@@ -312,9 +337,9 @@ class BPOVirtKeyboard(SplitKeyboard):
 
             img = Image.eval(img, threshold_func)
             b = BytesIO()
-            img.save(b, format='PNG')
-            code_to_filedata[img_item['value']] = b.getvalue()
-        super(BPOVirtKeyboard, self).__init__(code_to_filedata)
+            img.save(b, format="PNG")
+            code_to_filedata[img_item["value"]] = b.getvalue()
+        super().__init__(code_to_filedata)
 
 
 class HomePage(LoggedPage, MyHTMLPage):

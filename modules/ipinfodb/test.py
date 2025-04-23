@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -22,8 +20,8 @@ from woob.tools.test import BackendTest
 
 
 class IpinfodbTest(BackendTest):
-    MODULE = 'ipinfodb'
+    MODULE = "ipinfodb"
 
     def test_ipinfobd(self):
-        self.backend.get_location('88.198.11.130')
-        self.backend.get_location('2a01:4f8:130:3062::1')
+        self.backend.get_location("88.198.11.130")
+        self.backend.get_location("2a01:4f8:130:3062::1")

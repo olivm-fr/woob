@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -20,23 +18,23 @@
 import re
 from urllib.parse import quote_plus
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import RecipePage, ResultsPage, CommentPage
+from .pages import CommentPage, RecipePage, ResultsPage
 
 
-__all__ = ['SevenFiftyGramsBrowser']
+__all__ = ["SevenFiftyGramsBrowser"]
 
 
 class SevenFiftyGramsBrowser(PagesBrowser):
-    BASEURL = 'https://www.750g.com'
+    BASEURL = "https://www.750g.com"
 
-    comment = URL('/recipe/(?P<_id>.*)/sort/lastest/comments.json', CommentPage)
-    search = URL(r'/recherche/\?q=(?P<pattern>.*)&page=(?P<page>\d*)', ResultsPage)
-    recipe = URL('/(?P<id>.*).htm', RecipePage)
+    comment = URL("/recipe/(?P<_id>.*)/sort/lastest/comments.json", CommentPage)
+    search = URL(r"/recherche/\?q=(?P<pattern>.*)&page=(?P<page>\d*)", ResultsPage)
+    recipe = URL("/(?P<id>.*).htm", RecipePage)
 
     def iter_recipes(self, pattern):
-        return self.search.go(pattern=quote_plus(pattern.encode('utf-8')), page=1).iter_recipes()
+        return self.search.go(pattern=quote_plus(pattern.encode("utf-8")), page=1).iter_recipes()
 
     @recipe.id2url
     def get_recipe(self, url, recipe=None):
@@ -45,7 +43,7 @@ class SevenFiftyGramsBrowser(PagesBrowser):
         return self.get_recipe_content(recipe)
 
     def get_comments(self, id):
-        m = re.match(r'.*r(\d*)', id, re.DOTALL)
+        m = re.match(r".*r(\d*)", id, re.DOTALL)
         if m:
             _id = m.group(1)
             return self.comment.go(_id=_id).get_comments()

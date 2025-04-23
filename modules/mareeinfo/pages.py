@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,14 +15,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.pages import HTMLPage
-from woob.browser.elements import ListElement, ItemElement, method
-from woob.browser.filters.standard import CleanText, DateTime, CleanDecimal, Regexp
-from woob.browser.filters.html import Link, XPath
-from woob.capabilities.gauge import Gauge, GaugeMeasure, GaugeSensor
+import re
 from datetime import timedelta
 from decimal import Decimal
-import re
+
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.html import Link, XPath
+from woob.browser.filters.standard import CleanDecimal, CleanText, DateTime, Regexp
+from woob.browser.pages import HTMLPage
+from woob.capabilities.gauge import Gauge, GaugeMeasure, GaugeSensor
 
 
 class IndexPage(HTMLPage):
@@ -35,14 +34,14 @@ class IndexPage(HTMLPage):
         class item(ItemElement):
             klass = Gauge
 
-            obj_id = CleanText(Link('.'), replace=[('/', '')])
-            obj_name = CleanText('.')
-            obj_city = CleanText('.')
-            obj_object = u'Port'
+            obj_id = CleanText(Link("."), replace=[("/", "")])
+            obj_name = CleanText(".")
+            obj_city = CleanText(".")
+            obj_object = "Port"
 
             def validate(self, obj):
-                if self.env['pattern']:
-                    return self.env['pattern'].lower() in obj.name.lower()
+                if self.env["pattern"]:
+                    return self.env["pattern"].lower() in obj.name.lower()
                 return True
 
     @method
@@ -51,12 +50,12 @@ class IndexPage(HTMLPage):
 
         def _create_coef_sensor(self, gauge_id, AM=True):
             name = CleanText('//tr[@class="MJE"]/th[4]')(self)
-            _name = 'matin' if AM else 'aprem'
+            _name = "matin" if AM else "aprem"
             value = self._get_coef_value(AM=AM)
 
             if value:
-                coef = GaugeSensor(u'%s-%s-%s' % (gauge_id, name, _name))
-                coef.name = '%s %s' % (name, _name)
+                coef = GaugeSensor(f"{gauge_id}-{name}-{_name}")
+                coef.name = f"{name} {_name}"
                 coef.lastvalue = value
                 coef.gaugeid = gauge_id
 
@@ -86,13 +85,13 @@ class IndexPage(HTMLPage):
 
         def _create_high_tide(self, gauge_id, AM=True):
             name = CleanText('//tr[@class="MJE"]/th[3]')(self)
-            _name = 'matin' if AM else 'aprem'
+            _name = "matin" if AM else "aprem"
             value = self._get_high_tide_value(AM=AM)
 
             if value:
-                tide = GaugeSensor(u'%s-%s-PM-%s' % (gauge_id, name, _name))
-                tide.name = u'Pleine Mer %s' % (_name)
-                tide.unit = u'm'
+                tide = GaugeSensor(f"{gauge_id}-{name}-PM-{_name}")
+                tide.name = "Pleine Mer %s" % (_name)
+                tide.unit = "m"
                 tide.lastvalue = value
                 tide.gaugeid = gauge_id
 
@@ -111,10 +110,10 @@ class IndexPage(HTMLPage):
             else:
                 time, value = None, None
                 if len(XPath('//tr[@id="MareeJours_%s"]/td[1]/b' % jour)(self)) > 1:
-                    time = DateTime(CleanText('//tr[@id="MareeJours_%s"]/td[1]/b[2]' % jour),
-                                    strict=False, default=None)(self)
-                    value = CleanDecimal('//tr[@id="MareeJours_0"]/td[2]/b[2]', replace_dots=True,
-                                         default=None)(self)
+                    time = DateTime(
+                        CleanText('//tr[@id="MareeJours_%s"]/td[1]/b[2]' % jour), strict=False, default=None
+                    )(self)
+                    value = CleanDecimal('//tr[@id="MareeJours_0"]/td[2]/b[2]', replace_dots=True, default=None)(self)
 
             if time and value:
                 measure = GaugeMeasure()
@@ -124,13 +123,13 @@ class IndexPage(HTMLPage):
 
         def _create_low_tide(self, gauge_id, AM=True):
             name = CleanText('//tr[@class="MJE"]/th[3]')(self)
-            _name = 'matin' if AM else 'aprem'
+            _name = "matin" if AM else "aprem"
             value = self._get_low_tide_value(AM=AM)
 
             if value:
-                tide = GaugeSensor(u'%s-%s-BM-%s' % (gauge_id, name, _name))
-                tide.name = u'Basse Mer %s' % (_name)
-                tide.unit = u'm'
+                tide = GaugeSensor(f"{gauge_id}-{name}-BM-{_name}")
+                tide.name = "Basse Mer %s" % (_name)
+                tide.unit = "m"
                 tide.lastvalue = value
                 tide.gaugeid = gauge_id
 
@@ -143,40 +142,44 @@ class IndexPage(HTMLPage):
                 return tide
 
         def _is_low_tide_first(self, jour):
-            return list(XPath('//tr[@id="MareeJours_%s"]/td[1]' % jour)(self)[0])[0].tag != 'b'
+            return list(XPath('//tr[@id="MareeJours_%s"]/td[1]' % jour)(self)[0])[0].tag != "b"
 
         def _get_low_tide_value(self, AM=True, jour=0):
             slow_tide_pos = 1 if self._is_low_tide_first(jour) else 2
-            m = re.findall('(\d{2}h\d{2})', CleanText('//tr[@id="MareeJours_%s"]/td[1]' % jour)(self))
+            m = re.findall(r"(\d{2}h\d{2})", CleanText('//tr[@id="MareeJours_%s"]/td[1]' % jour)(self))
 
-            re_time = '(\d{2}h\d{2}).*(\d{2}h\d{2}).*(\d{2}h\d{2})'
-            re_value = '(.*)m(.*)m(.*)m'
+            re_time = r"(\d{2}h\d{2}).*(\d{2}h\d{2}).*(\d{2}h\d{2})"
+            re_value = r"(.*)m(.*)m(.*)m"
             if len(m) > 3:
-                re_time = '(\d{2}h\d{2}).*(\d{2}h\d{2}).*(\d{2}h\d{2}).*(\d{2}h\d{2})'
-                re_value = '(.*)m(.*)m(.*)m(.*)m'
+                re_time = r"(\d{2}h\d{2}).*(\d{2}h\d{2}).*(\d{2}h\d{2}).*(\d{2}h\d{2})"
+                re_value = r"(.*)m(.*)m(.*)m(.*)m"
 
             if AM:
-                time = DateTime(Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[1]' % jour),
-                                       re_time,
-                                       '\\%s' % slow_tide_pos), strict=False)(self)
+                time = DateTime(
+                    Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[1]' % jour), re_time, "\\%s" % slow_tide_pos),
+                    strict=False,
+                )(self)
 
-                value = CleanDecimal(Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[2]' % jour),
-                                            re_value,
-                                            '\\%s' % slow_tide_pos),
-                                     replace_dots=True, default=None)(self)
+                value = CleanDecimal(
+                    Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[2]' % jour), re_value, "\\%s" % slow_tide_pos),
+                    replace_dots=True,
+                    default=None,
+                )(self)
 
             else:
                 slow_tide_pos += 2
                 time, value = None, None
                 if len(m) > slow_tide_pos - 1:
-                    time = DateTime(Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[1]' % jour),
-                                           re_time,
-                                           '\\%s' % slow_tide_pos), strict=False)(self)
+                    time = DateTime(
+                        Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[1]' % jour), re_time, "\\%s" % slow_tide_pos),
+                        strict=False,
+                    )(self)
 
-                    value = CleanDecimal(Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[2]' % jour),
-                                                re_value,
-                                                '\\%s' % slow_tide_pos),
-                                         replace_dots=True, default=None)(self)
+                    value = CleanDecimal(
+                        Regexp(CleanText('//tr[@id="MareeJours_%s"]/td[2]' % jour), re_value, "\\%s" % slow_tide_pos),
+                        replace_dots=True,
+                        default=None,
+                    )(self)
 
             if time and value:
                 measure = GaugeMeasure()

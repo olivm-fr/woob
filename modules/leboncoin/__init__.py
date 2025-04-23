@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import LeboncoinModule
 
 
-__all__ = ['LeboncoinModule']
+__all__ = ["LeboncoinModule"]

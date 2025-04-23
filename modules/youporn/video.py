@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Roger Philibert
 #
 # This file is part of a woob module.
@@ -25,11 +23,11 @@ class YoupornVideo(BaseVideo):
     def __init__(self, *args, **kwargs):
         BaseVideo.__init__(self, *args, **kwargs)
         self.nsfw = True
-        self.ext = u'flv'
+        self.ext = "flv"
 
     @classmethod
     def id2url(cls, _id):
         if _id.isdigit():
-            return u'http://www.youporn.com/watch/%d' % int(_id)
+            return "http://www.youporn.com/watch/%d" % int(_id)
         else:
             return None

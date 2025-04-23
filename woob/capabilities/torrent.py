@@ -16,11 +16,11 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import Capability, BaseObject, Field, StringField, FloatField, \
-                  IntField, UserError
+from .base import BaseObject, Capability, Field, FloatField, IntField, StringField, UserError
 from .date import DateField
 
-__all__ = ['MagnetOnly', 'Torrent', 'CapTorrent']
+
+__all__ = ["MagnetOnly", "Torrent", "CapTorrent"]
 
 
 class MagnetOnly(UserError):
@@ -30,22 +30,23 @@ class MagnetOnly(UserError):
 
     def __init__(self, magnet):
         self.magnet = magnet
-        super(MagnetOnly, self).__init__('Only magnet URL is available')
+        super().__init__("Only magnet URL is available")
 
 
 class Torrent(BaseObject):
     """
     Torrent object.
     """
-    name =      StringField('Name of torrent')
-    size =      FloatField('Size of torrent')
-    date =      DateField('Date when torrent has been published')
-    magnet =    StringField('URI of magnet')
-    seeders =   IntField('Number of seeders')
-    leechers =  IntField('Number of leechers')
-    files =     Field('Files in torrent', list)
-    description =   StringField('Description of torrent')
-    filename =      StringField('Name of .torrent file')
+
+    name = StringField("Name of torrent")
+    size = FloatField("Size of torrent")
+    date = DateField("Date when torrent has been published")
+    magnet = StringField("URI of magnet")
+    seeders = IntField("Number of seeders")
+    leechers = IntField("Number of leechers")
+    files = Field("Files in torrent", list)
+    description = StringField("Description of torrent")
+    filename = StringField("Name of .torrent file")
 
 
 class CapTorrent(Capability):

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -19,15 +17,13 @@
 
 # flake8: compatible
 
-from woob.browser import LoginBrowser, need_login, URL
+from woob.browser import URL, LoginBrowser, need_login
 
-from .pages import (
-    LoginPage, AfterLoginPage, AccountsPage, TaxDocsPage,
-)
+from .pages import AccountsPage, AfterLoginPage, LoginPage, TaxDocsPage
 
 
 class PrimonialreimBrowser(LoginBrowser):
-    BASEURL = 'https://www.primonialreim.fr'
+    BASEURL = "https://www.primonialreim.fr"
 
     login = URL("/fr/login", LoginPage)
     accounts = URL("/group/extranet-associes/mon-patrimoine", AccountsPage)

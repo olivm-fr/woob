@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -21,10 +19,10 @@ from woob.tools.test import BackendTest
 
 
 class SupertoinetteTest(BackendTest):
-    MODULE = 'supertoinette'
+    MODULE = "supertoinette"
 
     def test_recipe(self):
-        recipes = self.backend.iter_recipes('fondue')
+        recipes = self.backend.iter_recipes("fondue")
         for recipe in recipes:
             full_recipe = self.backend.get_recipe(recipe.id)
             assert full_recipe.instructions

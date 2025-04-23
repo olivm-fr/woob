@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,31 +15,34 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 import re
+from datetime import date, datetime, timedelta
+
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.html import Link
+from woob.browser.filters.standard import BrowserURL, CleanText, Env, Filter, Format, Join, Regexp
+from woob.browser.pages import HTMLPage, JsonPage
+from woob.capabilities.base import empty
 
 from .calendar import SensCritiquenCalendarEvent
-
-from datetime import date, datetime, timedelta
-from woob.capabilities.base import empty
-from woob.browser.pages import HTMLPage, JsonPage
-from woob.browser.elements import ItemElement, ListElement, method
-from woob.browser.filters.standard import Filter, CleanText, Regexp, Join, Format, BrowserURL, Env
-from woob.browser.filters.html import Link
 
 
 class Description(Filter):
     def filter(self, el):
         header = "//div[@class='pvi-hero-product']"
         section = "//section[@class='pvi-productDetails']"
-        return Format(u'\n%s\n\n%s%s\n',
-                      CleanText("(%s/div[@class='d-rubric-inner']/h1)[1]" % header),
-                      Join(u'- ', "%s/ul/li" % section, newline=True, addBefore='- '),
-                      Join(u'- Avec ', "%s/div[@class='pvi-productDetails-workers']/a" % section,
-                           newline=True, addBefore='- Avec '))(el[0])
+        return Format(
+            "\n%s\n\n%s%s\n",
+            CleanText("(%s/div[@class='d-rubric-inner']/h1)[1]" % header),
+            Join("- ", "%s/ul/li" % section, newline=True, addBefore="- "),
+            Join(
+                "- Avec ", "%s/div[@class='pvi-productDetails-workers']/a" % section, newline=True, addBefore="- Avec "
+            ),
+        )(el[0])
 
 
 class FormatDate(Filter):
     def __init__(self, pattern, selector):
-        super(FormatDate, self).__init__(selector)
+        super().__init__(selector)
         self.pattern = pattern
 
     def filter(self, _date):
@@ -50,15 +51,15 @@ class FormatDate(Filter):
 
 class Date(Filter):
     def filter(self, el):
-        str_time = el[0].xpath("time")[0].attrib['datetime'][:-6]
-        _time = datetime.strptime(str_time, '%H:%M:%S')
+        str_time = el[0].xpath("time")[0].attrib["datetime"][:-6]
+        _time = datetime.strptime(str_time, "%H:%M:%S")
 
-        str_date = CleanText('.')(el[0])
+        str_date = CleanText(".")(el[0])
         _date = date.today()
-        m = re.search('\w* (\d\d?) .*', str_date)
-        if (('Demain' in str_date and str_time[0] != "0") or ('Ce soir' in str_date and str_time[0] == "0")):
+        m = re.search(r"\w* (\d\d?) .*", str_date)
+        if ("Demain" in str_date and str_time[0] != "0") or ("Ce soir" in str_date and str_time[0] == "0"):
             _date += timedelta(days=1)
-        elif 'Demain' in str_date:
+        elif "Demain" in str_date:
             _date += timedelta(days=2)
         elif m:
             day_number = int(m.group(1))
@@ -75,8 +76,8 @@ class Date(Filter):
 
 class JsonResumePage(JsonPage):
     def get_resume(self):
-        if self.doc['json']['success']:
-            return self.doc['json']['data']
+        if self.doc["json"]["success"]:
+            return self.doc["json"]["data"]
 
 
 class EventPage(HTMLPage):
@@ -84,8 +85,8 @@ class EventPage(HTMLPage):
     class get_event(ItemElement):
         klass = SensCritiquenCalendarEvent
 
-        obj_url = BrowserURL('event_page', _id=Env('_id'))
-        obj_description = Description('.')
+        obj_url = BrowserURL("event_page", _id=Env("_id"))
+        obj_description = Description(".")
 
 
 class FilmsPage(HTMLPage):
@@ -97,36 +98,45 @@ class FilmsPage(HTMLPage):
             klass = SensCritiquenCalendarEvent
 
             def condition(self):
-                if '_id' in self.env and self.env['_id']:
-                    return Format(u'%s#%s#%s',
-                                  Regexp(Link('.'), '/film/(.*)'),
-                                  FormatDate("%Y%m%d%H%M",
-                                             Date('div[@class="elgr-guide-details"]/div[@class="elgr-data-diffusion"]')),
-                                  CleanText('./div/span[@class="d-offset"]',
-                                            replace=[(' ', '-')]))(self) == self.env['_id']
+                if "_id" in self.env and self.env["_id"]:
+                    return (
+                        Format(
+                            "%s#%s#%s",
+                            Regexp(Link("."), r"/film/(.*)"),
+                            FormatDate(
+                                "%Y%m%d%H%M", Date('div[@class="elgr-guide-details"]/div[@class="elgr-data-diffusion"]')
+                            ),
+                            CleanText('./div/span[@class="d-offset"]', replace=[(" ", "-")]),
+                        )(self)
+                        == self.env["_id"]
+                    )
                 return True
 
             def validate(self, obj):
-                if 'date_from' in self.env and self.env['date_from'] and obj.start_date > self.env['date_from']:
-                    if not self.env['date_to']:
+                if "date_from" in self.env and self.env["date_from"] and obj.start_date > self.env["date_from"]:
+                    if not self.env["date_to"]:
                         return True
                     else:
                         if empty(obj.end_date):
-                            if obj.start_date < self.env['date_to']:
+                            if obj.start_date < self.env["date_to"]:
                                 return True
-                        elif obj.end_date <= self.env['date_to']:
+                        elif obj.end_date <= self.env["date_to"]:
                             return True
 
-                if '_id' in self.env:
+                if "_id" in self.env:
                     return True
 
                 return False
 
-            obj_id = Format(u'%s#%s#%s',
-                            Regexp(Link('.'), '/film/(.*)'),
-                            FormatDate("%Y%m%d%H%M", Date('div/div[@class="elgr-data-diffusion"]')),
-                            CleanText('./div/span[@class="d-offset"]', replace=[(' ', '-')]))
+            obj_id = Format(
+                "%s#%s#%s",
+                Regexp(Link("."), r"/film/(.*)"),
+                FormatDate("%Y%m%d%H%M", Date('div/div[@class="elgr-data-diffusion"]')),
+                CleanText('./div/span[@class="d-offset"]', replace=[(" ", "-")]),
+            )
             obj_start_date = Date('div/div[@class="elgr-data-diffusion"]')
-            obj_summary = Format('%s - %s',
-                                 Regexp(CleanText('./div/img/@alt'), '^Affiche(.*)'),
-                                 CleanText('./div/span[@class="d-offset"]'))
+            obj_summary = Format(
+                "%s - %s",
+                Regexp(CleanText("./div/img/@alt"), "^Affiche(.*)"),
+                CleanText('./div/span[@class="d-offset"]'),
+            )

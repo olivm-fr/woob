@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import VicSecCardModule
 
-__all__ = ['VicSecCardModule']
+
+__all__ = ["VicSecCardModule"]

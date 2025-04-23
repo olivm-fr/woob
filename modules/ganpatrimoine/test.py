@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2021  Budget Insight
 #
 # This file is part of a woob module.
@@ -22,4 +20,4 @@ from woob.tools.test import BackendTest
 
 
 class GanpatrimoineTest(BackendTest):
-    MODULE = 'ganpatrimoine'
+    MODULE = "ganpatrimoine"

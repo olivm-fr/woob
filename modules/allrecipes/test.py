@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,16 +15,16 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
-
 import itertools
+
+from woob.tools.test import BackendTest
 
 
 class AllrecipesTest(BackendTest):
-    MODULE = 'allrecipes'
+    MODULE = "allrecipes"
 
     def test_recipe(self):
-        recipes = list(itertools.islice(self.backend.iter_recipes('french fries'), 0, 20))
+        recipes = list(itertools.islice(self.backend.iter_recipes("french fries"), 0, 20))
         assert len(recipes)
         full_recipe = self.backend.get_recipe(recipes[0].id)
         assert full_recipe.instructions

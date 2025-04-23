@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,39 +16,43 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.housing import (CapHousing, Housing, HousingPhoto,
-                                       ADVERT_TYPES)
+from woob.capabilities.housing import ADVERT_TYPES, CapHousing, Housing, HousingPhoto
 from woob.tools.backend import Module
 
 from .browser import PapBrowser
 
 
-__all__ = ['PapModule']
+__all__ = ["PapModule"]
 
 
 class PapModule(Module, CapHousing):
-    NAME = 'pap'
-    MAINTAINER = u'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    VERSION = '3.6'
-    DESCRIPTION = 'French housing website'
-    LICENSE = 'AGPLv3+'
+    NAME = "pap"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    VERSION = "3.7"
+    DESCRIPTION = "French housing website"
+    LICENSE = "AGPLv3+"
     BROWSER = PapBrowser
 
     def search_housings(self, query):
-        if(len(query.advert_types) == 1 and
-           query.advert_types[0] == ADVERT_TYPES.PROFESSIONAL):
+        if len(query.advert_types) == 1 and query.advert_types[0] == ADVERT_TYPES.PROFESSIONAL:
             # Pap is personal only
             return list()
 
-        cities = ['%s' % c.id for c in query.cities if c.backend == self.name]
+        cities = ["%s" % c.id for c in query.cities if c.backend == self.name]
         if len(cities) == 0:
             return list()
 
-        return self.browser.search_housings(query.type, cities, query.nb_rooms,
-                                            query.area_min, query.area_max,
-                                            query.cost_min, query.cost_max,
-                                            query.house_types)
+        return self.browser.search_housings(
+            query.type,
+            cities,
+            query.nb_rooms,
+            query.area_min,
+            query.area_max,
+            query.cost_min,
+            query.cost_max,
+            query.house_types,
+        )
 
     def get_housing(self, housing):
         if isinstance(housing, Housing):
@@ -65,7 +67,7 @@ class PapModule(Module, CapHousing):
         return self.browser.search_geo(pattern)
 
     def fill_photo(self, photo, fields):
-        if 'data' in fields and photo.url and not photo.data:
+        if "data" in fields and photo.url and not photo.data:
             photo.data = self.browser.open(photo.url).content
         return photo
 

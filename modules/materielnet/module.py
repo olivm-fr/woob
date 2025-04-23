@@ -18,31 +18,29 @@
 
 # flake8: compatible
 
-from woob.capabilities.bill import (
-    CapDocument, Document, DocumentNotFound, DocumentCategory, DocumentTypes,
-)
-from woob.capabilities.base import find_object, NotAvailable
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, Value
+from woob.capabilities.base import NotAvailable, find_object
+from woob.capabilities.bill import CapDocument, Document, DocumentCategory, DocumentNotFound, DocumentTypes
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import MaterielnetBrowser
 
 
-__all__ = ['MaterielnetModule']
+__all__ = ["MaterielnetModule"]
 
 
 class MaterielnetModule(Module, CapDocument):
-    NAME = 'materielnet'
-    DESCRIPTION = 'Materiel.net'
-    MAINTAINER = 'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "materielnet"
+    DESCRIPTION = "Materiel.net"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Email'),
-        ValueBackendPassword('password', label='Mot de passe'),
-        Value('captcha_response', label='Réponse captcha', default='', required=False)
+        ValueBackendPassword("login", label="Email"),
+        ValueBackendPassword("password", label="Mot de passe"),
+        Value("captcha_response", label="Réponse captcha", default="", required=False),
     )
 
     BROWSER = MaterielnetBrowser
@@ -51,7 +49,7 @@ class MaterielnetModule(Module, CapDocument):
     document_categories = {DocumentCategory.SHOPPING}
 
     def create_default_browser(self):
-        return self.create_browser(self.config, self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config, self.config["login"].get(), self.config["password"].get())
 
     def iter_subscription(self):
         return self.browser.get_subscription_list()

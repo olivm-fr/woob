@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Roger Philibert
 #
 # This file is part of woob.
@@ -21,4 +19,4 @@
 from .module import SwileModule
 
 
-__all__ = ['SwileModule']
+__all__ = ["SwileModule"]

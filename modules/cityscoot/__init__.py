@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      P4ncake
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import CityscootModule
 
 
-__all__ = ['CityscootModule']
+__all__ = ["CityscootModule"]

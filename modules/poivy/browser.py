@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2014  Fourcot Florent
 #
 # This file is part of a woob module.
@@ -17,22 +15,23 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import BrowserIncorrectPassword
-from .pages import HomePage, LoginPage, HistoryPage, BillsPage, ErrorPage
+
+from .pages import BillsPage, ErrorPage, HistoryPage, HomePage, LoginPage
 
 
-__all__ = ['PoivyBrowser']
+__all__ = ["PoivyBrowser"]
 
 
 class PoivyBrowser(LoginBrowser):
-    BASEURL = 'https://www.poivy.com'
+    BASEURL = "https://www.poivy.com"
 
-    login = URL('/login', LoginPage)
-    homepage = URL('/buy_credit.*', HomePage)
-    history = URL('/recent_calls', HistoryPage)
-    bills = URL('/purchases', BillsPage)
-    warning = URL('/warning.*', ErrorPage)
+    login = URL("/login", LoginPage)
+    homepage = URL("/buy_credit.*", HomePage)
+    history = URL("/recent_calls", HistoryPage)
+    bills = URL("/purchases", BillsPage)
+    warning = URL("/warning.*", ErrorPage)
 
     def do_login(self):
         assert isinstance(self.username, str)

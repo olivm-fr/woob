@@ -16,10 +16,10 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import Capability, BaseObject, StringField, UserError
+from .base import BaseObject, Capability, StringField, UserError
 
 
-__all__ = ['TranslationFail', 'LanguageNotSupported', 'CapTranslate']
+__all__ = ["TranslationFail", "LanguageNotSupported", "CapTranslate"]
 
 
 class LanguageNotSupported(UserError):
@@ -27,8 +27,8 @@ class LanguageNotSupported(UserError):
     Raised when the language is not supported
     """
 
-    def __init__(self, msg='language is not supported'):
-        super(LanguageNotSupported, self).__init__(msg)
+    def __init__(self, msg="language is not supported"):
+        super().__init__(msg)
 
 
 class TranslationFail(UserError):
@@ -36,17 +36,18 @@ class TranslationFail(UserError):
     Raised when no translation matches the given request
     """
 
-    def __init__(self, msg='No Translation Available'):
-        super(TranslationFail, self).__init__(msg)
+    def __init__(self, msg="No Translation Available"):
+        super().__init__(msg)
 
 
 class Translation(BaseObject):
     """
     Translation.
     """
-    lang_src =      StringField('Source language')
-    lang_dst =      StringField('Destination language')
-    text =          StringField('Translation')
+
+    lang_src = StringField("Source language")
+    lang_dst = StringField("Destination language")
+    text = StringField("Translation")
 
 
 class CapTranslate(Capability):

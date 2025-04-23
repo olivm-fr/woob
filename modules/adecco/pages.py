@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,54 +16,55 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import requests
-from woob.browser.pages import HTMLPage, pagination, JsonPage
-from woob.browser.elements import ItemElement, method, DictElement
 
-from woob.browser.filters.standard import CleanText, Regexp, Date
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.html import CleanHTML
-from woob.browser.filters.json import Dict
-
 from woob.browser.filters.javascript import JSVar
-from woob.capabilities.job import BaseJobAdvert
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanText, Date, Regexp
+from woob.browser.pages import HTMLPage, JsonPage, pagination
 from woob.capabilities.base import empty
+from woob.capabilities.job import BaseJobAdvert
 
 
 class SearchPage(HTMLPage):
     def get_post_params(self):
-        return {'facetSettingId': JSVar(CleanText('//script'), var='_FacetName')(self.doc),
-                'currentLanguage': JSVar(CleanText('//script'), var='_CurrentLanguage')(self.doc),
-                'clientId': JSVar(CleanText('//script'), var='_ClientId')(self.doc),
-                'branchId': JSVar(CleanText('//script'), var='_BranchId')(self.doc),
-                'clientName':  JSVar(CleanText('//script'), var='_ClientName')(self.doc)}
+        return {
+            "facetSettingId": JSVar(CleanText("//script"), var="_FacetName")(self.doc),
+            "currentLanguage": JSVar(CleanText("//script"), var="_CurrentLanguage")(self.doc),
+            "clientId": JSVar(CleanText("//script"), var="_ClientId")(self.doc),
+            "branchId": JSVar(CleanText("//script"), var="_BranchId")(self.doc),
+            "clientName": JSVar(CleanText("//script"), var="_ClientName")(self.doc),
+        }
 
 
 class AdvertsJsonPage(JsonPage):
     @pagination
     @method
     class iter_job_adverts(DictElement):
-        item_xpath = 'Items'
+        item_xpath = "Items"
 
         def next_page(self):
-            if len(self.page.doc['Pagination']) >= 2:
-                if self.page.doc['Pagination'][-2]['keyName'] == u'Suivant':
-                    url = self.page.doc['Pagination'][-2]['valueName']
-                    self.env['data']['filterUrl'] = u'http://www.adecco.fr%s' % url
-                    return requests.Request("POST", self.page.url, data=self.env['data'])
+            if len(self.page.doc["Pagination"]) >= 2:
+                if self.page.doc["Pagination"][-2]["keyName"] == "Suivant":
+                    url = self.page.doc["Pagination"][-2]["valueName"]
+                    self.env["data"]["filterUrl"] = "http://www.adecco.fr%s" % url
+                    return requests.Request("POST", self.page.url, data=self.env["data"])
 
         class item(ItemElement):
             klass = BaseJobAdvert
 
             def validate(self, advert):
-                if empty(advert.publication_date) or not self.env['date_min']:
+                if empty(advert.publication_date) or not self.env["date_min"]:
                     return advert
 
-                if advert.publication_date >= self.env['date_min']:
+                if advert.publication_date >= self.env["date_min"]:
                     return advert
 
-            obj_id = Dict('JobId')
-            obj_title = Dict('JobTitle')
-            obj_place = Dict('JobLocation')
-            obj_publication_date = Date(Dict('PostedDate'))
+            obj_id = Dict("JobId")
+            obj_title = Dict("JobTitle")
+            obj_place = Dict("JobLocation")
+            obj_publication_date = Date(Dict("PostedDate"))
 
 
 class AdvertPage(HTMLPage):
@@ -74,18 +73,15 @@ class AdvertPage(HTMLPage):
         klass = BaseJobAdvert
 
         def obj_id(self):
-            _id = Regexp(CleanText('//meta[@property="og:url"]/@content'),
-                         '.*\?ID=(.*)',
-                         default=None)(self)
+            _id = Regexp(CleanText('//meta[@property="og:url"]/@content'), r".*\?ID=(.*)", default=None)(self)
             if _id is None:
-                _id = JSVar(CleanText('//script'), var='_JobDetailsId')(self)
+                _id = JSVar(CleanText("//script"), var="_JobDetailsId")(self)
             return _id
 
         def obj_title(self):
-            title = CleanText('//meta[@property="og:title"]/@content',
-                              default=None)(self)
+            title = CleanText('//meta[@property="og:title"]/@content', default=None)(self)
             if title is None:
-                title = JSVar(CleanText('//script'), var='_JobTitle')(self)
+                title = JSVar(CleanText("//script"), var="_JobTitle")(self)
             return title
 
         def obj_place(self):
@@ -94,8 +90,7 @@ class AdvertPage(HTMLPage):
                 place = CleanText('//li[@class="job--meta_location"]')(self)
 
             if not place:
-                place = Regexp(CleanText('//meta[@property="og:title"]/@content'),
-                               u'.*\ à (.*)')(self)
+                place = Regexp(CleanText('//meta[@property="og:title"]/@content'), r".*\ à (.*)")(self)
             return place
 
         def obj_publication_date(self):
@@ -104,15 +99,16 @@ class AdvertPage(HTMLPage):
                 date = Date(CleanText('//span[@id="posted-date"]'))(self)
             return date
 
-        obj_contract_type = CleanText('//li[@class="job--meta_employment-type"]/div/div/span[@class="job-details-value"]')
+        obj_contract_type = CleanText(
+            '//li[@class="job--meta_employment-type"]/div/div/span[@class="job-details-value"]'
+        )
 
         # obj_pay = CleanText('//div[@class="jobGreyContain"]/div/div[4]/span[@class="value"]')
 
         def obj_job_name(self):
-            job_name = Regexp(CleanText('//meta[@property="og:title"]/@content'),
-                              '(.*)\|.*', default=None)(self)
+            job_name = Regexp(CleanText('//meta[@property="og:title"]/@content'), r"(.*)\|.*", default=None)(self)
             if job_name is None:
-                job_name = JSVar(CleanText('//script'), var='_JobTitle')(self)
+                job_name = JSVar(CleanText("//script"), var="_JobTitle")(self)
             return job_name
 
         obj_description = CleanHTML('//div[@class="VacancyDescription"]')
@@ -120,9 +116,9 @@ class AdvertPage(HTMLPage):
         def obj_url(self):
             url = CleanText('//meta[@property="og:url"]/@content', default=None)(self)
             if url is None:
-                url = JSVar(CleanText('//script'), var='_JobUrl')(self)
+                url = JSVar(CleanText("//script"), var="_JobUrl")(self)
 
-            if not url.startswith('http'):
-                url = 'www.adecco.fr%s' % url
+            if not url.startswith("http"):
+                url = "www.adecco.fr%s" % url
 
             return url

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015-2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -19,23 +17,22 @@
 
 
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
 from woob.browser.profiles import Firefox
+from woob.browser.url import URL
 
 from .pages import LocationPage
 
 
-__all__ = ['IpinfodbBrowser']
+__all__ = ["IpinfodbBrowser"]
 
 
 class IpinfodbBrowser(PagesBrowser):
     PROFILE = Firefox()
     TIMEOUT = 30
 
-    BASEURL = 'https://ipinfodb.com/'
-    home = URL('$', LocationPage)
+    BASEURL = "https://ipinfodb.com/"
+    home = URL("$", LocationPage)
 
     def get_location(self, ipaddr):
-        self.home.go(data={'ip': ipaddr})
+        self.home.go(data={"ip": ipaddr})
         return self.page.get_location()
-

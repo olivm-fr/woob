@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Quentin Defenouillere
 #
 # This file is part of woob.
@@ -18,10 +16,11 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 from woob.browser import URL, LoginBrowser, need_login
-from .pages import BandPage, SearchBandsPage, LoginPage, FavoritesPage, SuggestionsPage, AlbumPage
+
+from .pages import AlbumPage, BandPage, FavoritesPage, LoginPage, SearchBandsPage, SuggestionsPage
 
 
-__all__ = ['MetalArchivesBrowser']
+__all__ = ["MetalArchivesBrowser"]
 
 
 class MetalArchivesBrowser(LoginBrowser):
@@ -29,36 +28,30 @@ class MetalArchivesBrowser(LoginBrowser):
     Browsing the Metal Archives website.
     """
 
-    BASEURL = 'https://www.metal-archives.com/'
-    login = URL('authentication/login', LoginPage)
-    bands = URL(r'search/ajax-band-search/\?field=name&query=(?P<pattern>.*)', SearchBandsPage)
-    band = URL('bands/Band/(?P<band_id>.*)', BandPage)
-    albums = URL('band/discography/id/(?P<band_id>.*)/tab/all', AlbumPage)
-    favorites = URL(r'bookmark/ajax-list/type/band\?sEcho=1', FavoritesPage)
-    suggested = URL(r'band/ajax-recommendations/id/(?P<band_id>.*)\?showMoreSimilar=1', SuggestionsPage)
+    BASEURL = "https://www.metal-archives.com/"
+    login = URL("authentication/login", LoginPage)
+    bands = URL(r"search/ajax-band-search/\?field=name&query=(?P<pattern>.*)", SearchBandsPage)
+    band = URL("bands/Band/(?P<band_id>.*)", BandPage)
+    albums = URL("band/discography/id/(?P<band_id>.*)/tab/all", AlbumPage)
+    favorites = URL(r"bookmark/ajax-list/type/band\?sEcho=1", FavoritesPage)
+    suggested = URL(r"band/ajax-recommendations/id/(?P<band_id>.*)\?showMoreSimilar=1", SuggestionsPage)
 
     def do_login(self):
-        d = {
-            'loginUsername': self.username,
-            'loginPassword': self.password
-        }
+        d = {"loginUsername": self.username, "loginPassword": self.password}
         self.login.go(data=d)
 
     def iter_band_search(self, pattern):
-        for band in self.bands.go(pattern=pattern).iter_bands():
-            yield band
+        yield from self.bands.go(pattern=pattern).iter_bands()
 
     def get_info(self, id):
         return self.band.go(band_id=id).get_info()
 
     def get_albums(self, id):
-        for album in self.albums.go(band_id=id).iter_albums():
-            yield album
+        yield from self.albums.go(band_id=id).iter_albums()
 
     @need_login
     def get_favorites(self):
-        for favorite in self.favorites.go().iter_favorites():
-            yield favorite
+        yield from self.favorites.go().iter_favorites()
 
     @need_login
     def get_suggestions(self, bands):
@@ -68,7 +61,9 @@ class MetalArchivesBrowser(LoginBrowser):
     def suggestions(self, band_list):
         # Offers band suggestions depending on your favorite bands.
         if not band_list:
-            self.logger.warning('In order to get band suggestions, you first need to add some favorite artists of the Metal Archives website.')
+            self.logger.warning(
+                "In order to get band suggestions, you first need to add some favorite artists of the Metal Archives website."
+            )
             return
 
         similar_bands = []
@@ -77,7 +72,7 @@ class MetalArchivesBrowser(LoginBrowser):
             similar_bands.extend(self.suggested.go(band_id=band).iter_suggestions())
 
         if not similar_bands:
-            self.logger.warning('Your favorite artists did not contain any similar bands.')
+            self.logger.warning("Your favorite artists did not contain any similar bands.")
             return
 
         suggestions = {}
@@ -102,7 +97,7 @@ class MetalArchivesBrowser(LoginBrowser):
             suggestion_list.append(suggested_bands.get(best_suggestion))
             suggestions.pop(best_suggestion)
 
-        assert suggestion_list, 'Failed to return any suggestions from your favorite artists.'
+        assert suggestion_list, "Failed to return any suggestions from your favorite artists."
 
         # The top 13 similar artists to your favorite bands
         for band in suggestion_list:

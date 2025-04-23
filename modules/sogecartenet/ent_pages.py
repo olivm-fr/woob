@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Budget Insight
 #
 # This file is part of a woob module.
@@ -17,28 +15,21 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-import xlrd
 import datetime
 
+import xlrd
 from dateutil.relativedelta import relativedelta
 from selenium.common.exceptions import ElementClickInterceptedException
 from selenium.webdriver.common.keys import Keys
 
-
+from woob.browser.elements import DictElement, ItemElement, method
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanDecimal, CleanText, Currency, Date, Field, Format
+from woob.browser.pages import LoggedPage, Page
+from woob.browser.selenium import AllCondition, AnyCondition, SeleniumPage, StablePageCondition, VisibleXPath
 from woob.capabilities.bank import Account, Transaction
 from woob.capabilities.base import NotAvailable
-from woob.browser.pages import LoggedPage, Page
-from woob.browser.filters.standard import (
-    CleanText, CleanDecimal, Date, Format,
-    Field, Currency,
-)
-from woob.browser.filters.json import Dict
-from woob.browser.elements import ItemElement, DictElement, method
 from woob.tools.decorators import retry
-from woob.browser.selenium import (
-    SeleniumPage, VisibleXPath, AnyCondition, AllCondition,
-    StablePageCondition,
-)
 
 
 class LoginPage(SeleniumPage):
@@ -60,10 +51,9 @@ class LoginPage(SeleniumPage):
         el.send_keys(Keys.RETURN)
 
     def get_error(self):
-        return (
-            CleanText('//h1[contains(@class, "Notification-caption")]')(self.doc) or
-            CleanText('//div[@class="popupContent"]//div[contains(text(), "mot de passe a expiré")]')(self.doc)
-        )
+        return CleanText('//h1[contains(@class, "Notification-caption")]')(self.doc) or CleanText(
+            '//div[@class="popupContent"]//div[contains(text(), "mot de passe a expiré")]'
+        )(self.doc)
 
 
 class AccueilPage(LoggedPage, SeleniumPage):
@@ -91,7 +81,7 @@ class XLSPage(Page):
 
     def __init__(self, browser, file_path, response):
         self.file_path = file_path
-        super(XLSPage, self).__init__(browser, response)
+        super().__init__(browser, response)
 
     def build_doc(self, content):
         wb = xlrd.open_workbook(self.file_path)
@@ -105,7 +95,7 @@ class XLSPage(Page):
                 continue
             row = sh.row_values(i)
             if header is None and self.HEADER:
-                header = [s.replace('/', '') for s in row]
+                header = [s.replace("/", "") for s in row]
             else:
                 rows.append(row)
                 if header:
@@ -128,24 +118,24 @@ class AccountsXlsPage(LoggedPage, XLSPage):
             # same service_number might have multiple cards.
             # And a card number can be associated to multiple persons.
             obj_id = obj_number = Format(
-                '%s_%s',
-                Field('_service_number'),
-                Field('_card_number'),
+                "%s_%s",
+                Field("_service_number"),
+                Field("_card_number"),
             )
 
             def obj_label(self):
-                card_number = Field('_card_number')(self)
-                last_card_digits = card_number[card_number.rfind('X') + 1:]
-                return '%s %s %s' % (
-                    Dict('nom titulaire')(self),
-                    Dict('prénom titulaire')(self),
+                card_number = Field("_card_number")(self)
+                last_card_digits = card_number[card_number.rfind("X") + 1 :]
+                return "{} {} {}".format(
+                    Dict("nom titulaire")(self),
+                    Dict("prénom titulaire")(self),
                     last_card_digits,
                 )
 
-            obj_currency = 'EUR'
+            obj_currency = "EUR"
             obj_type = Account.TYPE_CARD
-            obj__card_number = CleanText(Dict('numero carte'))
-            obj__service_number = CleanText(Dict('Numéro de prestation'))
+            obj__card_number = CleanText(Dict("numero carte"))
+            obj__service_number = CleanText(Dict("Numéro de prestation"))
 
 
 class DeferredQuery(Exception):
@@ -168,17 +158,16 @@ class HistoryPage(LoggedPage, SeleniumPage):
 
         # Read dates from dropdown menu, choose 1 year ago max
         self.browser.wait_xpath_visible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
-        dates_text = CleanText('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]')(self.doc)
+        dates_text = CleanText('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]//div[contains(@class, "suggestmenu")]')(
+            self.doc
+        )
         dates_list = dates_text.split()
         today = datetime.date.today()
         last_date_index = 0
         for date in dates_list:
             displayed_date = Date().filter(date)
             delta = relativedelta(today, displayed_date)
-            if (
-                delta.years >= 1 and
-                (delta.months > 0 or delta.days > 0)
-            ):
+            if delta.years >= 1 and (delta.months > 0 or delta.days > 0):
                 break
             last_date_index += 1
 
@@ -188,11 +177,12 @@ class HistoryPage(LoggedPage, SeleniumPage):
         # If we ask for too much history sometimes the site tells
         # us that the query will be answered at a later time and asks to
         # confirm, we want to avoid this behaviour
-        self.browser.wait_until(AnyCondition(
-            StablePageCondition(),
-            VisibleXPath('//div[@role="dialog"]/div[@class="popupContent"]')
-        ))
-        return 'Votre requête sera traitée en différé' in CleanText('//div[@role="dialog"]/div[@class="popupContent"]')(self.doc)
+        self.browser.wait_until(
+            AnyCondition(StablePageCondition(), VisibleXPath('//div[@role="dialog"]/div[@class="popupContent"]'))
+        )
+        return "Votre requête sera traitée en différé" in CleanText('//div[@role="dialog"]/div[@class="popupContent"]')(
+            self.doc
+        )
 
     def download_transactions(self, last_date_index, retry=False):
         # Select chosen date
@@ -206,24 +196,30 @@ class HistoryPage(LoggedPage, SeleniumPage):
         )
         el.click()
         self.browser.wait_xpath_invisible('//div[@id="VAADIN_COMBOBOX_OPTIONLIST"]')
-        self.browser.wait_xpath_invisible('//p[contains(@class, "Notification-description")][contains(text(), "a bien été sélectionnée")]')
+        self.browser.wait_xpath_invisible(
+            '//p[contains(@class, "Notification-description")][contains(text(), "a bien été sélectionnée")]'
+        )
         # Submit search for this date
         self.driver.execute_script("document.getElementById('BTN_SEARCH').click()")
 
         if self.is_deferred_query():
             # Clicking no on the popup
-            el = self.driver.find_element_by_xpath('//div[@role="dialog"]/div[@class="popupContent"]//div[contains(@class, "button-friendly") and .//span[text()="Non"]]',)
+            el = self.driver.find_element_by_xpath(
+                '//div[@role="dialog"]/div[@class="popupContent"]//div[contains(@class, "button-friendly") and .//span[text()="Non"]]',
+            )
             el.click()
             self.browser.wait_xpath_invisible('//div[@role="dialog"]/div[@class="popupContent"]')
             raise DeferredQuery()
 
         # Get data
-        self.browser.wait_until(AnyCondition(
-            VisibleXPath('//div/a/img'),
-            VisibleXPath('//p[contains(@class, "Notification-description")][contains(text(), "Aucune opération")]'),
-        ))
-        if self.doc.xpath('//div/a/img'):
-            el = self.driver.find_element_by_xpath('//div/a/img')
+        self.browser.wait_until(
+            AnyCondition(
+                VisibleXPath("//div/a/img"),
+                VisibleXPath('//p[contains(@class, "Notification-description")][contains(text(), "Aucune opération")]'),
+            )
+        )
+        if self.doc.xpath("//div/a/img"):
+            el = self.driver.find_element_by_xpath("//div/a/img")
             el.click()
             return True
         return False
@@ -242,7 +238,7 @@ class HistoryPage(LoggedPage, SeleniumPage):
         self.browser.wait_until(
             AnyCondition(
                 VisibleXPath('//div[span[span[text()="Annuler la sélection"]]]'),
-                VisibleXPath('//div[span[span[text()="Sélectionner une carte"]]]')
+                VisibleXPath('//div[span[span[text()="Sélectionner une carte"]]]'),
             )
         )
 
@@ -270,7 +266,9 @@ class HistoryPage(LoggedPage, SeleniumPage):
 
         # Click the search button
         self.browser.wait_until(StablePageCondition())
-        self.browser.wait_xpath_clickable('//div[not(contains(@class, "v-disabled")) and span[span[contains(text(), "Rechercher")]]]')
+        self.browser.wait_xpath_clickable(
+            '//div[not(contains(@class, "v-disabled")) and span[span[contains(text(), "Rechercher")]]]'
+        )
 
         el = self.driver.find_element_by_xpath('//div[span[span[text()="Rechercher"]]]')
         self.click_retry_intercepted(el)
@@ -279,10 +277,13 @@ class HistoryPage(LoggedPage, SeleniumPage):
         # Get the button of the right card (there might be multiple
         # card with the same service number) and click it
         el = self.driver.find_element_by_xpath(
-            '//tbody/tr/td[1][following-sibling::td[contains(text(), "%s")]]//div[contains(@class, "btnGrid-action")]' % account._card_number
+            '//tbody/tr/td[1][following-sibling::td[contains(text(), "%s")]]//div[contains(@class, "btnGrid-action")]'
+            % account._card_number
         )
         self.click_retry_intercepted(el)
-        self.browser.wait_xpath_visible('//p[contains(@class, "Notification-description")][contains(text(), "a bien été sélectionnée")]')
+        self.browser.wait_xpath_visible(
+            '//p[contains(@class, "Notification-description")][contains(text(), "a bien été sélectionnée")]'
+        )
 
 
 class HistoryXlsPage(LoggedPage, XLSPage):
@@ -293,21 +294,21 @@ class HistoryXlsPage(LoggedPage, XLSPage):
         class item(ItemElement):
             klass = Transaction
 
-            obj_label = CleanText(Dict('raison sociale'))
+            obj_label = CleanText(Dict("raison sociale"))
 
             def obj_original_currency(self):
-                currency = Currency(Dict('code devise origine'))(self)
-                if currency == 'EUR':
+                currency = Currency(Dict("code devise origine"))(self)
+                if currency == "EUR":
                     return NotAvailable
                 return currency
 
             def obj_original_amount(self):
-                if Field('original_currency')(self):
-                    return CleanDecimal.French(Dict('montant brut devise origine'), sign='-')(self)
+                if Field("original_currency")(self):
+                    return CleanDecimal.French(Dict("montant brut devise origine"), sign="-")(self)
                 return NotAvailable
 
-            obj_amount = CleanDecimal.French(Dict('montant imputé'), sign='-')
+            obj_amount = CleanDecimal.French(Dict("montant imputé"), sign="-")
 
             obj_date = Date(Dict("date d'arrêté"), dayfirst=True)
-            obj_rdate = Date(Dict('date de vente'), dayfirst=True)
+            obj_rdate = Date(Dict("date de vente"), dayfirst=True)
             obj_type = Transaction.TYPE_DEFERRED_CARD

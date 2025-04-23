@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016  Bezleputh
 #
 # This file is part of a woob module.
@@ -23,4 +21,4 @@ from woob.capabilities.pricecomparison import Product
 class LaCentraleProduct(Product):
     def __init__(self):
         self.id = 1
-        self.name = 'Voiture'
+        self.name = "Voiture"

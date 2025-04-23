@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,36 +15,53 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
-from woob.capabilities.housing import (Query, POSTS_TYPES)
+from woob.capabilities.housing import POSTS_TYPES, Query
 from woob.tools.capabilities.housing.housing_test import HousingTest
+from woob.tools.test import BackendTest
 
 
 class EntreparticuliersTest(BackendTest, HousingTest):
-    MODULE = 'entreparticuliers'
+    MODULE = "entreparticuliers"
 
     FIELDS_ALL_HOUSINGS_LIST = [
-        "id", "type", "advert_type", "house_type", "title", "area",
-        "cost", "currency", "utilities", "date", "location", "text"
+        "id",
+        "type",
+        "advert_type",
+        "house_type",
+        "title",
+        "area",
+        "cost",
+        "currency",
+        "utilities",
+        "date",
+        "location",
+        "text",
     ]
 
-    FIELDS_ANY_HOUSINGS_LIST = [
-        "photos", "rooms"
-    ]
+    FIELDS_ANY_HOUSINGS_LIST = ["photos", "rooms"]
 
     FIELDS_ALL_SINGLE_HOUSING = [
-        "id", "url", "type", "advert_type", "house_type", "title", "area",
-        "cost", "currency", "utilities", "date", "location", "text"
+        "id",
+        "url",
+        "type",
+        "advert_type",
+        "house_type",
+        "title",
+        "area",
+        "cost",
+        "currency",
+        "utilities",
+        "date",
+        "location",
+        "text",
     ]
 
-    FIELDS_ANY_SINGLE_HOUSING = [
-        "photos", "phone", "rooms"
-    ]
+    FIELDS_ANY_SINGLE_HOUSING = ["photos", "phone", "rooms"]
 
     def test_entreparticuliers_sale(self):
         query = Query()
         query.cities = []
-        for city in self.backend.search_city('lille'):
+        for city in self.backend.search_city("lille"):
             city.backend = self.backend.name
             query.cities.append(city)
 
@@ -58,11 +73,9 @@ class EntreparticuliersTest(BackendTest, HousingTest):
         query = Query()
         query.cities = []
 
-        self.FIELDS_ANY_SINGLE_HOUSING = [
-            "photos", "phone", "rooms"
-        ]
+        self.FIELDS_ANY_SINGLE_HOUSING = ["photos", "phone", "rooms"]
 
-        for city in self.backend.search_city('lille'):
+        for city in self.backend.search_city("lille"):
             city.backend = self.backend.name
             query.cities.append(city)
 

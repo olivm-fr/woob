@@ -21,18 +21,18 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
-from packaging.requirements import Requirement, InvalidRequirement
 
 
-__all__ = ['parse_requirements']
+__all__ = ["parse_requirements"]
 
 
 def parse_requirements(path: str | Path) -> dict[str, SpecifierSet]:
     requirements = OrderedDict()
 
     try:
-        with open(path, 'r', encoding='utf-8') as fp:
+        with open(path, encoding="utf-8") as fp:
             for line in fp.readlines():
                 try:
                     r = Requirement(line.strip())

@@ -18,10 +18,11 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import BackendConfig, Module
+from woob.capabilities.base import NotAvailable, find_object
 from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
-from woob.capabilities.base import find_object, NotAvailable
-from woob.tools.value import ValueBackendPassword, Value
+from woob.tools.backend import BackendConfig
+from woob.tools.value import Value, ValueBackendPassword
+from woob_modules.franceconnect.module import FranceConnectModule
 
 from .browser import CesuBrowser
 
@@ -29,17 +30,26 @@ from .browser import CesuBrowser
 __all__ = ["CesuModule"]
 
 
-class CesuModule(Module, CapDocument):
+class CesuModule(FranceConnectModule, CapDocument):
     NAME = "cesu"
     DESCRIPTION = "Le Cesu est une offre simplifiée pour déclarer facilement la rémunération de votre salarié à domicile pour des activités de service à la personne."
     MAINTAINER = "Ludovic LANGE"
     EMAIL = "llange@users.noreply.github.com"
     LICENSE = "LGPLv3+"
-    VERSION = "3.6"
+    DEPENDENCIES = ("franceconnect",)
 
     CONFIG = BackendConfig(
         Value("username", label="User ID"),
         ValueBackendPassword("password", label="Password"),
+        Value(
+            "login_source",
+            label="Méthode d'authentification",
+            default="direct",
+            choices={
+                "direct": "Directe",
+                "fc_impots": "France Connect Impôts",
+            },
+        ),
     )
 
     BROWSER = CesuBrowser
@@ -54,9 +64,7 @@ class CesuModule(Module, CapDocument):
     )
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config["username"].get(), self.config["password"].get()
-        )
+        return self.create_browser(self.config, self.config["username"].get(), self.config["password"].get())
 
     def download_document(self, document):
         if not isinstance(document, Document):
@@ -69,9 +77,7 @@ class CesuModule(Module, CapDocument):
     def get_document(self, _id):
         subscription_id = _id.split("_")[0]
         subscription = self.get_subscription(subscription_id)
-        return find_object(
-            self.iter_documents(subscription), id=_id, error=DocumentNotFound
-        )
+        return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 
     def iter_documents(self, subscription):
         if not isinstance(subscription, Subscription):

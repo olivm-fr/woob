@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -22,11 +20,11 @@ from woob.tools.test import BackendTest
 
 
 class AirparifTest(BackendTest):
-    MODULE = 'airparif'
+    MODULE = "airparif"
 
     def test_gauges(self):
         all_gauges = list(self.backend.iter_gauges())
-        paris_gauges = list(self.backend.iter_gauges(pattern='paris'))
+        paris_gauges = list(self.backend.iter_gauges(pattern="paris"))
         self.assertTrue(all_gauges)
         self.assertTrue(paris_gauges)
 

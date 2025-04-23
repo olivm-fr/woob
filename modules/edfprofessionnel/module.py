@@ -18,31 +18,34 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.bill import (
-    DocumentTypes, CapDocument, Subscription, Document, DocumentNotFound,
-    DocumentCategory,
-)
 from woob.capabilities.base import find_object
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, Value
+from woob.capabilities.bill import (
+    CapDocument,
+    Document,
+    DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
+)
 from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import EdfproBrowser
 
 
-__all__ = ['EdfProfessionnelModule']
+__all__ = ["EdfProfessionnelModule"]
 
 
 class EdfProfessionnelModule(Module, CapDocument, CapProfile):
-    NAME = 'edfprofessionnel'
-    DESCRIPTION = u'EDF Professionnel'
-    MAINTAINER = u'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "edfprofessionnel"
+    DESCRIPTION = "EDF Professionnel"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        Value('login', label='E-mail ou Identifiant'),
-        ValueBackendPassword('password', label='Mot de passe')
+        Value("login", label="E-mail ou Identifiant"), ValueBackendPassword("password", label="Mot de passe")
     )
 
     BROWSER = EdfproBrowser
@@ -57,7 +60,7 @@ class EdfProfessionnelModule(Module, CapDocument, CapProfile):
         return self.browser.get_subscription_list()
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)

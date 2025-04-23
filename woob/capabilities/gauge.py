@@ -16,11 +16,12 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import Capability, BaseObject, StringField, DecimalField, Field, UserError, empty
+from .address import GeoCoordinates, PostalAddress, compat_field
+from .base import BaseObject, Capability, DecimalField, Field, StringField, UserError, empty
 from .date import DateField
-from .address import compat_field, GeoCoordinates, PostalAddress
 
-__all__ = ['Gauge', 'GaugeSensor', 'GaugeMeasure', 'CapGauge', 'SensorNotFound']
+
+__all__ = ["Gauge", "GaugeSensor", "GaugeMeasure", "CapGauge", "SensorNotFound"]
 
 
 class SensorNotFound(UserError):
@@ -33,47 +34,50 @@ class Gauge(BaseObject):
     """
     Gauge class.
     """
-    name =       StringField('Name of gauge')
-    city =       StringField('City of the gauge')
-    object =     StringField('What is evaluate')  # For example, name of a river
-    sensors =    Field('List of sensors on the gauge', list)
+
+    name = StringField("Name of gauge")
+    city = StringField("City of the gauge")
+    object = StringField("What is evaluate")  # For example, name of a river
+    sensors = Field("List of sensors on the gauge", list)
 
 
 class GaugeMeasure(BaseObject):
     """
     Measure of a gauge sensor.
     """
-    level =     DecimalField('Level of measure')
-    date =      DateField('Date of measure')
-    alarm =     StringField('Alarm level')
+
+    level = DecimalField("Level of measure")
+    date = DateField("Date of measure")
+    alarm = StringField("Alarm level")
 
     def __repr__(self):
         if empty(self.level):
             return "<GaugeMeasure is %s>" % self.level
         else:
-            return "<GaugeMeasure level=%f alarm=%s date=%s>" % (self.level, self.alarm, self.date)
+            return f"<GaugeMeasure level={self.level:f} alarm={self.alarm} date={self.date}>"
 
 
 class GaugeSensor(BaseObject):
     """
     GaugeSensor class.
     """
-    name =      StringField('Name of the sensor')
-    unit =      StringField('Unit of values')
-    forecast =  StringField('Forecast')
-    location = Field('Address of the sensor', PostalAddress)
-    geo = Field('Geo address of the sensor', GeoCoordinates)
 
-    address = compat_field('location', 'full_address')
-    latitude = compat_field('geo', 'latitude')
-    longitude = compat_field('geo', 'longitude')
+    name = StringField("Name of the sensor")
+    unit = StringField("Unit of values")
+    forecast = StringField("Forecast")
+    location = Field("Address of the sensor", PostalAddress)
+    geo = Field("Geo address of the sensor", GeoCoordinates)
 
-    lastvalue = Field('Last value', GaugeMeasure)
-    history =   Field('Value history', list)  # lastvalue not included
-    gaugeid =   StringField('Id of the gauge')
+    address = compat_field("location", "full_address")
+    latitude = compat_field("geo", "latitude")
+    longitude = compat_field("geo", "longitude")
+
+    lastvalue = Field("Last value", GaugeMeasure)
+    history = Field("Value history", list)  # lastvalue not included
+    gaugeid = StringField("Id of the gauge")
 
     def __repr__(self):
-        return "<GaugeSensor id=%s name=%s>" % (self.id, self.name)
+        return f"<GaugeSensor id={self.id} name={self.name}>"
 
 
 class CapGauge(Capability):

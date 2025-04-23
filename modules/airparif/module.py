@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -17,25 +15,23 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module
 from woob.capabilities.base import find_object
-from woob.capabilities.gauge import (
-    CapGauge, SensorNotFound, Gauge, GaugeSensor,
-)
+from woob.capabilities.gauge import CapGauge, Gauge, GaugeSensor, SensorNotFound
+from woob.tools.backend import Module
 
 from .browser import AirparifBrowser
 
 
-__all__ = ['AirparifModule']
+__all__ = ["AirparifModule"]
 
 
 class AirparifModule(Module, CapGauge):
-    NAME = 'airparif'
-    DESCRIPTION = 'airparif website'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "airparif"
+    DESCRIPTION = "airparif website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = AirparifBrowser
 
@@ -68,7 +64,7 @@ class AirparifModule(Module, CapGauge):
                     yield sensor
 
     def _get_sensor_by_id(self, id):
-        gid = id.partition('.')[0]
+        gid = id.partition(".")[0]
         return find_object(self.iter_sensors(gid), id=id)
 
     def get_last_measure(self, sensor):

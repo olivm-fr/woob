@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,15 +15,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
 from woob.capabilities.base import NotLoaded
+from woob.tools.test import BackendTest
 
 
 class YggtorrentTest(BackendTest):
-    MODULE = 'yggtorrent'
+    MODULE = "yggtorrent"
 
     def test_torrent(self):
-        torrents = list(self.backend.iter_torrents('spiderman'))[:10]
+        torrents = list(self.backend.iter_torrents("spiderman"))[:10]
         for torrent in torrents:
             assert torrent.url
             assert torrent.id
@@ -33,4 +31,3 @@ class YggtorrentTest(BackendTest):
             assert torrent.description is NotLoaded
             full_torrent = self.backend.get_torrent(torrent.id)
             assert full_torrent.description is not NotLoaded
-

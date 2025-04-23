@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      dud
 #
 # This file is part of a woob module.
@@ -21,7 +19,7 @@ from woob.tools.test import BackendTest
 
 
 class VelibTest(BackendTest):
-    MODULE = 'jcvelaux'
+    MODULE = "jcvelaux"
 
     def test_velib(self):
         l = list(self.backend.iter_gauges())

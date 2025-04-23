@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Romain Bignon
 #
 # This file is part of a woob module.
@@ -17,18 +15,20 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import TrackPage
 
 
-__all__ = ['ChronopostBrowser']
+__all__ = ["ChronopostBrowser"]
 
 
 class ChronopostBrowser(PagesBrowser):
-    BASEURL = 'https://www.chronopost.fr'
-    track = URL(r'/tracking-no-cms/suivi-colis\?listeNumerosLT=(?P<id>\w+)&langue=fr', TrackPage)
+    BASEURL = "https://www.chronopost.fr"
+    track = URL(r"/tracking-no-cms/suivi-colis\?listeNumerosLT=(?P<id>\w+)&langue=fr", TrackPage)
 
     def get_tracking_info(self, _id):
-        self.track.go(id=_id, headers={'Referer': 'https://www.chronopost.fr/tracking-no-cms/suivi-page?listeNumerosLT=%s' % id})
+        self.track.go(
+            id=_id, headers={"Referer": "https://www.chronopost.fr/tracking-no-cms/suivi-page?listeNumerosLT=%s" % id}
+        )
         return self.page.get_parcel()

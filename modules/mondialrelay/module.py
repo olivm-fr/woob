@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Vincent A
 #
 # This file is part of a woob module.
@@ -20,7 +18,7 @@
 # flake8: compatible
 
 from woob.capabilities.parcel import CapParcel
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value
 
 from .browser import MondialrelayBrowser
@@ -35,7 +33,7 @@ class MondialrelayModule(Module, CapParcel):
     MAINTAINER = "Vincent A"
     EMAIL = "dev@indigo.re"
     LICENSE = "LGPLv3+"
-    VERSION = "3.6"
+    VERSION = "3.7"
 
     BROWSER = MondialrelayBrowser
 

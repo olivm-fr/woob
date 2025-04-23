@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Vincent A
 #
 # This file is part of a woob module.
@@ -19,21 +17,19 @@
 
 # flake8: compatible
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.tools.capabilities.messages.threading import build_linear_thread
 
-from .pages import (
-    LoginPage, AdsThreadsPage, ThreadsPage, ThreadPage, ThreadNextPage,
-)
+from .pages import AdsThreadsPage, LoginPage, ThreadNextPage, ThreadPage, ThreadsPage
 
 
 class DonnonsBrowser(LoginBrowser):
-    BASEURL = 'https://donnons.org/'
+    BASEURL = "https://donnons.org/"
 
-    login = URL(r'/connexion', LoginPage)
-    ads_threads_list = URL(r'/messagerie/annonces$', AdsThreadsPage)
-    threads_list = URL(r'/messagerie/annonces/(?P<ad>\d+)\?order=default&page=1', ThreadsPage)
-    thread = URL(r'/messagerie/annonces/(?P<ad>\d+)/(?P<thread>\d+)\?order=default&page=1', ThreadPage)
+    login = URL(r"/connexion", LoginPage)
+    ads_threads_list = URL(r"/messagerie/annonces$", AdsThreadsPage)
+    threads_list = URL(r"/messagerie/annonces/(?P<ad>\d+)\?order=default&page=1", ThreadsPage)
+    thread = URL(r"/messagerie/annonces/(?P<ad>\d+)/(?P<thread>\d+)\?order=default&page=1", ThreadPage)
     thread_next = URL(r"/messagerie/ajaxLoadMessages", ThreadNextPage)
 
     def __init__(self, *args, **kwargs):
@@ -76,7 +72,7 @@ class DonnonsBrowser(LoginBrowser):
                     "conv_id": thread_id,
                     "page": page_no,
                 },
-                headers={"X-Requested-With": "XMLHttpRequest"}
+                headers={"X-Requested-With": "XMLHttpRequest"},
             )
 
             new_messages = list(self.page.iter_messages())
@@ -95,8 +91,7 @@ class DonnonsBrowser(LoginBrowser):
 
     def iter_threads(self):
         for ad in self.iter_ads_threads():
-            for thread in self.iter_ad_threads(ad):
-                yield thread
+            yield from self.iter_ad_threads(ad)
 
     def fill_thread(self, thread):
         # this will build the tree

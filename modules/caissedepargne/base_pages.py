@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Romain Bignon
 #
 # This file is part of a woob module.
@@ -24,8 +22,10 @@ from woob.browser.pages import HTMLPage
 
 def fix_form(form):
     keys = [
-        'MM$HISTORIQUE_COMPTE$btnCumul', 'Cartridge$imgbtnMessagerie', 'MM$m_CH$ButtonImageFondMessagerie',
-        'MM$m_CH$ButtonImageMessagerie',
+        "MM$HISTORIQUE_COMPTE$btnCumul",
+        "Cartridge$imgbtnMessagerie",
+        "MM$m_CH$ButtonImageFondMessagerie",
+        "MM$m_CH$ButtonImageMessagerie",
     ]
     for name in keys:
         form.pop(name, None)
@@ -34,5 +34,5 @@ def fix_form(form):
 class BasePage(HTMLPage):
     def build_doc(self, content):
         # don't know if it's still relevant...
-        content = content.strip(b'\x00')
-        return super(BasePage, self).build_doc(content)
+        content = content.strip(b"\x00")
+        return super().build_doc(content)

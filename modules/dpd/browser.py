@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -18,15 +16,15 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import SearchPage
 
 
 class DPDBrowser(PagesBrowser):
-    BASEURL = 'https://tracking.dpd.de/'
+    BASEURL = "https://tracking.dpd.de/"
 
-    search_page = URL('/cgi-bin/simpleTracking.cgi\?parcelNr=(?P<id>.+)&locale=en_D2&type=1', SearchPage)
+    search_page = URL(r"/cgi-bin/simpleTracking\.cgi\?parcelNr=(?P<id>.+)&locale=en_D2&type=1", SearchPage)
 
     def get_tracking_info(self, _id):
         return self.search_page.go(id=_id).get_info(_id)

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Benjamin Bouvier
 #
 # This file is part of a woob module.
@@ -20,39 +18,40 @@
 # flake8: compatible
 
 from woob.capabilities.bank import CapBank
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .browser import Number26Browser
 
-__all__ = ['Number26Module']
+
+__all__ = ["Number26Module"]
 
 
 class Number26Module(Module, CapBank):
-    NAME = 'n26'
-    DESCRIPTION = 'Bank N26'
-    MAINTAINER = 'Stéphane SOBUCKI'
-    EMAIL = 'stephane.sobucki@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "n26"
+    DESCRIPTION = "Bank N26"
+    MAINTAINER = "Stéphane SOBUCKI"
+    EMAIL = "stephane.sobucki@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = Number26Browser
 
     CONFIG = BackendConfig(
-        Value('login', label='Email', regexp='.+'),
-        ValueBackendPassword('password', label='Password'),
-        ValueTransient('otp'),
-        ValueTransient('resume'),
-        ValueTransient('request_information')
+        Value("login", label="Email", regexp=".+"),
+        ValueBackendPassword("password", label="Password"),
+        ValueTransient("otp"),
+        ValueTransient("resume"),
+        ValueTransient("request_information"),
     )
 
-    STORAGE = {'categories': {}}
+    STORAGE = {"categories": {}}
 
     def get_categories(self):
-        categories = self.storage.get('categories')
+        categories = self.storage.get("categories")
         if not categories:
             categories = self.browser.get_categories()
-            self.storage.set('categories', categories)
+            self.storage.set("categories", categories)
         return categories
 
     def create_default_browser(self):

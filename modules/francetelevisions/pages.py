@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2011-2021  Romain Bignon
 #
 # This file is part of a woob module.
@@ -19,15 +17,14 @@
 
 from datetime import datetime, timedelta
 
-from woob.capabilities.image import Thumbnail
-from woob.capabilities.video import BaseVideo
-from woob.capabilities.collection import Collection
-
-from woob.browser.pages import HTMLPage, JsonPage
-from woob.browser.elements import ItemElement, ListElement, method, DictElement
-from woob.browser.filters.standard import CleanText, Regexp, Format, Field, Env
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import CleanHTML
 from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanText, Env, Field, Format, Regexp
+from woob.browser.pages import HTMLPage, JsonPage
+from woob.capabilities.collection import Collection
+from woob.capabilities.image import Thumbnail
+from woob.capabilities.video import BaseVideo
 
 
 def parse_duration(text):
@@ -37,41 +34,40 @@ def parse_duration(text):
 class SearchPage(JsonPage):
     @method
     class iter_videos(DictElement):
-        item_xpath = 'results/0/hits'
+        item_xpath = "results/0/hits"
 
         class item(ItemElement):
             klass = BaseVideo
 
-            obj_id = Format(r"https://www.france.tv/%s/%s-%s.html",
-                            Dict('path'),
-                            Dict('id'),
-                            Dict('url_page'))
+            obj_id = Format(r"https://www.france.tv/%s/%s-%s.html", Dict("path"), Dict("id"), Dict("url_page"))
 
-            obj_title = CleanText(Dict('title'))
+            obj_title = CleanText(Dict("title"))
 
             def obj_thumbnail(self):
                 try:
-                    img = Dict('image/formats/vignette_16x9/urls/w:1024', default=None)(self)
+                    img = Dict("image/formats/vignette_16x9/urls/w:1024", default=None)(self)
 
                 except KeyError:
-                    img = Dict('image/formats/carre/urls/w:400')(self)
+                    img = Dict("image/formats/carre/urls/w:400")(self)
 
-                return Thumbnail(r'https://www.france.tv%s' % img)
+                return Thumbnail(r"https://www.france.tv%s" % img)
 
             def obj_date(self):
-                return datetime.fromtimestamp(Dict('dates/first_publication_date')(self))
+                return datetime.fromtimestamp(Dict("dates/first_publication_date")(self))
 
             def obj_duration(self):
-                return timedelta(seconds=Dict('duration')(self))
+                return timedelta(seconds=Dict("duration")(self))
 
 
 class HomePage(HTMLPage):
 
     def get_params(self):
-        a = Regexp(CleanText('//script'),
-                   '"algolia_app_id":"(.*)","algolia_api_key":"(.*)","algolia_api_index_taxonomy".*',
-                   '\\1|\\2')(self.doc)
-        return a.split('|')
+        a = Regexp(
+            CleanText("//script"),
+            '"algolia_app_id":"(.*)","algolia_api_key":"(.*)","algolia_api_index_taxonomy".*',
+            "\\1|\\2",
+        )(self.doc)
+        return a.split("|")
 
     @method
     class iter_categories(ListElement):
@@ -83,16 +79,16 @@ class HomePage(HTMLPage):
             klass = Collection
 
             def condition(self):
-                return CleanText('./@href')(self)[-1] == '/'
+                return CleanText("./@href")(self)[-1] == "/"
 
             def obj_id(self):
-                id = CleanText('./@href')(self)
+                id = CleanText("./@href")(self)
                 return id[1:-1]
 
-            obj_title = CleanText('.')
+            obj_title = CleanText(".")
 
             def obj_split_path(self):
-                return Field('id')(self).split('/')
+                return Field("id")(self).split("/")
 
     @method
     class iter_subcategories(ListElement):
@@ -104,50 +100,49 @@ class HomePage(HTMLPage):
             klass = Collection
 
             def condition(self):
-                cat = Env('cat')(self)
-                return Regexp(CleanText('./@href'), '/%s/.*' % cat, default=False)(self)
+                cat = Env("cat")(self)
+                return Regexp(CleanText("./@href"), "/%s/.*" % cat, default=False)(self)
 
             def obj_id(self):
-                id = CleanText('./@href', replace=[('.html', '/'),
-                                                   ('https://www.france.tv', '')])(self)
-                return id[1:-1].split('/')[-1]
+                id = CleanText("./@href", replace=[(".html", "/"), ("https://www.france.tv", "")])(self)
+                return id[1:-1].split("/")[-1]
 
-            obj_title = CleanText('.')
+            obj_title = CleanText(".")
 
             def obj_split_path(self):
-                return [Env('cat')(self)] + [Field('id')(self)]
+                return [Env("cat")(self)] + [Field("id")(self)]
 
     @method
     class iter_emissions(ListElement):
         ignore_duplicate = True
 
-        item_xpath = u'//a[@class="c-card-program__link"]'
+        item_xpath = '//a[@class="c-card-program__link"]'
 
         class item(ItemElement):
             klass = Collection
 
             def condition(self):
-                cat = Env('cat')(self)
-                return Regexp(CleanText('./@href'), '/%s/.*' % cat[0], default=False)(self)
+                cat = Env("cat")(self)
+                return Regexp(CleanText("./@href"), "/%s/.*" % cat[0], default=False)(self)
 
             def obj_id(self):
-                id = CleanText('./@href')(self)
-                return id.split('/')[-1]
+                id = CleanText("./@href")(self)
+                return id.split("/")[-1]
 
-            obj_title = CleanText('./@title')
+            obj_title = CleanText("./@title")
 
             def obj_split_path(self):
-                return Env('cat')(self) + [Field('id')(self)]
+                return Env("cat")(self) + [Field("id")(self)]
 
     @method
     class iter_videos(ListElement):
-        item_xpath = u'//h3[@class="c-card-video__infos"]/a'
+        item_xpath = '//h3[@class="c-card-video__infos"]/a'
 
         class item(ItemElement):
             klass = BaseVideo
 
-            obj_id = Format('https://www.france.tv%s', CleanText('./@href'))
+            obj_id = Format("https://www.france.tv%s", CleanText("./@href"))
             obj_title = CleanText(CleanHTML('./div[has-class("c-card-video__title")]'))
 
             def condition(self):
-                return Field('title')(self)
+                return Field("title")(self)

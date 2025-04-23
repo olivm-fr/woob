@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020 Johann Broudin
 #
 # This file is part of a woob module.
@@ -18,22 +16,24 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.radio import CapRadio, Radio
 from woob.capabilities.audiostream import BaseAudioStream
 from woob.capabilities.collection import CapCollection
+from woob.capabilities.radio import CapRadio, Radio
 from woob.tools.backend import Module
+
 from .browser import VirginBrowser
 
-__all__ = ['VirginRadioModule']
+
+__all__ = ["VirginRadioModule"]
 
 
 class VirginRadioModule(Module, CapRadio, CapCollection):
-    NAME = 'virginradio'
-    MAINTAINER = u'Johann Broudin'
-    EMAIL = 'Johann.Broudin@6-8.fr'
-    VERSION = '3.6'
-    DESCRIPTION = u'VirginRadio french radio'
-    LICENSE = 'AGPLv3+'
+    NAME = "virginradio"
+    MAINTAINER = "Johann Broudin"
+    EMAIL = "Johann.Broudin@6-8.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "VirginRadio french radio"
+    LICENSE = "AGPLv3+"
     BROWSER = VirginBrowser
 
     def get_radio(self, radio):
@@ -45,21 +45,21 @@ class VirginRadioModule(Module, CapRadio, CapCollection):
         if r is None:
             return None
 
-        radio.title = r['title']
+        radio.title = r["title"]
 
         radio.description = self.browser.description(r)
 
         stream_hls = BaseAudioStream(0)
-        stream_hls.url = r['hls_source']
+        stream_hls.url = r["hls_source"]
         stream_hls.bitrate = 135
-        stream_hls.format = u'aac'
-        stream_hls.title = u'%s %skbits/s' % (stream_hls.format, stream_hls.bitrate)
+        stream_hls.format = "aac"
+        stream_hls.title = f"{stream_hls.format} {stream_hls.bitrate}kbits/s"
 
         stream = BaseAudioStream(0)
-        stream.url = r['source']
+        stream.url = r["source"]
         stream.bitrate = 128
-        stream.format = u'mp3'
-        stream.title = u'%s %skbits/s' % (stream.format, stream.bitrate)
+        stream.format = "mp3"
+        stream.title = f"{stream.format} {stream.bitrate}kbits/s"
 
         radio.streams = [stream_hls, stream]
         radio.current = self.browser.current(r)
@@ -76,12 +76,12 @@ class VirginRadioModule(Module, CapRadio, CapCollection):
                 yield self.get_radio(id)
 
     def iter_radios_search(self, pattern):
-        for radio in self.iter_resources((Radio, ), []):
+        for radio in self.iter_resources((Radio,), []):
             if pattern.lower() in radio.title.lower() or pattern.lower() in radio.description.lower():
                 yield radio
 
     def fill_radio(self, radio, fields):
-        if 'current' in fields:
+        if "current" in fields:
             if not radio.current:
                 radio = self.get_radio(radio.id)
         return radio

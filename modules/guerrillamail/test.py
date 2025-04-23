@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Vincent A
 #
 # This file is part of a woob module.
@@ -18,12 +16,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from uuid import uuid4
+
+from woob.tools.test import BackendTest
 
 
 class GuerrillamailTest(BackendTest):
-    MODULE = 'guerrillamail'
+    MODULE = "guerrillamail"
 
     def test_guerrillamail(self):
         box = uuid4()

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Antoine BOSSY
 #
 # This file is part of a woob module.
@@ -17,19 +15,18 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import ActionNeeded, ActionType, BrowserIncorrectPassword
 
 from .pages import AccountsPage, LoginPage, ProfilePage
 
 
 class TicketCesuBrowser(LoginBrowser):
-    BASEURL = 'https://ebeneficiaire.cesu-as.fr'
+    BASEURL = "https://ebeneficiaire.cesu-as.fr"
 
-    login_page = URL('/login.aspx', LoginPage)
-    profile_page = URL('/customerManagement/ProfileManagement.aspx', ProfilePage)
-    accounts_page = URL('/PaymentManagement/PaymentAccountInfoFullDemat.aspx', AccountsPage)
-
+    login_page = URL("/login.aspx", LoginPage)
+    profile_page = URL("/customerManagement/ProfileManagement.aspx", ProfilePage)
+    accounts_page = URL("/PaymentManagement/PaymentAccountInfoFullDemat.aspx", AccountsPage)
 
     def do_login(self):
         self.login_page.go()
@@ -37,12 +34,12 @@ class TicketCesuBrowser(LoginBrowser):
 
         if self.login_page.is_here():
             # Wrong credentials leads back here, with JS generated message, hard-coded in the exception raised.
-            raise BrowserIncorrectPassword('login et / ou mot de passe erroné')
-
+            raise BrowserIncorrectPassword("login et / ou mot de passe erroné")
 
         elif self.profile_page.is_here():
             raise ActionNeeded(
-                locale="en-US", message="Please agree CGU on the CESU website.",
+                locale="en-US",
+                message="Please agree CGU on the CESU website.",
                 action_type=ActionType.ACKNOWLEDGE,
             )
 

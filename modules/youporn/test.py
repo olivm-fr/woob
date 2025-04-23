@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,25 +16,25 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.capabilities.video import BaseVideo
+from woob.tools.test import BackendTest
 
 
 class YoupornTest(BackendTest):
-    MODULE = 'youporn'
+    MODULE = "youporn"
 
     def test_search(self):
-        self.assertTrue(len(self.backend.search_videos('ass to mouth', nsfw=False)) == 0)
+        self.assertTrue(len(self.backend.search_videos("ass to mouth", nsfw=False)) == 0)
 
-        l = list(self.backend.search_videos('ass to mouth', nsfw=True))
+        l = list(self.backend.search_videos("ass to mouth", nsfw=True))
         self.assertTrue(len(l) > 0)
         v = l[0]
-        v = self.backend.fillobj(v, ('url',))
-        self.assertTrue(v.url and v.url.startswith('https://'), 'URL for video "%s" not found: %s' % (v.id, v.url))
+        v = self.backend.fillobj(v, ("url",))
+        self.assertTrue(v.url and v.url.startswith("https://"), f'URL for video "{v.id}" not found: {v.url}')
 
     def test_latest(self):
-        l = list(self.backend.iter_resources([BaseVideo], [u'latest_nsfw']))
+        l = list(self.backend.iter_resources([BaseVideo], ["latest_nsfw"]))
         self.assertTrue(len(l) > 0)
         v = l[0]
-        v = self.backend.fillobj(v, ('url',))
-        self.assertTrue(v.url and v.url.startswith('https://'), 'URL for video "%s" not found: %s' % (v.id, v.url))
+        v = self.backend.fillobj(v, ("url",))
+        self.assertTrue(v.url and v.url.startswith("https://"), f'URL for video "{v.id}" not found: {v.url}')

@@ -1,5 +1,4 @@
 "GoogleTranslateModule init"
-# -*- coding: utf-8 -*-
 
 # Copyright(C) 2012  Lucien Loiseau
 #
@@ -21,4 +20,4 @@
 from .module import GoogleTranslateModule
 
 
-__all__ = ['GoogleTranslateModule']
+__all__ = ["GoogleTranslateModule"]

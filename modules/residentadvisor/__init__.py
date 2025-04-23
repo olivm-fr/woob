@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Alexandre Morignot
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import ResidentadvisorModule
 
 
-__all__ = ['ResidentadvisorModule']
+__all__ = ["ResidentadvisorModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2021 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,20 +15,20 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
-from woob.capabilities.base import NotLoaded
-
 from random import choice
+
+from woob.capabilities.base import NotLoaded
+from woob.tools.test import BackendTest
 
 
 class KickassTest(BackendTest):
-    MODULE = 'kickass'
+    MODULE = "kickass"
 
     def test_torrent(self):
-        torrents = list(self.backend.iter_torrents('debian'))
+        torrents = list(self.backend.iter_torrents("debian"))
         for torrent in torrents:
-            path, _, qs = torrent.url.partition('?')
-            assert path.endswith('.torrent')
+            path, _, qs = torrent.url.partition("?")
+            assert path.endswith(".torrent")
             if qs:
                 assert torrent.filename
             assert torrent.id

@@ -1,5 +1,4 @@
 "common tools for 20minutes backend"
-# -*- coding: utf-8 -*-
 
 # Copyright(C) 2011  Julien Hebert
 #
@@ -23,9 +22,9 @@ import re
 
 def url2id(url):
     "return an id from an url"
-    regexp = re.compile("http://www.20min.fr/(\w+)/([0-9]+)/(.*$)")
+    regexp = re.compile(r"http://www\.20min\.fr/(\w+)/([0-9]+)/(.*$)")
     match = regexp.match(url)
-    return '%s.%d.%s' % (match.group(1), int(match.group(2)), match.group(3))
+    return "%s.%d.%s" % (match.group(1), int(match.group(2)), match.group(3))
 
 
 def rssid(entry):

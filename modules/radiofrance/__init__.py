@@ -1,5 +1,3 @@
-# * -*- coding: utf-8 -*-
-
 # Copyright(C) 2011-2021  Johann Broudin
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import RadioFranceModule
 
 
-__all__ = ['RadioFranceModule']
+__all__ = ["RadioFranceModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,38 +16,34 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
 from woob.browser.profiles import Firefox
+from woob.browser.url import URL
 
-from .pages import SearchPage, LyricsPage, ArtistPages
+from .pages import ArtistPages, LyricsPage, SearchPage
 
 
-__all__ = ['LyricsdotcomBrowser']
+__all__ = ["LyricsdotcomBrowser"]
 
 
 class LyricsdotcomBrowser(PagesBrowser):
     PROFILE = Firefox()
     TIMEOUT = 30
 
-    BASEURL = 'http://www.lyrics.com'
-    search = URL('/serp.php\?st=(?P<pattern>.*)&qtype=(?P<criteria>1|2)',
-                 SearchPage)
-    songLyrics = URL('/lyric/(?P<id>\d*)',
-                     LyricsPage)
-    artistsong = URL('/artist/(?P<id>.*)', ArtistPages)
+    BASEURL = "http://www.lyrics.com"
+    search = URL(r"/serp\.php\?st=(?P<pattern>.*)&qtype=(?P<criteria>1|2)", SearchPage)
+    songLyrics = URL(r"/lyric/(?P<id>\d*)", LyricsPage)
+    artistsong = URL(r"/artist/(?P<id>.*)", ArtistPages)
 
     def iter_lyrics(self, criteria, pattern):
-        if criteria == 'song':
+        if criteria == "song":
             self.search.go(pattern=pattern, criteria=1)
             assert self.search.is_here()
-            for song in self.page.iter_lyrics():
-                yield song
-        elif criteria == 'artist':
+            yield from self.page.iter_lyrics()
+        elif criteria == "artist":
             self.search.go(pattern=pattern, criteria=2)
             assert self.search.is_here()
             for artist in self.page.iter_artists():
-                for song in self.artistsong.go(id=artist.id).iter_lyrics():
-                    yield song
+                yield from self.artistsong.go(id=artist.id).iter_lyrics()
 
     def get_lyrics(self, id):
         return self.songLyrics.go(id=id).get_lyrics()

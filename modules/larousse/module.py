@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.translate import CapTranslate
+from woob.tools.backend import Module
 
 from .browser import LarousseBrowser
 
 
-__all__ = ['LarousseModule']
+__all__ = ["LarousseModule"]
 
 
 class LarousseModule(Module, CapTranslate):
-    NAME = 'larousse'
-    DESCRIPTION = u'larousse dictionary translations'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "larousse"
+    DESCRIPTION = "larousse dictionary translations"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = LarousseBrowser
 

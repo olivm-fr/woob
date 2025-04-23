@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.parcel import CapParcel
+from woob.tools.backend import Module
 
 from .browser import DPDBrowser
 
 
-__all__ = ['DPDModule']
+__all__ = ["DPDModule"]
 
 
 class DPDModule(Module, CapParcel):
-    NAME = 'dpd'
-    DESCRIPTION = u'DPD website'
-    MAINTAINER = u'Matthieu Weber'
-    EMAIL = 'mweber+weboob@free.fr'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "dpd"
+    DESCRIPTION = "DPD website"
+    MAINTAINER = "Matthieu Weber"
+    EMAIL = "mweber+weboob@free.fr"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = DPDBrowser
 

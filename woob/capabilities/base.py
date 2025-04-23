@@ -17,23 +17,39 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Type, Any, Tuple, TypeVar, overload
-
-from collections import OrderedDict, deque
-import warnings
 import re
+import warnings
+from collections import OrderedDict, deque
+from collections.abc import Iterable
+from copy import copy, deepcopy
 from decimal import Decimal
-from copy import deepcopy, copy
+from typing import Any, TypeVar, overload
 
 from woob.tools.misc import to_unicode
 
 
 __all__ = [
-    'UserError', 'FieldNotFound', 'NotAvailable', 'FetchError', 'NotLoaded',
-    'Capability', 'Field', 'IntField', 'DecimalField', 'FloatField',
-    'StringField', 'BytesField', 'BoolField', 'Enum', 'EnumField', 'empty',
-    'BaseObject', 'find_object', 'find_object_any_match', 'strict_find_object',
-    'capability_to_string',
+    "UserError",
+    "FieldNotFound",
+    "NotAvailable",
+    "FetchError",
+    "NotLoaded",
+    "Capability",
+    "Field",
+    "IntField",
+    "DecimalField",
+    "FloatField",
+    "StringField",
+    "BytesField",
+    "BoolField",
+    "Enum",
+    "EnumField",
+    "empty",
+    "BaseObject",
+    "find_object",
+    "find_object_any_match",
+    "strict_find_object",
+    "capability_to_string",
 ]
 
 
@@ -46,13 +62,13 @@ class EnumMeta(type):
         return OrderedDict()
 
     def __init__(cls, name, bases, attrs, *args, **kwargs):
-        super(EnumMeta, cls).__init__(name, bases, attrs, *args, **kwargs)
-        attrs = [(k, v) for k, v in attrs.items() if not callable(v) and not k.startswith('__')]
+        super().__init__(name, bases, attrs, *args, **kwargs)
+        attrs = [(k, v) for k, v in attrs.items() if not callable(v) and not k.startswith("__")]
         cls.__members__ = OrderedDict(attrs)
 
     def __setattr__(cls, name, value):
-        super(EnumMeta, cls).__setattr__(name, value)
-        if not callable(value) and not name.startswith('__'):
+        super().__setattr__(name, value)
+        if not callable(value) and not name.startswith("__"):
             cls.__members__[name] = value
 
     def __call__(cls, *args, **kwargs):
@@ -100,29 +116,18 @@ def empty(value: Any) -> bool:
     return value is None or isinstance(value, EmptyType)
 
 
-T = TypeVar('T')
+T = TypeVar("T")
+
 
 @overload
-def find_object(
-    mylist: Iterable[T],
-    error: None = None,
-    **kwargs
-) -> T | None:
-    ...
+def find_object(mylist: Iterable[T], error: None = None, **kwargs) -> T | None: ...
+
 
 @overload
-def find_object(
-    mylist: Iterable[T],
-    error: Type[Exception],
-    **kwargs
-) -> T:
-    ...
+def find_object(mylist: Iterable[T], error: type[Exception], **kwargs) -> T: ...
 
-def find_object(
-    mylist,
-    error = None,
-    **kwargs
-):
+
+def find_object(mylist, error=None, **kwargs):
     """
     Very simple tools to return an object with the matching parameters in
     kwargs.
@@ -142,29 +147,29 @@ def find_object(
 @overload
 def find_object_any_match(
     objects: Iterable[T],
-    key_value_pairs: Iterable[Tuple[str, Any]],
+    key_value_pairs: Iterable[tuple[str, Any]],
     error: None = None,
     with_priority: bool = True,
-    ignore_empty: bool = True
-) -> T | None:
-    ...
+    ignore_empty: bool = True,
+) -> T | None: ...
+
 
 @overload
 def find_object_any_match(
     objects: Iterable[T],
-    key_value_pairs: Iterable[Tuple[str, Any]],
-    error: Type[Exception],
+    key_value_pairs: Iterable[tuple[str, Any]],
+    error: type[Exception],
     with_priority: bool = True,
-    ignore_empty: bool = True
-) -> T:
-    ...
+    ignore_empty: bool = True,
+) -> T: ...
+
 
 def find_object_any_match(
     objects: Iterable[T],
-    key_value_pairs: Iterable[Tuple[str, Any]],
-    error: Type[Exception] | None = None,
+    key_value_pairs: Iterable[tuple[str, Any]],
+    error: type[Exception] | None = None,
     with_priority: bool = True,
-    ignore_empty: bool = True
+    ignore_empty: bool = True,
 ) -> T | None:
     """
     Tool method that returns an object that match any parameter given in key_value_pairs.
@@ -227,10 +232,7 @@ def find_object_any_match(
                 break
 
             o_value = getattr(o, key)
-            if (
-                ignore_empty and (empty(value) or empty(o_value))
-                or o_value != value
-            ):
+            if ignore_empty and (empty(value) or empty(o_value)) or o_value != value:
                 continue
 
             # First key is a special case with priority, we can return early
@@ -279,7 +281,7 @@ class FieldNotFound(Exception):
     """
 
     def __init__(self, obj: BaseObject, field: str):
-        super().__init__('Field "%s" not found for object %s' % (field, obj))
+        super().__init__(f'Field "{field}" not found for object {obj}')
 
 
 class ConversionWarning(UserWarning):
@@ -322,10 +324,10 @@ class NotAvailableType(EmptyType):
     """
 
     def __repr__(self):
-        return 'NotAvailable'
+        return "NotAvailable"
 
     def __str__(self):
-        return 'Not available'
+        return "Not available"
 
 
 NotAvailable = NotAvailableType()
@@ -340,10 +342,10 @@ class NotLoadedType(EmptyType):
     """
 
     def __repr__(self):
-        return 'NotLoaded'
+        return "NotLoaded"
 
     def __str__(self):
-        return 'Not loaded'
+        return "Not loaded"
 
 
 NotLoaded = NotLoadedType()
@@ -355,10 +357,10 @@ class FetchErrorType(EmptyType):
     """
 
     def __repr__(self):
-        return 'FetchError'
+        return "FetchError"
 
     def __str__(self):
-        return 'Not mandatory'
+        return "Not mandatory"
 
 
 FetchError = FetchErrorType()
@@ -384,19 +386,20 @@ class Field:
     :param args: list of types accepted
     :param default: default value of this field. If not specified, :class:`NotLoaded` is used.
     """
+
     _creation_counter = 0
 
     def __init__(self, doc, *args, **kwargs):
         self.types = ()
-        self.value = kwargs.get('default', NotLoaded)
+        self.value = kwargs.get("default", NotLoaded)
         self.doc = doc
-        self.mandatory = kwargs.get('mandatory', True)
+        self.mandatory = kwargs.get("mandatory", True)
 
         for arg in args:
             if isinstance(arg, type) or isinstance(arg, str):
                 self.types += (arg,)
             else:
-                raise TypeError('Arguments must be types or strings of type name')
+                raise TypeError("Arguments must be types or strings of type name")
 
         self._creation_counter = Field._creation_counter
         Field._creation_counter += 1
@@ -452,7 +455,7 @@ class FloatField(Field):
     """
 
     def __init__(self, doc, **kwargs):
-        super(FloatField, self).__init__(doc, float, **kwargs)
+        super().__init__(doc, float, **kwargs)
 
     def convert(self, value):
         return float(value)
@@ -464,7 +467,7 @@ class StringField(Field):
     """
 
     def __init__(self, doc, **kwargs):
-        super(StringField, self).__init__(doc, str, **kwargs)
+        super().__init__(doc, str, **kwargs)
 
     def convert(self, value):
         return to_unicode(value)
@@ -476,33 +479,35 @@ class BytesField(Field):
     """
 
     def __init__(self, doc, **kwargs):
-        super(BytesField, self).__init__(doc, bytes, **kwargs)
+        super().__init__(doc, bytes, **kwargs)
 
     def convert(self, value):
         if isinstance(value, str):
-            value = value.encode('utf-8')
+            value = value.encode("utf-8")
         return bytes(value)
 
 
 class EnumField(Field):
     def __init__(self, doc, enum, **kwargs):
         if not issubclass(enum, Enum):
-            raise TypeError('invalid enum type: %r' % enum)
-        super(EnumField, self).__init__(doc, *enum._types, **kwargs)
+            raise TypeError("invalid enum type: %r" % enum)
+        super().__init__(doc, *enum._types, **kwargs)
         self.enum = enum
 
     def convert(self, value):
         if value not in self.enum._values:
-            raise ValueError('value %r does not belong to enum %s' % (value, self.enum))
+            raise ValueError(f"value {value!r} does not belong to enum {self.enum}")
         return value
 
 
 class _BaseObjectMeta(type):
     def __new__(cls, name, bases, attrs):
-        fields = [(field_name, attrs.pop(field_name)) for field_name, obj in list(attrs.items()) if isinstance(obj, Field)]
+        fields = [
+            (field_name, attrs.pop(field_name)) for field_name, obj in list(attrs.items()) if isinstance(obj, Field)
+        ]
         fields.sort(key=lambda x: x[1]._creation_counter)
 
-        new_class = super(_BaseObjectMeta, cls).__new__(cls, name, bases, attrs)
+        new_class = super().__new__(cls, name, bases, attrs)
         if new_class._fields is None:
             new_class._fields = OrderedDict()
         else:
@@ -510,12 +515,15 @@ class _BaseObjectMeta(type):
         new_class._fields.update(fields)
 
         if new_class.__doc__ is None:
-            new_class.__doc__ = ''
+            new_class.__doc__ = ""
         for name, field in new_class._fields.items():
-            doc = '(%s) %s' % (', '.join([':class:`%s`' % v.__name__ if isinstance(v, type) else v for v in field.types]), field.doc)
+            doc = "({}) {}".format(
+                ", ".join([":class:`%s`" % v.__name__ if isinstance(v, type) else v for v in field.types]),
+                field.doc,
+            )
             if field.value is not NotLoaded:
-                doc += ' (default: %s)' % field.value
-            new_class.__doc__ += '\n:var %s: %s' % (name, doc)
+                doc += " (default: %s)" % field.value
+            new_class.__doc__ += f"\n:var {name}: {doc}"
         return new_class
 
 
@@ -545,28 +553,23 @@ class BaseObject(metaclass=_BaseObjectMeta):
 
     id: str | None = None
     backend: str | None = None
-    _fields: Dict[str, Field] = {}
+    _fields: dict[str, Field] = {}
 
     # XXX remove it?
-    url = StringField('url')
+    url = StringField("url")
 
-    def __init__(
-        self,
-        id: str = '',
-        url: str | NotLoadedType | NotAvailableType = NotLoaded,
-        backend=None
-    ):
-        self.id = id or ''
+    def __init__(self, id: str = "", url: str | NotLoadedType | NotAvailableType = NotLoaded, backend=None):
+        self.id = id or ""
         self.backend = backend
         self._fields = deepcopy(self._fields)
-        self.__setattr__('url', url)
+        self.__setattr__("url", url)
 
     @property
     def fullid(self) -> str:
         """
         Full ID of the object, in form '**ID@backend**'.
         """
-        return '%s@%s' % (self.id, self.backend)
+        return f"{self.id}@{self.backend}"
 
     def __iscomplete__(self) -> bool:
         """
@@ -604,7 +607,7 @@ class BaseObject(metaclass=_BaseObjectMeta):
             if empty(old_value) and key not in excepts:
                 setattr(self, key, value)
 
-    def iter_fields(self) -> Iterable[Tuple[str, Any]]:
+    def iter_fields(self) -> Iterable[tuple[str, Any]]:
         """
         Iterate on the fields keys and values.
 
@@ -613,8 +616,8 @@ class BaseObject(metaclass=_BaseObjectMeta):
         :rtype: iter[(key, value)]
         """
 
-        if hasattr(self, 'id') and self.id is not None:
-            yield 'id', self.id
+        if hasattr(self, "id") and self.id is not None:
+            yield "id", self.id
         for name, field in self._fields.items():
             yield name, field.value
 
@@ -628,16 +631,18 @@ class BaseObject(metaclass=_BaseObjectMeta):
         if self._fields is not None and name in self._fields:
             return self._fields[name].value
         else:
-            raise AttributeError("'%s' object has no attribute '%s'" % (
-                self.__class__.__name__, name))
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def __setattr__(self, name: str, value: Any):
         try:
             attr = (self._fields or {})[name]
         except KeyError:
-            if name not in dir(self) and not name.startswith('_'):
-                warnings.warn('Creating a non-field attribute %s. Please prefix it with _' % name,
-                              AttributeCreationWarning, stacklevel=2)
+            if name not in dir(self) and not name.startswith("_"):
+                warnings.warn(
+                    "Creating a non-field attribute %s. Please prefix it with _" % name,
+                    AttributeCreationWarning,
+                    stacklevel=2,
+                )
             object.__setattr__(self, name, value)
         else:
             if not empty(value):
@@ -652,17 +657,17 @@ class BaseObject(metaclass=_BaseObjectMeta):
                 else:
                     # If the value was converted
                     if nvalue is not value:
-                        warnings.warn('Value %s was converted from %s to %s' %
-                                      (name, type(value), type(nvalue)),
-                                      ConversionWarning, stacklevel=2)
+                        warnings.warn(
+                            f"Value {name} was converted from {type(value)} to {type(nvalue)}",
+                            ConversionWarning,
+                            stacklevel=2,
+                        )
                     value = nvalue
 
             actual_types = _resolve_types(attr.types)
 
             if not isinstance(value, actual_types) and not empty(value):
-                raise ValueError(
-                    'Value for "%s" needs to be of type %r, not %r' % (
-                        name, actual_types, type(value)))
+                raise ValueError(f'Value for "{name}" needs to be of type {actual_types!r}, not {type(value)!r}')
             attr.value = value
 
     def __delattr__(self, name: str):
@@ -671,23 +676,23 @@ class BaseObject(metaclass=_BaseObjectMeta):
         except KeyError:
             object.__delattr__(self, name)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         def iter_decorate(d):
             for key, value in d:
-                if key == 'id' and self.backend is not None:
+                if key == "id" and self.backend is not None:
                     value = self.fullid
                 yield key, value
 
         fields_iterator = self.iter_fields()
         return OrderedDict(iter_decorate(fields_iterator))
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         d = self.to_dict()
-        d.update((k, v) for k, v in self.__dict__.items() if k != '_fields')
+        d.update((k, v) for k, v in self.__dict__.items() if k != "_fields")
         return d
 
     @classmethod
-    def from_dict(cls, values: Dict[str, Any], backend: str | None = None):
+    def from_dict(cls, values: dict[str, Any], backend: str | None = None):
         self = cls()
 
         for attr in values:
@@ -695,13 +700,13 @@ class BaseObject(metaclass=_BaseObjectMeta):
 
         return self
 
-    def __setstate__(self, state: Dict[str, Any]):
+    def __setstate__(self, state: dict[str, Any]):
         self._fields = deepcopy(self._fields)  # because yaml does not call __init__
         for k in state:
             setattr(self, k, state[k])
 
     def __dir__(self):
-        return list(super(BaseObject, self).__dir__()) + list(self._fields.keys())
+        return list(super().__dir__()) + list(self._fields.keys())
 
 
 def _resolve_types(types):
@@ -733,62 +738,64 @@ def _resolve_types(types):
 
 
 class Currency:
-    CURRENCIES = OrderedDict([
-        ('EUR', ('€', 'EURO', 'EUROS')),
-        ('CHF', ('CHF',)),
-        ('USD', ('$', '$US')),
-        ('GBP', ('£',)),
-        ('LBP', ('ل.ل',)),
-        ('AED', ('AED',)),
-        ('XOF', ('XOF',)),
-        ('RUB', ('руб',)),
-        ('SGD', ('SGD',)),
-        ('BRL', ('R$',)),
-        ('MXN', ('$',)),
-        ('JPY', ('¥',)),
-        ('TRY', ('₺', 'TRY')),
-        ('RON', ('lei',)),
-        ('COP', ('$',)),
-        ('NOK', ('kr',)),
-        ('CNY', ('¥',)),
-        ('RSD', ('din',)),
-        ('ZAR', ('rand',)),
-        ('MYR', ('RM',)),
-        ('HUF', ('Ft',)),
-        ('HKD', ('HK$',)),
-        ('TWD', ('NT$',)),
-        ('QAR', ('QR',)),
-        ('MAD', ('MAD',)),
-        ('ARS', ('ARS',)),
-        ('AUD', ('AUD',)),
-        ('CAD', ('CAD',)),
-        ('NZD', ('NZD',)),
-        ('BHD', ('BHD',)),
-        ('SEK', ('SEK',)),
-        ('DKK', ('DKK',)),
-        ('LUF', ('LUF',)),
-        ('KZT', ('KZT',)),
-        ('PLN', ('PLN',)),
-        ('ILS', ('ILS',)),
-        ('THB', ('THB',)),
-        ('INR', ('₹', 'INR')),
-        ('PEN', ('S/',)),
-        ('IDR', ('Rp',)),
-        ('KWD', ('KD',)),
-        ('KRW', ('₩',)),
-        ('CZK', ('Kč',)),
-        ('EGP', ('E£',)),
-        ('ISK', ('Íkr', 'kr')),
-        ('XPF', ('XPF',)),
-        ('SAR', ('SAR',)),
-        ('BGN', ('лв',)),
-        ('HRK', ('HRK',  'kn')),
-    ])
+    CURRENCIES = OrderedDict(
+        [
+            ("EUR", ("€", "EURO", "EUROS")),
+            ("CHF", ("CHF",)),
+            ("USD", ("$", "$US")),
+            ("GBP", ("£",)),
+            ("LBP", ("ل.ل",)),
+            ("AED", ("AED",)),
+            ("XOF", ("XOF",)),
+            ("RUB", ("руб",)),
+            ("SGD", ("SGD",)),
+            ("BRL", ("R$",)),
+            ("MXN", ("$",)),
+            ("JPY", ("¥",)),
+            ("TRY", ("₺", "TRY")),
+            ("RON", ("lei",)),
+            ("COP", ("$",)),
+            ("NOK", ("kr",)),
+            ("CNY", ("¥",)),
+            ("RSD", ("din",)),
+            ("ZAR", ("rand",)),
+            ("MYR", ("RM",)),
+            ("HUF", ("Ft",)),
+            ("HKD", ("HK$",)),
+            ("TWD", ("NT$",)),
+            ("QAR", ("QR",)),
+            ("MAD", ("MAD",)),
+            ("ARS", ("ARS",)),
+            ("AUD", ("AUD",)),
+            ("CAD", ("CAD",)),
+            ("NZD", ("NZD",)),
+            ("BHD", ("BHD",)),
+            ("SEK", ("SEK",)),
+            ("DKK", ("DKK",)),
+            ("LUF", ("LUF",)),
+            ("KZT", ("KZT",)),
+            ("PLN", ("PLN",)),
+            ("ILS", ("ILS",)),
+            ("THB", ("THB",)),
+            ("INR", ("₹", "INR")),
+            ("PEN", ("S/",)),
+            ("IDR", ("Rp",)),
+            ("KWD", ("KD",)),
+            ("KRW", ("₩",)),
+            ("CZK", ("Kč",)),
+            ("EGP", ("E£",)),
+            ("ISK", ("Íkr", "kr")),
+            ("XPF", ("XPF",)),
+            ("SAR", ("SAR",)),
+            ("BGN", ("лв",)),
+            ("HRK", ("HRK", "kn")),
+        ]
+    )
 
-    EXTRACTOR = re.compile(r'[()\d\s,\.\-]', re.UNICODE)
+    EXTRACTOR = re.compile(r"[()\d\s,\.\-]", re.UNICODE)
 
     @classmethod
-    def get_currency(cls: Type[Currency], text: str) -> str | None:
+    def get_currency(cls: type[Currency], text: str) -> str | None:
         """
         >>> Currency.get_currency(u'42')
         None
@@ -805,7 +812,7 @@ class Currency:
         >>> Currency.get_currency(u'US1D')
         None
         """
-        curtexts = cls.EXTRACTOR.sub(' ', text.upper()).split()
+        curtexts = cls.EXTRACTOR.sub(" ", text.upper()).split()
 
         for currency, symbols in cls.CURRENCIES.items():
             for curtext in curtexts:
@@ -818,12 +825,12 @@ class Currency:
 
     @classmethod
     def currency2txt(cls, currency):
-        _currency = cls.CURRENCIES.get(currency, ('',))
+        _currency = cls.CURRENCIES.get(currency, ("",))
         return _currency[0]
 
 
-def capability_to_string(capability_klass: Type[Capability]) -> str:
-    m = re.match(r'^Cap(\w+)', capability_klass.__name__)
+def capability_to_string(capability_klass: type[Capability]) -> str:
+    m = re.match(r"^Cap(\w+)", capability_klass.__name__)
     assert m is not None
 
     return m.group(1).lower()

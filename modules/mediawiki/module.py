@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2011  Clément Schreiner
 #
 # This file is part of a woob module.
@@ -19,17 +17,17 @@
 
 import os
 
-from woob.tools.backend import Module, BackendConfig
 from woob.capabilities.content import CapContent, Content
 from woob.capabilities.file import CapFile
-from woob.capabilities.gallery import CapGallery, BaseImage, BaseGallery
+from woob.capabilities.gallery import BaseGallery, BaseImage, CapGallery
 from woob.capabilities.image import CapImage, Thumbnail
-from woob.tools.value import ValueBackendPassword, Value
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import MediawikiBrowser
 
 
-__all__ = ['MediawikiModule']
+__all__ = ["MediawikiModule"]
 
 
 class WikiImage(BaseImage):
@@ -39,31 +37,36 @@ class WikiImage(BaseImage):
 
 
 class MediawikiModule(Module, CapContent, CapImage, CapGallery):
-    NAME = 'mediawiki'
-    MAINTAINER = u'Clément Schreiner'
-    EMAIL = 'clemux@clemux.info'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = 'Wikis running MediaWiki, like Wikipedia'
-    CONFIG = BackendConfig(Value('url',      label='URL of the Mediawiki website', default='https://en.wikipedia.org/', regexp='https?://.*'),
-                           Value('apiurl',   label='URL of the Mediawiki website\'s API', default='https://en.wikipedia.org/w/api.php', regexp='https?://.*'),
-                           Value('username', label='Login', default=''),
-                           ValueBackendPassword('password', label='Password', default=''))
+    NAME = "mediawiki"
+    MAINTAINER = "Clément Schreiner"
+    EMAIL = "clemux@clemux.info"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "Wikis running MediaWiki, like Wikipedia"
+    CONFIG = BackendConfig(
+        Value("url", label="URL of the Mediawiki website", default="https://en.wikipedia.org/", regexp="https?://.*"),
+        Value(
+            "apiurl",
+            label="URL of the Mediawiki website's API",
+            default="https://en.wikipedia.org/w/api.php",
+            regexp="https?://.*",
+        ),
+        Value("username", label="Login", default=""),
+        ValueBackendPassword("password", label="Password", default=""),
+    )
 
     BROWSER = MediawikiBrowser
 
     def create_default_browser(self):
-        username = self.config['username'].get()
+        username = self.config["username"].get()
         if len(username) > 0:
-            password = self.config['password'].get()
+            password = self.config["password"].get()
         else:
-            password = ''
-        return self.create_browser(self.config['url'].get(),
-                                   self.config['apiurl'].get(),
-                                   username, password)
+            password = ""
+        return self.create_browser(self.config["url"].get(), self.config["apiurl"].get(), username, password)
 
     def get_content(self, _id, revision=None):
-        _id = _id.replace(' ', '_')
+        _id = _id.replace(" ", "_")
         content = Content(_id)
         page = _id
         rev = revision.id if revision else None
@@ -82,18 +85,18 @@ class MediawikiModule(Module, CapContent, CapImage, CapGallery):
         return self.browser.get_wiki_preview(content)
 
     def _make_image(self, info):
-        img = WikiImage(info['title'])
+        img = WikiImage(info["title"])
 
-        img.title, img.ext = os.path.splitext(info['title'])
-        img.title = img.title.rsplit(':', 1)[-1]
-        img.size = info['size']
+        img.title, img.ext = os.path.splitext(info["title"])
+        img.title = img.title.rsplit(":", 1)[-1]
+        img.size = info["size"]
 
-        if 'thumbnail' in info:
-            thumb = Thumbnail(info['thumbnail'])
+        if "thumbnail" in info:
+            thumb = Thumbnail(info["thumbnail"])
             img.thumbnail = thumb
-        if 'original' in info:
-            img.url = info['original']
-        img._canonical_url = info['canonicalurl']
+        if "original" in info:
+            img.url = info["original"]
+        img._canonical_url = info["canonicalurl"]
 
         return img
 
@@ -102,14 +105,14 @@ class MediawikiModule(Module, CapContent, CapImage, CapGallery):
             yield self._make_image(info)
 
     def get_image(self, _id):
-        _id = _id.replace(' ', '_')
+        _id = _id.replace(" ", "_")
         info = self.browser.get_image(_id)
         return self._make_image(info)
 
     def search_galleries(self, pattern, sortby=CapGallery.SEARCH_RELEVANCE):
         for info in self.browser.search_categories(pattern):
-            gall = BaseGallery(info['id'])
-            gall.title = info['title']
+            gall = BaseGallery(info["id"])
+            gall.title = info["title"]
             yield gall
 
     def iter_gallery_images(self, gallery):
@@ -117,15 +120,15 @@ class MediawikiModule(Module, CapContent, CapImage, CapGallery):
             yield self._make_image(info)
 
     def fill_img(self, obj, fields):
-        if set(fields) & set(('url', 'thumbnail')):
+        if set(fields) & {"url", "thumbnail"}:
             new = self.get_image(obj.id)
 
-            if 'url' in fields:
+            if "url" in fields:
                 obj.url = new.url
-            if 'thumbnail' in fields:
+            if "thumbnail" in fields:
                 obj.thumbnail = new.thumbnail
                 self.fillobj(obj.thumbnail)
-        if 'data' in fields:
+        if "data" in fields:
             self.browser.fill_file(obj, fields)
         return obj
 

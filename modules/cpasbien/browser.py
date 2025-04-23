@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,26 +16,24 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
+from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser.profiles import Firefox
+from woob.browser.url import URL
 
-from .pages import SearchPage, TorrentPage#, HomePage
+from .pages import SearchPage, TorrentPage  # , HomePage
 
 
-__all__ = ['CpasbienBrowser']
+__all__ = ["CpasbienBrowser"]
 
 
 class CpasbienBrowser(PagesBrowser):
     PROFILE = Firefox()
     TIMEOUT = 30
 
-    BASEURL = 'http://www.cpasbien.cm/'
-    search = URL('recherche/(?P<pattern>.*).html,trie-seeds-d',
-                 SearchPage)
-    torrent = URL('dl-torrent/(?P<id>.*)\.html',
-                  TorrentPage)
+    BASEURL = "http://www.cpasbien.cm/"
+    search = URL(r"recherche/(?P<pattern>.*).html,trie-seeds-d", SearchPage)
+    torrent = URL(r"dl-torrent/(?P<id>.*)\.html", TorrentPage)
 
     def iter_torrents(self, pattern):
         self.search.go(pattern=pattern)

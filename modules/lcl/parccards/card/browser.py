@@ -18,27 +18,27 @@
 from random import randint
 from time import sleep
 
-from woob.exceptions import BrowserIncorrectPassword, BrowserUserBanned
-from woob.browser.browsers import LoginBrowser, need_login, URL
+from woob.browser.browsers import URL, LoginBrowser, need_login
 from woob.browser.exceptions import ClientError
+from woob.exceptions import BrowserIncorrectPassword, BrowserUserBanned
 
-from .pages import LoginPage, PeriodsPage
 from ..pages import HistoryPage
+from .pages import LoginPage, PeriodsPage
 
 
-__all__ = ['LCLCardsBrowser']
+__all__ = ["LCLCardsBrowser"]
 
 
 class LCLCardsBrowser(LoginBrowser):
-    BASEURL = 'https://cartesentreprises.secure.lcl.fr'
+    BASEURL = "https://cartesentreprises.secure.lcl.fr"
     TIMEOUT = 30.0
 
-    login = URL(r'/services/users/login', LoginPage)
-    periods = URL(r'/services/porteur/depensescarte', PeriodsPage)
-    history = URL(r'/services/porteur/operationscarteporteur', HistoryPage)
+    login = URL(r"/services/users/login", LoginPage)
+    periods = URL(r"/services/porteur/depensescarte", PeriodsPage)
+    history = URL(r"/services/porteur/operationscarteporteur", HistoryPage)
 
     def __init__(self, config, *args, **kwargs):
-        super(LCLCardsBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.accounts_page = None
 
     def do_login(self):
@@ -52,21 +52,25 @@ class LCLCardsBrowser(LoginBrowser):
 
         try:
             # We can't access the accounts page later, we need to cache it
-            self.accounts_page = self.login.go(json={
-                'login': self.username,
-                'password': self.password,
-            })
+            self.accounts_page = self.login.go(
+                json={
+                    "login": self.username,
+                    "password": self.password,
+                }
+            )
         except ClientError as e:
             if e.response.text == '"USER_ACCOUNT_LOCKED_BY_TOO_MANY_WRONG_AUTHENTICATIONS"':
-                raise BrowserUserBanned('Trop de tentatives erronées, compte utilisateur bloqué')
+                raise BrowserUserBanned("Trop de tentatives erronées, compte utilisateur bloqué")
             if e.response.text == '"USER_AUTHENTICATION_KO"':
-                raise BrowserIncorrectPassword('Login ou mot de passe incorrect')
+                raise BrowserIncorrectPassword("Login ou mot de passe incorrect")
             raise
 
-        self.session.headers.update({
-            'authorization': "Bearer " + self.page.get_token(),
-            'id': self.page.get_logged_user(),
-        })
+        self.session.headers.update(
+            {
+                "authorization": "Bearer " + self.page.get_token(),
+                "id": self.page.get_logged_user(),
+            }
+        )
 
     @need_login
     def iter_accounts(self):
@@ -76,12 +80,14 @@ class LCLCardsBrowser(LoginBrowser):
     def iter_history(self, account):
         logged_user = self.accounts_page.get_logged_user()
         accounts_params = self.accounts_page.get_accounts_params()
-        self.periods.go(json={
-            'loggedUser': logged_user,
-            'possibleCardsToSee': accounts_params,
-        })
+        self.periods.go(
+            json={
+                "loggedUser": logged_user,
+                "possibleCardsToSee": accounts_params,
+            }
+        )
         period_ids = self.page.get_periods()
-        '''
+        """
         Each period corresponds to 1 month of history (dateFin and dateDebut are UNIX timestamps
         given in milliseconds)
         {
@@ -98,16 +104,15 @@ class LCLCardsBrowser(LoginBrowser):
         }
         It seems that period which starting date are older than one year can't be retrieved anymore.
         In other words, we can only get 12 periods.
-        '''
+        """
         for period_id in period_ids:
             json = {
-                'cardId': account._card_id,
-                'periodeId': period_id,
-                'login': logged_user,
+                "cardId": account._card_id,
+                "periodeId": period_id,
+                "login": logged_user,
             }
             self.history.go(json=json)
-            for tr in self.page.iter_history():
-                yield tr
+            yield from self.page.iter_history()
 
     @need_login
     def iter_coming(self, account):

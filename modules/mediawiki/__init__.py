@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2011 Clément Schreiner
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import MediawikiModule
 
-__all__ = ['MediawikiModule']
+
+__all__ = ["MediawikiModule"]

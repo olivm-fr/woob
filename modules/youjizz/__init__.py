@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Roger Philibert
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import YoujizzModule
 
-__all__ = ['YoujizzModule']
+
+__all__ = ["YoujizzModule"]

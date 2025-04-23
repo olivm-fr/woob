@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -17,33 +15,33 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, Value
 from woob.capabilities.captcha import CapCaptchaSolver, ImageCaptchaJob, RecaptchaV2Job
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import DeathbycaptchaBrowser
 
 
-__all__ = ['DeathbycaptchaModule']
+__all__ = ["DeathbycaptchaModule"]
 
 
 class DeathbycaptchaModule(Module, CapCaptchaSolver):
-    NAME = 'deathbycaptcha'
-    DESCRIPTION = 'Death By Captcha'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "deathbycaptcha"
+    DESCRIPTION = "Death By Captcha"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     CONFIG = BackendConfig(
-        Value('login'),
-        ValueBackendPassword('password'),
+        Value("login"),
+        ValueBackendPassword("password"),
     )
 
     BROWSER = DeathbycaptchaBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def create_job(self, job):
         if isinstance(job, ImageCaptchaJob):

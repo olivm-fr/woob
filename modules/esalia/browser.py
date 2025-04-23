@@ -18,38 +18,34 @@
 from woob.browser import URL
 from woob.tools.url import get_url_param
 from woob_modules.erehsbc.browser import ErehsbcBrowser
-from woob_modules.erehsbc.pages import (
-    AuthenticationPage as ErehsbcAuthenticationPage,
-    FinalizeAuthenticationPage as ErehsbcFinalizeAuthenticationPage,
-)
+from woob_modules.erehsbc.pages import AuthenticationPage as ErehsbcAuthenticationPage
+from woob_modules.erehsbc.pages import FinalizeAuthenticationPage as ErehsbcFinalizeAuthenticationPage
 
 
 class EsaliaBrowser(ErehsbcBrowser):
-    BASEURL = 'https://salaries.esalia.com'
-    AUTH_BASEURL = 'https://iam.esalia.com'
+    BASEURL = "https://salaries.esalia.com"
+    AUTH_BASEURL = "https://iam.esalia.com"
 
-    SLUG = 'sg'
-    LANG = 'fr'  # ['fr', 'en']
+    SLUG = "sg"
+    LANG = "fr"  # ['fr', 'en']
 
-    login_page = URL(r'/portal/salarie-(?P<slug>\w+)/connect')
+    login_page = URL(r"/portal/salarie-(?P<slug>\w+)/connect")
     authentication_page = URL(
-        r'/connect/json/realms/root/realms/sg_ws/authenticate',
-        ErehsbcAuthenticationPage,
-        base='AUTH_BASEURL'
+        r"/connect/json/realms/root/realms/sg_ws/authenticate", ErehsbcAuthenticationPage, base="AUTH_BASEURL"
     )
     finalize_authentication_page = URL(
-        r'/connect/json/realms/root/realms/sg_ws/users\?_action=idFromSession',
+        r"/connect/json/realms/root/realms/sg_ws/users\?_action=idFromSession",
         ErehsbcFinalizeAuthenticationPage,
-        base='AUTH_BASEURL'
+        base="AUTH_BASEURL",
     )
 
     def build_authentication_params(self):
         # Keeping redirect_uri in the state for OTP connections
         # that will need it in finalize_login
-        self.redirect_uri = get_url_param(self.url, 'goto')
+        self.redirect_uri = get_url_param(self.url, "goto")
         return {
-            'locale': 'fr',
-            'goto': self.redirect_uri,
-            'authIndexType': 'service',
-            'authIndexValue': 'authn_sg_ws',
+            "locale": "fr",
+            "goto": self.redirect_uri,
+            "authIndexType": "service",
+            "authIndexValue": "authn_sg_ws",
         }

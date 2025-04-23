@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,13 +16,12 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.lyrics import SongLyrics
-from woob.capabilities.base import NotLoaded, NotAvailable, BaseObject
-
 from woob.browser.elements import ItemElement, ListElement, method
-from woob.browser.pages import HTMLPage
-from woob.browser.filters.standard import Regexp, CleanText, Env, BrowserURL
 from woob.browser.filters.html import CleanHTML, XPath
+from woob.browser.filters.standard import BrowserURL, CleanText, Env, Regexp
+from woob.browser.pages import HTMLPage
+from woob.capabilities.base import BaseObject, NotAvailable, NotLoaded
+from woob.capabilities.lyrics import SongLyrics
 
 
 class SearchPage(HTMLPage):
@@ -40,8 +37,9 @@ class SearchPage(HTMLPage):
                 content = CleanText('./pre[@class="lyric-body"]')(self)
                 return content.replace(title, "").strip() != ""
 
-            obj_id = Regexp(CleanText('./div/p[@class="lyric-meta-title"]/a/@href', default=NotAvailable),
-                            '/lyric/(.*)')
+            obj_id = Regexp(
+                CleanText('./div/p[@class="lyric-meta-title"]/a/@href', default=NotAvailable), "/lyric/(.*)"
+            )
 
             obj_title = CleanText('./div/p[@class="lyric-meta-title"]/a', default=NotAvailable)
 
@@ -57,9 +55,9 @@ class SearchPage(HTMLPage):
             klass = BaseObject
 
             def condition(self):
-                return CleanText('.//a/@href')(self)
+                return CleanText(".//a/@href")(self)
 
-            obj_id = Regexp(CleanText('.//a/@href'), 'artist/(.*)')
+            obj_id = Regexp(CleanText(".//a/@href"), "artist/(.*)")
 
 
 class LyricsPage(HTMLPage):
@@ -70,8 +68,8 @@ class LyricsPage(HTMLPage):
         def condition(self):
             return not XPath('//div[has-class("lyric-no-data")]')(self)
 
-        obj_id = Env('id')
-        obj_url = BrowserURL('songLyrics', id=Env('id'))
+        obj_id = Env("id")
+        obj_url = BrowserURL("songLyrics", id=Env("id"))
         obj_content = CleanHTML('//pre[@id="lyric-body-text"]', default=NotAvailable)
         obj_title = CleanText('//h2[@id="lyric-title-text"]')
         obj_artist = CleanText('//h3[@class="lyric-artist"]/a[1]', default=NotAvailable)
@@ -86,9 +84,9 @@ class ArtistPages(HTMLPage):
             klass = SongLyrics
 
             def condition(self):
-                return CleanText('./strong/a/@href')(self)
+                return CleanText("./strong/a/@href")(self)
 
-            obj_id = Regexp(CleanText('./strong/a/@href'), '/lyric/(.*)')
-            obj_title = CleanText('./strong/a', default=NotAvailable)
-            obj_artist = CleanText('//h3/strong', default=NotAvailable)
+            obj_id = Regexp(CleanText("./strong/a/@href"), "/lyric/(.*)")
+            obj_title = CleanText("./strong/a", default=NotAvailable)
+            obj_artist = CleanText("//h3/strong", default=NotAvailable)
             obj_content = NotLoaded

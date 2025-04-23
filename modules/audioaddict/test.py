@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Pierre Mazière
 #
 # This file is part of a woob module.
@@ -18,27 +16,27 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.capabilities.radio import Radio
+from woob.tools.test import BackendTest
 from woob.tools.value import Value
 
 
 class AudioAddictTest(BackendTest):
-    MODULE = 'audioaddict'
+    MODULE = "audioaddict"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['networks'] = Value(value='RockRadio RadioTunes JazzRadio DI ClassicalRadio')
-            self.backend.config['quality'] = Value(value='l')
+            self.backend.config["networks"] = Value(value="RockRadio RadioTunes JazzRadio DI ClassicalRadio")
+            self.backend.config["quality"] = Value(value="l")
 
     def test_audioaddict(self):
-        ls = list(self.backend.iter_resources((Radio, ), []))
+        ls = list(self.backend.iter_resources((Radio,), []))
         self.assertTrue(len(ls) > 0)
 
-        search = list(self.backend.iter_radios_search('classic'))
+        search = list(self.backend.iter_radios_search("classic"))
         self.assertTrue(len(search) > 0)
 
-        radio = self.backend.get_radio('classicrock.RockRadio')
+        radio = self.backend.get_radio("classicrock.RockRadio")
         self.assertTrue(radio.title)
         self.assertTrue(radio.description)
         self.assertTrue(radio.current.who)

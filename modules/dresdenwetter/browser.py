@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2013 Romain Bignon, Florent Fourcot
 #
 # This file is part of a woob module.
@@ -18,17 +16,18 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
+
 from .pages import StartPage
 
 
-__all__ = ['DresdenWetterBrowser']
+__all__ = ["DresdenWetterBrowser"]
 
 
 class DresdenWetterBrowser(PagesBrowser):
-    BASEURL = 'http://www.dresden-wetter.de'
+    BASEURL = "http://www.dresden-wetter.de"
 
-    home = URL('/Current_Vantage_Pro.htm', StartPage)
+    home = URL("/Current_Vantage_Pro.htm", StartPage)
 
     def get_sensors_list(self):
         return self.home.stay_or_go().get_sensors_list()

@@ -1,6 +1,3 @@
-
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011  Romain Bignon
 #
 # This file is part of a woob module.
@@ -23,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class InrocksTest(BackendTest):
-    MODULE = 'inrocks'
+    MODULE = "inrocks"
 
     def test_new_messages(self):
         for message in self.backend.iter_unread_messages():

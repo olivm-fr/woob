@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Lucien Loiseau
 #
 # This file is part of a woob module.
@@ -17,10 +15,10 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.pages import HTMLPage
 from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import CleanText, Env, Regexp
+from woob.browser.pages import HTMLPage
 from woob.capabilities.translate import Translation
-from woob.browser.filters.standard import CleanText, Regexp, Env
 
 
 class TranslatePage(HTMLPage):
@@ -31,7 +29,7 @@ class TranslatePage(HTMLPage):
         class item(ItemElement):
             klass = Translation
 
-            obj_id = Regexp(CleanText('./@id'), '.*:(.*)')
-            obj_lang_src = Env('sl')
-            obj_lang_dst = Env('tl')
+            obj_id = Regexp(CleanText("./@id"), ".*:(.*)")
+            obj_lang_src = Env("sl")
+            obj_lang_dst = Env("tl")
             obj_text = CleanText('./td[@class="ToWrd"]', children=False)

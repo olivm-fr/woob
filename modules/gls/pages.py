@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -20,9 +18,14 @@
 from dateutil.parser import parse as parse_date
 
 from woob.browser.pages import JsonPage
-from woob.capabilities.parcel import Parcel, Event
+from woob.capabilities.parcel import Event, Parcel
+
 
 STATUSES = {
+    "PREADVICE": Parcel.STATUS_PLANNED,
+    "INTRANSIT": Parcel.STATUS_IN_TRANSIT,
+    "INWAREHOUSE": Parcel.STATUS_IN_TRANSIT,
+    "INDELIVERY": Parcel.STATUS_IN_TRANSIT,
     "DELIVEREDPS": Parcel.STATUS_ARRIVED,
     "DELIVERED": Parcel.STATUS_ARRIVED,
 }
@@ -31,7 +34,8 @@ STATUSES = {
 class SearchPage(JsonPage):
     def get_info(self, _id):
         p = Parcel(_id)
-        events = self.doc["tuStatus"][0]["history"]
+        # TODO: temporary fix, history only available when we submit the recipient's postcode
+        events = self.doc["tuStatus"][0].get("history", [])
         p.history = [self.build_event(i, tr) for i, tr in enumerate(events)]
         p.status = self.guess_status(self.doc["tuStatus"][0]["progressBar"]["statusInfo"])
         p.info = self.doc["tuStatus"][0]["progressBar"]["statusText"]
@@ -42,9 +46,10 @@ class SearchPage(JsonPage):
 
     def build_event(self, index, data):
         event = Event(index)
-        date = "%s %s" % (data["date"], data["time"])
+        date = "{} {}".format(data["date"], data["time"])
         event.date = parse_date(date, dayfirst=False)
         event.location = ", ".join(
-            [str(data["address"][field]) for field in ["city", "countryName"] if data["address"][field]])
+            [str(data["address"][field]) for field in ["city", "countryName"] if data["address"][field]]
+        )
         event.activity = str(data["evtDscr"])
         return event

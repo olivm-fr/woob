@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2014 Florent Fourcot
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class FreeMobileTest(BackendTest):
-    MODULE = 'freemobile'
+    MODULE = "freemobile"
 
     def test_details(self):
         for subscription in self.backend.iter_subscription():

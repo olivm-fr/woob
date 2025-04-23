@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -17,16 +15,17 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from datetime import time
 import re
+from datetime import time
 
 from dateutil import rrule
-from woob.browser.elements import method, ListElement, ItemElement
-from woob.browser.filters.standard import CleanText, Regexp, Field, Env, BrowserURL
+
+from woob.browser.elements import ItemElement, ListElement, method
 from woob.browser.filters.html import AbsoluteLink, HasElement, XPath
+from woob.browser.filters.standard import BrowserURL, CleanText, Env, Field, Regexp
 from woob.browser.pages import HTMLPage, pagination
-from woob.capabilities.base import NotLoaded, NotAvailable
-from woob.capabilities.contact import Place, OpeningRule
+from woob.capabilities.base import NotAvailable, NotLoaded
+from woob.capabilities.contact import OpeningRule, Place
 
 
 class ResultsPage(HTMLPage):
@@ -37,11 +36,8 @@ class ResultsPage(HTMLPage):
 
         def next_page(self):
             if XPath('//div/@class="pagination"', default=False)(self):
-                next_page = int(Env('page')(self)) + 1
-                return BrowserURL('search',
-                                  city=Env('city'),
-                                  pattern=Env('pattern'),
-                                  page=next_page)(self)
+                next_page = int(Env("page")(self)) + 1
+                return BrowserURL("search", city=Env("city"), pattern=Env("pattern"), page=next_page)(self)
 
         class item(ItemElement):
             klass = Place
@@ -51,14 +47,15 @@ class ResultsPage(HTMLPage):
 
             def obj_phone(self):
                 tel = []
-                for _ in XPath(
-                        './/div[has-class("tel-zone")][span[contains(text(),"Tél")]]//strong[@class="num"]')(self):
-                    tel.append(Regexp(CleanText('.', replace=[(' ', '')]), r'^0(\d{9})$', r'+33\1')(_))
+                for _ in XPath('.//div[has-class("tel-zone")][span[contains(text(),"Tél")]]//strong[@class="num"]')(
+                    self
+                ):
+                    tel.append(Regexp(CleanText(".", replace=[(" ", "")]), r"^0(\d{9})$", r"+33\1")(_))
 
                 return " / ".join(tel)
 
             def obj_url(self):
-                if CleanText('.//a[has-class("denomination-links")]/@href', replace=[('#', '')])(self):
+                if CleanText('.//a[has-class("denomination-links")]/@href', replace=[("#", "")])(self):
                     return AbsoluteLink('.//a[has-class("denomination-links")]')(self)
                 return NotAvailable
 
@@ -74,20 +71,20 @@ class PlacePage(HTMLPage):
             klass = OpeningRule
 
             def obj_dates(self):
-                wday = CleanText('./p')(self)
-                wday = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'].index(wday.lower())
+                wday = CleanText("./p")(self)
+                wday = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"].index(wday.lower())
                 assert wday >= 0
                 return rrule.rrule(rrule.DAILY, byweekday=wday, count=1)
 
             def obj_times(self):
                 times = []
-                for sub in XPath('.//li')(self):
-                    t = CleanText('.')(sub)
-                    m = re.match(r'(\d{2})h(\d{2}) - (\d{2})h(\d{2})$', t)
+                for sub in XPath(".//li")(self):
+                    t = CleanText(".")(sub)
+                    m = re.match(r"(\d{2})h(\d{2}) - (\d{2})h(\d{2})$", t)
                     if m:
                         m = [int(x) for x in m.groups()]
                         times.append((time(m[0], m[1]), time(m[2], m[3])))
                 return times
 
             def obj_is_open(self):
-                return len(Field('times')(self)) > 0
+                return len(Field("times")(self)) > 0

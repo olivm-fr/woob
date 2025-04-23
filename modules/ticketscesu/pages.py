@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Antoine BOSSY
 #
 # This file is part of a woob module.
@@ -18,9 +16,9 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.elements import method, ItemElement, ListElement, SkipItem
-from woob.browser.filters.standard import CleanDecimal, CleanText, Field, Format, Date
+from woob.browser.elements import ItemElement, ListElement, SkipItem, method
 from woob.browser.filters.html import Attr
+from woob.browser.filters.standard import CleanDecimal, CleanText, Date, Field, Format
 from woob.browser.pages import HTMLPage, LoggedPage
 from woob.capabilities.bank import Account, Transaction
 from woob.capabilities.base import NotAvailable
@@ -29,8 +27,8 @@ from woob.capabilities.base import NotAvailable
 class LoginPage(HTMLPage):
     def login(self, login, password):
         form = self.get_form('//form[@id="frmMain"]')
-        form['UserLogin'] = login
-        form['UserPass'] = password
+        form["UserLogin"] = login
+        form["UserPass"] = password
         form.submit()
 
 
@@ -49,18 +47,18 @@ class AccountsPage(LoggedPage, HTMLPage):
             # TODO: control all these attributes
 
             # obj_type = '??????'
-            obj_id = CleanText('./td[position()=2]')
-            obj_balance = CleanDecimal('./td[position()=6]', replace_dots=True)
-            obj_label = Format('Millésime %s', Field('id'))
-            obj_number = Field('id')
-            obj_currency = 'EUR'
+            obj_id = CleanText("./td[position()=2]")
+            obj_balance = CleanDecimal("./td[position()=6]", replace_dots=True)
+            obj_label = Format("Millésime %s", Field("id"))
+            obj_number = Field("id")
+            obj_currency = "EUR"
 
-            obj__page = Attr('./td//input', 'name')
+            obj__page = Attr("./td//input", "name")
 
     def go_to_transactions_page(self, page):
         form = self.get_form('//form[@id="frmMain"]')
-        form[f'{page}.x'] = 1
-        form[f'{page}.y'] = 1
+        form[f"{page}.x"] = 1
+        form[f"{page}.y"] = 1
         form.submit()
 
     @method
@@ -73,30 +71,29 @@ class AccountsPage(LoggedPage, HTMLPage):
             # TODO: control all these attributes
 
             def obj_date(self):
-                maybe_date = CleanText('./td[position()=2]')(self)
-                if maybe_date == '-':
+                maybe_date = CleanText("./td[position()=2]")(self)
+                if maybe_date == "-":
                     raise SkipItem()
 
-                return Date(CleanText('./td[position()=2]'), dayfirst=True)(self)
+                return Date(CleanText("./td[position()=2]"), dayfirst=True)(self)
 
-            obj_id = CleanText('./td[position()=3]')
+            obj_id = CleanText("./td[position()=3]")
 
             def obj_amount(self):
-                amount = CleanDecimal('./td[position()=4]', replace_dots=True,
-                                      default=NotAvailable)(self)
+                amount = CleanDecimal("./td[position()=4]", replace_dots=True, default=NotAvailable)(self)
 
                 if amount is NotAvailable:
-                    return CleanDecimal('./td[position()=5]', replace_dots=True)(self)
+                    return CleanDecimal("./td[position()=5]", replace_dots=True)(self)
 
                 return amount * -1
 
-            obj_currency = 'EUR'
+            obj_currency = "EUR"
 
             def obj_label(self):
-                label = CleanText('./td[position()=6]')(self)
-                if label == '-':
-                    return CleanText('./td[position()=7]')(self)
+                label = CleanText("./td[position()=6]")(self)
+                if label == "-":
+                    return CleanText("./td[position()=7]")(self)
 
                 return label
 
-            obj_raw = Field('label')
+            obj_raw = Field("label")

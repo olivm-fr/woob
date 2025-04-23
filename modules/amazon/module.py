@@ -20,70 +20,79 @@
 from collections import OrderedDict
 from urllib.parse import urljoin
 
+from woob.capabilities.base import NotAvailable, find_object
 from woob.capabilities.bill import (
-    DocumentTypes, CapDocument, Subscription, Document, DocumentNotFound,
+    CapDocument,
+    Document,
     DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
 )
-from woob.capabilities.base import find_object, NotAvailable
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, Value, ValueTransient
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.pdf import html_to_pdf
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .browser import AmazonBrowser
-from .en.browser import AmazonEnBrowser
 from .de.browser import AmazonDeBrowser
+from .en.browser import AmazonEnBrowser
 from .uk.browser import AmazonUkBrowser
 
-__all__ = ['AmazonModule']
+
+__all__ = ["AmazonModule"]
 
 
 class AmazonModule(Module, CapDocument):
-    NAME = 'amazon'
-    DESCRIPTION = 'Amazon'
-    MAINTAINER = 'Théo Dorée'
-    EMAIL = 'tdoree@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "amazon"
+    DESCRIPTION = "Amazon"
+    MAINTAINER = "Théo Dorée"
+    EMAIL = "tdoree@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
-    website_choices = OrderedDict([
-        (k, '%s (%s)' % (v, k))
-        for k, v in sorted({
-            'www.amazon.com': 'Amazon.com',
-            'www.amazon.fr': 'Amazon France',
-            'www.amazon.de': 'Amazon.de',
-            'www.amazon.co.uk': 'Amazon UK',
-        }.items())
-    ])
+    website_choices = OrderedDict(
+        [
+            (k, f"{v} ({k})")
+            for k, v in sorted(
+                {
+                    "www.amazon.com": "Amazon.com",
+                    "www.amazon.fr": "Amazon France",
+                    "www.amazon.de": "Amazon.de",
+                    "www.amazon.co.uk": "Amazon UK",
+                }.items()
+            )
+        ]
+    )
 
     BROWSERS = {
-        'www.amazon.fr': AmazonBrowser,
-        'www.amazon.com': AmazonEnBrowser,
-        'www.amazon.de': AmazonDeBrowser,
-        'www.amazon.co.uk': AmazonUkBrowser,
+        "www.amazon.fr": AmazonBrowser,
+        "www.amazon.com": AmazonEnBrowser,
+        "www.amazon.de": AmazonDeBrowser,
+        "www.amazon.co.uk": AmazonUkBrowser,
     }
 
     CONFIG = BackendConfig(
-        Value('website', label='Website', choices=website_choices, default='www.amazon.com'),
-        ValueBackendPassword('email', label='Username', masked=False),
-        ValueBackendPassword('password', label='Password'),
-        ValueTransient('captcha_response', label='Captcha Response'),
-        ValueTransient('pin_code', label='OTP response'),
-        ValueTransient('request_information'),
-        ValueTransient('resume'),
+        Value("website", label="Website", choices=website_choices, default="www.amazon.com"),
+        ValueBackendPassword("email", label="Username", masked=False),
+        ValueBackendPassword("password", label="Password"),
+        ValueTransient("captcha_response", label="Captcha Response"),
+        ValueTransient("pin_code", label="OTP response"),
+        ValueTransient("request_information"),
+        ValueTransient("resume"),
     )
 
     accepted_document_types = (DocumentTypes.BILL,)
     document_categories = {DocumentCategory.SHOPPING}
 
     def create_default_browser(self):
-        self.BROWSER = self.BROWSERS[self.config['website'].get()]
+        self.BROWSER = self.BROWSERS[self.config["website"].get()]
         return self.create_browser(self.config)
 
     def iter_subscription(self):
         return self.browser.iter_subscription()
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
@@ -111,7 +120,7 @@ class AmazonModule(Module, CapDocument):
             document = self.get_document(document)
         if document.url is NotAvailable:
             return
-        if document.format == 'pdf':
+        if document.format == "pdf":
             return self.get_pdf_from_cache_or_download_it(document)
         # We can't pass the html document we saved before as a string since there is a freeze when wkhtmltopdf
         # takes a string

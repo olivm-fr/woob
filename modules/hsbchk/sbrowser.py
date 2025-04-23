@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2013  Romain Bignon
 #
 # This file is part of a woob module.
@@ -17,30 +15,27 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from selenium.common.exceptions import (
-    TimeoutException
-)
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
-from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable, BrowserHTTPError
-from woob.browser.selenium import (SeleniumBrowser, VisibleXPath)
 from woob.browser import URL
+from woob.browser.selenium import SeleniumBrowser, VisibleXPath
+from woob.exceptions import BrowserHTTPError, BrowserIncorrectPassword, BrowserUnavailable
 
-from .pages.login import (
-    LoginPage
-)
+from .pages.login import LoginPage
+
 
 class LoginBrowser(SeleniumBrowser):
-    BASEURL = 'https://www.hsbc.com.hk/'
+    BASEURL = "https://www.hsbc.com.hk/"
 
     app_gone = False
 
-    preconnection =      URL(r'https://www.ebanking.hsbc.com.hk/1/2/logon?LANGTAG=en&COUNTRYTAG=US', LoginPage)
-    login =           URL(r'https://www.security.online-banking.hsbc.com.hk/gsa/SaaS30Resource/*', LoginPage)
+    preconnection = URL(r"https://www.ebanking.hsbc.com.hk/1/2/logon?LANGTAG=en&COUNTRYTAG=US", LoginPage)
+    login = URL(r"https://www.security.online-banking.hsbc.com.hk/gsa/SaaS30Resource/*", LoginPage)
 
     def __init__(self, username, password, secret, *args, **kwargs):
-        super(LoginBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.username = username
         self.password = password
         self.secret = secret
@@ -48,8 +43,8 @@ class LoginBrowser(SeleniumBrowser):
         self.home_url = None
 
     def _build_capabilities(self):
-        capa = super(LoginBrowser, self)._build_capabilities()
-        capa['marionette'] = True
+        capa = super()._build_capabilities()
+        capa["marionette"] = True
         return capa
 
     def load_state(self, state):

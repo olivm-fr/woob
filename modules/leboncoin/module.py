@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,21 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.housing import CapHousing, Housing, HousingPhoto
 from woob.tools.backend import Module
-from woob.capabilities.housing import (CapHousing, Housing, HousingPhoto)
+
 from .browser import LeboncoinBrowser
 
 
-__all__ = ['LeboncoinModule']
+__all__ = ["LeboncoinModule"]
 
 
 class LeboncoinModule(Module, CapHousing):
-    NAME = 'leboncoin'
-    DESCRIPTION = u'search house on leboncoin website'
-    MAINTAINER = u'Bezleputh'
-    EMAIL = 'carton_ben@yahoo.fr'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "leboncoin"
+    DESCRIPTION = "search house on leboncoin website"
+    MAINTAINER = "Bezleputh"
+    EMAIL = "carton_ben@yahoo.fr"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = LeboncoinBrowser
 
@@ -43,9 +42,9 @@ class LeboncoinModule(Module, CapHousing):
         return self.browser.get_housing(_id)
 
     def fill_housing(self, housing, fields):
-        if 'phone' in fields:
+        if "phone" in fields:
             housing.phone = self.browser.get_phone(housing.id)
-            fields.remove('phone')
+            fields.remove("phone")
 
         if len(fields) > 0:
             self.browser.get_housing(housing.id, housing)
@@ -53,7 +52,7 @@ class LeboncoinModule(Module, CapHousing):
         return housing
 
     def fill_photo(self, photo, fields):
-        if 'data' in fields and photo.url and not photo.data:
+        if "data" in fields and photo.url and not photo.data:
             photo.data = self.browser.open(photo.url).content
         return photo
 

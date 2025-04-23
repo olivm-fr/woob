@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # flake8: compatible
 
 # Copyright(C) 2013 Romain Bignon
@@ -22,4 +20,5 @@
 
 from .module import AXABanqueModule
 
-__all__ = ['AXABanqueModule']
+
+__all__ = ["AXABanqueModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Gilles-Alexandre Quenot
 #
 # This file is part of a woob module.
@@ -20,6 +18,7 @@
 
 from .module import FortuneoModule
 
-__all__ = ['FortuneoModule']
+
+__all__ = ["FortuneoModule"]
 
 # vim:ts=4:sw=4

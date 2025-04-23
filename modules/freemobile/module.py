@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # flake8: compatible
 
 # Copyright(C) 2012-2014 Florent Fourcot
@@ -19,46 +17,35 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.bill import (
-    DocumentTypes, CapDocument, Subscription,
-    Bill, DocumentNotFound, DocumentCategory,
-)
-from woob.capabilities.profile import CapProfile
-from woob.capabilities.messages import CantSendMessage, CapMessages, CapMessagesPost
 from woob.capabilities.base import find_object
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, ValueTransient, ValueBool
+from woob.capabilities.bill import Bill, CapDocument, DocumentCategory, DocumentNotFound, DocumentTypes, Subscription
+from woob.capabilities.messages import CantSendMessage, CapMessages, CapMessagesPost
+from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword, ValueBool, ValueTransient
 
 from .browser import Freemobile
 
 
-__all__ = ['FreeMobileModule']
+__all__ = ["FreeMobileModule"]
 
 
 class FreeMobileModule(Module, CapDocument, CapProfile, CapMessages, CapMessagesPost):
-    NAME = 'freemobile'
-    MAINTAINER = u'Ludovic LANGE'
-    EMAIL = 'llange@users.noreply.github.com'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = 'Free Mobile website'
+    NAME = "freemobile"
+    MAINTAINER = "Ludovic LANGE"
+    EMAIL = "llange@users.noreply.github.com"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Free Mobile website"
     CONFIG = BackendConfig(
-        ValueBackendPassword(
-            'login',
-            label='Account ID',
-            masked=False,
-            regexp=r'^(\d{8}|)$'
-        ),
-        ValueBackendPassword(
-            'password',
-            label='Password'
-        ),
+        ValueBackendPassword("login", label="Account ID", masked=False, regexp=r"^(\d{8}|)$"),
+        ValueBackendPassword("password", label="Password"),
         ValueBool(
-            'force_twofa_type_email',
-            label='Force 2FA to be sent by email',
+            "force_twofa_type_email",
+            label="Force 2FA to be sent by email",
             default=False,
         ),
-        ValueTransient('request_information'),
-        ValueTransient('otp_code', regexp=r'\d{6}'),
+        ValueTransient("request_information"),
+        ValueTransient("otp_code", regexp=r"\d{6}"),
     )
     BROWSER = Freemobile
 
@@ -66,17 +53,13 @@ class FreeMobileModule(Module, CapDocument, CapProfile, CapMessages, CapMessages
     document_categories = {DocumentCategory.INTERNET_TELEPHONY}
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config,
-            self.config['login'].get(),
-            self.config['password'].get()
-        )
+        return self.create_browser(self.config, self.config["login"].get(), self.config["password"].get())
 
     def iter_subscription(self):
         return self.browser.iter_subscription()
 
     def get_document(self, _id):
-        subid = _id.split('_')[0]
+        subid = _id.split("_")[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
@@ -93,7 +76,7 @@ class FreeMobileModule(Module, CapDocument, CapProfile, CapMessages, CapMessages
 
     def post_message(self, message):
         if not message.content.strip():
-            raise CantSendMessage(u'Message content is empty.')
+            raise CantSendMessage("Message content is empty.")
         return self.browser.post_message(message)
 
     def get_profile(self):

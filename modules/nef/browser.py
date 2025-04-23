@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Damien Cassou
 #
 # This file is part of a woob module.
@@ -18,15 +16,21 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import datetime
+from base64 import b64decode, b64encode
+
+
+try:
+    from Cryptodome.Cipher import PKCS1_v1_5
+    from Cryptodome.PublicKey import RSA
+except ImportError:
+    from Crypto.Cipher import PKCS1_v1_5
+    from Crypto.PublicKey import RSA
 
 from woob.browser import URL, need_login
 from woob.browser.mfa import TwoFactorBrowser
 from woob.exceptions import BrowserIncorrectPassword, OTPSentType, SentOTPQuestion
 
-from .pages import (
-    LoginHomePage, LoginPage, FinalizeLoginPage, HomePage, AccountsPage,
-    RecipientsPage, TransactionsPage,
-)
+from .pages import AccountsPage, FinalizeLoginPage, HomePage, LoginHomePage, LoginPage, RecipientsPage, TransactionsPage
 
 
 def next_week_string():
@@ -34,42 +38,56 @@ def next_week_string():
 
 
 class NefBrowser(TwoFactorBrowser):
-    BASEURL = 'https://espace-client.lanef.com'
+    BASEURL = "https://espace-client.lanef.com"
 
-    home = URL('/templates/home.cfm', HomePage)
-    main = URL('/templates/main.cfm', HomePage)
-    download = URL(r'/templates/account/accountActivityListDownload.cfm\?viewMode=CSV&orderBy=TRANSACTION_DATE_DESCENDING&page=1&startDate=2016-01-01&endDate=%s&showBalance=true&AccNum=(?P<account_id>.*)' % next_week_string(), TransactionsPage)
-    login_home = URL('/templates/logon/logon.cfm', LoginHomePage)
-    login = URL('/Gateway.cfc', LoginPage)
-    finalize = URL(r'/templates/logon/checkPasswordMatrixToken.cfm', FinalizeLoginPage)
+    home = URL("/templates/home.cfm", HomePage)
+    main = URL("/templates/main.cfm", HomePage)
+    download = URL(
+        r"/templates/account/accountActivityListDownload.cfm\?viewMode=CSV&orderBy=TRANSACTION_DATE_DESCENDING&page=1&startDate=2016-01-01&endDate=%s&showBalance=true&AccNum=(?P<account_id>.*)&startAmount=0&endAmount=999999999999"
+        % next_week_string(),
+        TransactionsPage,
+    )
+    login_home = URL("/templates/logon/logon.cfm", LoginHomePage)
+    login = URL("/Gateway.cfc", LoginPage)
+    finalize = URL(r"/templates/logon/checkPasswordMatrixToken.cfm", FinalizeLoginPage)
 
-    __states__ = ('login_token',)
+    __states__ = ("login_token",)
 
     def __init__(self, config, *args, **kwargs):
-        super(NefBrowser, self).__init__(config, *args, **kwargs)
+        super().__init__(config, *args, **kwargs)
         self.login_token = None
-        self.otp_sms = config['otp_sms'].get()
+        self.login_public_key = None
+        self.otp_sms = config["otp_sms"].get()
 
         self.AUTHENTICATION_METHODS = {
-            'otp_sms': self.handle_sms,
+            "otp_sms": self.handle_sms,
         }
 
     def locate_browser(self, state):
         if self.otp_sms:
             return
-        super(NefBrowser, self).locate_browser(state)
+        super().locate_browser(state)
+
+    def encrypt(self, value):
+        public_key = RSA.importKey(b64decode(self.login_public_key))
+        cipher = PKCS1_v1_5.new(public_key)
+        cipher_text = cipher.encrypt(value.encode())
+        return b64encode(cipher_text).decode("utf-8")
 
     def init_login(self):
         self.login_home.go()
         self.login_token = self.page.get_login_token()
-        self.login.go(data={
-            'method': 'logonAuthentication',
-            'logonId': self.username,
-            'userId': self.username,
-            'subUserId': '',
-            'factor': 'LOGPAS',
-            'password': self.password,
-        })
+        self.login_public_key = self.page.get_login_public_key()
+        self.login.go(
+            data={
+                "method": "logonAuthentication",
+                "logonId": self.encrypt(self.username),
+                "userId": self.encrypt(self.username),
+                "subUserId": self.encrypt(""),
+                "factor": "LOGPAS",
+                "password": self.encrypt(self.password),
+            }
+        )
 
         if self.page.is_wrongpass():
             # returns ["error","Utilisateur ou mot de passe invalide"]
@@ -78,26 +96,28 @@ class NefBrowser(TwoFactorBrowser):
         if self.page.is_otp():
             # returns ["OTPSMS"]
             raise SentOTPQuestion(
-                'otp_sms',
+                "otp_sms",
                 medium_type=OTPSentType.SMS,
-                message='Mot de passe à usage unique (en cas de non réception, veuillez contacter votre conseiller)'
+                message="Mot de passe à usage unique (en cas de non réception, veuillez contacter votre conseiller)",
             )
 
         if self.page.is_login_only_password():
             # no otp needed
             return self.finalize_login()
 
-        raise AssertionError('Something unexpected happened during login')
+        raise AssertionError("Something unexpected happened during login")
 
     def handle_sms(self):
-        self.login.go(data={
-            'method': 'logonAuthentication',
-            'logonId': self.username,
-            'userId': self.username,
-            'subUserId': '',
-            'factor': 'OTPSMS',
-            'otpVal': self.otp_sms,
-        })
+        self.login.go(
+            data={
+                "method": "logonAuthentication",
+                "logonId": self.encrypt(self.username),
+                "userId": self.encrypt(self.username),
+                "subUserId": self.encrypt(""),
+                "factor": "OTPSMS",
+                "otpVal": self.encrypt(self.otp_sms),
+            }
+        )
 
         if self.page.is_wrongpass():
             # returns ["error","Mot de passe &agrave; usage unique invalide."]
@@ -107,29 +127,29 @@ class NefBrowser(TwoFactorBrowser):
             raise BrowserIncorrectPassword()
 
         if not self.page.is_otp():
-            raise AssertionError('Unexpected error during otp validation')
+            raise AssertionError("Unexpected error during otp validation")
 
         self.finalize_login()
 
     def finalize_login(self):
-        self.finalize.go(data={
-            'FACTOR': 'OTPSMS',
-            'logonToken': self.login_token,
-            'USERID': self.username,
-            'SUBUSERID': '',
-            'STATIC': self.password,
-            'OTP': self.otp_sms,
-            'AUTOMATEDID': '',
-        })
+        self.finalize.go(
+            data={
+                "FACTOR": "OTPSMS",
+                "logonToken": self.login_token,
+                "USERID": self.username,
+                "SUBUSERID": "",
+                "STATIC": self.encrypt(self.password),
+                "OTP": self.otp_sms,
+                "AUTOMATEDID": "",
+            }
+        )
 
         if not self.home.is_here():
-            raise AssertionError('We should be redirected to the home page')
+            raise AssertionError("We should be redirected to the home page")
 
     @need_login
     def iter_accounts_list(self):
-        response = self.main.open(data={
-            'templateName': 'account/accountList.cfm'
-        })
+        response = self.main.open(data={"templateName": "account/accountList.cfm"})
 
         page = AccountsPage(self, response)
         return page.get_items()
@@ -141,10 +161,7 @@ class NefBrowser(TwoFactorBrowser):
     # CapBankTransfer
     @need_login
     def iter_recipients_list(self):
-        response = self.main.open(data={
-            'templateName': 'beneficiary/beneficiaryList.cfm',
-            'LISTTYPE': 'HISTORY'
-        })
+        response = self.main.open(data={"templateName": "beneficiary/beneficiaryList.cfm", "LISTTYPE": "HISTORY"})
 
         page = RecipientsPage(self, response)
         return page.get_items()

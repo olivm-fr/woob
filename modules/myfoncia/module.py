@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Phyks (Lucas Verney)
 #
 # This file is part of a woob module.
@@ -18,34 +16,41 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module, BackendConfig
 from woob.capabilities.base import find_object
 from woob.capabilities.bill import (
-    CapDocument, DocumentCategory, DocumentNotFound,
-    Subscription, DocumentTypes, Document,
+    CapDocument,
+    Document,
+    DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
 )
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
 
 from .browser import MyFonciaBrowser
 
 
-__all__ = ['MyFonciaModule']
+__all__ = ["MyFonciaModule"]
 
 
 class MyFonciaModule(Module, CapDocument):
-    NAME = 'myfoncia'
-    DESCRIPTION = u'Foncia billing capabilities'
-    MAINTAINER = u'Phyks (Lucas Verney)'
-    EMAIL = 'phyks@phyks.me'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "myfoncia"
+    DESCRIPTION = "Foncia billing capabilities"
+    MAINTAINER = "Phyks (Lucas Verney)"
+    EMAIL = "phyks@phyks.me"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Email address or Foncia ID'),
-        ValueBackendPassword('password', label='Password'),
+        ValueBackendPassword("login", label="Email address or Foncia ID"),
+        ValueBackendPassword("password", label="Password"),
     )
     BROWSER = MyFonciaBrowser
 
-    accepted_document_types = (DocumentTypes.BILL, DocumentTypes.REPORT,)
+    accepted_document_types = (
+        DocumentTypes.BILL,
+        DocumentTypes.REPORT,
+    )
     document_categories = {DocumentCategory.REAL_ESTATE}
 
     def create_default_browser(self):
@@ -62,7 +67,7 @@ class MyFonciaModule(Module, CapDocument):
         return self.browser.iter_documents(subscription_id)
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)

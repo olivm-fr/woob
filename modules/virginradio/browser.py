@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020 Johann Broudin
 #
 # This file is part of a woob module.
@@ -17,20 +15,20 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.capabilities.streaminfo import StreamInfo
 from woob.browser import Browser
+from woob.tools.capabilities.streaminfo import StreamInfo
 
 from . import parser
 
 
 class VirginBrowser(Browser):
-    _RADIOS_URL = 'https://www.virginradio.fr/desktop/js/all.min.js'
-    _PROGRAM_URL = 'https://www.virginradio.fr/calendar/api/current.json/argv/calendar_type/emission/origine_flags/virginradio/get_current_foreign_type/TRUE'
-    _INFO_URL = 'https://www.virginradio.fr/radio/api/get_current_event/?id_radio=%s'
-    _WEBRADIOS_URL = 'https://www.virginradio.fr/webradios/'
+    _RADIOS_URL = "https://www.virginradio.fr/desktop/js/all.min.js"
+    _PROGRAM_URL = "https://www.virginradio.fr/calendar/api/current.json/argv/calendar_type/emission/origine_flags/virginradio/get_current_foreign_type/TRUE"
+    _INFO_URL = "https://www.virginradio.fr/radio/api/get_current_event/?id_radio=%s"
+    _WEBRADIOS_URL = "https://www.virginradio.fr/webradios/"
 
     def __init__(self, *args, **kwargs):
-        super(VirginBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._radios = {}
 
     def radios(self):
@@ -50,7 +48,7 @@ class VirginBrowser(Browser):
         return self._radios[radio]
 
     def current(self, radio):
-        r = self.open(self._INFO_URL % (radio['radio_id']))
+        r = self.open(self._INFO_URL % (radio["radio_id"]))
         who, what = parser.current(r)
         current = StreamInfo(0)
         current.who = who
@@ -58,8 +56,8 @@ class VirginBrowser(Browser):
         return current
 
     def description(self, radio):
-        description = radio['title']
-        if radio['name'] == 'live':
+        description = radio["title"]
+        if radio["name"] == "live":
             r = self.open(self._PROGRAM_URL)
             description = parser.description(r)
 

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,37 +16,33 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
+from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser.profiles import Firefox
+from woob.browser.url import URL
 
-from .pages import SearchPage, LyricsPage
+from .pages import LyricsPage, SearchPage
 
 
-__all__ = ['LyricsmodeBrowser']
+__all__ = ["LyricsmodeBrowser"]
 
 
 class LyricsmodeBrowser(PagesBrowser):
     PROFILE = Firefox()
     TIMEOUT = 30
 
-    BASEURL = 'http://www.lyricsmode.com/'
-    search = URL('search\.php\?search=(?P<pattern>[^&/]*)$',
-                 SearchPage)
-    songLyrics = URL('lyrics/(?P<letterid>[^/]*)/(?P<artistid>[^/]*)/(?P<songid>[^/]*)\.html$',
-                  LyricsPage)
-
+    BASEURL = "http://www.lyricsmode.com/"
+    search = URL(r"search\.php\?search=(?P<pattern>[^&/]*)$", SearchPage)
+    songLyrics = URL(r"lyrics/(?P<letterid>[^/]*)/(?P<artistid>[^/]*)/(?P<songid>[^/]*)\.html$", LyricsPage)
 
     def iter_lyrics(self, criteria, pattern):
         return self.search.go(pattern=pattern).iter_lyrics()
 
     def get_lyrics(self, id):
-        subid = id.split('|')
+        subid = id.split("|")
         try:
             self.songLyrics.go(letterid=subid[0], artistid=subid[1], songid=subid[2])
             songlyrics = self.page.get_lyrics()
             return songlyrics
         except BrowserHTTPNotFound:
             return
-

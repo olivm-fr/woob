@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Arthur Huillet
 #
 # This file is part of a woob module.
@@ -18,35 +16,36 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.bank import AccountNotFound, CapBankWealth
 from woob.capabilities.base import find_object
-from woob.capabilities.bank import CapBankWealth, AccountNotFound
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
 
 from .browser import Suravenir
 
 
-__all__ = ['SuravenirModule']
+__all__ = ["SuravenirModule"]
 
 
 class SuravenirModule(Module, CapBankWealth):
-    NAME = 'suravenir'
-    MAINTAINER = 'Arthur Huillet'
-    EMAIL = 'arthur.huillet+weboob@free.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = u'Assurance-vie Suravenir à travers différents courtiers (assurancevie.com, linxea, ...)'
+    NAME = "suravenir"
+    MAINTAINER = "Arthur Huillet"
+    EMAIL = "arthur.huillet+weboob@free.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "Assurance-vie Suravenir à travers différents courtiers (assurancevie.com, linxea, ...)"
     CONFIG = BackendConfig(
-                ValueBackendPassword('broker',    label='Courtier', choices=Suravenir.broker_to_instance.keys(), masked=False, required=True),
-                ValueBackendPassword('login',     label='Identifiant', masked=False, required=True),
-                ValueBackendPassword('password',  label='Mot de passe', required=True))
+        ValueBackendPassword(
+            "broker", label="Courtier", choices=Suravenir.broker_to_instance.keys(), masked=False, required=True
+        ),
+        ValueBackendPassword("login", label="Identifiant", masked=False, required=True),
+        ValueBackendPassword("password", label="Mot de passe", required=True),
+    )
     BROWSER = Suravenir
 
     def create_default_browser(self):
         return self.create_browser(
-                self.config['broker'].get(),
-                self.config['login'].get(),
-                self.config['password'].get()
+            self.config["broker"].get(), self.config["login"].get(), self.config["password"].get()
         )
 
     def get_account(self, id):
@@ -63,4 +62,3 @@ class SuravenirModule(Module, CapBankWealth):
 
     def iter_investment(self, account):
         return self.browser.iter_investments(account)
-

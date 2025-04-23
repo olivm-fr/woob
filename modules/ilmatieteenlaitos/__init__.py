@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Matthieu Weber
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import IlmatieteenlaitosModule
 
-__all__ = ['IlmatieteenlaitosModule']
+
+__all__ = ["IlmatieteenlaitosModule"]

@@ -18,24 +18,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.bill import DocumentTypes, Subscription, Document
-from woob.browser.pages import JsonPage, HTMLPage, LoggedPage, RawPage
-from woob.browser.elements import (
-    method,
-    DictElement,
-    ItemElement,
-)
+from urllib.parse import parse_qsl, urlparse
+
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import (
-    CleanText,
-    Regexp,
-    Env,
-    Date,
-    Format,
-    Field,
-    BrowserURL,
-    Lower,
-)
+from woob.browser.filters.standard import BrowserURL, CleanText, Date, Env, Field, Format, Lower, Regexp
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage
+from woob.capabilities.bill import Document, DocumentTypes, Subscription
 
 
 class CesuPage(HTMLPage):
@@ -47,6 +36,16 @@ class CesuPage(HTMLPage):
 class LoginPage(CesuPage):
     def is_here(self):
         return not bool(self.doc.xpath('//*[@id="deconnexion_link"]'))
+
+
+class StartPage(CesuPage):
+    _params = None
+
+    @property
+    def parameters(self):
+        if not self._params:
+            self._params = dict(parse_qsl(urlparse(self.url).query))
+        return self._params
 
 
 class HomePage(LoggedPage, JsonPage):
@@ -102,7 +101,7 @@ class EmployeesPage(CesuApiPage):
                 CleanText(Dict("prenom")),
                 CleanText(Dict("nom")),
             )
-            obj_subscriber = Field('label')
+            obj_subscriber = Field("label")
             obj__type = "employee"
 
 
@@ -114,7 +113,7 @@ class RegistrationPage(CesuApiPage):
         class item(ItemElement):
 
             def condition(self):
-                return Lower(CleanText(Dict('isTelechargeable')))(self.el) == 'true'
+                return Lower(CleanText(Dict("isTelechargeable")))(self.el) == "true"
 
             klass = Document
 
@@ -166,9 +165,7 @@ class DirectDebitsHeaderPage(CesuApiPage):
             obj_id = Format("%s_%s_%s", Env("subscription"), Dict("reference"), Dict("datePrelevement"))
             obj_format = "pdf"
             obj_date = Date(Dict("datePrelevement"))
-            obj__period = Regexp(
-                Dict("datePrelevement"), r"(\d{4})-(\d{2})-(\d{2})", "\\1\\2"
-            )
+            obj__period = Regexp(Dict("datePrelevement"), r"(\d{4})-(\d{2})-(\d{2})", "\\1\\2")
             obj_label = Format("Prélèvement du %s", Field("date"))
             obj_type = DocumentTypes.OTHER
             obj_url = BrowserURL(
@@ -213,4 +210,17 @@ class TaxCertificateDownloadPage(RawPage):
 
 
 class PayslipDownloadPage(RawPage):
+    pass
+
+
+class FranceConnectGetUrlPage(CesuApiPage):
+    def value(self):
+        return self.get_object().get("redirectToFranceConnectUrl")
+
+
+class FranceConnectFinalizePage(CesuApiPage):
+    pass
+
+
+class FranceConnectRedirectPage(RawPage):
     pass

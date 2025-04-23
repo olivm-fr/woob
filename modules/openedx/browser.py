@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Simon Lipp
 #
 # This file is part of a woob module.
@@ -17,19 +15,16 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import LoginBrowser, URL, need_login
-from woob.browser.pages import RawPage, JsonPage, HTMLPage
+from woob.browser import URL, LoginBrowser, need_login
 from woob.browser.exceptions import ClientError
+from woob.browser.pages import HTMLPage, JsonPage, RawPage
 from woob.exceptions import BrowserIncorrectPassword
+
 
 class LoginPage(HTMLPage):
     def login(self, username, password):
         try:
-            self.browser.login_result.open(data = {
-                "email": username,
-                "password": password,
-                "remember": "false"
-            })
+            self.browser.login_result.open(data={"email": username, "password": password, "remember": "false"})
         except ClientError as e:
             if e.response.status_code == 403:
                 raise BrowserIncorrectPassword()
@@ -38,12 +33,18 @@ class LoginPage(HTMLPage):
 
         self.logged = True
 
+
 class OpenEDXBrowser(LoginBrowser):
-    login = URL('/login', LoginPage)
+    login = URL("/login", LoginPage)
     login_result = URL("/user_api/v1/account/login_session/", RawPage)
-    threads = URL(r'/courses/(?P<course>.+)/discussion/forum/\?ajax=1&page=(?P<page>\d+)&sort_key=date&sort_order=desc', JsonPage)
-    messages = URL(r'/courses/(?P<course>.+)/discussion/forum/(?P<topic>.+)/threads/(?P<id>.+)\?ajax=1&resp_skip=(?P<skip>\d+)&resp_limit=100', JsonPage)
-    thread = URL(r'/courses/(?P<course>.+)/discussion/forum/(?P<topic>.+)/threads/(?P<id>.+)', HTMLPage)
+    threads = URL(
+        r"/courses/(?P<course>.+)/discussion/forum/\?ajax=1&page=(?P<page>\d+)&sort_key=date&sort_order=desc", JsonPage
+    )
+    messages = URL(
+        r"/courses/(?P<course>.+)/discussion/forum/(?P<topic>.+)/threads/(?P<id>.+)\?ajax=1&resp_skip=(?P<skip>\d+)&resp_limit=100",
+        JsonPage,
+    )
+    thread = URL(r"/courses/(?P<course>.+)/discussion/forum/(?P<topic>.+)/threads/(?P<id>.+)", HTMLPage)
 
     def __init__(self, url, course, *args, **kwargs):
         self.BASEURL = url
@@ -64,9 +65,8 @@ class OpenEDXBrowser(LoginBrowser):
 
     @need_login
     def get_threads(self, page=1):
-        return self.threads.open(course = self.course, page = page)
+        return self.threads.open(course=self.course, page=page)
 
     @need_login
     def get_thread(self, topic, id, skip):
-        return self.messages.open(course = self.course,
-                topic = topic, id = id, skip = skip)
+        return self.messages.open(course=self.course, topic=topic, id=id, skip=skip)

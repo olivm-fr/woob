@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014 Vicnet
 #
 # This file is part of a woob module.
@@ -18,15 +16,16 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 import itertools
+
+from woob.tools.test import BackendTest
 
 
 class LaCentraleTest(BackendTest):
-    MODULE = 'lacentrale'
+    MODULE = "lacentrale"
 
     def test_lacentrale(self):
-        products = list(itertools.islice(self.backend.search_products(u'10000€,pro'), 0, 20))
+        products = list(itertools.islice(self.backend.search_products("10000€,pro"), 0, 20))
         self.assertTrue(len(products) > 0)
         product = products[0]
         product.backend = self.backend.name

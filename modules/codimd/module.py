@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a woob module.
@@ -18,37 +16,37 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value, ValueBackendPassword
 from woob.capabilities.content import CapContent
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import CodimdBrowser
 
 
-__all__ = ['CodimdModule']
+__all__ = ["CodimdModule"]
 
 
 class CodimdModule(Module, CapContent):
-    NAME = 'codimd'
-    DESCRIPTION = 'HedgeDoc'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "codimd"
+    DESCRIPTION = "HedgeDoc"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = CodimdBrowser
 
     CONFIG = BackendConfig(
-        Value('baseurl', label='URL of the HedgeDoc instance', default='https://demo.hedgedoc.org/'),
-        ValueBackendPassword('login', label='Email or LDAP username', default=''),
-        ValueBackendPassword('password', label='Password', default=''),
+        Value("baseurl", label="URL of the HedgeDoc instance", default="https://demo.hedgedoc.org/"),
+        ValueBackendPassword("login", label="Email or LDAP username", default=""),
+        ValueBackendPassword("password", label="Password", default=""),
     )
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['baseurl'].get(),
-            self.config['login'].get(),
-            self.config['password'].get(),
+            self.config["baseurl"].get(),
+            self.config["login"].get(),
+            self.config["password"].get(),
         )
 
     def get_content(self, id, revision=None):

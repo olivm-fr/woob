@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Romain Bignon
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class ThemisBanqueTest(BackendTest):
-    MODULE = 'themisbanque'
+    MODULE = "themisbanque"
 
     def test_themisbanque(self):
         raise NotImplementedError()

@@ -16,11 +16,12 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.json import json, WoobEncoder
+from woob.tools.json import WoobEncoder, json
 
 from .iformatter import IFormatter
 
-__all__ = ['JsonFormatter', 'JsonLineFormatter']
+
+__all__ = ["JsonFormatter", "JsonLineFormatter"]
 
 
 class JsonFormatter(IFormatter):
@@ -29,7 +30,7 @@ class JsonFormatter(IFormatter):
     """
 
     def __init__(self):
-        super(JsonFormatter, self).__init__()
+        super().__init__()
         self.queue = []
 
     def flush(self):

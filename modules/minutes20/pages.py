@@ -15,8 +15,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.filters.standard import CleanText
 from woob.browser.filters.html import CSS
+from woob.browser.filters.standard import CleanText
 from woob_modules.genericnewspaper.pages import GenericNewsPage
 
 
@@ -43,4 +43,4 @@ class ArticlePage(GenericNewsPage):
             self.try_remove(element_body, "p > a.highlight")
             self.try_remove(element_body, "script")
             self.try_remove(element_body, "blockquote")
-            return CleanText('.')(element_body)
+            return CleanText(".")(element_body)

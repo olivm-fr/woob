@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -20,24 +18,24 @@
 from urllib.parse import urlparse
 
 from woob.browser.exceptions import ClientError, HTTPNotFound
-from woob.capabilities.gallery import CapGallery, BaseGallery, BaseImage, Thumbnail
-from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.gallery import BaseGallery, BaseImage, CapGallery, Thumbnail
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value
 
 from .browser import TumblrBrowser
 
 
-__all__ = ['TumblrModule']
+__all__ = ["TumblrModule"]
 
 
 class TumblrModule(Module, CapGallery):
-    NAME = 'tumblr'
-    DESCRIPTION = 'images in tumblr blogs'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
-    CONFIG = BackendConfig(Value('url', label='URL of the tumblr', regexp='https?://.+'))
+    NAME = "tumblr"
+    DESCRIPTION = "images in tumblr blogs"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
+    CONFIG = BackendConfig(Value("url", label="URL of the tumblr", regexp="https?://.+"))
 
     BROWSER = TumblrBrowser
 
@@ -45,7 +43,7 @@ class TumblrModule(Module, CapGallery):
         return self.create_browser(self.url())
 
     def url(self):
-        return self.config['url'].get()
+        return self.config["url"].get()
 
     def get_gallery(self, _id):
         title, icon = self.browser.get_title_icon()
@@ -60,17 +58,16 @@ class TumblrModule(Module, CapGallery):
             yield self.get_gallery(urlparse(url).netloc)
 
     def iter_gallery_images(self, gallery):
-        for img in self.browser.iter_images(gallery):
-            yield img
+        yield from self.browser.iter_images(gallery)
 
     def fill_img(self, img, fields):
-        if 'data' in fields:
+        if "data" in fields:
             try:
                 img.data = self.browser.open_img(img.url).content
             except (ClientError, HTTPNotFound):
-                img.data = b''
-        if 'thumbnail' in fields and img.thumbnail:
-            self.fill_img(img.thumbnail, ('data',))
+                img.data = b""
+        if "thumbnail" in fields and img.thumbnail:
+            self.fill_img(img.thumbnail, ("data",))
 
     OBJECTS = {
         BaseImage: fill_img,

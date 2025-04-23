@@ -19,4 +19,5 @@
 
 from .module import LAdresseModule
 
-__all__ = ['LAdresseModule']
+
+__all__ = ["LAdresseModule"]

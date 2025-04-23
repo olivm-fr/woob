@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Budget Insight
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import SogecartenetModule
 
-__all__ = ['SogecartenetModule']
+
+__all__ = ["SogecartenetModule"]

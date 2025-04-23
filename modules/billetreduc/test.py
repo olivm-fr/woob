@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -24,11 +22,11 @@ from woob.tools.test import BackendTest
 
 
 class BilletreducTest(BackendTest):
-    MODULE = 'billetreduc'
+    MODULE = "billetreduc"
 
     def test_basic_search(self):
         q = Query()
-        q.city = 'paris'
+        q.city = "paris"
 
         event = None
         for n, event in enumerate(self.backend.search_events(q)):
@@ -45,4 +43,4 @@ class BilletreducTest(BackendTest):
             if n == 9:
                 break
         else:
-            assert False, 'not enough events'
+            assert False, "not enough events"

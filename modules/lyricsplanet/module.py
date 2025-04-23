@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -22,30 +20,29 @@ from woob.tools.backend import Module
 
 from .browser import LyricsplanetBrowser
 
-__all__ = ['LyricsplanetModule']
+
+__all__ = ["LyricsplanetModule"]
 
 
 class LyricsplanetModule(Module, CapLyrics):
-    NAME = 'lyricsplanet'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'eneiluj@gmx.fr'
-    VERSION = '3.6'
-    DESCRIPTION = 'Lyricsplanet.com song lyrics website'
-    LICENSE = 'AGPLv3+'
+    NAME = "lyricsplanet"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "eneiluj@gmx.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Lyricsplanet.com song lyrics website"
+    LICENSE = "AGPLv3+"
     BROWSER = LyricsplanetBrowser
 
     def get_lyrics(self, id):
         return self.browser.get_lyrics(id)
 
     def iter_lyrics(self, criteria, pattern):
-        return self.browser.iter_lyrics(criteria, pattern.encode('utf-8'))
+        return self.browser.iter_lyrics(criteria, pattern.encode("utf-8"))
 
     def fill_songlyrics(self, songlyrics, fields):
-        if 'content' in fields:
+        if "content" in fields:
             sl = self.get_lyrics(songlyrics.id)
             songlyrics.content = sl.content
         return songlyrics
 
-    OBJECTS = {
-        SongLyrics: fill_songlyrics
-    }
+    OBJECTS = {SongLyrics: fill_songlyrics}

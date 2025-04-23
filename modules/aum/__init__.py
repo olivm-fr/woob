@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -21,4 +19,5 @@
 from .browser import AuMBrowser
 from .module import AuMModule
 
-__all__ = ['AuMBrowser', 'AuMModule']
+
+__all__ = ["AuMBrowser", "AuMModule"]

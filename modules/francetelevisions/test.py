@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2011-2021  Romain Bignon
 #
 # This file is part of a woob module.
@@ -22,24 +20,24 @@ from woob.tools.test import BackendTest
 
 
 class PluzzTest(BackendTest):
-    MODULE = 'francetelevisions'
+    MODULE = "francetelevisions"
 
     def test_search(self):
         # If the test fails, it might be good news!
         l = list(self.backend.search_videos("20h"))
         self.assertTrue(len(l) > 0)
         v = l[0]
-        v = self.backend.fillobj(v, ('url',)) or v
-        self.assertTrue(v.url, 'URL for video "%s" not found: %s' % (v.id, v.url))
+        v = self.backend.fillobj(v, ("url",)) or v
+        self.assertTrue(v.url, f'URL for video "{v.id}" not found: {v.url}')
 
     def test_categories(self):
         cat = list(self.backend.iter_resources([BaseVideo], []))
         self.assertTrue(len(cat) > 0)
         for c in cat:
-            if c.split_path[-1] == u'videos':
+            if c.split_path[-1] == "videos":
                 videos = list(self.backend.iter_resources([BaseVideo], c.split_path))
                 self.assertTrue(len(videos) > 0)
                 v = videos[0]
-                v = self.backend.fillobj(v, ('url',)) or v
-                self.assertTrue(v.url, 'URL for video "%s" not found: %s' % (v.id, v.url))
+                v = self.backend.fillobj(v, ("url",)) or v
+                self.assertTrue(v.url, f'URL for video "{v.id}" not found: {v.url}')
                 return

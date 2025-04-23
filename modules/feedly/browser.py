@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,27 +15,28 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.json import json
+from woob.browser import URL, LoginBrowser, need_login
 from woob.capabilities.base import UserError
 from woob.capabilities.collection import Collection
-from woob.browser import LoginBrowser, URL, need_login
-from .pages import EssentialsPage, TokenPage, ContentsPage, PreferencesPage, MarkerPage
+from woob.tools.json import json
+
+from .pages import ContentsPage, EssentialsPage, MarkerPage, PreferencesPage, TokenPage
 
 
-__all__ = ['FeedlyBrowser']
+__all__ = ["FeedlyBrowser"]
 
 
 class FeedlyBrowser(LoginBrowser):
-    BASEURL = 'https://www.feedly.com/'
+    BASEURL = "https://www.feedly.com/"
 
-    essentials = URL('https://s3.feedly.com/essentials/essentials_fr.json', EssentialsPage)
-    token = URL('v3/auth/token', TokenPage)
-    contents = URL('v3/streams/contents', ContentsPage)
-    preferences = URL('v3/preferences', PreferencesPage)
-    marker = URL('v3/markers', MarkerPage)
+    essentials = URL("https://s3.feedly.com/essentials/essentials_fr.json", EssentialsPage)
+    token = URL("v3/auth/token", TokenPage)
+    contents = URL("v3/streams/contents", ContentsPage)
+    preferences = URL("v3/preferences", PreferencesPage)
+    marker = URL("v3/markers", MarkerPage)
 
     def __init__(self, username, password, login_browser, *args, **kwargs):
-        super(FeedlyBrowser, self).__init__(username, password, *args, **kwargs)
+        super().__init__(username, password, *args, **kwargs)
         self.user_id = None
         self.login_browser = login_browser
 
@@ -45,30 +44,31 @@ class FeedlyBrowser(LoginBrowser):
         if self.login_browser:
             if self.login_browser.code is None or self.user_id is None:
                 self.login_browser.do_login()
-                params = {'code': self.login_browser.code,
-                          'client_id': 'feedly',
-                          'client_secret': '0XP4XQ07VVMDWBKUHTJM4WUQ',
-                          'redirect_uri': 'http://dev.feedly.com/feedly.html',
-                          'grant_type': 'authorization_code'}
+                params = {
+                    "code": self.login_browser.code,
+                    "client_id": "feedly",
+                    "client_secret": "0XP4XQ07VVMDWBKUHTJM4WUQ",
+                    "redirect_uri": "http://dev.feedly.com/feedly.html",
+                    "grant_type": "authorization_code",
+                }
 
                 token, self.user_id = self.token.go(data=params).get_token()
-                self.session.headers['X-Feedly-Access-Token'] = token
+                self.session.headers["X-Feedly-Access-Token"] = token
         else:
-            raise UserError(r'You need to fill your username and password to access this page')
+            raise UserError(r"You need to fill your username and password to access this page")
 
     @need_login
     def iter_threads(self):
-        params = {'streamId': 'user/%s/category/global.all' % self.user_id,
-                  'unreadOnly': 'true',
-                  'ranked': 'newest',
-                  'count': '100'}
+        params = {
+            "streamId": "user/%s/category/global.all" % self.user_id,
+            "unreadOnly": "true",
+            "ranked": "newest",
+            "count": "100",
+        }
         return self.contents.go(params=params).get_articles()
 
     def get_unread_feed(self, url):
-        params = {'streamId': url,
-                  'backfill': 'true',
-                  'boostMustRead': 'true',
-                  'unreadOnly': 'true'}
+        params = {"streamId": url, "backfill": "true", "boostMustRead": "true", "unreadOnly": "true"}
         return self.contents.go(params=params).get_articles()
 
     def get_categories(self):
@@ -79,7 +79,7 @@ class FeedlyBrowser(LoginBrowser):
     @need_login
     def get_logged_categories(self):
         user_categories = list(self.preferences.go().get_categories())
-        user_categories.append(Collection([u'global.saved'], u'Saved'))
+        user_categories.append(Collection(["global.saved"], "Saved"))
         return user_categories
 
     def get_feeds(self, category):
@@ -89,11 +89,11 @@ class FeedlyBrowser(LoginBrowser):
 
     @need_login
     def get_logged_feeds(self, category):
-        if category == 'global.saved':
-            type = 'tag'
+        if category == "global.saved":
+            type = "tag"
         else:
-            type = 'category'
-        url = 'user/%s/%s/%s' % (self.user_id, type, category)
+            type = "category"
+        url = f"user/{self.user_id}/{type}/{category}"
         return self.get_unread_feed(url)
 
     def get_feed_url(self, category, feed):
@@ -101,7 +101,5 @@ class FeedlyBrowser(LoginBrowser):
 
     @need_login
     def set_message_read(self, _id):
-        datas = {'action': 'markAsRead',
-                 'type': 'entries',
-                 'entryIds': [_id]}
+        datas = {"action": "markAsRead", "type": "entries", "entryIds": [_id]}
         self.marker.open(data=json.dumps(datas))

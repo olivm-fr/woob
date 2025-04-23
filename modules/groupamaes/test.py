@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class GroupamaesTest(BackendTest):
-    MODULE = 'groupamaes'
+    MODULE = "groupamaes"
 
     def test_groupamaes(self):
         l = list(self.backend.iter_accounts())

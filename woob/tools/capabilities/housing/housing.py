@@ -15,22 +15,24 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.filters.standard import _Filter, Field, debug
-from woob.capabilities.base import empty
 from decimal import Decimal
+
+from woob.browser.filters.standard import Field, _Filter, debug
+from woob.capabilities.base import empty
 
 
 class PricePerMeterFilter(_Filter):
     """
     Filter that help to fill PricePerMeter field
     """
+
     def __init__(self):
-        super(PricePerMeterFilter, self).__init__()
+        super().__init__()
 
     @debug()
     def __call__(self, item):
-        cost = Field('cost')(item)
-        area = Field('area')(item)
+        cost = Field("cost")(item)
+        area = Field("area")(item)
         if not (empty(cost) or empty(area)):
             return Decimal(cost or 0) / Decimal(area or 1)
         return Decimal(0)

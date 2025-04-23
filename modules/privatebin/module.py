@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021      Vincent A
 #
 # This file is part of a woob module.
@@ -19,32 +17,32 @@
 
 # flake8: compatible
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value, ValueBool
 from woob.capabilities.paste import CapPaste
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBool
 
 from .browser import PrivatebinBrowser, PrivatePaste
 
 
-__all__ = ['PrivatebinModule']
+__all__ = ["PrivatebinModule"]
 
 
 class PrivatebinModule(Module, CapPaste):
-    NAME = 'privatebin'
-    DESCRIPTION = u'PrivateBin encrypted pastebin'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "privatebin"
+    DESCRIPTION = "PrivateBin encrypted pastebin"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        Value('url', label='URL of the privatebin', regexp='https?://.*', default='https://privatebin.net'),
-        ValueBool('discussion', label='Allow paste comments', default=False),
+        Value("url", label="URL of the privatebin", regexp="https?://.*", default="https://privatebin.net"),
+        ValueBool("discussion", label="Allow paste comments", default=False),
     )
 
     BROWSER = PrivatebinBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['url'].get(), self.config['discussion'].get())
+        return self.create_browser(self.config["url"].get(), self.config["discussion"].get())
 
     def can_post(self, contents, title=None, public=None, max_age=None):
         """
@@ -69,10 +67,10 @@ class PrivatebinModule(Module, CapPaste):
         return self.browser.can_post(contents, max_age)
 
     def get_paste(self, id):
-        if '#' not in id:
+        if "#" not in id:
             return
-        elif id.startswith('http://') or id.startswith('https://'):
-            if not id.startswith(self.config['url'].get()):
+        elif id.startswith("http://") or id.startswith("https://"):
+            if not id.startswith(self.config["url"].get()):
                 return
         return self.browser.get_paste(id)
 

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014 Johann Broudin
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import VirginRadioModule
 
-__all__ = ['VirginRadioModule']
+
+__all__ = ["VirginRadioModule"]

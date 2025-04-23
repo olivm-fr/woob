@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019-2020 Célande Adrien
 #
 # This file is part of a woob module.
@@ -18,32 +16,29 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.capabilities.base import find_object
-from woob.capabilities.rpg import SkillType, SkillNotFound, CharacterNotFound, CharacterClassNotFound
+from woob.capabilities.rpg import CharacterClassNotFound, CharacterNotFound, SkillNotFound, SkillType
 
-from .pages import (
-    PkmnListPage, PkmnDetailsPage, Gen8AttackDexPage,
-    AbilitiesPage, XYTypePage, ItemsPage,
-)
+from .pages import AbilitiesPage, Gen8AttackDexPage, ItemsPage, PkmnDetailsPage, PkmnListPage, XYTypePage
 
 
 class SerebiiBrowser(PagesBrowser):
-    BASEURL = 'https://www.serebii.net'
+    BASEURL = "https://www.serebii.net"
 
     # pokemon
-    pkmn_list = URL(r'/pokedex-swsh/$', PkmnListPage)
-    pkmn_details = URL(r'/pokedex-swsh/(?P<pkmn_id>.*)/', PkmnDetailsPage)
+    pkmn_list = URL(r"/pokedex-swsh/$", PkmnListPage)
+    pkmn_details = URL(r"/pokedex-swsh/(?P<pkmn_id>.*)/", PkmnDetailsPage)
 
     # skills
-    gen8_attack_dex = URL(r'/attackdex-swsh/', Gen8AttackDexPage)
-    abilities = URL(r'/abilitydex/', AbilitiesPage)
+    gen8_attack_dex = URL(r"/attackdex-swsh/", Gen8AttackDexPage)
+    abilities = URL(r"/abilitydex/", AbilitiesPage)
 
     # clases
-    types = URL(r'/games/typexy.shtml$', XYTypePage)
+    types = URL(r"/games/typexy.shtml$", XYTypePage)
 
     # items
-    items = URL(r'/swordshield/items.shtml$', ItemsPage)
+    items = URL(r"/swordshield/items.shtml$", ItemsPage)
 
     def iter_characters(self):
         self.pkmn_list.go()
@@ -58,13 +53,11 @@ class SerebiiBrowser(PagesBrowser):
         # passive first beacause there is less
         if skill_type is None or int(skill_type) == SkillType.PASSIVE:
             self.abilities.go()
-            for skill in self.page.iter_abilities():
-                yield skill
+            yield from self.page.iter_abilities()
 
         if skill_type is None or int(skill_type) == SkillType.ACTIVE:
             self.gen8_attack_dex.go()
-            for skill in self.page.iter_moves():
-                yield skill
+            yield from self.page.iter_moves()
 
     def get_skill(self, skill_id):
         skill = find_object(self.iter_skills(), id=skill_id, error=SkillNotFound)
@@ -76,12 +69,10 @@ class SerebiiBrowser(PagesBrowser):
         self.location(pokemon.url)
 
         if skill_type is None or int(skill_type) == SkillType.PASSIVE:
-            for ability in self.page.iter_abilities():
-                yield ability
+            yield from self.page.iter_abilities()
 
         if skill_type is None or int(skill_type) == SkillType.ACTIVE:
-            for move in self.page.iter_moves():
-                yield move
+            yield from self.page.iter_moves()
 
     def iter_character_classes(self):
         self.types.go()

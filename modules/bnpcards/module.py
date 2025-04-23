@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Baptiste Delpey
 #
 # This file is part of a woob module.
@@ -17,75 +15,73 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
-from woob.capabilities.bank import CapBank, AccountNotFound
+from woob.capabilities.bank import AccountNotFound, CapBank
 from woob.capabilities.base import find_object
-from woob.tools.value import ValueBackendPassword, Value
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .proxy_browser import ProxyBrowser
 
 
-__all__ = ['BnpcartesentrepriseModule']
+__all__ = ["BnpcartesentrepriseModule"]
 
 
 class BnpcartesentrepriseModule(Module, CapBank):
-    NAME = 'bnpcards'
-    DESCRIPTION = 'BNP Cartes Entreprises'
-    MAINTAINER = 'Baptiste Delpey'
-    EMAIL = 'bdelpey@budget-insight.fr'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "bnpcards"
+    DESCRIPTION = "BNP Cartes Entreprises"
+    MAINTAINER = "Baptiste Delpey"
+    EMAIL = "bdelpey@budget-insight.fr"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Identifiant', masked=False),
-        ValueBackendPassword('password', label='Code personnel'),
+        ValueBackendPassword("login", label="Identifiant", masked=False),
+        ValueBackendPassword("password", label="Code personnel"),
         Value(
-            'type',
-            label='Profil de connexion',
-            default='1',
+            "type",
+            label="Profil de connexion",
+            default="1",
             choices={
-                '1': 'Titulaire',
-                '2': 'Gestionnaire',
-            }
-        )
+                "1": "Titulaire",
+                "2": "Gestionnaire",
+            },
+        ),
     )
 
     BROWSER = ProxyBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['type'].get(),
-                                   self.config['login'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(self.config["type"].get(), self.config["login"].get(), self.config["password"].get())
 
     def get_account(self, _id):
         return find_object(self.browser.iter_accounts(), id=_id, error=AccountNotFound)
 
     def iter_accounts(self):
         for acc in self.browser.iter_accounts():
-            acc._bisoftcap = {'all': {'softcap_day':5,'day_for_softcap':100}}
+            acc._bisoftcap = {"all": {"softcap_day": 5, "day_for_softcap": 100}}
             yield acc
         # If this browser exists we have corporate cards, that we also need to fetch
         if self.browser.corporate_browser:
             for acc in self.browser.corporate_browser.iter_accounts():
-                acc._bisoftcap = {'all': {'softcap_day': 5, 'day_for_softcap': 100}}
+                acc._bisoftcap = {"all": {"softcap_day": 5, "day_for_softcap": 100}}
                 yield acc
 
     def iter_history(self, account):
-        if getattr(account, '_is_corporate', False):
+        if getattr(account, "_is_corporate", False):
             get_transactions = self.browser.corporate_browser.get_transactions
         else:
             get_transactions = self.browser.get_transactions
 
         for tr in get_transactions(account):
-            if not tr._coming:
+            if not tr.coming:
                 yield tr
 
     def iter_coming(self, account):
-        if getattr(account, '_is_corporate', False):
+        if getattr(account, "_is_corporate", False):
             get_transactions = self.browser.corporate_browser.get_transactions
         else:
             get_transactions = self.browser.get_transactions
 
         for tr in get_transactions(account):
-            if not tr._coming:
+            if not tr.coming:
                 break
             yield tr

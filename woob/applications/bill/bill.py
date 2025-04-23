@@ -18,43 +18,45 @@
 from decimal import Decimal
 
 from woob.capabilities.bill import CapDocument, Detail, Subscription
+from woob.capabilities.captcha import exception_to_job
 from woob.capabilities.profile import CapProfile
-from woob.tools.application.repl import ReplApplication, defaultcount
-from woob.tools.application.formatters.iformatter import PrettyFormatter
-from woob.tools.application.base import MoreResultsAvailable
-from woob.tools.application.captcha import CaptchaMixin
 from woob.core import CallErrors
 from woob.exceptions import CaptchaQuestion
-from woob.capabilities.captcha import exception_to_job
+from woob.tools.application.base import MoreResultsAvailable
+from woob.tools.application.captcha import CaptchaMixin
+from woob.tools.application.formatters.iformatter import PrettyFormatter
+from woob.tools.application.repl import ReplApplication, defaultcount
 
 
-__all__ = ['AppBill']
+__all__ = ["AppBill"]
 
 
 class SubscriptionsFormatter(PrettyFormatter):
-    MANDATORY_FIELDS = ('id', 'label')
+    MANDATORY_FIELDS = ("id", "label")
 
     def get_title(self, obj):
         if obj.renewdate:
-            return "%s - %s" % (obj.label, obj.renewdate.strftime('%d/%m/%y'))
+            return "{} - {}".format(obj.label, obj.renewdate.strftime("%d/%m/%y"))
         return obj.label
 
 
 class AppBill(CaptchaMixin, ReplApplication):
-    APPNAME = 'bill'
-    OLD_APPNAME = 'boobill'
-    VERSION = '3.6'
-    COPYRIGHT = 'Copyright(C) 2012-YEAR Florent Fourcot'
-    DESCRIPTION = 'Console application allowing to get/download documents and bills.'
+    APPNAME = "bill"
+    OLD_APPNAME = "boobill"
+    VERSION = "3.7"
+    COPYRIGHT = "Copyright(C) 2012-YEAR Florent Fourcot"
+    DESCRIPTION = "Console application allowing to get/download documents and bills."
     SHORT_DESCRIPTION = "get/download documents and bills"
     CAPS = CapDocument
-    COLLECTION_OBJECTS = (Subscription, )
-    EXTRA_FORMATTERS = {'subscriptions':   SubscriptionsFormatter,
-                        }
-    DEFAULT_FORMATTER = 'table'
-    COMMANDS_FORMATTERS = {'subscriptions':   'subscriptions',
-                           'ls':              'subscriptions',
-                          }
+    COLLECTION_OBJECTS = (Subscription,)
+    EXTRA_FORMATTERS = {
+        "subscriptions": SubscriptionsFormatter,
+    }
+    DEFAULT_FORMATTER = "table"
+    COMMANDS_FORMATTERS = {
+        "subscriptions": "subscriptions",
+        "ls": "subscriptions",
+    }
 
     def load_default_backends(self):
         self.load_backends(CapDocument, storage=self.create_storage())
@@ -68,7 +70,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         id, backend_name = self.parse_id(id)
 
         if not id:
-            for subscrib in self.get_object_list('iter_subscription'):
+            for subscrib in self.get_object_list("iter_subscription"):
                 l.append((subscrib.id, subscrib.backend))
         else:
             l.append((id, backend_name))
@@ -84,7 +86,7 @@ class AppBill(CaptchaMixin, ReplApplication):
             except CallErrors as errors:
                 for backend, error, backtrace in errors:
                     if isinstance(error, MoreResultsAvailable):
-                        more_results.append(id + '@' + backend.name)
+                        more_results.append(id + "@" + backend.name)
                     elif isinstance(error, NotImplementedError):
                         if backend not in not_implemented:
                             not_implemented.append(backend)
@@ -92,9 +94,13 @@ class AppBill(CaptchaMixin, ReplApplication):
                         self.bcall_error_handler(backend, error, backtrace)
 
         if len(more_results) > 0:
-            print('Hint: There are more results available for %s (use option -n or count command)' % (', '.join(more_results)), file=self.stderr)
+            print(
+                "Hint: There are more results available for %s (use option -n or count command)"
+                % (", ".join(more_results)),
+                file=self.stderr,
+            )
         for backend in not_implemented:
-            print('Error(%s): This feature is not supported yet by this backend.' % backend.name, file=self.stderr)
+            print("Error(%s): This feature is not supported yet by this backend." % backend.name, file=self.stderr)
 
     def do_subscriptions(self, line):
         """
@@ -115,7 +121,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         id, backend_name = self.parse_id(id)
 
         if not id:
-            for subscrib in self.get_object_list('iter_subscription'):
+            for subscrib in self.get_object_list("iter_subscription"):
                 l.append((subscrib.id, subscrib.backend))
         else:
             l.append((id, backend_name))
@@ -131,7 +137,7 @@ class AppBill(CaptchaMixin, ReplApplication):
             mysum.price = Decimal("0.")
 
             self.start_format()
-            for detail in self.do('get_details', id, backends=names):
+            for detail in self.do("get_details", id, backends=names):
                 self.format(detail)
                 mysum.price = detail.price + mysum.price
 
@@ -145,7 +151,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         If no ID given, display balance of all backends.
         """
 
-        self.exec_method(id, 'get_balance')
+        self.exec_method(id, "get_balance")
 
     @defaultcount(10)
     def do_history(self, id):
@@ -155,7 +161,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         Get the history of subscriptions.
         If no ID given, display histories of all backends.
         """
-        self.exec_method(id, 'iter_bills_history')
+        self.exec_method(id, "iter_bills_history")
 
     @defaultcount(10)
     def do_documents(self, id):
@@ -165,7 +171,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         Get the list of documents for subscriptions.
         If no ID given, display documents of all backends
         """
-        self.exec_method(id, 'iter_documents')
+        self.exec_method(id, "iter_documents")
 
     @defaultcount(10)
     def do_bills(self, id):
@@ -175,7 +181,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         Get the list of bills documents for subscriptions.
         If no ID given, display bills of all backends
         """
-        self.exec_method(id, 'iter_bills')
+        self.exec_method(id, "iter_bills")
 
     def do_download(self, line, force_pdf=False):
         """
@@ -197,35 +203,35 @@ class AppBill(CaptchaMixin, ReplApplication):
         id, dest = self.parse_command_args(line, 2, 1)
         id, backend_name = self.parse_id(id)
         if not id:
-            print('Error: please give a document ID (hint: use documents command)', file=self.stderr)
+            print("Error: please give a document ID (hint: use documents command)", file=self.stderr)
             return 2
 
-        if id == 'all':
+        if id == "all":
             return self.download_all(dest, force_pdf)
 
         names = (backend_name,) if backend_name is not None else None
 
-        document, = self.do('get_document', id, backends=names)
+        (document,) = self.do("get_document", id, backends=names)
         if not document:
-            print('Error: document not found')
+            print("Error: document not found")
             return 1
 
         if dest is None:
-            extension = document.format if not force_pdf else 'pdf'
-            dest = document.id + (f'.{extension}' if extension else '')
+            extension = document.format if not force_pdf else "pdf"
+            dest = document.id + (f".{extension}" if extension else "")
 
-        for buf in self.do('download_document' if not force_pdf else 'download_document_pdf', document, backends=names):
+        for buf in self.do("download_document" if not force_pdf else "download_document_pdf", document, backends=names):
             if buf:
                 if dest == "-":
                     self.stdout.buffer.write(buf)
                 else:
                     try:
-                        with open(dest, 'wb') as f:
+                        with open(dest, "wb") as f:
                             f.write(buf)
                         if not document.has_file:
-                            print('Warning: document.has_file is falsy but the file is available', file=self.stderr)
-                    except IOError as e:
-                        print('Unable to write document in "%s": %s' % (dest, e), file=self.stderr)
+                            print("Warning: document.has_file is falsy but the file is available", file=self.stderr)
+                    except OSError as e:
+                        print(f'Unable to write document in "{dest}": {e}', file=self.stderr)
                         return 1
                 return
 
@@ -242,38 +248,38 @@ class AppBill(CaptchaMixin, ReplApplication):
         if sub_id:
             sub_id, backend_name = self.parse_id(sub_id)
             names = (backend_name,) if backend_name else None
-            subscription, = self.do('get_subscription', sub_id, backends=names)
+            (subscription,) = self.do("get_subscription", sub_id, backends=names)
             if not self.download_subscription(subscription, force_pdf):
                 return 1
         else:
-            for subscription in self.do('iter_subscription'):
+            for subscription in self.do("iter_subscription"):
                 if not self.download_subscription(subscription, force_pdf):
                     return 1
 
     def download_subscription(self, subscription, force_pdf):
-        for document in self.do('iter_documents', subscription, backends=(subscription.backend,)):
+        for document in self.do("iter_documents", subscription, backends=(subscription.backend,)):
             if not self.download_doc(document, force_pdf):
                 return False
         return True
 
     def download_doc(self, document, force_pdf):
         if force_pdf:
-            method = 'download_document_pdf'
+            method = "download_document_pdf"
         else:
-            method = 'download_document'
+            method = "download_document"
 
-        extension = document.format if not force_pdf else 'pdf'
-        dest = document.id + (f'.{extension}' if extension else '')
+        extension = document.format if not force_pdf else "pdf"
+        dest = document.id + (f".{extension}" if extension else "")
 
         for buf in self.do(method, document, backends=(document.backend,)):
             if buf:
                 try:
-                    with open(dest, 'wb') as f:
+                    with open(dest, "wb") as f:
                         f.write(buf)
                         if not document.has_file:
-                            print('Warning: document.has_file is falsy but the file is available', file=self.stderr)
-                except IOError as e:
-                    print('Unable to write bill in "%s": %s' % (dest, e), file=self.stderr)
+                            print("Warning: document.has_file is falsy but the file is available", file=self.stderr)
+                except OSError as e:
+                    print(f'Unable to write bill in "{dest}": {e}', file=self.stderr)
                     return False
         return True
 
@@ -284,7 +290,7 @@ class AppBill(CaptchaMixin, ReplApplication):
         Display detailed information about person or company.
         """
         self.start_format()
-        for profile in self.do('get_profile', caps=CapProfile):
+        for profile in self.do("get_profile", caps=CapProfile):
             self.format(profile)
 
     def bcall_error_handler(self, backend, error, backtrace):
@@ -295,11 +301,18 @@ class AppBill(CaptchaMixin, ReplApplication):
         """
         if isinstance(error, CaptchaQuestion):
             if not self.captcha_woob.count_backends():
-                print('Error(%s): Site requires solving a CAPTCHA but no CapCaptchaSolver backends were configured' % backend.name,
-                      file=self.stderr)
+                print(
+                    "Error(%s): Site requires solving a CAPTCHA but no CapCaptchaSolver backends were configured"
+                    % backend.name,
+                    file=self.stderr,
+                )
                 return False
 
-            print('Info(%s): Encountered CAPTCHA, please wait for its resolution, it can take dozens of seconds' % backend.name, file=self.stderr)
+            print(
+                "Info(%s): Encountered CAPTCHA, please wait for its resolution, it can take dozens of seconds"
+                % backend.name,
+                file=self.stderr,
+            )
             job = exception_to_job(error)
             self.solve_captcha(job, backend)
             return False

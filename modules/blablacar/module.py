@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.travel import CapTravel
+from woob.tools.backend import Module
 
 from .browser import BlablacarBrowser
 
 
-__all__ = ['BlablacarModule']
+__all__ = ["BlablacarModule"]
 
 
 class BlablacarModule(Module, CapTravel):
-    NAME = 'blablacar'
-    DESCRIPTION = u'blablacar website'
-    MAINTAINER = u'Bezleputh'
-    EMAIL = 'carton_ben@yahoo.fr'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "blablacar"
+    DESCRIPTION = "blablacar website"
+    MAINTAINER = "Bezleputh"
+    EMAIL = "carton_ben@yahoo.fr"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = BlablacarBrowser
 

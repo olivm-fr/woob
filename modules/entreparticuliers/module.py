@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,23 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.housing import ADVERT_TYPES, CapHousing, Housing, HousingPhoto
 from woob.tools.backend import Module
-from woob.capabilities.housing import (CapHousing, HousingPhoto,
-                                         ADVERT_TYPES, Housing)
 
 from .browser import EntreparticuliersBrowser
 
 
-__all__ = ['EntreparticuliersModule']
+__all__ = ["EntreparticuliersModule"]
 
 
 class EntreparticuliersModule(Module, CapHousing):
-    NAME = 'entreparticuliers'
-    DESCRIPTION = u'entreparticuliers.com website'
-    MAINTAINER = u'Bezleputh'
-    EMAIL = 'carton_ben@yahoo.fr'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "entreparticuliers"
+    DESCRIPTION = "entreparticuliers.com website"
+    MAINTAINER = "Bezleputh"
+    EMAIL = "carton_ben@yahoo.fr"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = EntreparticuliersBrowser
 
@@ -42,8 +39,7 @@ class EntreparticuliersModule(Module, CapHousing):
         return self.browser.search_city(pattern)
 
     def search_housings(self, query):
-        if(len(query.advert_types) == 1 and
-           query.advert_types[0] == ADVERT_TYPES.PROFESSIONAL):
+        if len(query.advert_types) == 1 and query.advert_types[0] == ADVERT_TYPES.PROFESSIONAL:
             # Entreparticuliers is personal only
             return list()
 
@@ -57,7 +53,7 @@ class EntreparticuliersModule(Module, CapHousing):
         return self.browser.get_housing(_id)
 
     def fill_photo(self, photo, fields):
-        if 'data' in fields and photo.url and not photo.data:
+        if "data" in fields and photo.url and not photo.data:
             photo.data = self.browser.open(photo.url).content
         return photo
 

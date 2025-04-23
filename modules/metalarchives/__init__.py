@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Quentin Defenouillere
 #
 # This file is part of woob.
@@ -20,4 +18,4 @@
 from .module import MetalarchivesModule
 
 
-__all__ = ['MetalarchivesModule']
+__all__ = ["MetalarchivesModule"]

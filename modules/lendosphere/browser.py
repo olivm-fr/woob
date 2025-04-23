@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -19,13 +17,11 @@
 
 import datetime
 
-from woob.browser import LoginBrowser, URL, need_login
-from woob.tools.capabilities.bank.investments import create_french_liquidity
+from woob.browser import URL, LoginBrowser, need_login
 from woob.capabilities.bank.wealth import Investment
+from woob.tools.capabilities.bank.investments import create_french_liquidity
 
-from .pages import (
-    LoginPage, SummaryPage, GSummaryPage, ProfilePage, ComingPage,
-)
+from .pages import ComingPage, GSummaryPage, LoginPage, ProfilePage, SummaryPage
 
 
 class AttrURL(URL):
@@ -39,17 +35,17 @@ class AttrURL(URL):
                 if hasattr(self.browser, k) and k not in kwargs:
                     kwargs[k] = getattr(self.browser, k)
 
-        return super(AttrURL, self).build(*args, **kwargs)
+        return super().build(*args, **kwargs)
 
 
 class LendosphereBrowser(LoginBrowser):
-    BASEURL = 'https://www.lendosphere.com'
+    BASEURL = "https://www.lendosphere.com"
 
-    login = URL(r'/membres/se-connecter', LoginPage)
-    dashboard = AttrURL(r'/membres/(?P<user_id>[a-z0-9-]+)/tableau-de-bord', SummaryPage)
-    global_summary = AttrURL(r'/membres/(?P<user_id>[a-z0-9-]+)/dashboard_global_info', GSummaryPage)
-    coming = AttrURL(r'/membres/(?P<user_id>[a-z0-9-]+)/mes-echeanciers.csv', ComingPage)
-    profile = AttrURL(r'/membres/(?P<user_id>[a-z0-9-]+)', ProfilePage)
+    login = URL(r"/membres/se-connecter", LoginPage)
+    dashboard = AttrURL(r"/membres/(?P<user_id>[a-z0-9-]+)/tableau-de-bord", SummaryPage)
+    global_summary = AttrURL(r"/membres/(?P<user_id>[a-z0-9-]+)/dashboard_global_info", GSummaryPage)
+    coming = AttrURL(r"/membres/(?P<user_id>[a-z0-9-]+)/mes-echeanciers.csv", ComingPage)
+    profile = AttrURL(r"/membres/(?P<user_id>[a-z0-9-]+)", ProfilePage)
 
     user_id = None
 
@@ -60,7 +56,7 @@ class LendosphereBrowser(LoginBrowser):
         if self.login.is_here():
             self.page.raise_error()
 
-        self.user_id = self.page.params['user_id']
+        self.user_id = self.page.params["user_id"]
 
     @need_login
     def iter_accounts(self):

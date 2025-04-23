@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -17,42 +15,43 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-import re, json
+import json
+import re
 
 from dateutil.parser import parse as parse_date
 
-from woob.browser.pages import JsonPage, HTMLPage
-from woob.capabilities.parcel import Parcel, Event, ParcelNotFound
+from woob.browser.pages import HTMLPage, JsonPage
+from woob.capabilities.parcel import Event, Parcel, ParcelNotFound
 
 
 class DHLExpressSearchPage(JsonPage):
     # Based on http://www.dhl.com/etc/designs/dhl/docroot/tracking/less/tracking.css
     STATUSES = {
-        u'105': Parcel.STATUS_PLANNED,
-        u'104': Parcel.STATUS_PLANNED,
-        u'102': Parcel.STATUS_IN_TRANSIT,
-        u'101': Parcel.STATUS_ARRIVED,
+        "105": Parcel.STATUS_PLANNED,
+        "104": Parcel.STATUS_PLANNED,
+        "102": Parcel.STATUS_IN_TRANSIT,
+        "101": Parcel.STATUS_ARRIVED,
     }
 
     def get_info(self, _id):
-        if u'errors' in self.doc:
+        if "errors" in self.doc:
             raise ParcelNotFound("No such ID: %s" % _id)
-        elif u'results' in self.doc:
-            result = self.doc[u'results'][0]
+        elif "results" in self.doc:
+            result = self.doc["results"][0]
             p = Parcel(_id)
-            p.history = [self.build_event(e) for e in result[u'checkpoints']]
-            p.status = self.STATUSES.get(result[u'delivery'][u'code'], Parcel.STATUS_UNKNOWN)
+            p.history = [self.build_event(e) for e in result["checkpoints"]]
+            p.status = self.STATUSES.get(result["delivery"]["code"], Parcel.STATUS_UNKNOWN)
             p.info = p.history[0].activity
             return p
         else:
             raise ParcelNotFound("Unexpected reply from server")
 
     def build_event(self, e):
-        index = e[u'counter']
+        index = e["counter"]
         event = Event(index)
-        event.date = parse_date(e[u'date'] + " " + e.get(u'time', ''), dayfirst=True, fuzzy=True)
-        event.location = e.get(u'location', '')
-        event.activity = e[u'description']
+        event.date = parse_date(e["date"] + " " + e.get("time", ""), dayfirst=True, fuzzy=True)
+        event.location = e.get("location", "")
+        event.activity = e["description"]
         return event
 
 
@@ -78,11 +77,13 @@ class DeutschePostDHLSearchPage(HTMLPage):
             raise ParcelNotFound("No such ID: %s" % _id)
         result_id = result_id[0].text.split(" ")[-1]
         if result_id != _id:
-            raise ParcelNotFound("ID mismatch: expecting %s, got %s" % (_id, result_id))
+            raise ParcelNotFound(f"ID mismatch: expecting {_id}, got {result_id}")
 
         p = Parcel(_id)
         events = self.doc.xpath('//div[@id="events-content-0"]//dl/div/*')
-        p.history = list(reversed([self.build_html_event(i, dt, dd) for i,(dt,dd) in enumerate(zip(events[0::2], events[1::2]))]))
+        p.history = list(
+            reversed([self.build_html_event(i, dt, dd) for i, (dt, dd) in enumerate(zip(events[0::2], events[1::2]))])
+        )
         status_msg = self.doc.xpath('//div[@class="mm_shipmentStatusText"]//dd[1]')[0].text.split(" ", 1)[1]
         if len(status_msg) > 0:
             p.status = self.STATUSES.get(status_msg, Parcel.STATUS_UNKNOWN)
@@ -93,16 +94,16 @@ class DeutschePostDHLSearchPage(HTMLPage):
 
     def get_info_json(self, _id):
         script = self.doc.xpath('//script[contains(text(), "__INITIAL_APP_STATE__")]')[0]
-        data = json.loads(re.search('JSON.parse\("(.*)"\),', script.text.decode("unicode_escape")).group(1))
+        data = json.loads(re.search(r'JSON.parse\("(.*)"\),', script.text.decode("unicode_escape")).group(1))
         result_id = data["sendungen"][0]["id"]
         if not result_id:
             raise ParcelNotFound("No such ID: %s" % _id)
         if result_id != _id:
-            raise ParcelNotFound("ID mismatch: expecting %s, got %s" % (_id, result_id))
+            raise ParcelNotFound(f"ID mismatch: expecting {_id}, got {result_id}")
 
         p = Parcel(_id)
         events = data["sendungen"][0]["sendungsdetails"]["sendungsverlauf"]["events"]
-        p.history = [self.build_json_event(i, e) for i,e in enumerate(events)]
+        p.history = [self.build_json_event(i, e) for i, e in enumerate(events)]
         status_msg = data["sendungen"][0]["sendungsdetails"]["sendungsverlauf"]["kurzStatus"]
         if len(status_msg) > 0:
             p.status = self.STATUSES.get(status_msg, Parcel.STATUS_UNKNOWN)

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,30 +16,29 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import EventListPage, EventPage
 
 
-__all__ = ['RazibusBrowser']
+__all__ = ["RazibusBrowser"]
 
 
 class RazibusBrowser(PagesBrowser):
-    BASEURL = 'http://razibus.net/'
+    BASEURL = "http://razibus.net/"
     TIMEOUT = 20
-    event_list_page = URL('evenements-a-venir.php\?region=(?P<region>.*)', EventListPage)
-    event_page = URL('(?P<_id>.*).html', EventPage)
+    event_list_page = URL(r"evenements-a-venir.php\?region=(?P<region>.*)", EventListPage)
+    event_page = URL(r"(?P<_id>.*).html", EventPage)
     region = None
 
     def __init__(self, region, *args, **kwargs):
-        super(RazibusBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.region = region
 
     def get_event(self, _id, event=None):
         return self.event_page.go(_id=_id).get_event(obj=event)
 
     def list_events(self, date_from, date_to, city=None, categories=None):
-        return self.event_list_page.go(region=self.region).list_events(date_from=date_from,
-                                                                       date_to=date_to,
-                                                                       city=city,
-                                                                       categories=categories)
+        return self.event_list_page.go(region=self.region).list_events(
+            date_from=date_from, date_to=date_to, city=city, categories=categories
+        )

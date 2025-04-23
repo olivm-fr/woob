@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Jocelyn Jaubert
 # Copyright(C) 2012-2013 Romain Bignon
 #
@@ -21,84 +19,82 @@
 # flake8: compatible
 
 import re
-from decimal import Decimal
 from datetime import timedelta
+from decimal import Decimal
 
 from unidecode import unidecode
 
-from woob.capabilities.bank import (
-    CapBankTransferAddRecipient, AccountNotFound,
-    Account, RecipientNotFound,
-)
+from woob.capabilities.bank import Account, AccountNotFound, CapBankTransferAddRecipient, RecipientNotFound
 from woob.capabilities.bank.pfm import CapBankMatching
-from woob.capabilities.bill import (
-    CapDocument, Subscription, Document, DocumentNotFound, DocumentTypes,
-)
 from woob.capabilities.bank.wealth import CapBankWealth
+from woob.capabilities.base import NotAvailable, empty, find_object, strict_find_object
+from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
 from woob.capabilities.contact import CapContact
 from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.capabilities.bank.transactions import sorted_transactions
-from woob.tools.backend import Module, BackendConfig
 from woob.tools.value import Value, ValueBackendPassword, ValueTransient
-from woob.capabilities.base import empty, find_object, NotAvailable, strict_find_object
 
 from .browser import SocieteGenerale
 from .sgpe.browser import SGEnterpriseBrowser, SGProfessionalBrowser
 
 
-__all__ = ['SocieteGeneraleModule']
+__all__ = ["SocieteGeneraleModule"]
 
 
 class SocieteGeneraleModule(
-        Module, CapBankWealth, CapBankTransferAddRecipient, CapContact, CapProfile, CapDocument, CapBankMatching,
+    Module,
+    CapBankWealth,
+    CapBankTransferAddRecipient,
+    CapContact,
+    CapProfile,
+    CapDocument,
+    CapBankMatching,
 ):
-    NAME = 'societegenerale'
-    MAINTAINER = u'Jocelyn Jaubert'
-    EMAIL = 'jocelyn.jaubert@gmail.com'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = u'Société Générale'
+    NAME = "societegenerale"
+    MAINTAINER = "Jocelyn Jaubert"
+    EMAIL = "jocelyn.jaubert@gmail.com"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Société Générale"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Code client', masked=False),
-        ValueBackendPassword('password', label='Code secret'),
+        ValueBackendPassword("login", label="Code client", masked=False),
+        ValueBackendPassword("password", label="Code secret"),
         Value(
-            'website',
-            label='Type de compte',
-            default='par',
-            choices={'par': 'Particuliers', 'pro': 'Professionnels', 'ent': 'Entreprises'}
+            "website",
+            label="Type de compte",
+            default="par",
+            choices={"par": "Particuliers", "pro": "Professionnels", "ent": "Entreprises"},
         ),
         # SCA
-        ValueTransient('code'),
-        ValueTransient('resume'),
-        ValueTransient('request_information'),
+        ValueTransient("code"),
+        ValueTransient("resume"),
+        ValueTransient("request_information"),
     )
 
     accepted_document_types = (DocumentTypes.STATEMENT, DocumentTypes.RIB)
 
     def create_default_browser(self):
-        website = self.config['website'].get()
-        browsers = {'par': SocieteGenerale, 'pro': SGProfessionalBrowser, 'ent': SGEnterpriseBrowser}
+        website = self.config["website"].get()
+        browsers = {"par": SocieteGenerale, "pro": SGProfessionalBrowser, "ent": SGEnterpriseBrowser}
         self.BROWSER = browsers[website]
 
-        return self.create_browser(
-            self.config,
-            self.config['login'].get(),
-            self.config['password'].get()
-        )
+        return self.create_browser(self.config, self.config["login"].get(), self.config["password"].get())
 
     def iter_accounts(self):
-        for account in self.browser.get_accounts_list():
-            yield account
+        yield from self.browser.get_accounts_list()
 
     def fill_account(self, account, fields):
-        if all((
-            self.BROWSER == SocieteGenerale,
-            'insurance_amount' in fields,
-            account.type is Account.TYPE_LOAN,
-        )):
+        if all(
+            (
+                self.BROWSER == SocieteGenerale,
+                "insurance_amount" in fields,
+                account.type is Account.TYPE_LOAN,
+            )
+        ):
             self.browser.fill_loan_insurance(account)
 
     def iter_coming(self, account):
-        if hasattr(self.browser, 'get_cb_operations'):
+        if hasattr(self.browser, "get_cb_operations"):
             transactions = list(self.browser.get_cb_operations(account))
             return sorted_transactions(transactions)
         return self.browser.iter_coming(account)
@@ -113,50 +109,49 @@ class SocieteGeneraleModule(
         return self.browser.iter_market_orders(account)
 
     def iter_contacts(self):
-        if not hasattr(self.browser, 'get_advisor'):
+        if not hasattr(self.browser, "get_advisor"):
             raise NotImplementedError()
         return self.browser.get_advisor()
 
     def get_profile(self):
-        if not hasattr(self.browser, 'get_profile'):
+        if not hasattr(self.browser, "get_profile"):
             raise NotImplementedError()
         return self.browser.get_profile()
 
     def iter_transfer_recipients(self, origin_account, ignore_errors=True):
-        if self.config['website'].get() not in ('par', 'pro'):
+        if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
         if not isinstance(origin_account, Account):
             origin_account = find_object(self.iter_accounts(), id=origin_account, error=AccountNotFound)
         return self.browser.iter_recipients(origin_account, ignore_errors)
 
     def new_recipient(self, recipient, **params):
-        if self.config['website'].get() not in ('par', 'pro'):
+        if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
-        recipient.label = ' '.join(w for w in re.sub(r'[^0-9a-zA-Z:\/\-\?\(\)\.,\'\+ ]+', '', recipient.label).split())
+        recipient.label = " ".join(w for w in re.sub(r"[^0-9a-zA-Z:\/\-\?\(\)\.,\'\+ ]+", "", recipient.label).split())
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
-        if self.config['website'].get() not in ('par', 'pro'):
+        if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
-        transfer.label = ' '.join(w for w in re.sub(r'[^0-9a-zA-Z ]+', '', transfer.label).split())
-        self.logger.info('Going to do a new transfer')
+        transfer.label = " ".join(w for w in re.sub(r"[^0-9a-zA-Z ]+", "", transfer.label).split())
+        self.logger.info("Going to do a new transfer")
 
         account = strict_find_object(self.iter_accounts(), iban=transfer.account_iban)
         if not account:
             account = strict_find_object(self.iter_accounts(), id=transfer.account_id, error=AccountNotFound)
 
         recipient = strict_find_object(
-            self.iter_transfer_recipients(account.id, ignore_errors=False),
-            id=transfer.recipient_id
+            self.iter_transfer_recipients(account.id, ignore_errors=False), id=transfer.recipient_id
         )
         if not recipient:
             recipient = strict_find_object(
                 self.iter_transfer_recipients(account.id, ignore_errors=False),
                 iban=transfer.recipient_iban,
-                error=RecipientNotFound
+                error=RecipientNotFound,
             )
 
-        transfer.amount = transfer.amount.quantize(Decimal('.01'))
+        transfer.amount = transfer.amount.quantize(Decimal(".01"))
         new_transfer = self.browser.init_transfer(account, recipient, transfer)
 
         # In some situations, we might get different account_id values for a
@@ -170,21 +165,24 @@ class SocieteGeneraleModule(
                 # account_id is still different from what we expected, but we
                 # can ignore this if the account_iban is still the same.
                 if transfer.account_iban != new_transfer.account_iban:
-                    raise AssertionError('account_id changed during transfer processing (from "%s" to "%s").' % (
-                        transfer.account_id,
-                        new_transfer.account_id,
-                    ))
+                    raise AssertionError(
+                        'account_id changed during transfer processing (from "%s" to "%s").'
+                        % (
+                            transfer.account_id,
+                            new_transfer.account_id,
+                        )
+                    )
 
         return new_transfer
 
     def execute_transfer(self, transfer, **params):
-        if self.config['website'].get() not in ('par', 'pro'):
+        if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
         return self.browser.execute_transfer(transfer)
 
     def transfer_check_label(self, old_label, new_label):
-        old_label = unidecode(re.sub(r'\s+', ' ', old_label).strip())
-        new_label = unidecode(re.sub(r'\s+', ' ', new_label).strip())
+        old_label = unidecode(re.sub(r"\s+", " ", old_label).strip())
+        new_label = unidecode(re.sub(r"\s+", " ", new_label).strip())
 
         if old_label == new_label:
             return True
@@ -197,7 +195,7 @@ class SocieteGeneraleModule(
         # "A - EMIS PAR ABC-DEF - EMIS PAR BCD-EFG" becomes
         # "A - EMIS PAR ABC-DEF" instead of simply "A", by using reversing
         # and lazy quantifier '.+?' instead of '.+'.
-        new_label = re.sub(r'^.+?RAP SIME\s*-\s*', '', new_label[::-1])[::-1]
+        new_label = re.sub(r"^.+?RAP SIME\s*-\s*", "", new_label[::-1])[::-1]
         return old_label == new_label
 
     def transfer_check_exec_date(self, old_exec_date, new_exec_date):
@@ -226,7 +224,7 @@ class SocieteGeneraleModule(
             return self.iter_subscription()
 
     def get_document(self, _id):
-        subscription_id = _id.split('_')[0]
+        subscription_id = _id.split("_")[0]
         subscription = self.get_subscription(subscription_id)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 
@@ -243,7 +241,7 @@ class SocieteGeneraleModule(
         if not isinstance(subscription, Subscription):
             subscription = self.get_subscription(subscription)
 
-        if self.config['website'].get() not in ('ent', 'pro'):
+        if self.config["website"].get() not in ("ent", "pro"):
             for doc in self.browser.iter_documents_by_types(subscription, accepted_types):
                 yield doc
         else:
@@ -261,7 +259,7 @@ class SocieteGeneraleModule(
         return self.browser.open(document.url).content
 
     def iter_emitters(self):
-        if self.config['website'].get() not in ('par', 'pro'):
+        if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
         return self.browser.iter_emitters()
 
@@ -283,7 +281,7 @@ class SocieteGeneraleModule(
                     matched_accounts.append(old_account)
 
         if len(matched_accounts) > 1:
-            raise AssertionError(f'Found multiple candidates to match the card {account.label}.')
+            raise AssertionError(f"Found multiple candidates to match the card {account.label}.")
 
         if len(matched_accounts) == 1:
             return matched_accounts[0]

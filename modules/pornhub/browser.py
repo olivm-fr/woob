@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Roger Philibert
 #
 # This file is part of a woob module.
@@ -18,20 +16,20 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import IndexPage, VideoPage
 
 
-__all__ = ['PornhubBrowser']
+__all__ = ["PornhubBrowser"]
 
 
 class PornhubBrowser(PagesBrowser):
-    BASEURL = 'https://www.pornhub.com'
+    BASEURL = "https://www.pornhub.com"
 
-    index = URL(r'/$', IndexPage)
-    search = URL(r'/video/search\?search=(?P<pattern>.+)\&page=(?P<pagenum>\d+)', IndexPage)
-    video = URL(r'/view_video.php\?viewkey=(?P<id>.*)', VideoPage)
+    index = URL(r"/$", IndexPage)
+    search = URL(r"/video/search\?search=(?P<pattern>.+)\&page=(?P<pagenum>\d+)", IndexPage)
+    video = URL(r"/view_video.php\?viewkey=(?P<id>.*)", VideoPage)
 
     @video.id2url
     def get_video(self, url, video=None):

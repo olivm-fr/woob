@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Vincent A
 #
 # This file is part of a woob module.
@@ -17,21 +15,21 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from html import unescape
 import re
+from html import unescape
 
-from woob.browser.pages import HTMLPage, LoggedPage
-from woob.browser.elements import method, ListElement, ItemElement, SkipItem
-from woob.capabilities.collection import Collection
+from woob.browser.elements import ItemElement, ListElement, SkipItem, method
 from woob.browser.filters.standard import CleanText
+from woob.browser.pages import HTMLPage, LoggedPage
+from woob.capabilities.collection import Collection
 
 
 class PageLogin(HTMLPage):
     def login(self, email, password, csrf):
         form = self.get_form(xpath='//form[contains(@class,"login-form")]')
-        form['email'] = email
-        form['password'] = password
-        form['csrfmiddlewaretoken'] = csrf
+        form["email"] = email
+        form["password"] = password
+        form["csrfmiddlewaretoken"] = csrf
         form.submit()
 
 
@@ -40,9 +38,9 @@ class PageDashboard(LoggedPage, HTMLPage):
         for c in self.doc.xpath('//article[@class="course"]'):
             title = c.xpath('.//h3[@class="course-title"]/a')[0].text.strip()
             link = c.xpath('.//a[contains(@class,"enter-course")]')[0]
-            url = self.browser.absurl(link.get('href'))
+            url = self.browser.absurl(link.get("href"))
             match = self.browser.course.match(url)
-            courseid = match.group('course').replace('/', '-')
+            courseid = match.group("course").replace("/", "-")
             yield Collection([courseid], title)
 
 
@@ -54,22 +52,22 @@ class PageChapter(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Collection
 
-            obj_title = CleanText('.')
+            obj_title = CleanText(".")
 
             def obj_split_path(self):
                 # parse first section link
                 section_links = self.xpath('./following-sibling::div[has-class("chapter-content-container")]//a')
                 if not section_links:
                     raise SkipItem()
-                url = section_links[0].get('href')
+                url = section_links[0].get("href")
                 url = self.page.browser.absurl(url)
                 match = self.page.browser.section.match(url)
-                courseid = self.env['course'].replace('/', '-')
-                chapter = match.group('chapter')
+                courseid = self.env["course"].replace("/", "-")
+                chapter = match.group("chapter")
                 return [courseid, chapter]
 
             def obj_id(self):
-                return '-'.join(self.obj_split_path())
+                return "-".join(self.obj_split_path())
 
     @method
     class iter_sections(ListElement):
@@ -78,25 +76,25 @@ class PageChapter(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Collection
 
-            obj_title = CleanText('.')
+            obj_title = CleanText(".")
 
             def obj_split_path(self):
-                url = self.xpath('.')[0].get('href')
+                url = self.xpath(".")[0].get("href")
                 url = self.page.browser.absurl(url)
                 match = self.page.browser.section.match(url)
-                courseid = self.env['course'].replace('/', '-')
-                chapter = match.group('chapter')
-                section = match.group('section')
+                courseid = self.env["course"].replace("/", "-")
+                chapter = match.group("chapter")
+                section = match.group("section")
                 return [courseid, chapter, section]
 
             def obj_id(self):
-                return '-'.join(self.obj_split_path())
+                return "-".join(self.obj_split_path())
 
 
 class PageSection(LoggedPage, HTMLPage):
-    video_url = re.compile(r'[^\s;]+/HD\.mp4', re.I)
-    video_thumb = re.compile(r'reposter=&#34;(.*?)&#34;')
-    video_title = re.compile(r'&lt;h2&gt;(.*?)&lt;/h2&gt;')
+    video_url = re.compile(r"[^\s;]+/HD\.mp4", re.I)
+    video_thumb = re.compile(r"reposter=&#34;(.*?)&#34;")
+    video_title = re.compile(r"&lt;h2&gt;(.*?)&lt;/h2&gt;")
 
     def iter_videos(self):
         urls = set()
@@ -111,7 +109,7 @@ class PageSection(LoggedPage, HTMLPage):
                 continue
             urls.add(url)
 
-            beforetext = self.text[:page_match.end(0)]
+            beforetext = self.text[: page_match.end(0)]
             try:
                 thumb = list(self.video_thumb.finditer(beforetext))[-1].group(1)
             except IndexError:
@@ -119,10 +117,10 @@ class PageSection(LoggedPage, HTMLPage):
             try:
                 title = unescape(unescape(list(self.video_title.finditer(beforetext))[-1].group(1)))
             except IndexError:
-                title = u'%s - %s' % (match.group('id'), n)
+                title = "{} - {}".format(match.group("id"), n)
 
             yield {
-                'url': url,
-                'title': title,
-                'thumbnail': thumb,
+                "url": url,
+                "title": title,
+                "thumbnail": thumb,
             }

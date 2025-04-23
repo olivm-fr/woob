@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016-2021  Romain Bignon
 #
 # This file is part of woob.
@@ -21,6 +19,6 @@ from woob.tools.capabilities.bank.iban import rebuild_iban, rebuild_rib
 
 
 def test_rebuild():
-    assert rebuild_iban('FR0013048379405300290000355') == "FR7613048379405300290000355"
-    assert rebuild_iban('GB87BARC20658244971655') == "GB87BARC20658244971655"
-    assert rebuild_rib('30003021990005077567600') == "30003021990005077567667"
+    assert rebuild_iban("FR0013048379405300290000355") == "FR7613048379405300290000355"
+    assert rebuild_iban("GB87BARC20658244971655") == "GB87BARC20658244971655"
+    assert rebuild_rib("30003021990005077567600") == "30003021990005077567667"

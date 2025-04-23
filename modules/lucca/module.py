@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -18,34 +16,32 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value, ValueBackendPassword
 from woob.capabilities.base import find_object
+from woob.capabilities.bill import CapDocument, DocumentCategory, DocumentNotFound, DocumentTypes, Subscription
 from woob.capabilities.calendar import CapCalendarEvent
-from woob.capabilities.bill import (
-    CapDocument, DocumentCategory, DocumentTypes, DocumentNotFound, Subscription,
-)
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import LuccaBrowser
 
 
-__all__ = ['LuccaModule']
+__all__ = ["LuccaModule"]
 
 
 class LuccaModule(Module, CapDocument, CapCalendarEvent):
-    NAME = 'lucca'
-    DESCRIPTION = 'Lucca'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "lucca"
+    DESCRIPTION = "Lucca"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = LuccaBrowser
 
     CONFIG = BackendConfig(
-        Value('subdomain', label='Sous-domaine', regexp=r'[\w-]+'),
-        Value('login', label='Identifiant'),
-        ValueBackendPassword('password', label='Mot de passe'),
+        Value("subdomain", label="Sous-domaine", regexp=r"[\w-]+"),
+        Value("login", label="Identifiant"),
+        ValueBackendPassword("password", label="Mot de passe"),
     )
 
     accepted_document_types = (DocumentTypes.PAYSLIP,)
@@ -53,9 +49,7 @@ class LuccaModule(Module, CapDocument, CapCalendarEvent):
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['subdomain'].get(),
-            self.config['login'].get(),
-            self.config['password'].get()
+            self.config["subdomain"].get(), self.config["login"].get(), self.config["password"].get()
         )
 
     def get_event(self, _id):
@@ -89,7 +83,7 @@ class LuccaModule(Module, CapDocument, CapCalendarEvent):
         return self.browser.iter_documents(subscription)
 
     def get_document(self, id):
-        subid = id.split('_')[0]
+        subid = id.split("_")[0]
         return find_object(self.iter_documents(subid), id=id, error=DocumentNotFound)
 
     def download_document(self, document):
@@ -99,4 +93,3 @@ class LuccaModule(Module, CapDocument, CapCalendarEvent):
         if Subscription in objs:
             return CapDocument.iter_resources(self, objs, split_path)
         return CapCalendarEvent.iter_resources(self, objs, split_path)
-

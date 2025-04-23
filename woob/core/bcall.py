@@ -16,25 +16,25 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from copy import copy
-from threading import Thread, Event
 import queue
+from copy import copy
+from threading import Event, Thread
 
 from woob.capabilities.base import BaseObject
-from woob.tools.misc import get_backtrace
 from woob.tools.log import getLogger
+from woob.tools.misc import get_backtrace
 
 
-__all__ = ['BackendsCall', 'CallErrors']
+__all__ = ["BackendsCall", "CallErrors"]
 
 
 class CallErrors(Exception):
     def __init__(self, errors):
-        msg = 'Errors during backend calls:\n' + \
-                '\n'.join(['Module(%r): %r\n%r\n' % (backend, error, backtrace)
-                           for backend, error, backtrace in errors])
+        msg = "Errors during backend calls:\n" + "\n".join(
+            [f"Module({backend!r}): {error!r}\n{backtrace!r}\n" for backend, error, backtrace in errors]
+        )
 
-        super(CallErrors, self).__init__(msg)
+        super().__init__(msg)
         self.errors = copy(errors)
 
     def __iter__(self):
@@ -83,18 +83,18 @@ class BackendsCall:
             try:
                 # Call method on backend
                 try:
-                    self.logger.debug('%s: Calling function %s', backend, function)
+                    self.logger.debug("%s: Calling function %s", backend, function)
                     if callable(function):
                         result = function(backend, *args, **kwargs)
                     else:
                         result = getattr(backend, function)(*args, **kwargs)
                 except Exception as error:
-                    self.logger.debug('%s: Called function %s raised an error: %r', backend, function, error)
+                    self.logger.debug("%s: Called function %s raised an error: %r", backend, function, error)
                     self.errors.append((backend, error, get_backtrace(error)))
                 else:
-                    self.logger.debug('%s: Called function %s returned: %r', backend, function, result)
+                    self.logger.debug("%s: Called function %s returned: %r", backend, function, result)
 
-                    if hasattr(result, '__iter__') and not isinstance(result, (bytes, str)):
+                    if hasattr(result, "__iter__") and not isinstance(result, (bytes, str)):
                         # Loop on iterator
                         try:
                             for subresult in result:

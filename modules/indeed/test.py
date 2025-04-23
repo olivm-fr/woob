@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -23,28 +21,28 @@ from woob.tools.value import Value
 
 
 class IndeedTest(BackendTest):
-    MODULE = 'indeed'
+    MODULE = "indeed"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['limit_date'] = Value(value='any')
-            self.backend.config['metier'] = Value(value='informaticien')
-            self.backend.config['contrat'] = Value(value='contract')
+            self.backend.config["limit_date"] = Value(value="any")
+            self.backend.config["metier"] = Value(value="informaticien")
+            self.backend.config["contrat"] = Value(value="contract")
 
     def test_indeed_search(self):
-        l = list(self.backend.search_job('informaticien'))
+        l = list(self.backend.search_job("informaticien"))
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, l[0])
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')
 
     def test_indeed_advanced_search(self):
         l = list(self.backend.advanced_search_job())
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, l[0])
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')
 
     def test_indeep_info_from_id(self):
         l = list(self.backend.advanced_search_job())
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, None)
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')

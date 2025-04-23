@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -19,22 +17,23 @@
 
 import re
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.capabilities.contact import OpeningHours
 
-from .pages import ResultsPage, PlacePage
+from .pages import PlacePage, ResultsPage
 
 
 class PagesjaunesBrowser(PagesBrowser):
-    BASEURL = 'https://www.pagesjaunes.fr'
+    BASEURL = "https://www.pagesjaunes.fr"
 
     search = URL(
-        r'/annuaire/chercherlespros\?quoiqui=(?P<pattern>[a-z0-9-]+)&ou=(?P<city>[a-z0-9-]+)&page=(?P<page>\d+)',
-        ResultsPage)
-    company = URL(r'/pros/\d+', PlacePage)
+        r"/annuaire/chercherlespros\?quoiqui=(?P<pattern>[a-z0-9-]+)&ou=(?P<city>[a-z0-9-]+)&page=(?P<page>\d+)",
+        ResultsPage,
+    )
+    company = URL(r"/pros/\d+", PlacePage)
 
     def simplify(self, name):
-        return re.sub(r'[^a-z0-9-]+', '-', name.lower())
+        return re.sub(r"[^a-z0-9-]+", "-", name.lower())
 
     def search_contacts(self, query):
         assert query.name

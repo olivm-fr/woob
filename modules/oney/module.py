@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014 Budget Insight
 #
 # This file is part of a woob module.
@@ -20,28 +18,28 @@
 # flake8: compatible
 
 from woob.capabilities.bank import CapBank
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import OneyBrowser
 
 
-__all__ = ['OneyModule']
+__all__ = ["OneyModule"]
 
 
 class OneyModule(Module, CapBank):
-    NAME = 'oney'
-    MAINTAINER = 'Vincent Paredes'
-    EMAIL = 'vparedes@budget-insight.com'
-    VERSION = '3.6'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = 'Oney'
+    NAME = "oney"
+    MAINTAINER = "Vincent Paredes"
+    EMAIL = "vparedes@budget-insight.com"
+    VERSION = "3.7"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Oney"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Identifiant', masked=False, regexp=r'([0-9]{9}|.+@.+\..+)'),
-        ValueBackendPassword('password', label='Mot de passe'),
-        ValueTransient('request_information'),
-        ValueTransient('code', regexp=r'^\d{6}$'),
-        ValueTransient('resume'),
+        ValueBackendPassword("login", label="Identifiant", masked=False, regexp=r"([0-9]{9}|.+@.+\..+)"),
+        ValueBackendPassword("password", label="Mot de passe"),
+        ValueTransient("request_information"),
+        ValueTransient("code", regexp=r"^\d{6}$"),
+        ValueTransient("resume"),
     )
     BROWSER = OneyBrowser
 
@@ -54,8 +52,6 @@ class OneyModule(Module, CapBank):
     def iter_history(self, account):
         # To prevent issues in calcul of actual balance and coming one, all
         # operations are marked as debited.
-        for tr in self.browser.iter_coming(account):
-            yield tr
+        yield from self.browser.iter_coming(account)
 
-        for tr in self.browser.iter_history(account):
-            yield tr
+        yield from self.browser.iter_history(account)

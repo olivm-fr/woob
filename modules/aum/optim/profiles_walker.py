@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon, Christophe Benz
 #
 # This file is part of a woob module.
@@ -19,27 +17,27 @@
 
 from random import randint
 
-from woob.exceptions import BrowserUnavailable
 from woob.capabilities.dating import Optimization
+from woob.exceptions import BrowserUnavailable
 from woob.tools.log import getLogger
 
 
 class ProfilesWalker(Optimization):
     def __init__(self, sched, storage, browser):
-        super(ProfilesWalker, self).__init__()
+        super().__init__()
         self._sched = sched
         self._storage = storage
         self._browser = browser
-        self._logger = getLogger('walker', browser.logger)
+        self._logger = getLogger("walker", browser.logger)
 
         self._walk_cron = None
         self._view_cron = None
-        self._visited_profiles = set(storage.get('profiles_walker', 'viewed'))
-        self._logger.info(u'Loaded %d already visited profiles from storage.' % len(self._visited_profiles))
+        self._visited_profiles = set(storage.get("profiles_walker", "viewed"))
+        self._logger.info("Loaded %d already visited profiles from storage." % len(self._visited_profiles))
         self._profiles_queue = set()
 
     def save(self):
-        self._storage.set('profiles_walker', 'viewed', list(self._visited_profiles))
+        self._storage.set("profiles_walker", "viewed", list(self._visited_profiles))
         self._storage.save()
 
     def start(self):
@@ -60,7 +58,7 @@ class ProfilesWalker(Optimization):
     def enqueue_profiles(self):
         try:
             profiles_to_visit = self._browser.search_profiles().difference(self._visited_profiles)
-            self._logger.info(u'Enqueuing profiles to visit: %s' % profiles_to_visit)
+            self._logger.info("Enqueuing profiles to visit: %s" % profiles_to_visit)
             self._profiles_queue = set(profiles_to_visit)
             self.save()
         except BrowserUnavailable:
@@ -75,10 +73,10 @@ class ProfilesWalker(Optimization):
 
             try:
                 profile = self._browser.get_profile(id)
-                self._logger.info(u'Visited profile %s (%s)' % (profile['pseudo'], id))
+                self._logger.info("Visited profile {} ({})".format(profile["pseudo"], id))
 
                 # Get score from the aum_score module
-                #d = self.nucentral_core.callService(context.Context.fromComponent(self), 'aum_score', 'score', profile)
+                # d = self.nucentral_core.callService(context.Context.fromComponent(self), 'aum_score', 'score', profile)
                 # d.addCallback(self.score_cb, profile.getID())
                 # deferredlist.append(d)
 

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017-2021 Romain Bignon
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import SprungeModule
 
-__all__ = ['SprungeModule']
+
+__all__ = ["SprungeModule"]

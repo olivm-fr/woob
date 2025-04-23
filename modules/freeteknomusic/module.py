@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -17,24 +15,24 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module
+from woob.capabilities.audio import Album, BaseAudio, CapAudio
 from woob.capabilities.base import find_object
-from woob.capabilities.audio import CapAudio, BaseAudio, Album
 from woob.capabilities.collection import CapCollection, Collection
+from woob.tools.backend import Module
 
 from .browser import FreeteknomusicBrowser
 
 
-__all__ = ['FreeteknomusicModule']
+__all__ = ["FreeteknomusicModule"]
 
 
 class FreeteknomusicModule(Module, CapAudio, CapCollection):
-    NAME = 'freeteknomusic'
-    DESCRIPTION = 'freeteknomusic website'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "freeteknomusic"
+    DESCRIPTION = "freeteknomusic website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = FreeteknomusicBrowser
 
@@ -44,7 +42,7 @@ class FreeteknomusicModule(Module, CapAudio, CapCollection):
         return []
 
     def get_album(self, id):
-        coll = find_object(self.browser.ls_content([]), id='album.%s' % id)
+        coll = find_object(self.browser.ls_content([]), id="album.%s" % id)
         if coll:
             return self._make_album(coll)
 
@@ -69,10 +67,10 @@ class FreeteknomusicModule(Module, CapAudio, CapCollection):
         return alb
 
     def fill_album(self, obj, fields):
-        if 'tracks_list' in fields:
-            id = obj.id.replace('album.', '')
+        if "tracks_list" in fields:
+            id = obj.id.replace("album.", "")
             obj.tracks_list = []
-            for el in self.browser.ls_content(id.split('/')):
+            for el in self.browser.ls_content(id.split("/")):
                 if isinstance(el, BaseAudio):
                     obj.tracks_list.append(el)
 

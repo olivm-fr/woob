@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,19 +16,19 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.exceptions import BrowserUnavailable
 from woob.capabilities.dating import Optimization
+from woob.exceptions import BrowserUnavailable
 
 
 class Visibility(Optimization):
     def __init__(self, sched, browser):
-        super(Visibility, self).__init__()
+        super().__init__()
         self._sched = sched
         self._browser = browser
         self._cron = None
 
     def start(self):
-        self._cron = self._sched.repeat(60*5, self.reconnect)
+        self._cron = self._sched.repeat(60 * 5, self.reconnect)
         return True
 
     def stop(self):

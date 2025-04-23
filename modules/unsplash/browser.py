@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -17,27 +15,28 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import ImageSearch
 
 
 class UnsplashBrowser(PagesBrowser):
-    BASEURL = 'https://unsplash.com'
+    BASEURL = "https://unsplash.com"
 
-    collection_search = URL(r'/napi/search/collections\?query=(?P<term>[^&]+)&page=(?P<page>\d+)&per_page=20')
-    image_search = URL(r'/napi/search/photos\?query=(?P<term>[^&]+)&page=(?P<page>\d+)&per_page=20', ImageSearch)
+    collection_search = URL(r"/napi/search/collections\?query=(?P<term>[^&]+)&page=(?P<page>\d+)&per_page=20")
+    image_search = URL(r"/napi/search/photos\?query=(?P<term>[^&]+)&page=(?P<page>\d+)&per_page=20", ImageSearch)
 
     def __init__(self, *args, **kwargs):
-        super(UnsplashBrowser, self).__init__(*args, **kwargs)
-        self.session.headers['Authorization'] = 'Client-ID d69927c7ea5c770fa2ce9a2f1e3589bd896454f7068f689d8e41a25b54fa6042'
+        super().__init__(*args, **kwargs)
+        self.session.headers["Authorization"] = (
+            "Client-ID d69927c7ea5c770fa2ce9a2f1e3589bd896454f7068f689d8e41a25b54fa6042"
+        )
 
     def search_image(self, term):
         n = 1
         nb_pages = 1
         while n <= nb_pages:
             self.image_search.go(term=term, page=n)
-            for img in self.page.iter_images():
-                yield img
+            yield from self.page.iter_images()
             nb_pages = self.page.nb_pages()
             n += 1

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Arthur Huillet
 #
 # This file is part of a woob module.
@@ -22,7 +20,8 @@ from woob.tools.test import BackendTest
 
 
 class SuravenirTest(BackendTest):
-    MODULE = 'suravenir'
+    MODULE = "suravenir"
+
     def test_suravenir(self):
         l = list(self.backend.iter_accounts())
         self.assertTrue(len(l) > 0)

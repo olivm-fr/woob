@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Clément Schreiner
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class NewsfeedTest(BackendTest):
-    MODULE = 'newsfeed'
+    MODULE = "newsfeed"
 
     def test_newsfeed(self):
         for message in self.backend.iter_unread_messages():

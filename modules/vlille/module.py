@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,22 +16,23 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 import re
 
-from woob.tools.backend import Module
 from woob.capabilities.base import find_object
-from woob.capabilities.gauge import CapGauge, GaugeSensor, Gauge, SensorNotFound
+from woob.capabilities.gauge import CapGauge, Gauge, GaugeSensor, SensorNotFound
+from woob.tools.backend import Module
 
 from .browser import VlilleBrowser
 
-__all__ = ['VlilleModule']
+
+__all__ = ["VlilleModule"]
 
 
 class VlilleModule(Module, CapGauge):
-    NAME = 'vlille'
-    DESCRIPTION = u'Lille bike renting availability information'
-    MAINTAINER = u'Bezleputh'
-    EMAIL = 'carton_ben@yahoo.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
+    NAME = "vlille"
+    DESCRIPTION = "Lille bike renting availability information"
+    MAINTAINER = "Bezleputh"
+    EMAIL = "carton_ben@yahoo.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
 
     BROWSER = VlilleBrowser
 
@@ -68,7 +67,7 @@ class VlilleModule(Module, CapGauge):
         return sensor.lastvalue
 
     def _get_sensor_by_id(self, _id):
-        re_sensor_id = re.search(r'(\d+)-(bikes|attach|status)', _id, re.IGNORECASE)
+        re_sensor_id = re.search(r"(\d+)-(bikes|attach|status)", _id, re.IGNORECASE)
         if re_sensor_id:
             gauge = re_sensor_id.group(1)
             pattern = re_sensor_id.group(2)

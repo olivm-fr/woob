@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,23 +16,26 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
 from woob.applications.subtitles.subtitles import LANGUAGE_CONV
+from woob.browser import URL, PagesBrowser
 
-from .pages import SubtitlesPage, SearchPage, SubtitlePage, SeriesSubtitlePage
+from .pages import SearchPage, SeriesSubtitlePage, SubtitlePage, SubtitlesPage
 
 
-__all__ = ['OpensubtitlesBrowser']
+__all__ = ["OpensubtitlesBrowser"]
 
 
 class OpensubtitlesBrowser(PagesBrowser):
-    BASEURL = 'https://www.opensubtitles.org'
-    search = URL('/en/search2/sublanguageid-(?P<language>.*)/moviename-(?P<movie>.*)(/offset-\d*)?', SearchPage)
-    subtitles = URL('/en/search/sublanguageid-(?P<language>.*)/idmovie-(?P<id_movie>.*)',
-                    '/en/search/imdbid-\d*/sublanguageid-(?P<language>.*)/moviename-(?P<movie>.*)', SubtitlesPage)
-    subtitle = URL('/en/subtitles/(?P<id>.*)', SubtitlePage)
-    series_subtitle = URL('/en/ssearch/sublanguageid-(?P<language>.*)/idmovie-(?P<id_movie>.*)', SeriesSubtitlePage)
-    file = URL('/en/subtitleserve/sub/(?P<id>.+)')
+    BASEURL = "https://www.opensubtitles.org"
+    search = URL(r"/en/search2/sublanguageid-(?P<language>.*)/moviename-(?P<movie>.*)(/offset-\d*)?", SearchPage)
+    subtitles = URL(
+        r"/en/search/sublanguageid-(?P<language>.*)/idmovie-(?P<id_movie>.*)",
+        r"/en/search/imdbid-\d*/sublanguageid-(?P<language>.*)/moviename-(?P<movie>.*)",
+        SubtitlesPage,
+    )
+    subtitle = URL(r"/en/subtitles/(?P<id>.*)", SubtitlePage)
+    series_subtitle = URL(r"/en/ssearch/sublanguageid-(?P<language>.*)/idmovie-(?P<id_movie>.*)", SeriesSubtitlePage)
+    file = URL(r"/en/subtitleserve/sub/(?P<id>.+)")
 
     def iter_subtitles(self, language, pattern):
         lang = LANGUAGE_CONV[language]

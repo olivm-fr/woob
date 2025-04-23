@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,20 +16,23 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
+
 from .pages import SearchPage, SubtitlePage
 
 
-__all__ = ['PodnapisiBrowser']
+__all__ = ["PodnapisiBrowser"]
 
 
 class PodnapisiBrowser(PagesBrowser):
-    BASEURL = 'https://www.podnapisi.net'
-    search = URL('/subtitles/search/advanced\?keywords=(?P<keywords>.*)&language=(?P<language>.*)',
-                 '/en/subtitles/search/advanced\?keywords=(?P<keywords>.*)&language=(?P<language>.*)',
-                 SearchPage)
-    file = URL('/subtitles/(?P<id>-*\w*)/download')
-    subtitle = URL('/subtitles/(?P<id>.*)', SubtitlePage)
+    BASEURL = "https://www.podnapisi.net"
+    search = URL(
+        r"/subtitles/search/advanced\?keywords=(?P<keywords>.*)&language=(?P<language>.*)",
+        r"/en/subtitles/search/advanced\?keywords=(?P<keywords>.*)&language=(?P<language>.*)",
+        SearchPage,
+    )
+    file = URL(r"/subtitles/(?P<id>-*\w*)/download")
+    subtitle = URL(r"/subtitles/(?P<id>.*)", SubtitlePage)
 
     def iter_subtitles(self, language, pattern):
         return self.search.go(language=language, keywords=pattern).iter_subtitles()

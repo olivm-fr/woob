@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Baptiste Delpey
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import BnpcartesentrepriseModule
 
 
-__all__ = ['BnpcartesentrepriseModule']
+__all__ = ["BnpcartesentrepriseModule"]

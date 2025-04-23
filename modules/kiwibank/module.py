@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Cédric Félizard
 #
 # This file is part of a woob module.
@@ -19,33 +17,33 @@
 
 
 from woob.capabilities.bank import CapBank
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
+
 from .browser import Kiwibank
 
 
-__all__ = ['KiwibankModule']
+__all__ = ["KiwibankModule"]
 
 
 class KiwibankModule(Module, CapBank):
-    NAME = 'kiwibank'
-    MAINTAINER = u'Cédric Félizard'
-    EMAIL = 'cedric@felizard.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = u'Kiwibank'
+    NAME = "kiwibank"
+    MAINTAINER = "Cédric Félizard"
+    EMAIL = "cedric@felizard.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "Kiwibank"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Access number', masked=False),
-        ValueBackendPassword('password', label='Password'),
+        ValueBackendPassword("login", label="Access number", masked=False),
+        ValueBackendPassword("password", label="Password"),
     )
     BROWSER = Kiwibank
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_accounts(self):
         return self.browser.get_accounts()
 
     def iter_history(self, account):
-        for transaction in self.browser.get_history(account):
-            yield transaction
+        yield from self.browser.get_history(account)

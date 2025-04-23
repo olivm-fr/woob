@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014-2015      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -24,30 +22,32 @@ from woob.tools.value import ValueBackendPassword
 
 from .browser import AmazonStoreCard
 
-__all__ = ['AmazonStoreCardModule']
+
+__all__ = ["AmazonStoreCardModule"]
 
 
 class AmazonStoreCardModule(Module, CapBank):
-    NAME = 'amazonstorecard'
-    MAINTAINER = u'Oleg Plakhotniuk'
-    EMAIL = 'olegus8@gmail.com'
-    VERSION = '3.6'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = u'Amazon Store Card'
+    NAME = "amazonstorecard"
+    MAINTAINER = "Oleg Plakhotniuk"
+    EMAIL = "olegus8@gmail.com"
+    VERSION = "3.7"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Amazon Store Card"
     CONFIG = BackendConfig(
-        ValueBackendPassword('username', label='User ID', masked=False),
-        ValueBackendPassword('password', label='Password'),
-        ValueBackendPassword('phone',
-                             label='Phone to send verification code to', masked=False),
-        ValueBackendPassword('code_file',
-                             label='File to read the verification code from', masked=False))
+        ValueBackendPassword("username", label="User ID", masked=False),
+        ValueBackendPassword("password", label="Password"),
+        ValueBackendPassword("phone", label="Phone to send verification code to", masked=False),
+        ValueBackendPassword("code_file", label="File to read the verification code from", masked=False),
+    )
     BROWSER = AmazonStoreCard
 
     def create_default_browser(self):
-        return self.create_browser(username=self.config['username'].get(),
-                                   password=self.config['password'].get(),
-                                   phone=self.config['phone'].get(),
-                                   code_file=self.config['code_file'].get())
+        return self.create_browser(
+            username=self.config["username"].get(),
+            password=self.config["password"].get(),
+            phone=self.config["phone"].get(),
+            code_file=self.config["code_file"].get(),
+        )
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

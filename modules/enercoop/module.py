@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Vincent A
 #
 # This file is part of a woob module.
@@ -19,39 +17,37 @@
 
 # flake8: compatible
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword
-from woob.capabilities.bill import (
-    DocumentTypes, CapDocument, DocumentNotFound,
-)
 from woob.capabilities.base import find_object
+from woob.capabilities.bill import CapDocument, DocumentNotFound, DocumentTypes
 from woob.capabilities.gauge import CapGauge
 from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword
 
 from .browser import EnercoopBrowser
 
 
-__all__ = ['EnercoopModule']
+__all__ = ["EnercoopModule"]
 
 
 class EnercoopModule(Module, CapDocument, CapGauge, CapProfile):
-    NAME = 'enercoop'
-    DESCRIPTION = 'Enercoop'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
+    NAME = "enercoop"
+    DESCRIPTION = "Enercoop"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
 
     BROWSER = EnercoopBrowser
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('email', label='Adresse email', regexp='.+@.+', masked=False),
-        ValueBackendPassword('password', label='Mot de passe'),
+        ValueBackendPassword("email", label="Adresse email", regexp=".+@.+", masked=False),
+        ValueBackendPassword("password", label="Mot de passe"),
     )
 
     accepted_document_types = (DocumentTypes.BILL,)
 
     def create_default_browser(self):
-        return self.create_browser(self.config['email'].get(), self.config['password'].get())
+        return self.create_browser(self.config["email"].get(), self.config["password"].get())
 
     def get_profile(self):
         return self.browser.get_profile()
@@ -70,11 +66,7 @@ class EnercoopModule(Module, CapDocument, CapGauge, CapProfile):
         :rtype: :class:`Document`
         :raises: :class:`DocumentNotFound`
         """
-        return find_object(
-            self.iter_documents(id.split("_")[-1]),
-            id=id,
-            error=DocumentNotFound
-        )
+        return find_object(self.iter_documents(id.split("_")[-1]), id=id, error=DocumentNotFound)
 
     def download_document(self, id):
         return self.browser.download_document(id)

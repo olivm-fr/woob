@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -18,27 +16,25 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import FolderPage
 
 
 class FreeteknomusicBrowser(PagesBrowser):
-    BASEURL = 'http://archive.freeteknomusic.org/'
+    BASEURL = "http://archive.freeteknomusic.org/"
 
-    folder = URL('/', FolderPage)
+    folder = URL("/", FolderPage)
 
     def ls_content(self, split_path):
-        self.location('/' + '/'.join(split_path))
-        for el in self.page.iter_dirs():
-            yield el
-        for el in self.page.iter_files():
-            yield el
+        self.location("/" + "/".join(split_path))
+        yield from self.page.iter_dirs()
+        yield from self.page.iter_files()
 
     def get_file(self, id):
-        split_path = id.split('/')[:-1]
-        self.location('/' + '/'.join(split_path))
-        id = 'audio.%s' % id
+        split_path = id.split("/")[:-1]
+        self.location("/" + "/".join(split_path))
+        id = "audio.%s" % id
         for el in self.page.iter_files():
             if el.id == id:
                 return el

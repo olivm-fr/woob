@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Vincent A
 #
 # This file is part of a woob module.
@@ -19,28 +17,22 @@
 
 # flake8: compatible
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.browser.url import BrowserParamURL
 
-from .pages import (
-    EntriesPage, EntryPage,
-)
+from .pages import EntriesPage, EntryPage
 
 
 class TinyViewBrowser(PagesBrowser):
     BASEURL = "https://storage.googleapis.com/"
 
-    entries = BrowserParamURL(
-        r"/tinyview-d78fb.appspot.com/(?P<browser_comic>[^?/]+)/index.json",
-        EntriesPage
-    )
-    entry = URL(
-        r"/tinyview-d78fb.appspot.com/(?P<id>.+)/index.json",
-        EntryPage
-    )
+    entries = BrowserParamURL(r"/tinyview-d78fb.appspot.com/(?P<browser_comic>[^?/]+)/index.json", EntriesPage)
+    entry = URL(r"/tinyview-d78fb.appspot.com/(?P<id>.+)/index.json", EntryPage)
     # id is formatted like this: <browser_comic>/<year>/<month>/<day>/<slug>
 
-    entry_image = BrowserParamURL(r"/tinyview-d78fb.appspot.com/(?P<browser_comic>[^?/]+)/(?P<y>\d{4})/(?P<m>\d{2})/(?P<d>\d{2})/(?P<slug>[^?/]+)/(?P<filename>[^?/]+)")
+    entry_image = BrowserParamURL(
+        r"/tinyview-d78fb.appspot.com/(?P<browser_comic>[^?/]+)/(?P<y>\d{4})/(?P<m>\d{2})/(?P<d>\d{2})/(?P<slug>[^?/]+)/(?P<filename>[^?/]+)"
+    )
     base_storage = URL(r"/tinyview-d78fb.appspot.com/(?P<rest>)")
 
     user_page = URL("https://tinyview.com/(?P<page>.+)")

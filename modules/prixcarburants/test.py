@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,24 +16,25 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+import itertools
+
 from woob.tools.test import BackendTest
 from woob.tools.value import Value
-import itertools
 
 
 class PrixCarburantsTest(BackendTest):
-    MODULE = 'prixcarburants'
+    MODULE = "prixcarburants"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['Zipcode'] = Value(value='59000')
+            self.backend.config["Zipcode"] = Value(value="59000")
 
     def test_search_products(self):
-        products = list(self.backend.search_products('gpl'))
+        products = list(self.backend.search_products("gpl"))
         self.assertTrue(len(products) == 1)
 
     def test_prixcarburants(self):
-        products = list(self.backend.search_products('gpl'))
+        products = list(self.backend.search_products("gpl"))
         product = products[0]
         product.backend = self.backend.name
         prices = list(itertools.islice(self.backend.iter_prices([product]), 0, 20))

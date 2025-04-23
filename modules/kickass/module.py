@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -24,19 +22,20 @@ from woob.tools.backend import Module
 
 from .browser import KickassBrowser
 
-#from contextlib import closing
-#from gzip import GzipFile
 
-__all__ = ['KickassModule']
+# from contextlib import closing
+# from gzip import GzipFile
+
+__all__ = ["KickassModule"]
 
 
 class KickassModule(Module, CapTorrent):
-    NAME = 'kickass'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '3.6'
-    DESCRIPTION = 'Kickass Torrents BitTorrent tracker'
-    LICENSE = 'AGPLv3+'
+    NAME = "kickass"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "julien.veyssier@aiur.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Kickass Torrents BitTorrent tracker"
+    LICENSE = "AGPLv3+"
     BROWSER = KickassBrowser
 
     def get_torrent(self, id):
@@ -48,22 +47,20 @@ class KickassModule(Module, CapTorrent):
             return None
 
         resp = self.browser.open(torrent.url)
-        #headers = response.info()
-        #if headers.get('Content-Encoding', '') == 'gzip':
+        # headers = response.info()
+        # if headers.get('Content-Encoding', '') == 'gzip':
         #    with closing(GzipFile(fileobj=response, mode='rb')) as gz:
         #        data = gz.read()
-        #else:
+        # else:
         #    data = response.read()
         return resp.content
 
     def iter_torrents(self, pattern):
-        return self.browser.iter_torrents(quote_plus(pattern.encode('utf-8')))
+        return self.browser.iter_torrents(quote_plus(pattern.encode("utf-8")))
 
     def fill_torrent(self, torrent, fields):
-        if 'description' in fields or 'files' in fields:
+        if "description" in fields or "files" in fields:
             torrent = self.browser.get_torrent(torrent.id)
         return torrent
 
-    OBJECTS = {
-        Torrent: fill_torrent
-    }
+    OBJECTS = {Torrent: fill_torrent}

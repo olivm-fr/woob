@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Romain Bignon
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import CaisseEpargneModule
 
-__all__ = ['CaisseEpargneModule']
+
+__all__ = ["CaisseEpargneModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Roger Philibert
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class TinderTest(BackendTest):
-    MODULE = 'tinder'
+    MODULE = "tinder"
 
     def test_tinder(self):
         self.backend.browser.like_profile()

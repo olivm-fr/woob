@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014 Budget Insight
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import OneyModule
 
-__all__ = ['OneyModule']
+
+__all__ = ["OneyModule"]

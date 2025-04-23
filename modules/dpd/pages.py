@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -20,7 +18,8 @@
 from dateutil.parser import parse as parse_date
 
 from woob.browser.pages import JsonPage
-from woob.capabilities.parcel import Parcel, Event, ParcelNotFound
+from woob.capabilities.parcel import Event, Parcel, ParcelNotFound
+
 
 STATUSES = {
     1: Parcel.STATUS_PLANNED,
@@ -34,6 +33,7 @@ STATUSES = {
 class SearchPage(JsonPage):
     def build_doc(self, text):
         from woob.tools.json import json
+
         return json.loads(text[1:-1])
 
     def get_info(self, _id):
@@ -41,15 +41,14 @@ class SearchPage(JsonPage):
         if not result_id:
             raise ParcelNotFound("No such ID: %s" % _id)
         if not _id.startswith(result_id):
-            raise ParcelNotFound("ID mismatch: expecting %s, got %s" % (_id, result_id))
+            raise ParcelNotFound(f"ID mismatch: expecting {_id}, got {result_id}")
 
         p = Parcel(_id)
         events = self.doc.get("TrackingStatusJSON", {}).get("statusInfos", [])
         p.history = [self.build_event(i, data) for i, data in enumerate(events)]
         p.status = self.guess_status(
-            self.doc.get("TrackingStatusJSON", {}).
-            get("shipmentInfo", {}).
-            get("deliveryStatus"))
+            self.doc.get("TrackingStatusJSON", {}).get("shipmentInfo", {}).get("deliveryStatus")
+        )
         p.info = p.history[-1].activity
         return p
 
@@ -58,7 +57,7 @@ class SearchPage(JsonPage):
 
     def build_event(self, index, data):
         event = Event(index)
-        date = "%s %s" % (data["date"], data["time"])
+        date = "{} {}".format(data["date"], data["time"])
         event.date = parse_date(date, dayfirst=False)
         event.location = str(data["city"])
         event.activity = ", ".join([_["label"] for _ in data["contents"]])

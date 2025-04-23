@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import RedmineModule
 
-__all__ = ['RedmineModule']
+
+__all__ = ["RedmineModule"]

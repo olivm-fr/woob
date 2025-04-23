@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
 #
 # This file is part of a woob module.
@@ -18,30 +16,33 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.base import NotAvailable, find_object
 from woob.capabilities.bill import (
-    DocumentCategory, DocumentTypes, CapDocument, Subscription,
-    Document, DocumentNotFound,
+    CapDocument,
+    Document,
+    DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
 )
-from woob.capabilities.base import find_object, NotAvailable
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
 
 from .browser import TrainlineBrowser
 
 
-__all__ = ['TrainlineModule']
+__all__ = ["TrainlineModule"]
 
 
 class TrainlineModule(Module, CapDocument):
-    NAME = 'trainline'
-    DESCRIPTION = 'trainline'
-    MAINTAINER = 'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "trainline"
+    DESCRIPTION = "trainline"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Adresse email'),
-        ValueBackendPassword('password', label='Mot de passe')
+        ValueBackendPassword("login", label="Adresse email"), ValueBackendPassword("password", label="Mot de passe")
     )
 
     BROWSER = TrainlineBrowser
@@ -50,13 +51,13 @@ class TrainlineModule(Module, CapDocument):
     document_categories = {DocumentCategory.TRANSPORT}
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_subscription(self):
         return self.browser.get_subscription_list()
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)

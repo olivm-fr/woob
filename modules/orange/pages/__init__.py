@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Vincent Paredes
 #
 # This file is part of a woob module.
@@ -21,4 +19,5 @@
 
 from .login import LoginPage
 
-__all__ = ['LoginPage']
+
+__all__ = ["LoginPage"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Phyks (Lucas Verney)
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class RATPTest(BackendTest):
-    MODULE = 'ratp'
+    MODULE = "ratp"
 
     def test_ratp_gauges(self):
         l = list(self.backend.iter_gauges())

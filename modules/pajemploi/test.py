@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Ludovic LANGE
 #
 # This file is part of a woob module.
@@ -22,4 +20,4 @@ from woob.tools.test import BackendTest
 
 
 class PajemploiTest(BackendTest):
-    MODULE = 'pajemploi'
+    MODULE = "pajemploi"

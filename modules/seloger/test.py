@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012  Romain Bignon
 #
 # This file is part of a woob module.
@@ -17,17 +15,26 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.housing import Query, POSTS_TYPES, ADVERT_TYPES
+from woob.capabilities.housing import ADVERT_TYPES, POSTS_TYPES, Query
 from woob.tools.capabilities.housing.housing_test import HousingTest
 from woob.tools.test import BackendTest
 
 
 class SeLogerTest(BackendTest, HousingTest):
-    MODULE = 'seloger'
+    MODULE = "seloger"
 
     FIELDS_ALL_HOUSINGS_LIST = [
-        "id", "type", "advert_type", "house_type", "url", "title", "area",
-        "utilities", "date", "location", "text"
+        "id",
+        "type",
+        "advert_type",
+        "house_type",
+        "url",
+        "title",
+        "area",
+        "utilities",
+        "date",
+        "location",
+        "text",
     ]
     FIELDS_ANY_HOUSINGS_LIST = [
         "cost",  # Some posts don't have cost in seloger
@@ -35,8 +42,19 @@ class SeLogerTest(BackendTest, HousingTest):
         "photos",
     ]
     FIELDS_ALL_SINGLE_HOUSING = [
-        "id", "url", "type", "advert_type", "house_type", "title", "area",
-        "utilities", "date", "location", "text", "phone", "details"
+        "id",
+        "url",
+        "type",
+        "advert_type",
+        "house_type",
+        "title",
+        "area",
+        "utilities",
+        "date",
+        "location",
+        "text",
+        "phone",
+        "details",
     ]
     FIELDS_ANY_SINGLE_HOUSING = [
         "cost",  # Some posts don't have cost in seloger
@@ -45,7 +63,7 @@ class SeLogerTest(BackendTest, HousingTest):
         "rooms",
         "bedrooms",
         "DPE",
-        "GES"
+        "GES",
     ]
     DO_NOT_DISTINGUISH_FURNISHED_RENT = True
 
@@ -55,7 +73,7 @@ class SeLogerTest(BackendTest, HousingTest):
         query.cost_max = 1500
         query.type = POSTS_TYPES.RENT
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -65,7 +83,7 @@ class SeLogerTest(BackendTest, HousingTest):
         query.area_min = 10
         query.type = POSTS_TYPES.SALE
         query.cities = []
-        for city in self.backend.search_city('lille'):
+        for city in self.backend.search_city("lille"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -76,7 +94,7 @@ class SeLogerTest(BackendTest, HousingTest):
         query.cost_max = 1500
         query.type = POSTS_TYPES.FURNISHED_RENT
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -85,7 +103,7 @@ class SeLogerTest(BackendTest, HousingTest):
         query = Query()
         query.type = POSTS_TYPES.VIAGER
         query.cities = []
-        for city in self.backend.search_city('85'):
+        for city in self.backend.search_city("85"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -97,7 +115,7 @@ class SeLogerTest(BackendTest, HousingTest):
         query.type = POSTS_TYPES.RENT
         query.advert_types = [ADVERT_TYPES.PROFESSIONAL]
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)

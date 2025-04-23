@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Vincent A
 #
 # This file is part of a woob module.
@@ -21,13 +19,13 @@
 
 from urllib.parse import urljoin
 
-from woob.browser.elements import method, DictElement, ItemElement
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import (
-    DateTime, BrowserURL, Field, Env, Regexp,
-)
+from woob.browser.filters.standard import BrowserURL, DateTime, Env, Field, Regexp
 from woob.browser.pages import JsonPage
-from woob.capabilities.base import BaseObject, StringField, Field as FieldModel
+from woob.capabilities.base import BaseObject
+from woob.capabilities.base import Field as FieldModel
+from woob.capabilities.base import StringField
 from woob.capabilities.date import DateField
 from woob.capabilities.image import BaseImage
 

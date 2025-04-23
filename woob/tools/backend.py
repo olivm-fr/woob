@@ -17,14 +17,15 @@
 
 from __future__ import annotations
 
-import logging
 import importlib
+import logging
 import os
+import warnings
+from collections.abc import Iterator
 from copy import copy
 from threading import RLock
-import warnings
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.request import getproxies
-from typing import List, Any, Dict, Tuple, Iterator, Type, ClassVar, TYPE_CHECKING
 
 from packaging.version import Version
 
@@ -34,14 +35,15 @@ from woob.tools.json import json
 from woob.tools.log import getLogger
 from woob.tools.misc import iter_fields
 from woob.tools.storage import IStorage
-from woob.tools.value import ValuesDict, ValueBool
+from woob.tools.value import ValueBool, ValuesDict
+
 
 if TYPE_CHECKING:
-    from woob.core import WoobBase
     from woob.browser import Browser
+    from woob.core import WoobBase
 
 
-__all__ = ['BackendStorage', 'BackendConfig', 'Module']
+__all__ = ["BackendStorage", "BackendConfig", "Module"]
 
 
 class BackendStorage:
@@ -76,7 +78,7 @@ class BackendStorage:
         :param args: the path where to store value
         """
         if self.storage:
-            self.storage.set('backends', self.name, *args)
+            self.storage.set("backends", self.name, *args)
 
     def delete(self, *args):
         """
@@ -85,7 +87,7 @@ class BackendStorage:
         :param args: path to delete.
         """
         if self.storage:
-            self.storage.delete('backends', self.name, *args)
+            self.storage.delete("backends", self.name, *args)
 
     def get(self, *args, **kwargs) -> Any:
         """
@@ -106,11 +108,11 @@ class BackendStorage:
         :param default: if specified, default value when path is not found
         """
         if self.storage:
-            return self.storage.get('backends', self.name, *args, **kwargs)
+            return self.storage.get("backends", self.name, *args, **kwargs)
 
-        return kwargs.get('default', None)
+        return kwargs.get("default", None)
 
-    def load(self, default: Dict):
+    def load(self, default: dict):
         """
         Load storage.
 
@@ -121,14 +123,14 @@ class BackendStorage:
         :type default: :class:`dict`
         """
         if self.storage:
-            self.storage.load('backends', self.name, default)
+            self.storage.load("backends", self.name, default)
 
     def save(self):
         """
         Save storage.
         """
         if self.storage:
-            self.storage.save('backends', self.name)
+            self.storage.save("backends", self.name)
 
 
 class BackendConfig(ValuesDict):
@@ -141,18 +143,12 @@ class BackendConfig(ValuesDict):
     Then, using the :func:`load` method will load configuration from file and
     create a copy of the :class:`BackendConfig` object with the loaded values.
     """
+
     modname: str
     instname: str
     woob: WoobBase
 
-    def load(
-        self,
-        woob: WoobBase,
-        modname: str,
-        instname: str,
-        config: Dict,
-        nofail: bool = False
-    ) -> BackendConfig:
+    def load(self, woob: WoobBase, modname: str, instname: str, config: dict, nofail: bool = False) -> BackendConfig:
         """
         Load configuration from dict to create an instance.
 
@@ -178,8 +174,8 @@ class BackendConfig(ValuesDict):
             if value is None:
                 if not nofail and field.required:
                     raise Module.ConfigError(
-                        f'Backend({cfg.instname}): Configuration error: Missing parameter {name} ({field.description})',
-                       bad_fields=[name]
+                        f"Backend({cfg.instname}): Configuration error: Missing parameter {name} ({field.description})",
+                        bad_fields=[name],
                     )
                 value = field.default
 
@@ -189,8 +185,7 @@ class BackendConfig(ValuesDict):
             except ValueError as v:
                 if not nofail:
                     raise Module.ConfigError(
-                        f'Backend({cfg.instname}): Configuration error for field "{name}": {v}',
-                        bad_fields=[name]
+                        f'Backend({cfg.instname}): Configuration error for field "{name}": {v}', bad_fields=[name]
                     )
 
             cfg[name] = field
@@ -208,7 +203,7 @@ class BackendConfig(ValuesDict):
                 settings[name] = value.dump()
         return settings
 
-    def save(self, edit: bool = True, params: Dict | None = None):
+    def save(self, edit: bool = True, params: dict | None = None):
         """
         Save backend config.
 
@@ -252,16 +247,16 @@ class Module:
     NAME: ClassVar[str]
     """Name of the maintainer of this module."""
 
-    MAINTAINER: ClassVar[str] = '<unspecified>'
+    MAINTAINER: ClassVar[str] = "<unspecified>"
     """Name of the maintainer."""
 
-    EMAIL: ClassVar[str] = '<unspecified>'
+    EMAIL: ClassVar[str] = "<unspecified>"
     """Email address of the maintainer."""
 
-    DESCRIPTION: ClassVar[str] = '<unspecified>'
+    DESCRIPTION: ClassVar[str] = "<unspecified>"
     """Description"""
 
-    LICENSE: ClassVar[str] = '<unspecified>'
+    LICENSE: ClassVar[str] = "<unspecified>"
     """License of the module"""
 
     CONFIG: ClassVar[BackendConfig] = BackendConfig()
@@ -270,7 +265,7 @@ class Module:
     Values must be :class:`woob.tools.value.Value` objects.
     """
 
-    STORAGE: ClassVar[Dict] = {}
+    STORAGE: ClassVar[dict] = {}
     """Storage"""
 
     BROWSER: Browser | None = None
@@ -283,7 +278,7 @@ class Module:
     the module's directory, and keep the ICON value to None.
     """
 
-    OBJECTS: ClassVar[Dict] = {}
+    OBJECTS: ClassVar[dict] = {}
     """Supported objects to fill
 
     The key is the class and the value the method to call to fill
@@ -292,7 +287,7 @@ class Module:
     NOT yet filled.
     """
 
-    DEPENDENCIES: ClassVar[Tuple[str]] = ()
+    DEPENDENCIES: ClassVar[tuple[str]] = ()
     """Tuple of module names on which this module depends."""
 
     class ConfigError(Exception):
@@ -321,7 +316,7 @@ class Module:
         return f"<Backend {self.name}>"
 
     def __new__(cls, *args, **kwargs):
-        """ Accept any arguments, necessary for AbstractModule __new__ override.
+        """Accept any arguments, necessary for AbstractModule __new__ override.
 
         AbstractModule, in its overridden __new__, removes itself from class hierarchy
         so its __new__ is called only once. In python 3, default (object) __new__ is
@@ -333,9 +328,7 @@ class Module:
     @property
     def VERSION(self):
         warnings.warn(
-            'Attribute Module.VERSION will be removed in woob 4, do not use it.',
-            DeprecationWarning,
-            stacklevel=3
+            "Attribute Module.VERSION will be removed in woob 4, do not use it.", DeprecationWarning, stacklevel=3
         )
         return Version(__version__).base_version
 
@@ -343,20 +336,17 @@ class Module:
         self,
         woob: WoobBase,
         name: str,
-        config: Dict | None = None,
+        config: dict | None = None,
         storage: IStorage | None = None,
         logger: logging.Logger | None = None,
-        nofail: bool = False
+        nofail: bool = False,
     ):
-        if (
-            hasattr(self.__class__, 'VERSION') and
-            not isinstance(self.__class__.VERSION, property)
-        ):
+        if hasattr(self.__class__, "VERSION") and not isinstance(self.__class__.VERSION, property):
             warnings.warn(
-                f'Class attribute {self.__class__.__name__}.VERSION is now '
-                'unused and deprecated, you can remove it. '
-                'If you do so, do not forget to increase the woob version to at '
-                'least 3.4 in requirements.txt.',
+                f"Class attribute {self.__class__.__name__}.VERSION is now "
+                "unused and deprecated, you can remove it. "
+                "If you do so, do not forget to increase the woob version to at "
+                "least 3.4 in requirements.txt.",
                 DeprecationWarning,
             )
 
@@ -368,7 +358,7 @@ class Module:
             config = {}
 
         # Private fields (which start with '_')
-        self._private_config = dict((key, value) for key, value in config.items() if key.startswith('_'))
+        self._private_config = {key: value for key, value in config.items() if key.startswith("_")}
 
         # Load configuration of backend.
         self.config = self.CONFIG.load(woob, self.NAME, self.name, config, nofail)
@@ -380,8 +370,8 @@ class Module:
         """
         Dump module state into storage.
         """
-        if hasattr(self.browser, 'dump_state'):
-            self.storage.set('browser_state', self.browser.dump_state())
+        if hasattr(self.browser, "dump_state"):
+            self.storage.set("browser_state", self.browser.dump_state())
             self.storage.save()
 
     def deinit(self):
@@ -394,7 +384,7 @@ class Module:
         try:
             self.dump_state()
         finally:
-            if hasattr(self.browser, 'deinit'):
+            if hasattr(self.browser, "deinit"):
                 self.browser.deinit()
 
     @property
@@ -403,7 +393,7 @@ class Module:
         .. deprecated:: 3.4
            Don't use this attribute, but :attr:`woob` instead.
         """
-        warnings.warn('Use Module.woob instead.', DeprecationWarning, stacklevel=2)
+        warnings.warn("Use Module.woob instead.", DeprecationWarning, stacklevel=2)
         return self.woob
 
     _browser = None
@@ -439,55 +429,59 @@ class Module:
         :type load_state: bool
         """
 
-        klass = kwargs.pop('klass', self.BROWSER)
+        klass = kwargs.pop("klass", self.BROWSER)
         if not klass:
             return None
 
-        should_load_state = bool(kwargs.pop('load_state', True))
+        should_load_state = bool(kwargs.pop("load_state", True))
 
-        kwargs['proxy'] = self.get_proxy()
-        if '_proxy_headers' in self._private_config:
-            kwargs['proxy_headers'] = self._private_config['_proxy_headers']
-            if isinstance(kwargs['proxy_headers'], str):
-                kwargs['proxy_headers'] = json.loads(kwargs['proxy_headers'])
+        kwargs["proxy"] = self.get_proxy()
+        if "_proxy_headers" in self._private_config:
+            kwargs["proxy_headers"] = self._private_config["_proxy_headers"]
+            if isinstance(kwargs["proxy_headers"], str):
+                kwargs["proxy_headers"] = json.loads(kwargs["proxy_headers"])
 
-        if '_ssl_verify' in self._private_config:
+        if "_ssl_verify" in self._private_config:
             # value can be either a boolean or a string (path)
             value = ValueBool()
             try:
-                value.set(self._private_config['_ssl_verify'])
+                value.set(self._private_config["_ssl_verify"])
             except ValueError:
-                kwargs.setdefault('verify', self._private_config['_ssl_verify'])
+                kwargs.setdefault("verify", self._private_config["_ssl_verify"])
             else:
-                kwargs.setdefault('verify', value.get())
+                kwargs.setdefault("verify", value.get())
 
-        kwargs['logger'] = self.logger
+        kwargs["logger"] = self.logger
 
-        if self.logger.settings['responses_dirname']:
-            kwargs.setdefault('responses_dirname', os.path.join(self.logger.settings['responses_dirname'],
-                                                                self._private_config.get('_debug_dir', self.name)))
-        elif os.path.isabs(self._private_config.get('_debug_dir', '')):
-            kwargs.setdefault('responses_dirname', self._private_config['_debug_dir'])
+        if self.logger.settings["responses_dirname"]:
+            kwargs.setdefault(
+                "responses_dirname",
+                os.path.join(
+                    self.logger.settings["responses_dirname"], self._private_config.get("_debug_dir", self.name)
+                ),
+            )
+        elif os.path.isabs(self._private_config.get("_debug_dir", "")):
+            kwargs.setdefault("responses_dirname", self._private_config["_debug_dir"])
 
-        if '_highlight_el' in self._private_config:
+        if "_highlight_el" in self._private_config:
             value = ValueBool()
             try:
-                value.set(self._private_config['_highlight_el'])
+                value.set(self._private_config["_highlight_el"])
             except ValueError as e:
                 raise Module.ConfigError(
-                    f'Backend({self.name}): Configuration error: _highlight_el must be a boolean'
+                    f"Backend({self.name}): Configuration error: _highlight_el must be a boolean"
                 ) from e
 
-            kwargs.setdefault('highlight_el', value.get())
+            kwargs.setdefault("highlight_el", value.get())
 
         browser = klass(*args, **kwargs)
 
-        if should_load_state and hasattr(browser, 'load_state'):
-            browser.load_state(self.storage.get('browser_state', default={}))
+        if should_load_state and hasattr(browser, "load_state"):
+            browser.load_state(self.storage.get("browser_state", default={}))
 
         return browser
 
-    def get_proxy(self) -> Dict[str, str]:
+    def get_proxy(self) -> dict[str, str]:
         """
         Get proxy to use.
 
@@ -501,10 +495,10 @@ class Module:
         # Get proxies from environment variables
         proxies = getproxies()
         # Override them with backend-specific config
-        if '_proxy' in self._private_config:
-            proxies['http'] = self._private_config['_proxy']
-        if '_proxy_ssl' in self._private_config:
-            proxies['https'] = self._private_config['_proxy_ssl']
+        if "_proxy" in self._private_config:
+            proxies["http"] = self._private_config["_proxy"]
+        if "_proxy_ssl" in self._private_config:
+            proxies["https"] = self._private_config["_proxy_ssl"]
         # Remove empty values
         for key in list(proxies.keys()):
             if not proxies[key]:
@@ -512,7 +506,7 @@ class Module:
         return proxies
 
     @classmethod
-    def iter_caps(cls) -> Iterator[Type[Capability]]:
+    def iter_caps(cls) -> Iterator[type[Capability]]:
         """
         Iter capabilities implemented by this backend.
 
@@ -529,12 +523,9 @@ class Module:
         `caps` should be list of :class:`Capability` objects (e.g. :class:`CapBank`) or capability names (e.g. 'bank').
         """
         available_cap_names = [cap.__name__ for cap in self.iter_caps()]
-        return any(
-            (isinstance(c, str) and c in available_cap_names) or isinstance(self, c)
-            for c in caps
-        )
+        return any((isinstance(c, str) and c in available_cap_names) or isinstance(self, c) for c in caps)
 
-    def fillobj(self, obj: BaseObject, fields: List[str] | None = None):
+    def fillobj(self, obj: BaseObject, fields: list[str] | None = None):
         """
         Fill an object with the wanted fields.
 
@@ -545,7 +536,7 @@ class Module:
             return obj
 
         def not_loaded_or_incomplete(v):
-            return (v is NotLoaded or isinstance(v, BaseObject) and not v.__iscomplete__())
+            return v is NotLoaded or isinstance(v, BaseObject) and not v.__iscomplete__()
 
         def not_loaded(v):
             return v is NotLoaded
@@ -565,8 +556,8 @@ class Module:
                 value = getattr(obj, field)
 
                 missing = False
-                if hasattr(value, '__iter__'):
-                    for v in (value.values() if isinstance(value, dict) else value):
+                if hasattr(value, "__iter__"):
+                    for v in value.values() if isinstance(value, dict) else value:
                         if check_cb(v):
                             missing = True
                             break
@@ -588,7 +579,7 @@ class Module:
 
         for key, value in self.OBJECTS.items():
             if isinstance(obj, key):
-                self.logger.debug('Fill %r with fields: %s', obj, missing_fields)
+                self.logger.debug("Fill %r with fields: %s", obj, missing_fields)
                 obj = value(self, obj, missing_fields) or obj
                 break
 
@@ -609,23 +600,27 @@ class AbstractModuleMissingParentError(Exception):
 class MetaModule(type):
     # we can remove this class as soon as we get rid of Abstract*
     def __new__(mcs, name, bases, dct):
-        if name != 'AbstractModule' and AbstractModule in bases:
-            warnings.warn('AbstractModule is deprecated and will be removed in woob 4.0. '
-                          'Use standard "from woob_modules.other_module import Module" instead.',
-                          DeprecationWarning, stacklevel=2)
+        if name != "AbstractModule" and AbstractModule in bases:
+            warnings.warn(
+                "AbstractModule is deprecated and will be removed in woob 4.0. "
+                'Use standard "from woob_modules.other_module import Module" instead.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
-            module = importlib.import_module('woob_modules.%s' % dct['PARENT'])
-            symbols = [getattr(module, attr) for attr in dir(module) if not attr.startswith('__')]
+            module = importlib.import_module("woob_modules.%s" % dct["PARENT"])
+            symbols = [getattr(module, attr) for attr in dir(module) if not attr.startswith("__")]
             klass = next(
-                symbol for symbol in symbols
+                symbol
+                for symbol in symbols
                 if isinstance(symbol, type) and issubclass(symbol, Module) and symbol != Module
             )
 
             bases = tuple(klass if isinstance(base, mcs) else base for base in bases)
 
-            additional_config = dct.pop('ADDITIONAL_CONFIG', None)
+            additional_config = dct.pop("ADDITIONAL_CONFIG", None)
             if additional_config:
-                dct['CONFIG'] = BackendConfig(*(list(klass.CONFIG.values()) + list(additional_config.values())))
+                dct["CONFIG"] = BackendConfig(*(list(klass.CONFIG.values()) + list(additional_config.values())))
 
         return super().__new__(mcs, name, bases, dct)
 

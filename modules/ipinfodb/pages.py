@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015-2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,11 +16,11 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.pages import HTMLPage
 from woob.browser.elements import ItemElement, method
-from woob.capabilities.geolocip import IpLocation
-from woob.browser.filters.standard import Regexp, CleanText, Type
+from woob.browser.filters.standard import CleanText, Regexp, Type
+from woob.browser.pages import HTMLPage
 from woob.capabilities.base import NotAvailable
+from woob.capabilities.geolocip import IpLocation
 
 
 class LocationPage(HTMLPage):
@@ -30,7 +28,7 @@ class LocationPage(HTMLPage):
     class get_location(ItemElement):
         klass = IpLocation
 
-        obj_id = Regexp(CleanText('//h1/strong[starts-with(.,"IP Address Information")]'), r'- ([.\d]+)')
+        obj_id = Regexp(CleanText('//h1/strong[starts-with(.,"IP Address Information")]'), r"- ([.\d]+)")
 
         obj_city = CleanText('//td[.//strong[text()="City"]]', children=False)
         obj_country = CleanText('//td[.//strong[text()="Country"]]', children=False)
@@ -38,6 +36,9 @@ class LocationPage(HTMLPage):
         obj_zipcode = CleanText('//td[.//strong[text()="Postcode"]]', children=False)
         obj_host = CleanText('//td[.//strong[text()="Domain Name"]]', children=False, default=NotAvailable)
         obj_isp = CleanText('//td[.//strong[text()="ISP"]]', children=False)
-        obj_lt = Regexp(CleanText('//td[.//strong[text()="Coordinates of City"]]', children=False), r'\(([\d.-]+), [\d.-]+\)') & Type(type=float)
-        obj_lg = Regexp(CleanText('//td[.//strong[text()="Coordinates of City"]]', children=False), r'\([\d.-]+, ([\d.-]+)\)') & Type(type=float)
-
+        obj_lt = Regexp(
+            CleanText('//td[.//strong[text()="Coordinates of City"]]', children=False), r"\(([\d.-]+), [\d.-]+\)"
+        ) & Type(type=float)
+        obj_lg = Regexp(
+            CleanText('//td[.//strong[text()="Coordinates of City"]]', children=False), r"\([\d.-]+, ([\d.-]+)\)"
+        ) & Type(type=float)

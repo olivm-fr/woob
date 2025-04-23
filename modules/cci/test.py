@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -22,10 +20,10 @@ from woob.tools.test import BackendTest
 
 
 class CciTest(BackendTest):
-    MODULE = 'cci'
+    MODULE = "cci"
 
     def test_cci_search(self):
         l = list(self.backend.search_job())
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, None)
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -19,19 +17,20 @@
 
 import re
 
-from woob.capabilities.translate import Translation
-from woob.browser.elements import method, ListElement, ItemElement
-from woob.browser.filters.standard import Env, CleanText
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import CleanText, Env
 from woob.browser.pages import HTMLPage
+from woob.capabilities.translate import Translation
+
 
 CODES = {
-    'allemand': 'de',
-    'anglais': 'en',
-    'arabe': 'ar',
-    'chinois': 'zh',
-    'espagnol': 'es',
-    'francais': 'fr',
-    'italien': 'it',
+    "allemand": "de",
+    "anglais": "en",
+    "arabe": "ar",
+    "chinois": "zh",
+    "espagnol": "es",
+    "francais": "fr",
+    "italien": "it",
 }
 
 RCODES = {v: k for k, v in CODES.items()}
@@ -41,8 +40,8 @@ class LangList(HTMLPage):
     def get_langs(self):
         res = {}
         for a in self.doc.xpath('//a[@class="item-dico-bil"]'):
-            url = a.attrib['href']
-            mtc = re.search(r'/dictionnaires/(\w+)-(\w+)', url)
+            url = a.attrib["href"]
+            mtc = re.search(r"/dictionnaires/(\w+)-(\w+)", url)
             if not mtc:
                 continue
             src, dst = mtc.groups()
@@ -61,7 +60,7 @@ class WordPage(HTMLPage):
             def condition(self):
                 # ignore sub-translations
                 parent = self.el.getparent()
-                if parent.attrib.get('class', '') in ('Traduction', 'Traduction2'):
+                if parent.attrib.get("class", "") in ("Traduction", "Traduction2"):
                     return False
 
                 if self.el.xpath('./ancestor::div[@class="BlocExpression" or @class="ZoneExpression"]'):
@@ -69,16 +68,16 @@ class WordPage(HTMLPage):
                     return False
 
                 # ignore idioms translations
-                for sibling in self.el.xpath('./preceding-sibling::*')[::-1]:
-                    if sibling.tag == 'br':
+                for sibling in self.el.xpath("./preceding-sibling::*")[::-1]:
+                    if sibling.tag == "br":
                         return True
-                    if sibling.tag == 'span' and sibling.attrib.get('class', '') == 'Locution2':
+                    if sibling.tag == "span" and sibling.attrib.get("class", "") == "Locution2":
                         return False
                     # TODO handle RTL text which is put in a sub div
                 return True
 
-            obj_lang_src = Env('src')
-            obj_lang_dst = Env('dst')
+            obj_lang_src = Env("src")
+            obj_lang_dst = Env("dst")
 
             def obj_text(self):
-                return re.sub(',', '', CleanText('./a[has-class("lienarticle2")]')(self)).strip()
+                return re.sub(",", "", CleanText('./a[has-class("lienarticle2")]')(self)).strip()

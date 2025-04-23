@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Vincent A
 #
 # This file is part of a woob module.
@@ -19,13 +17,9 @@
 
 # flake8: compatible
 
-from woob.browser.elements import method, ListElement, ItemElement
-from woob.browser.filters.standard import (
-    CleanText, DateTime, Env, Format, Regexp, Map,
-)
-from woob.browser.pages import (
-    HTMLPage, Page, JsonPage, PartialHTMLPage,
-)
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import CleanText, DateTime, Env, Format, Map, Regexp
+from woob.browser.pages import HTMLPage, JsonPage, Page, PartialHTMLPage
 from woob.capabilities.base import NotAvailable
 from woob.capabilities.parcel import Event, Parcel, ParcelState
 
@@ -82,7 +76,8 @@ class TrackPage(ParentPage, JsonPage):
                 class date(ListElement):
                     def parse(self, el):
                         self.env["date"] = Regexp(
-                            CleanText("./div/div/p/strong"), r"(\d{2}/\d{2}/\d{4})",
+                            CleanText("./div/div/p/strong"),
+                            r"(\d{2}/\d{2}/\d{4})",
                         )(el)
 
                     item_xpath = ".//div[has-class('step-suivi') and not(./input)]"
@@ -94,12 +89,11 @@ class TrackPage(ParentPage, JsonPage):
                             Format(
                                 "%s %s",
                                 Env("date"),
-                                Regexp(
-                                    CleanText("./div/p"),
-                                    r"(\d{2}:\d{2})"
-                                ),
+                                Regexp(CleanText("./div/p"), r"(\d{2}:\d{2})"),
                             ),
-                            tzinfo="Europe/Paris", dayfirst=True, strict=False,
+                            tzinfo="Europe/Paris",
+                            dayfirst=True,
+                            strict=False,
                         )
                         obj_activity = CleanText("./div/p[not(@class)]")
                         obj_location = Regexp(obj_activity, r"site logistique de ([^.]+)", default=NotAvailable)

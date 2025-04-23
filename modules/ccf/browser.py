@@ -17,17 +17,19 @@
 
 import random
 from base64 import b64encode
+from datetime import date
 from hashlib import sha256
+
+from dateutil.relativedelta import relativedelta
 
 from woob.browser import URL, need_login
 from woob.browser.browsers import ClientError, ServerError
-from woob_modules.cmso.par.browser import CmsoParBrowser
-from woob.capabilities.bill import Subscription
 from woob.capabilities.bank import Account
 from woob.tools.decorators import retry
+from woob_modules.cmso.par.browser import CmsoParBrowser
 
+from .pages import AccountsPage, BalancePage, DocumentsPage, RibPage, SubscriptionsPage, TransactionsPage
 
-from .pages import SubscriptionsPage, DocumentsPage, RibPage, TransactionsPage
 
 __all__ = ["CCFParBrowser", "CCFProBrowser"]
 
@@ -37,18 +39,25 @@ class CCFBrowser(CmsoParBrowser):
     arkea_si = None
     AUTH_CLIENT_ID = "S4dgkKwTA7FQzWxGRHPXe6xNvihEATOY"
 
-    subscriptions = URL(
-        r"/distri-account-api/api/v1/customers/me/accounts", SubscriptionsPage
+    # Use CmsoParBrowser as base, but rely on /distri-account-api/api
+    # for accounts list & balance. Like modules/allianzbanque/browser.py
+    # We should probably extract a common browser.
+
+    balances_comings = URL(
+        r"/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/total-upcoming-transactions",
+        AccountsPage,
     )
-    documents = URL(r"/documentapi/api/v2/documents\?type=RELEVE$", DocumentsPage)
-    document_pdf = URL(
-        r"/documentapi/api/v2/documents/(?P<document_id>.*)/content\?database=(?P<database>.*)"
-    )
-    rib_details = URL(r"/domiapi/oauth/json/accounts/recupererRib$", RibPage)
     transactions = URL(
-        r'/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/transactions',
-        TransactionsPage
+        r"/distri-account-api/api/v1/persons/me/accounts/(?P<account_id>[A-Z0-9]{10})/transactions", TransactionsPage
     )
+    # accounts_: note the trailing underscore
+    # don't override super.accounts, used indirectly by get_ibans_from_ribs
+    accounts_ = URL(r"/distri-account-api/api/v1/persons/me/accounts", AccountsPage)
+    balance = URL(r"/distri-account-api/api/v1/customers/me/accounts/(?P<account_id>.*)/balances", BalancePage)
+    subscriptions = URL(r"/distri-account-api/api/v1/customers/me/accounts", SubscriptionsPage)
+    documents = URL(r"/documentapi/api/v2/documents\?type=RELEVE$", DocumentsPage)
+    document_pdf = URL(r"/documentapi/api/v2/documents/(?P<document_id>.*)/content\?database=(?P<database>.*)")
+    rib_details = URL(r"/domiapi/oauth/json/accounts/recupererRib$", RibPage)
 
     def __init__(self, *args, **kwargs):
         # most of url return 403 without this origin header
@@ -104,17 +113,12 @@ class CCFBrowser(CmsoParBrowser):
 
     @need_login
     def get_subscription_list(self):
-        accounts_list = self.iter_accounts()
-        subscriptions = []
-        for account in accounts_list:
-            s = Subscription()
-            s.label = account._lib
-            if account.number:
-                s.label = f"{s.label} {account.number}"
-            s.subscriber = account._owner_name
-            s.id = account.id
-            subscriptions.append(s)
-        return subscriptions
+        params = {
+            "types": "CHECKING",
+            "roles": "TIT,COT",
+        }
+        self.subscriptions.go(params=params)
+        return self.page.iter_subscriptions()
 
     @need_login
     def iter_documents(self, subscription):
@@ -132,11 +136,33 @@ class CCFBrowser(CmsoParBrowser):
         if not account.iban:
             account.iban = iban_number
 
-    def iter_accounts(self):
+    def get_ibans_from_ribs(self):
         accounts_list = super().iter_accounts()
         for account in accounts_list:
             account._original_id = account.id
             self.update_iban(account)
+        return {account.id: account.iban for account in accounts_list}
+
+    @need_login
+    def iter_accounts(self):
+        ibans = self.get_ibans_from_ribs()
+
+        go_accounts = retry(ClientError, tries=5)(self.accounts_.go)
+        go_accounts(params={"types": "CHECKING,SAVING"})
+
+        accounts_list = list(self.page.iter_accounts())
+        for account in accounts_list:
+            self.balance.go(account_id=account.id)
+            balance = list(self.page.iter_balances())[0 if account.type == Account.TYPE_CHECKING else 1]  # valorisation
+            account.balance = balance.amount
+            account.iban = ibans.get(account.id)
+            if account.iban:
+                account.number = account.iban.account_code
+            date_to = (date.today() + relativedelta(days=5)).strftime("%Y-%m-%dT11:00:00.000Z")
+            self.balances_comings.go(account_id=account.id, params={"dateTo": date_to})
+            self.page.fill_coming(account)
+            account._original_id = account.id
+
         return accounts_list
 
     @need_login

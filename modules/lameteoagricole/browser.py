@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -18,24 +16,26 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import CitiesPage, HourPage, Days5Page, Days10Page
+from .pages import CitiesPage, Days5Page, Days10Page, HourPage
 
 
 class LameteoagricoleBrowser(PagesBrowser):
-    BASEURL = 'https://www.lameteoagricole.net'
-    cities = URL(r'/autocomplete/autocomplete_ajax_new.php\?table=meteo_ville_france_new&field=nom_commune_normalise&search=(?P<pattern>.*)',
-                 CitiesPage)
-    hour = URL(r'/meteo-heure-par-heure/(?P<code>[^.]+).html',
-               r'/index_meteo-heure-par-heure.php\?communehome=(?P<id>.*)',
-               HourPage)
-    day5 = URL(r'/previsions-meteo-agricole/(?P<code>[^.]+).html',
-               r'/index.php\?communehome=(?P<id>.*)',
-               Days5Page)
-    day10 = URL(r'/meteo-a-10-jours/(?P<code>[^.]+).html',
-                r'/index_meteo-a-10-jours.php\?communehome=(?P<id>.*)',
-                Days10Page)
+    BASEURL = "https://www.lameteoagricole.net"
+    cities = URL(
+        r"/autocomplete/autocomplete_ajax_new.php\?table=meteo_ville_france_new&field=nom_commune_normalise&search=(?P<pattern>.*)",
+        CitiesPage,
+    )
+    hour = URL(
+        r"/meteo-heure-par-heure/(?P<code>[^.]+).html",
+        r"/index_meteo-heure-par-heure.php\?communehome=(?P<id>.*)",
+        HourPage,
+    )
+    day5 = URL(r"/previsions-meteo-agricole/(?P<code>[^.]+).html", r"/index.php\?communehome=(?P<id>.*)", Days5Page)
+    day10 = URL(
+        r"/meteo-a-10-jours/(?P<code>[^.]+).html", r"/index_meteo-a-10-jours.php\?communehome=(?P<id>.*)", Days10Page
+    )
 
     def iter_cities(self, pattern):
         self.cities.go(pattern=pattern)
@@ -48,13 +48,10 @@ class LameteoagricoleBrowser(PagesBrowser):
 
     def iter_forecast(self, id):
         self.hour.go(id=id)
-        for f in self.page.iter_forecast():
-            yield f
+        yield from self.page.iter_forecast()
 
         self.day5.go(id=id)
-        for f in self.page.iter_forecast():
-            yield f
+        yield from self.page.iter_forecast()
 
         self.day10.go(id=id)
-        for f in self.page.iter_forecast():
-            yield f
+        yield from self.page.iter_forecast()

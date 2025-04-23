@@ -18,37 +18,34 @@
 # flake8: compatible
 
 from woob.capabilities.bank.wealth import CapBankWealth
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import ApivieBrowser
 
 
-__all__ = ['ApivieModule']
+__all__ = ["ApivieModule"]
 
 
 class ApivieModule(Module, CapBankWealth):
-    NAME = 'apivie'
-    DESCRIPTION = 'Apivie'
-    MAINTAINER = 'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    VERSION = '3.6'
+    NAME = "apivie"
+    DESCRIPTION = "Apivie"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    VERSION = "3.7"
 
     BROWSER = ApivieBrowser
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Identifiant', masked=False),
-        ValueBackendPassword('password', label='Mot de passe'),
-        ValueTransient('request_information'),
-        ValueTransient('otp_sms'),
+        ValueBackendPassword("login", label="Identifiant", masked=False),
+        ValueBackendPassword("password", label="Mot de passe"),
+        ValueTransient("request_information"),
+        ValueTransient("otp_sms"),
     )
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config,
-            'hub.apivie.fr',
-            self.config['login'].get(),
-            self.config['password'].get()
+            self.config, "hub.apivie.fr", self.config["login"].get(), self.config["password"].get()
         )
 
     def iter_accounts(self):

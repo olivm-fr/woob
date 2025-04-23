@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Vincent A
 #
 # This file is part of a woob module.
@@ -38,8 +36,8 @@ class SearchAPI(JsonPage):
 class ViewPage(HTMLPage):
     @property
     def type(self):
-        return Attr('//*[@class="download_menu"]', 'data-type')(self.doc)
+        return Attr('//*[@class="download_menu"]', "data-type")(self.doc)
 
     @property
     def filename(self):
-        return Attr('//*[@class="download_menu"]//input[@data-perm="auth"]', 'value')(self.doc)
+        return Attr('//*[@class="download_menu"]//input[@data-perm="auth"]', "value")(self.doc)

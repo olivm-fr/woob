@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Edouard Lambert
 #
 # This file is part of a woob module.
@@ -17,24 +15,24 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.value import ValueBackendPassword
 from woob.capabilities.bank.wealth import CapBankWealth
+from woob.tools.value import ValueBackendPassword
 from woob_modules.humanis.module import HumanisModule
 
 
-__all__ = ['PradoepargneModule']
+__all__ = ["PradoepargneModule"]
 
 
 class PradoepargneModule(HumanisModule, CapBankWealth):
-    NAME = 'pradoepargne'
-    DESCRIPTION = 'Prado Épargne Salariale'
-    MAINTAINER = 'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
-    DEPENDENCIES = ('humanis',)
+    NAME = "pradoepargne"
+    DESCRIPTION = "Prado Épargne Salariale"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
+    DEPENDENCIES = ("humanis",)
     CONFIG = HumanisModule.CONFIG.with_values(
-        ValueBackendPassword('login', label='Identifiant', masked=False),
+        ValueBackendPassword("login", label="Identifiant", masked=False),
     )
 
-    PARENT = 'humanis'
+    PARENT = "humanis"

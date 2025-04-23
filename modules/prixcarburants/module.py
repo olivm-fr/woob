@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Romain Bignon
 #
 # This file is part of a woob module.
@@ -17,27 +15,29 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value
-from woob.capabilities.pricecomparison import CapPriceComparison, Price, Product, PriceNotFound
 from woob.capabilities.base import find_object
+from woob.capabilities.pricecomparison import CapPriceComparison, Price, PriceNotFound, Product
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value
 
 from .browser import PrixCarburantsBrowser
 
 
-__all__ = ['PrixCarburantsModule']
+__all__ = ["PrixCarburantsModule"]
 
 
 class PrixCarburantsModule(Module, CapPriceComparison):
-    NAME = 'prixcarburants'
-    MAINTAINER = u'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    VERSION = '3.6'
-    DESCRIPTION = 'French governement website to compare fuel prices'
-    LICENSE = 'AGPLv3+'
+    NAME = "prixcarburants"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    VERSION = "3.7"
+    DESCRIPTION = "French governement website to compare fuel prices"
+    LICENSE = "AGPLv3+"
     BROWSER = PrixCarburantsBrowser
-    CONFIG = BackendConfig(Value('zipcode', label='Zipcode', regexp=r'\d+', default=''),
-                           Value('town', label='Town name', regexp=r'[\w\-\s]+', masked=False, default=''))
+    CONFIG = BackendConfig(
+        Value("zipcode", label="Zipcode", regexp=r"\d+", default=""),
+        Value("town", label="Town name", regexp=r"[\w\-\s]+", masked=False, default=""),
+    )
 
     def search_products(self, pattern=None):
         for product in self.browser.iter_products():
@@ -47,19 +47,19 @@ class PrixCarburantsModule(Module, CapPriceComparison):
     def iter_prices(self, products):
         product = [product for product in products if product.backend == self.name]
         if product:
-            return self.browser.iter_prices(self.config['zipcode'].get(),
-                                            self.config['town'].get(),
-                                            product[0])
+            return self.browser.iter_prices(self.config["zipcode"].get(), self.config["town"].get(), product[0])
 
     def get_price(self, id, price=None):
-        product = Product(id.split('.')[0])
+        product = Product(id.split(".")[0])
         product.backend = self.name
 
         price = find_object(self.iter_prices([product]), id=id, error=PriceNotFound)
-        price.shop.info = self.browser.get_shop_info(price.id.split('.', 2)[-1])
+        price.shop.info = self.browser.get_shop_info(price.id.split(".", 2)[-1])
         return price
 
     def fill_price(self, price, fields):
         return self.get_price(price.id, price)
 
-    OBJECTS = {Price: fill_price, }
+    OBJECTS = {
+        Price: fill_price,
+    }

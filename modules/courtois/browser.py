@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a woob module.
@@ -21,5 +19,5 @@ from woob.browser import AbstractBrowser
 
 
 class CourtoisBrowser(AbstractBrowser):
-    BASEURL = 'https://www.banque-courtois.fr/'
-    PARENT = 'creditdunord'
+    BASEURL = "https://www.banque-courtois.fr/"
+    PARENT = "creditdunord"

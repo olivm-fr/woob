@@ -17,34 +17,33 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.picross import (
-    CapPicross, PicrossSolutionKind, PicrossSolvedStatus,
-)
+from woob.capabilities.picross import CapPicross, PicrossSolutionKind, PicrossSolvedStatus
 from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
 
 from .browser import PixNCrossBrowser
 
-__all__ = ['PixNCrossModule']
+
+__all__ = ["PixNCrossModule"]
 
 
 class PixNCrossModule(Module, CapPicross):
-    NAME = 'pixncross'
+    NAME = "pixncross"
     DESCRIPTION = "Pix'N'Cross"
-    MAINTAINER = 'Thomas Touhey'
-    EMAIL = 'thomas@touhey.fr'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    MAINTAINER = "Thomas Touhey"
+    EMAIL = "thomas@touhey.fr"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     CONFIG = BackendConfig(
         ValueBackendPassword(
-            'login',
+            "login",
             label="Nom d'utilisateur",
             required=False,
         ),
         ValueBackendPassword(
-            'password',
-            label='Mot de passe',
+            "password",
+            label="Mot de passe",
             required=False,
         ),
     )
@@ -55,8 +54,8 @@ class PixNCrossModule(Module, CapPicross):
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['login'].get(),
-            self.config['password'].get(),
+            self.config["login"].get(),
+            self.config["password"].get(),
         )
 
     def iter_picross_puzzles(self, solved_status=PicrossSolvedStatus.UNKNOWN):
@@ -67,6 +66,6 @@ class PixNCrossModule(Module, CapPicross):
 
     def submit_picross_puzzle_solution(self, puzzle, solution):
         if solution.kind != PicrossSolutionKind.PLACEMENTS:
-            raise ValueError('Solution kind must be PLACEMENTS.')
+            raise ValueError("Solution kind must be PLACEMENTS.")
 
         return self.browser.submit_solution(puzzle.id, solution)

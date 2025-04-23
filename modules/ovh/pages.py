@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Vincent Paredes
 #
 # This file is part of a woob module.
@@ -17,13 +15,15 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.bill import Bill, Subscription
-from woob.browser.pages import HTMLPage, LoggedPage, JsonPage
-from woob.browser.filters.standard import CleanDecimal, CleanText, Env, Format, DateTime
+import time
+
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import Attr
 from woob.browser.filters.json import Dict
-from woob.browser.elements import ListElement, ItemElement, method, DictElement
-import time
+from woob.browser.filters.standard import CleanDecimal, CleanText, DateTime, Env, Format
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from woob.capabilities.bill import Bill, Subscription
+
 
 class LoginPage(HTMLPage):
     def is_logged(self):
@@ -32,8 +32,8 @@ class LoginPage(HTMLPage):
     def login(self, login, password):
         form = self.get_form('//form[@id="login-form"]')
         # because name attribute for login and password change each time we call this page
-        user = Attr('//form[@id="login-form"]//input[@id="account"]', 'name')(self.doc)
-        pwd = Attr('//form[@id="login-form"]//input[@id="password"]', 'name')(self.doc)
+        user = Attr('//form[@id="login-form"]//input[@id="account"]', "name")(self.doc)
+        pwd = Attr('//form[@id="login-form"]//input[@id="password"]', "name")(self.doc)
 
         form[user] = login
         form[pwd] = password
@@ -53,15 +53,15 @@ class LoginPage(HTMLPage):
 
     def maybe_switch_user_double_auth(self, method):
         form = self.get_form('//form[@id="form-2fa" or @id="2fa"]')
-        if form['change2FA'] != method:
-            form['change2FA'] = method
+        if form["change2FA"] != method:
+            form["change2FA"] = method
             time.sleep(0.5)
             form.submit()
 
     def submit_user_double_auth(self, method, value):
         form = self.get_form('//form[@id="form-2fa" or @id="2fa"]')
         form[method] = value
-        form['otpMethod'] = method
+        form["otpMethod"] = method
         time.sleep(0.5)
         form.submit()
 
@@ -83,35 +83,35 @@ class ProfilePage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Subscription
 
-            obj_label = CleanText(Dict('nichandle'))
-            obj_subscriber = Format("%s %s", CleanText(Dict('firstname')), CleanText(Dict('name')))
-            obj_id = CleanText(Dict('nichandle'))
+            obj_label = CleanText(Dict("nichandle"))
+            obj_subscriber = Format("%s %s", CleanText(Dict("firstname")), CleanText(Dict("name")))
+            obj_id = CleanText(Dict("nichandle"))
 
 
 class BillItem(ItemElement):
     klass = Bill
 
-    obj_id = Format('%s.%s', Env('subid'), Dict('orderId'))
-    obj_total_price = CleanDecimal.SI(Dict('priceWithTax/value'))
-    obj_format = 'pdf'
-    obj_url = Dict('pdfUrl')
-    obj_label = Format('Facture %s', Dict('orderId'))
+    obj_id = Format("%s.%s", Env("subid"), Dict("orderId"))
+    obj_total_price = CleanDecimal.SI(Dict("priceWithTax/value"))
+    obj_format = "pdf"
+    obj_url = Dict("pdfUrl")
+    obj_label = Format("Facture %s", Dict("orderId"))
 
 
 class BillsPage(LoggedPage, JsonPage):
     @method
     class get_documents(DictElement):
-        item_xpath = 'list/results'
+        item_xpath = "list/results"
 
         class item(BillItem):
-            obj_date = DateTime(Dict('billingDate'))
+            obj_date = DateTime(Dict("billingDate"))
 
 
 class RefundsPage(LoggedPage, JsonPage):
     @method
     class get_documents(DictElement):
-        item_xpath = 'list/results'
+        item_xpath = "list/results"
 
         class item(BillItem):
-            obj_date = DateTime(Dict('date'))
-            obj_total_price = CleanDecimal.SI(Dict('priceWithTax/value'), sign='-')
+            obj_date = DateTime(Dict("date"))
+            obj_total_price = CleanDecimal.SI(Dict("priceWithTax/value"), sign="-")

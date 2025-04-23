@@ -16,11 +16,11 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import Capability, BaseObject, Field, DecimalField, \
-                  StringField, UserError
+from .base import BaseObject, Capability, DecimalField, Field, StringField, UserError
 from .date import DateField
 
-__all__ = ['Shop', 'Price', 'Product', 'CapPriceComparison']
+
+__all__ = ["Shop", "Price", "Product", "CapPriceComparison"]
 
 
 class PriceNotFound(UserError):
@@ -28,36 +28,39 @@ class PriceNotFound(UserError):
     Raised when a price is not found
     """
 
-    def __init__(self, msg='Price not found'):
-        super(PriceNotFound, self).__init__(msg)
+    def __init__(self, msg="Price not found"):
+        super().__init__(msg)
 
 
 class Product(BaseObject):
     """
     A product.
     """
-    name =      StringField('Name of product')
+
+    name = StringField("Name of product")
 
 
 class Shop(BaseObject):
     """
     A shop where the price is.
     """
-    name =      StringField('Name of shop')
-    location =  StringField('Location of the shop')
-    info =      StringField('Information about the shop')
+
+    name = StringField("Name of shop")
+    location = StringField("Location of the shop")
+    info = StringField("Information about the shop")
 
 
 class Price(BaseObject):
     """
     Price.
     """
-    date =      DateField('Date when this price has been published')
-    cost =      DecimalField('Cost of the product in this shop')
-    currency =  StringField('Currency of the price')
-    message =   StringField('Message related to this price')
-    shop =      Field('Shop information', Shop)
-    product =   Field('Product', Product)
+
+    date = DateField("Date when this price has been published")
+    cost = DecimalField("Cost of the product in this shop")
+    currency = StringField("Currency of the price")
+    message = StringField("Message related to this price")
+    shop = Field("Shop information", Shop)
+    product = Field("Product", Product)
 
 
 class CapPriceComparison(Capability):

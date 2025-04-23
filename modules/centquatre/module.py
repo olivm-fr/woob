@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Phyks
 #
 # This file is part of a woob module.
@@ -18,32 +16,32 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value, ValueBackendPassword
 from woob.capabilities.calendar import CapCalendarEvent
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import CentQuatreBrowser
 
-__all__ = ['CentQuatreModule']
+
+__all__ = ["CentQuatreModule"]
 
 
 class CentQuatreModule(Module, CapCalendarEvent):
-    NAME = 'centquatre'
-    DESCRIPTION = u'centquatre website'
-    MAINTAINER = u'Phyks'
-    EMAIL = 'phyks@phyks.me'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "centquatre"
+    DESCRIPTION = "centquatre website"
+    MAINTAINER = "Phyks"
+    EMAIL = "phyks@phyks.me"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
     BROWSER = CentQuatreBrowser
 
     CONFIG = BackendConfig(
-        Value('email', label='Username', default=''),
-        ValueBackendPassword('password', label='Password', default='')
+        Value("email", label="Username", default=""), ValueBackendPassword("password", label="Password", default="")
     )
 
     def create_default_browser(self):
-        email = self.config['email'].get()
-        password = self.config['password'].get()
+        email = self.config["email"].get()
+        password = self.config["password"].get()
         return self.create_browser(email, password)
 
     def get_event(self, _id):

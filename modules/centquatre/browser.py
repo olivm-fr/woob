@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Phyks
 #
 # This file is part of a woob module.
@@ -20,21 +18,21 @@
 
 import itertools
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import BrowserIncorrectPassword
 
-from .pages import CentQuatrePage, LoginPage, TicketsPage, TicketsDetailsPage
+from .pages import CentQuatrePage, LoginPage, TicketsDetailsPage, TicketsPage
 
 
-__all__ = ['CentQuatreBrowser']
+__all__ = ["CentQuatreBrowser"]
 
 
 class CentQuatreBrowser(LoginBrowser):
-    BASEURL = 'https://billetterie.104.fr'
-    login = URL(r'/account/login$', LoginPage)
-    tickets = URL(r'/account/tickets', TicketsPage)
-    ticketDetails = URL(r'/account/file\?(.*)?fileId=(?P<fileId>)', TicketsDetailsPage)
-    unknown = URL(r'*', CentQuatrePage)
+    BASEURL = "https://billetterie.104.fr"
+    login = URL(r"/account/login$", LoginPage)
+    tickets = URL(r"/account/tickets", TicketsPage)
+    ticketDetails = URL(r"/account/file\?(.*)?fileId=(?P<fileId>)", TicketsDetailsPage)
+    unknown = URL(r"*", CentQuatrePage)
 
     def do_login(self):
         self.session.cookies.clear()

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 
 # flake8: compatible
@@ -19,39 +17,39 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.browser.exceptions import ServerError
 from woob.exceptions import BrowserIncorrectPassword, BrowserQuestion
 from woob.tools.value import Value
 
-from .pages import LoginPage, SubscriptionsPage, DocumentsPage
+from .pages import DocumentsPage, LoginPage, SubscriptionsPage
 
 
 class InfomaniakBrowser(LoginBrowser):
-    BASEURL = 'https://manager.infomaniak.com'
+    BASEURL = "https://manager.infomaniak.com"
 
-    login = URL(r'https://login.infomaniak.com/api/login', LoginPage)
-    profile = URL(r'/v3/api/proxypass/profile', SubscriptionsPage)
-    documents = URL(r'/v3/api/invoicing/(?P<subid>.*)/invoices', DocumentsPage)
+    login = URL(r"https://login.infomaniak.com/api/login", LoginPage)
+    profile = URL(r"/v3/api/proxypass/profile", SubscriptionsPage)
+    documents = URL(r"/v3/api/invoicing/(?P<subid>.*)/invoices", DocumentsPage)
 
     def __init__(self, config, *args, **kwargs):
         self.config = config
-        kwargs['username'] = self.config['login'].get()
-        kwargs['password'] = self.config['password'].get()
-        super(InfomaniakBrowser, self).__init__(*args, **kwargs)
+        kwargs["username"] = self.config["login"].get()
+        kwargs["password"] = self.config["password"].get()
+        super().__init__(*args, **kwargs)
 
     def do_login(self):
         try:
-            if self.config['otp'].get():
+            if self.config["otp"].get():
                 self.login.go(
                     data={
-                        'login': self.username,
-                        'password': self.password,
-                        'double_auth_code': self.config['otp'].get(),
+                        "login": self.username,
+                        "password": self.password,
+                        "double_auth_code": self.config["otp"].get(),
                     }
                 )
             else:
-                self.login.go(data={'login': self.username, 'password': self.password})
+                self.login.go(data={"login": self.username, "password": self.password})
         except ServerError as e:
             if e.response.status_code == 500:
                 page = LoginPage(self, e.response)
@@ -61,8 +59,8 @@ class InfomaniakBrowser(LoginBrowser):
                     raise BrowserIncorrectPassword(page.get_error())
             raise
 
-        if self.page.has_otp and not self.config['otp'].get():
-            raise BrowserQuestion(Value('otp', label='Enter the OTP'))
+        if self.page.has_otp and not self.config["otp"].get():
+            raise BrowserQuestion(Value("otp", label="Enter the OTP"))
 
     @need_login
     def iter_subscription(self):
@@ -72,11 +70,11 @@ class InfomaniakBrowser(LoginBrowser):
     @need_login
     def iter_documents(self, subscription):
         params = {
-            'ajax': 'true',
-            'order_by': 'name',
-            'order_for[name]': 'asc',
-            'page': '1',
-            'per_page': '100',
+            "ajax": "true",
+            "order_by": "name",
+            "order_for[name]": "asc",
+            "page": "1",
+            "per_page": "100",
         }
         self.documents.go(subid=subscription.id, params=params)
         return self.page.iter_documents(subid=subscription.id)

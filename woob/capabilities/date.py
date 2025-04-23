@@ -17,11 +17,11 @@
 
 import datetime
 
-from woob.tools.date import new_date, new_datetime
 from woob.capabilities.base import Field
+from woob.tools.date import new_date, new_datetime
 
 
-__all__ = ['DateField', 'TimeField', 'DeltaField']
+__all__ = ["DateField", "TimeField", "DeltaField"]
 
 
 class DateField(Field):
@@ -30,10 +30,10 @@ class DateField(Field):
     """
 
     def __init__(self, doc, **kwargs):
-        super(DateField, self).__init__(doc, datetime.date, datetime.datetime, **kwargs)
+        super().__init__(doc, datetime.date, datetime.datetime, **kwargs)
 
     def __setattr__(self, name, value):
-        if name == 'value':
+        if name == "value":
             # Force use of our date and datetime types, to fix bugs in python2
             # with strftime on year<1900.
             if type(value) is datetime.datetime:
@@ -49,7 +49,7 @@ class TimeField(Field):
     """
 
     def __init__(self, doc, **kwargs):
-        super(TimeField, self).__init__(doc, datetime.time, datetime.datetime, **kwargs)
+        super().__init__(doc, datetime.time, datetime.datetime, **kwargs)
 
 
 class DeltaField(Field):
@@ -58,7 +58,7 @@ class DeltaField(Field):
     """
 
     def __init__(self, doc, **kwargs):
-        super(DeltaField, self).__init__(doc, datetime.timedelta, **kwargs)
+        super().__init__(doc, datetime.timedelta, **kwargs)
 
     def convert(self, value):
         if isinstance(value, int):

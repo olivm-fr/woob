@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Bezleputh
 #
 # This file is part of a woob module.
@@ -17,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.calendar import BaseCalendarEvent, TRANSP, STATUS
+from woob.capabilities.calendar import STATUS, TRANSP, BaseCalendarEvent
 
 
 class AgendaculturelEvent(BaseCalendarEvent):
@@ -27,4 +25,4 @@ class AgendaculturelEvent(BaseCalendarEvent):
         self.sequence = 1
         self.transp = TRANSP.TRANSPARENT
         self.status = STATUS.CONFIRMED
-        self.timezone = u'Europe/Paris'
+        self.timezone = "Europe/Paris"

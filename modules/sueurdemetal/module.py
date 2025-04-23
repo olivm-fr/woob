@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Vincent A
 #
 # This file is part of a woob module.
@@ -23,30 +21,31 @@ from woob.tools.backend import Module
 
 from .browser import SueurDeMetalBrowser
 
-__all__ = ['SueurDeMetalModule']
+
+__all__ = ["SueurDeMetalModule"]
 
 
 class SueurDeMetalModule(Module, CapCalendarEvent):
-    NAME = 'sueurdemetal'
-    DESCRIPTION = u'SueurDeMetal French concerts list website'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "sueurdemetal"
+    DESCRIPTION = "SueurDeMetal French concerts list website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = SueurDeMetalBrowser
 
     ASSOCIATED_CATEGORIES = [CATEGORIES.CONCERT]
 
     def __init__(self, *a, **kw):
-        super(SueurDeMetalModule, self).__init__(*a, **kw)
+        super().__init__(*a, **kw)
         self.cities = {}
 
     def search_events(self, query):
         if not self.has_matching_categories(query):
             return
 
-        for ev in self.browser.search_city(query.city or '00'):
+        for ev in self.browser.search_city(query.city or "00"):
             if query.start_date and ev.start_date < query.start_date:
                 continue
             if query.end_date and ev.start_date > query.end_date:
@@ -63,7 +62,7 @@ class SueurDeMetalModule(Module, CapCalendarEvent):
         return self.browser.get_concert(id)
 
     def fill_concert(self, obj, fields):
-        if set(fields) & set(('location', 'price')):
+        if set(fields) & {"location", "price"}:
             new = self.get_event(obj.id)
             for f in fields:
                 setattr(obj, f, getattr(new, f))

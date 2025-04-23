@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      dud
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import jcvelauxModule
 
 
-__all__ = ['jcvelauxModule']
+__all__ = ["jcvelauxModule"]

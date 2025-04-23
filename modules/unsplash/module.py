@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -17,23 +15,23 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module
 from woob.capabilities.file import CapFile
-from woob.capabilities.image import CapImage, BaseImage
+from woob.capabilities.image import BaseImage, CapImage
+from woob.tools.backend import Module
 
 from .browser import UnsplashBrowser
 
 
-__all__ = ['UnsplashModule']
+__all__ = ["UnsplashModule"]
 
 
 class UnsplashModule(Module, CapImage):
-    NAME = 'unsplash'
-    DESCRIPTION = u'unsplash website'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "unsplash"
+    DESCRIPTION = "unsplash website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = UnsplashBrowser
 
@@ -41,9 +39,9 @@ class UnsplashModule(Module, CapImage):
         return self.browser.search_image(pattern)
 
     def fill_image(self, img, fields):
-        if 'data' in fields:
+        if "data" in fields:
             img.data = self.browser.open(img.url).content
-        if 'thumbnail' in fields:
+        if "thumbnail" in fields:
             img.thumbnail.data = self.browser.open(img.thumbnail.url).content
 
     OBJECTS = {BaseImage: fill_image}

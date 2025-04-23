@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Roger Philibert
 #
 # This file is part of a woob module.
@@ -17,22 +15,23 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.radio import CapRadio, Radio
 from woob.capabilities.collection import CapCollection
+from woob.capabilities.radio import CapRadio, Radio
 from woob.tools.backend import Module
 
 from .browser import SomaFMBrowser
 
-__all__ = ['SomaFMModule']
+
+__all__ = ["SomaFMModule"]
 
 
 class SomaFMModule(Module, CapRadio, CapCollection):
-    NAME = 'somafm'
-    MAINTAINER = u'Roger Philibert'
-    EMAIL = 'roger.philibert@gmail.com'
-    VERSION = '3.6'
-    DESCRIPTION = u'SomaFM web radio'
-    LICENSE = 'AGPLv3+'
+    NAME = "somafm"
+    MAINTAINER = "Roger Philibert"
+    EMAIL = "roger.philibert@gmail.com"
+    VERSION = "3.7"
+    DESCRIPTION = "SomaFM web radio"
+    LICENSE = "AGPLv3+"
     BROWSER = SomaFMBrowser
 
     def iter_radios_search(self, pattern):
@@ -45,8 +44,7 @@ class SomaFMModule(Module, CapRadio, CapCollection):
         if Radio in objs:
             self._restrict_level(split_path)
 
-            for radio in self.browser.iter_radios():
-                yield radio
+            yield from self.browser.iter_radios()
 
     def get_radio(self, radio_id):
         for radio in self.browser.iter_radios():
@@ -54,7 +52,7 @@ class SomaFMModule(Module, CapRadio, CapCollection):
                 return radio
 
     def fill_radio(self, radio, fields):
-        if 'current' in fields:
+        if "current" in fields:
             return self.get_radio(radio.id)
         return radio
 

@@ -17,25 +17,27 @@
 
 
 from woob.tools.capabilities.streaminfo import StreamInfo
+
+from .audio import BaseAudio, CapAudio
 from .base import Field
 from .file import CapFile
-from .audio import CapAudio, BaseAudio
 
 
-__all__ = ['BaseAudioStream', 'CapAudioStream']
+__all__ = ["BaseAudioStream", "CapAudioStream"]
 
 
 class BaseAudioStream(BaseAudio):
     """
     Audio stream object
     """
-    current = Field('Information related to current broadcast', StreamInfo)
+
+    current = Field("Information related to current broadcast", StreamInfo)
 
     def __str__(self):
-        return '%s (%s)' % (self.title, self.url)
+        return f"{self.title} ({self.url})"
 
     def __repr__(self):
-        return '%r (%r)' % (self.title, self.url)
+        return f"{self.title!r} ({self.url!r})"
 
 
 class CapAudioStream(CapAudio):

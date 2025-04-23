@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -24,13 +22,14 @@ from woob.browser.pages import HTMLPage, RawPage
 class LoginPage(RawPage):
     pass
 
+
 class HomePage(HTMLPage):
     def login(self, login, password):
         form = self.get_form(xpath='//form[@action="%suser/login"]' % self.browser.BASEURL)
-        form['id'] = login
-        form['pass'] = password
-        form.submit(format_url='utf-8')
+        form["id"] = login
+        form["pass"] = password
+        form.submit(format_url="utf-8")
+
     @property
     def logged(self):
         return bool(self.doc.xpath('//a[@href="%suser/logout"]' % self.browser.BASEURL))
-

@@ -16,14 +16,13 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from threading import Event, RLock
-from threading import Timer
+from threading import Event, RLock, Timer
 
 from woob.tools.log import getLogger
 from woob.tools.misc import get_backtrace
 
 
-__all__ = ['Scheduler']
+__all__ = ["Scheduler"]
 
 
 class IScheduler:
@@ -93,7 +92,7 @@ class Scheduler(IScheduler):
     """Scheduler using Python's :mod:`threading`."""
 
     def __init__(self):
-        self.logger = getLogger('%s.scheduler' % __name__)
+        self.logger = getLogger("%s.scheduler" % __name__)
         self.mutex = RLock()
         self.stop_event = Event()
         self.count = 0
@@ -111,7 +110,7 @@ class Scheduler(IScheduler):
 
         with self.mutex:
             self.count += 1
-            self.logger.debug('function "%s" will be called in %s seconds' % (function.__name__, interval))
+            self.logger.debug(f'function "{function.__name__}" will be called in {interval} seconds')
             timer = klass(interval, meta_func, (self.count, interval, function, args))
             self.queue[self.count] = timer
             timer.start()
@@ -130,7 +129,7 @@ class Scheduler(IScheduler):
             except KeyError:
                 return
             else:
-                self.logger.debug('function "%s" will be called in %s seconds' % (function.__name__, e.interval))
+                self.logger.debug(f'function "{function.__name__}" will be called in {e.interval} seconds')
 
     def cancel(self, ev):
         with self.mutex:

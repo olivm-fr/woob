@@ -17,32 +17,36 @@
 
 # flake8: compatible
 
+from woob.capabilities.base import NotAvailable, find_object
 from woob.capabilities.bill import (
-    DocumentTypes, CapDocument, Subscription, Document, DocumentNotFound,
+    CapDocument,
+    Document,
     DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
 )
 from woob.capabilities.profile import CapProfile
-from woob.capabilities.base import find_object, NotAvailable
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, Value, ValueTransient
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .browser import FreeBrowser
 
 
-__all__ = ['FreeModule']
+__all__ = ["FreeModule"]
 
 
 class FreeModule(Module, CapDocument, CapProfile):
-    NAME = 'free'
-    DESCRIPTION = u'free website'
-    MAINTAINER = u'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "free"
+    DESCRIPTION = "free website"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        Value('login', label='Identifiant'),
-        ValueBackendPassword('password', label='Mot de passe'),
-        ValueTransient('private_user_agent', label='Private User-Agent'),
+        Value("login", label="Identifiant"),
+        ValueBackendPassword("password", label="Mot de passe"),
+        ValueTransient("private_user_agent", label="Private User-Agent"),
     )
 
     BROWSER = FreeBrowser
@@ -52,16 +56,14 @@ class FreeModule(Module, CapDocument, CapProfile):
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['private_user_agent'].get(),
-            self.config['login'].get(),
-            self.config['password'].get()
+            self.config["private_user_agent"].get(), self.config["login"].get(), self.config["password"].get()
         )
 
     def iter_subscription(self):
         return self.browser.get_subscription_list()
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
 
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)

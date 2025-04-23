@@ -1,20 +1,18 @@
-# -*- coding: utf-8 -*-
-
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages.index import IndexPage
-from .pages.torrents import TorrentsPage, TorrentPage
+from .pages.torrents import TorrentPage, TorrentsPage
 
 
-__all__ = ['TorrentzBrowser']
+__all__ = ["TorrentzBrowser"]
 
 
 class TorrentzBrowser(PagesBrowser):
-    BASEURL = 'https://torrentz2.eu/'
+    BASEURL = "https://torrentz2.eu/"
 
-    index_page = URL('/$', IndexPage)
-    torrents_page = URL('/search\?f=(?P<query>.+)', TorrentsPage)
-    torrent_page = URL('/(?P<hash>[0-9a-f]+)', TorrentPage)
+    index_page = URL(r"/$", IndexPage)
+    torrents_page = URL(r"/search\?f=(?P<query>.+)", TorrentsPage)
+    torrent_page = URL(r"/(?P<hash>[0-9a-f]+)", TorrentPage)
 
     def home(self):
         return self.index_page.go()

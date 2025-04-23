@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -18,20 +16,23 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import AllPage
 
 
 class AirparifBrowser(PagesBrowser):
-    BASEURL = 'https://airparif.asso.fr'
+    BASEURL = "https://airparif.asso.fr"
 
-    all_page = URL(r'/stations/indicepolluant/', AllPage)
+    all_page = URL(r"/stations/indicepolluant/", AllPage)
 
     def iter_gauges(self):
-        self.all_page.go(method='POST', headers={
-            # don't remove the following headers, site returns 404 else...
-            'X-Requested-With': 'XMLHttpRequest',
-            'Referer': 'https://airparif.asso.fr/stations/index/',
-        })
+        self.all_page.go(
+            method="POST",
+            headers={
+                # don't remove the following headers, site returns 404 else...
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://airparif.asso.fr/stations/index/",
+            },
+        )
         return self.page.iter_gauges()

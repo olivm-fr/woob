@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -30,8 +28,8 @@ class BaseHTMLPage(HTMLPage):
 class LoginPage(HTMLPage):
     def login(self, username, password):
         form = self.get_form(xpath='//form[@method="post"]')
-        form['username'] = username
-        form['password'] = password
+        form["username"] = username
+        form["password"] = password
         form.submit()
 
 
@@ -46,9 +44,9 @@ class MyPage(BaseHTMLPage):
 class ProjectsPage(BaseHTMLPage):
     def iter_projects(self):
         for ul in self.doc.xpath('//ul[has-class("projects")]'):
-            for li in ul.findall('li'):
+            for li in ul.findall("li"):
                 prj = {}
-                link = li.find('div').find('a')
-                prj['id'] = link.attrib['href'].split('/')[-1]
-                prj['name'] = link.text
+                link = li.find("div").find("a")
+                prj["id"] = link.attrib["href"].split("/")[-1]
+                prj["name"] = link.text
                 yield prj

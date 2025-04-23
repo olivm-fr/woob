@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Kevin Pouget
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class CreditCooperatifTest(BackendTest):
-    MODULE = 'creditcooperatif'
+    MODULE = "creditcooperatif"
 
     def test_creditcoop(self):
         l = list(self.backend.iter_accounts())

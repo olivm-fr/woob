@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,33 +15,32 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+from datetime import datetime
 from urllib.parse import urlencode
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import DeparturesPage
 
-from datetime import datetime
-
 
 class BlablacarBrowser(PagesBrowser):
-    BASEURL = 'https://www.blablacar.fr'
+    BASEURL = "https://www.blablacar.fr"
 
-    departures = URL('/search_xhr\?(?P<qry>.*)', DeparturesPage)
+    departures = URL(r"/search_xhr\?(?P<qry>.*)", DeparturesPage)
 
     def get_roadmap(self, departure, arrival, filters):
         pass
 
     def get_station_departures(self, station_id, arrival_id, date):
-        query = {'fn': station_id}
+        query = {"fn": station_id}
         if arrival_id:
-            query['tn'] = arrival_id
+            query["tn"] = arrival_id
 
             if date:
                 _date = datetime.strftime(date, "%d/%m/%Y")
-                query['db'] = _date
+                query["db"] = _date
                 _heure = datetime.strftime(date, "%H")
-                query['hb'] = _heure
-                query['he'] = '24'
+                query["hb"] = _heure
+                query["he"] = "24"
 
         return self.departures.open(qry=urlencode(query)).get_station_departures()

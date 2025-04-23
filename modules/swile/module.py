@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Roger Philibert
 #
 # This file is part of woob.
@@ -19,29 +17,30 @@
 
 # flake8: compatible
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, ValueTransient
 from woob.capabilities.bank import CapBank
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import SwileBrowser
 
-__all__ = ['SwileModule']
+
+__all__ = ["SwileModule"]
 
 
 class SwileModule(Module, CapBank):
-    NAME = 'swile'
-    DESCRIPTION = 'Swile'
-    MAINTAINER = 'Roger Philibert'
-    EMAIL = 'roger.philibert@gmail.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "swile"
+    DESCRIPTION = "Swile"
+    MAINTAINER = "Roger Philibert"
+    EMAIL = "roger.philibert@gmail.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = SwileBrowser
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='E-mail', masked=False),
-        ValueBackendPassword('password', label='Mot de passe'),
-        ValueTransient('captcha_response', label='Captcha Response'),
+        ValueBackendPassword("login", label="E-mail", masked=False),
+        ValueBackendPassword("password", label="Mot de passe"),
+        ValueTransient("captcha_response", label="Captcha Response"),
     )
 
     def create_default_browser(self):

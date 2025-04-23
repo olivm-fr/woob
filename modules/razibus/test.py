@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,15 +16,16 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from datetime import datetime
+
+from woob.tools.test import BackendTest
 
 
 class RazibusTest(BackendTest):
-    MODULE = 'razibus'
+    MODULE = "razibus"
 
     def test_razibus(self):
         l = list(self.backend.list_events(datetime.now()))
         assert len(l)
         event = self.backend.get_event(l[0].id)
-        self.assertTrue(event.url, 'URL for event "%s" not found: %s' % (event.id, event.url))
+        self.assertTrue(event.url, f'URL for event "{event.id}" not found: {event.url}')

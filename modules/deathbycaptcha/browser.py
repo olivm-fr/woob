@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -22,8 +20,8 @@ from collections import OrderedDict
 from io import BytesIO
 from urllib.parse import parse_qsl
 
-from woob.capabilities.captcha import UnsolvableCaptcha, InvalidCaptcha
 from woob.browser import DomainBrowser
+from woob.capabilities.captcha import InvalidCaptcha, UnsolvableCaptcha
 from woob.tools.json import json
 
 
@@ -32,59 +30,63 @@ def parse_qs(d):
 
 
 class DeathbycaptchaBrowser(DomainBrowser):
-    BASEURL = 'http://api.dbcapi.me'
+    BASEURL = "http://api.dbcapi.me"
 
     def __init__(self, username, password, *args, **kwargs):
-        super(DeathbycaptchaBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.username = username
         self.password = password
 
     def check_correct(self, reply):
-        if reply.get('is_correct', '1') == '0':
+        if reply.get("is_correct", "1") == "0":
             raise UnsolvableCaptcha()
-        if reply.get('status', '0') == '255':
-            raise InvalidCaptcha(reply.get('error', ''))
+        if reply.get("status", "0") == "255":
+            raise InvalidCaptcha(reply.get("error", ""))
 
     def create_job(self, data):
-        data64 = b'base64:%s' % b64encode(data)
+        data64 = b"base64:%s" % b64encode(data)
         files = {
-            'captchafile': ('captcha.jpg', BytesIO(data64)),
+            "captchafile": ("captcha.jpg", BytesIO(data64)),
         }
 
-        post = OrderedDict([
-            ('username', self.username),
-            ('password', self.password),
-        ])
+        post = OrderedDict(
+            [
+                ("username", self.username),
+                ("password", self.password),
+            ]
+        )
 
-        r = self.open('/api/captcha', data=post, files=files)
+        r = self.open("/api/captcha", data=post, files=files)
         reply = parse_qs(r.text)
         self.check_correct(reply)
 
-        return reply['captcha']
+        return reply["captcha"]
 
     def create_recaptcha2_job(self, url, key):
 
         token_params = {
-          'googlekey': key,
-          'pageurl': url,
+            "googlekey": key,
+            "pageurl": url,
         }
 
-        data = OrderedDict([
-            ('username', self.username),
-            ('password', self.password),
-            ('type', 4),
-            ('token_params', json.dumps(token_params)),
-        ])
+        data = OrderedDict(
+            [
+                ("username", self.username),
+                ("password", self.password),
+                ("type", 4),
+                ("token_params", json.dumps(token_params)),
+            ]
+        )
 
-        r = self.open('/api/captcha', data=data)
+        r = self.open("/api/captcha", data=data)
         reply = parse_qs(r.text)
         self.check_correct(reply)
 
-        return reply['captcha']
+        return reply["captcha"]
 
     def poll(self, id):
-        r = self.open('/api/captcha/%s' % id)
+        r = self.open("/api/captcha/%s" % id)
         reply = parse_qs(r.text)
         self.check_correct(reply)
 
-        return reply.get('text', None) or None
+        return reply.get("text", None) or None

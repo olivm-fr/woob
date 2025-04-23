@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,20 +16,20 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import RecipePage, ResultsPage
 
 
-__all__ = ['CuisineazBrowser']
+__all__ = ["CuisineazBrowser"]
 
 
 class CuisineazBrowser(PagesBrowser):
 
-    BASEURL = 'https://www.cuisineaz.com'
+    BASEURL = "https://www.cuisineaz.com"
     TIMEOUT = 20
-    search = URL(r'recettes/recherche_terme.aspx\?recherche=(?P<pattern>.*)', ResultsPage)
-    recipe = URL('recettes/(?P<id>.*).aspx', RecipePage)
+    search = URL(r"recettes/recherche_terme.aspx\?recherche=(?P<pattern>.*)", ResultsPage)
+    recipe = URL("recettes/(?P<id>.*).aspx", RecipePage)
 
     def iter_recipes(self, pattern):
         return self.search.go(pattern=pattern).iter_recipes()

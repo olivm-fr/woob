@@ -18,12 +18,12 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.exceptions import BrowserUnavailable
+from woob.tools.test import BackendTest
 
 
 class AuMTest(BackendTest):
-    MODULE = 'aum'
+    MODULE = "aum"
 
     def test_new_messages(self):
         try:
@@ -39,7 +39,7 @@ class AuMTest(BackendTest):
             if len(contacts) == 0:
                 # so bad, we can't test that...
                 return
-            self.backend.fillobj(contacts[0], ['photos', 'profile'])
+            self.backend.fillobj(contacts[0], ["photos", "profile"])
         except BrowserUnavailable:
             # enough frequent to do not care about.
             pass

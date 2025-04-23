@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -18,17 +16,17 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.capabilities.translate import LanguageNotSupported
 
 from .pages import LangList, WordPage
 
 
 class LarousseBrowser(PagesBrowser):
-    BASEURL = 'https://www.larousse.fr'
+    BASEURL = "https://www.larousse.fr"
 
-    langlist = URL('/dictionnaires/bilingues$', LangList)
-    word = URL(r'/dictionnaires/(?P<src>\w+)-(?P<dst>\w+)/(?P<word>.*)', WordPage)
+    langlist = URL("/dictionnaires/bilingues$", LangList)
+    word = URL(r"/dictionnaires/(?P<src>\w+)-(?P<dst>\w+)/(?P<word>.*)", WordPage)
 
     LANGS = None
 

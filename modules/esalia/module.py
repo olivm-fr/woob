@@ -17,32 +17,33 @@
 
 # flake8: compatible
 
-from woob.tools.backend import BackendConfig
-from woob.tools.value import ValueBackendPassword, Value, ValueTransient
 from woob.capabilities.bank.wealth import CapBankWealth
 from woob.capabilities.bill import CapDocument
 from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 from woob_modules.erehsbc.module import ErehsbcModule
 
 from .browser import EsaliaBrowser
 
-__all__ = ['EsaliaModule']
+
+__all__ = ["EsaliaModule"]
 
 
 class EsaliaModule(ErehsbcModule, CapBankWealth, CapDocument, CapProfile):
-    NAME = 'esalia'
-    DESCRIPTION = 'Société Générale Épargne Salariale'
-    MAINTAINER = 'Edouard Lambert'
-    EMAIL = 'elambert@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
-    DEPENDENCIES = ('erehsbc',)
+    NAME = "esalia"
+    DESCRIPTION = "Société Générale Épargne Salariale"
+    MAINTAINER = "Edouard Lambert"
+    EMAIL = "elambert@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
+    DEPENDENCIES = ("erehsbc",)
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Identifiant', masked=False),
-        ValueBackendPassword('password', label='Code secret', regexp=r'^(\d{6})$'),
-        Value('otp', label='Code unique temporaire', default=''),
-        ValueTransient('request_information'),
+        ValueBackendPassword("login", label="Identifiant", masked=False),
+        ValueBackendPassword("password", label="Code secret", regexp=r"^(\d{6})$"),
+        Value("otp", label="Code unique temporaire", default=""),
+        ValueTransient("request_information"),
     )
 
     BROWSER = EsaliaBrowser

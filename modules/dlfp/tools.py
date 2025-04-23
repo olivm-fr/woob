@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011  Romain Bignon
 #
 # This file is part of a woob module.
@@ -20,20 +18,22 @@
 
 import re
 
-RSSID_RE = re.compile('tag:.*:(\w+)/(\d+)')
-ID2URL_RE = re.compile('^(\w)(.*)\.([^ \.]+)$')
 
-REGEXPS = {'/users/%s/journaux/%s': 'D%s.%s',
-           '/news/%s':              'N.%s',
-           '/wiki/%s':              'W.%s',
-           '/suivi/%s':             'T.%s',
-           '/sondages/%s':          'P.%s',
-           '/forums/%s/posts/%s':   'B%s.%s',
-          }
+RSSID_RE = re.compile(r"tag:.*:(\w+)/(\d+)")
+ID2URL_RE = re.compile(r"^(\w)(.*)\.([^ \.]+)$")
+
+REGEXPS = {
+    "/users/%s/journaux/%s": "D%s.%s",
+    "/news/%s": "N.%s",
+    "/wiki/%s": "W.%s",
+    "/suivi/%s": "T.%s",
+    "/sondages/%s": "P.%s",
+    "/forums/%s/posts/%s": "B%s.%s",
+}
 
 
 def f2re(f):
-    return '.*' + f.replace('%s', '([^ /]+)')
+    return ".*" + f.replace("%s", r"([^ /]+)")
 
 
 def rssid(entry):
@@ -41,19 +41,19 @@ def rssid(entry):
     if not m:
         return None
 
-    ind = m.group(1).replace('Post', 'Board')[0]
+    ind = m.group(1).replace("Post", "Board")[0]
 
     for url_re, id_re in REGEXPS.items():
         if id_re[0] != ind:
             continue
 
-        if id_re.count('%s') == 2:
+        if id_re.count("%s") == 2:
             mm = re.match(f2re(url_re), entry.link)
             if not mm:
                 return
-            return '%s%s.%s' % (ind, mm.group(1), m.group(2))
+            return f"{ind}{mm.group(1)}.{m.group(2)}"
         else:
-            return '%s.%s' % (ind, m.group(2))
+            return f"{ind}.{m.group(2)}"
 
 
 def id2url(id):
@@ -65,7 +65,7 @@ def id2url(id):
         if id_re[0] != m.group(1):
             continue
 
-        if id_re.count('%s') == 2:
+        if id_re.count("%s") == 2:
             return url_re % (m.group(2), m.group(3))
         else:
             return url_re % m.group(3)

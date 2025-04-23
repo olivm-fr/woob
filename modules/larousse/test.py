@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -21,7 +19,7 @@ from woob.tools.test import BackendTest
 
 
 class LarousseTest(BackendTest):
-    MODULE = 'larousse'
+    MODULE = "larousse"
 
     def _check_translations(self, src, dst, text):
         res = list(self.backend.translate(src, dst, text))
@@ -31,10 +29,10 @@ class LarousseTest(BackendTest):
         return [t.text for t in res]
 
     def test_translate(self):
-        res = self._check_translations('fr', 'en', 'maison')
+        res = self._check_translations("fr", "en", "maison")
         assert res
-        assert any(t == 'house' for t in res)
+        assert any(t == "house" for t in res)
 
-        res = self._check_translations('de', 'fr', 'kaffee')
+        res = self._check_translations("de", "fr", "kaffee")
         assert res
-        assert any('café' in t for t in res)
+        assert any("café" in t for t in res)

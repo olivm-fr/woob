@@ -22,16 +22,17 @@ from woob.tools.backend import Module
 
 from .browser import OnlineNonogramsBrowser
 
-__all__ = ['OnlineNonogramsModule']
+
+__all__ = ["OnlineNonogramsModule"]
 
 
 class OnlineNonogramsModule(Module, CapPicross):
-    NAME = 'onlinenonograms'
-    DESCRIPTION = 'Online Nonograms'
-    MAINTAINER = 'Thomas Touhey'
-    EMAIL = 'thomas@touhey.fr'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "onlinenonograms"
+    DESCRIPTION = "Online Nonograms"
+    MAINTAINER = "Thomas Touhey"
+    EMAIL = "thomas@touhey.fr"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = OnlineNonogramsBrowser
 

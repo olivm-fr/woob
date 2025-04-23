@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Arno Renevier
 #
 # This file is part of a woob module.
@@ -23,16 +21,17 @@ from woob.tools.backend import Module
 
 from .browser import WeatherBrowser
 
-__all__ = ['WeatherModule']
+
+__all__ = ["WeatherModule"]
 
 
 class WeatherModule(Module, CapWeather):
-    NAME = 'weather'
-    MAINTAINER = u'Arno Renevier'
-    EMAIL = 'arno@renevier.net'
-    VERSION = '3.6'
-    DESCRIPTION = 'Get forecasts from weather.com'
-    LICENSE = 'AGPLv3+'
+    NAME = "weather"
+    MAINTAINER = "Arno Renevier"
+    EMAIL = "arno@renevier.net"
+    VERSION = "3.7"
+    DESCRIPTION = "Get forecasts from weather.com"
+    LICENSE = "AGPLv3+"
     BROWSER = WeatherBrowser
 
     def iter_city_search(self, pattern):

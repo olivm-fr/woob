@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Romain Bignon
 #
 # This file is part of a woob module.
@@ -24,16 +22,16 @@ from woob.tools.backend import Module
 from .browser import ChronopostBrowser
 
 
-__all__ = ['ChronopostModule']
+__all__ = ["ChronopostModule"]
 
 
 class ChronopostModule(Module, CapParcel):
-    NAME = 'chronopost'
-    DESCRIPTION = u'Chronopost'
-    MAINTAINER = u'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
+    NAME = "chronopost"
+    DESCRIPTION = "Chronopost"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
 
     BROWSER = ChronopostBrowser
 

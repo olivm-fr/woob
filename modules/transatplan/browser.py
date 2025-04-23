@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2021  Budget Insight
 #
 # This file is part of a woob module.
@@ -22,55 +20,60 @@
 import re
 from decimal import Decimal
 
-from woob.capabilities.base import empty
+from woob.browser import URL, LoginBrowser, need_login
 from woob.capabilities.bank import Account, NoAccountsException
 from woob.capabilities.bank.wealth import Investment
-from woob.browser import LoginBrowser, need_login, URL
-from woob.exceptions import BrowserIncorrectPassword, ActionNeeded
+from woob.capabilities.base import empty
+from woob.exceptions import ActionNeeded, BrowserIncorrectPassword
 from woob.tools.capabilities.bank.investments import IsinType
 
 from .pages import (
-    LoginPage, HomePage, HistoryPage, AccountPage, ErrorPage,
-    InvestmentDetailPage, InvestmentPerformancePage, SituationPage, InvestmentAggregationPage,
-    PocketsPage, PocketDetailPage, ActionNeededPage, InvestPocketsPage, InvestPocketsDetailsPage,
+    AccountPage,
+    ActionNeededPage,
+    ErrorPage,
+    HistoryPage,
+    HomePage,
+    InvestmentAggregationPage,
+    InvestmentDetailPage,
+    InvestmentPerformancePage,
+    InvestPocketsDetailsPage,
+    InvestPocketsPage,
+    LoginPage,
+    PocketDetailPage,
+    PocketsPage,
+    SituationPage,
 )
 
 
 class TransatplanBrowser(LoginBrowser):
-    BASEURL = 'https://transatplan.banquetransatlantique.com'
+    BASEURL = "https://transatplan.banquetransatlantique.com"
 
-    error = URL(r'.*', ErrorPage)
-    login = URL(r'/fr/identification/authentification.html', LoginPage)
-    action_needed = URL(r'/fr/client/votre-situation.aspx\?FID=GoOngletCompte', ActionNeededPage)
-    situation = URL(r'/fr/client/votre-situation.aspx$', SituationPage)
+    error = URL(r".*", ErrorPage)
+    login = URL(r"/fr/identification/authentification.html", LoginPage)
+    action_needed = URL(r"/fr/client/votre-situation.aspx\?FID=GoOngletCompte", ActionNeededPage)
+    situation = URL(r"/fr/client/votre-situation.aspx$", SituationPage)
     account = URL(
-        r'/fr/client/votre-situation.aspx\?FID=GoOngletCompte',
-        r'/fr/client/votre-situation.aspx\?.*GoRetour.*',
-        r'/fr/client/votre-situation.aspx\?.*GoCourLst.*',
-        AccountPage
+        r"/fr/client/votre-situation.aspx\?FID=GoOngletCompte",
+        r"/fr/client/votre-situation.aspx\?.*GoRetour.*",
+        r"/fr/client/votre-situation.aspx\?.*GoCourLst.*",
+        AccountPage,
     )
-    investment_detail = URL(r'/fr/client/votre-situation.aspx\?.*GoCourLst.*', InvestmentDetailPage)
-    investment_performance = URL(r'/fr/client/VAL_FicheCours.aspx.*', InvestmentPerformancePage)
+    investment_detail = URL(r"/fr/client/votre-situation.aspx\?.*GoCourLst.*", InvestmentDetailPage)
+    investment_performance = URL(r"/fr/client/VAL_FicheCours.aspx.*", InvestmentPerformancePage)
     pockets = URL(
-        r'/fr/client/votre-situation.aspx\?FID=GoSituation',
-        r'/fr/client/votre-situation.aspx\?_productfilter=',
-        PocketsPage
+        r"/fr/client/votre-situation.aspx\?FID=GoSituation",
+        r"/fr/client/votre-situation.aspx\?_productfilter=",
+        PocketsPage,
     )
-    invest_pockets = URL(
-        r'/fr/client/votre-situation.aspx\?_productfilter=',
-        InvestPocketsPage
-    )
-    invest_pockets_details = URL(
-        r'/fr/client/votre-situation.aspx\?_productfilter=FPSO_WBEN',
-        InvestPocketsDetailsPage
-    )
-    history = URL(r'/fr/client/votre-situation.aspx\?_productfilter=.*GoCptMvt.*', HistoryPage)
-    pocket_details = URL(r'/fr/client/votre-situation.aspx\?_productfilter=', PocketDetailPage)
-    home = URL(r'/fr/client/Accueil.aspx\?FID=GoSitAccueil.*', HomePage)
+    invest_pockets = URL(r"/fr/client/votre-situation.aspx\?_productfilter=", InvestPocketsPage)
+    invest_pockets_details = URL(r"/fr/client/votre-situation.aspx\?_productfilter=FPSO_WBEN", InvestPocketsDetailsPage)
+    history = URL(r"/fr/client/votre-situation.aspx\?_productfilter=.*GoCptMvt.*", HistoryPage)
+    pocket_details = URL(r"/fr/client/votre-situation.aspx\?_productfilter=", PocketDetailPage)
+    home = URL(r"/fr/client/Accueil.aspx\?FID=GoSitAccueil.*", HomePage)
 
     def update_url_with_state(self, url):
         state = self.page.get_state()
-        return re.sub(r'(_state=)(\d{4})(-F)', rf'\g<1>{state}\g<3>', url)
+        return re.sub(r"(_state=)(\d{4})(-F)", rf"\g<1>{state}\g<3>", url)
 
     def do_login(self):
         self.login.go()
@@ -110,7 +113,7 @@ class TransatplanBrowser(LoginBrowser):
 
             if market_account_counter > 1:
                 raise AssertionError(
-                    f'{market_account_counter} market accounts found, IDs will be the same for these accounts'
+                    f"{market_account_counter} market accounts found, IDs will be the same for these accounts"
                 )
 
     @need_login
@@ -235,7 +238,7 @@ class TransatplanBrowser(LoginBrowser):
                 yield pocket
 
     def do_return(self):
-        if hasattr(self.page, 'do_return'):
+        if hasattr(self.page, "do_return"):
             self.page.do_return()
 
     def create_market_account(self, checking_id, company_name):

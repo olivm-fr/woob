@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Antoine BOSSY
 #
 # This file is part of a woob module.
@@ -18,14 +16,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from woob.capabilities.bill import CapDocument
-
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword, Value
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import TicketCesuBrowser
 
 
-__all__ = ['TicketsCesuModule']
+__all__ = ["TicketsCesuModule"]
 
 
 class TicketsCesuModule(Module, CapDocument):
@@ -37,22 +34,22 @@ class TicketsCesuModule(Module, CapDocument):
     –> CapDocument methods to be implemented
     """
 
-    NAME = 'ticketscesu'
-    DESCRIPTION = 'Tickets CESU Edenred'
-    MAINTAINER = 'Antoine BOSSY'
-    EMAIL = 'mail+github@abossy.fr'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "ticketscesu"
+    DESCRIPTION = "Tickets CESU Edenred"
+    MAINTAINER = "Antoine BOSSY"
+    EMAIL = "mail+github@abossy.fr"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = TicketCesuBrowser
 
     CONFIG = BackendConfig(
-        Value('login', label='Identifiant', masked=False),
-        ValueBackendPassword('password', label='Code secret', required=True)
+        Value("login", label="Identifiant", masked=False),
+        ValueBackendPassword("password", label="Code secret", required=True),
     )
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

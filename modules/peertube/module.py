@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -17,32 +15,32 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
+from woob.capabilities.video import BaseVideo, CapVideo
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value
-from woob.capabilities.video import CapVideo, BaseVideo
 
 from .browser import PeertubeBrowser
 
 
-__all__ = ['PeertubeModule']
+__all__ = ["PeertubeModule"]
 
 
 class PeertubeModule(Module, CapVideo):
-    NAME = 'peertube'
-    DESCRIPTION = 'Peertube'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "peertube"
+    DESCRIPTION = "Peertube"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     CONFIG = BackendConfig(
-        Value('url', label='Base URL of the PeerTube instance'),
+        Value("url", label="Base URL of the PeerTube instance"),
     )
 
     BROWSER = PeertubeBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['url'].get())
+        return self.create_browser(self.config["url"].get())
 
     def get_video(self, id):
         return self.browser.get_video(id)
@@ -53,9 +51,9 @@ class PeertubeModule(Module, CapVideo):
                 yield video
 
     def fill_video(self, obj, fields):
-        if set(('url', 'size')) & set(fields):
+        if {"url", "size"} & set(fields):
             self.browser.get_video(obj.id, obj)
-        if 'thumbnail' in fields and obj.thumbnail:
+        if "thumbnail" in fields and obj.thumbnail:
             obj.thumbnail.data = self.browser.open(obj.thumbnail.url).content
 
     OBJECTS = {

@@ -17,23 +17,23 @@
 
 # flake8: compatible
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
-from woob.tools.capabilities.bill.documents import sorted_documents, merge_iterators
+from woob.tools.capabilities.bill.documents import merge_iterators, sorted_documents
 
-from .pages import LoginPage, HomePage, ConsolePage, SuiviPage, DocumentsPage, ProfilePage, ContractPage
+from .pages import ConsolePage, ContractPage, DocumentsPage, HomePage, LoginPage, ProfilePage, SuiviPage
 
 
 class FreeBrowser(LoginBrowser):
-    BASEURL = 'https://adsl.free.fr'
+    BASEURL = "https://adsl.free.fr"
 
-    login = URL(r'https://subscribe.free.fr/login/', LoginPage)
-    home = URL(r'/home.pl(?P<urlid>.*)', HomePage)
-    console = URL(r'https://subscribe.free.fr/accesgratuit/console/console.pl(?P<urlid>.*)', ConsolePage)
-    suivi = URL(r'/suivi.pl', SuiviPage)
-    documents = URL(r'/liste-factures.pl(?P<urlid>.*)', DocumentsPage)
-    profile = URL(r'/modif_infoscontact.pl(?P<urlid>.*)', ProfilePage)
-    address = URL(r'/show_adresse.pl(?P<urlid>.*)', ProfilePage)
+    login = URL(r"https://subscribe.free.fr/login/", LoginPage)
+    home = URL(r"/home.pl(?P<urlid>.*)", HomePage)
+    console = URL(r"https://subscribe.free.fr/accesgratuit/console/console.pl(?P<urlid>.*)", ConsolePage)
+    suivi = URL(r"/suivi.pl", SuiviPage)
+    documents = URL(r"/liste-factures.pl(?P<urlid>.*)", DocumentsPage)
+    profile = URL(r"/modif_infoscontact.pl(?P<urlid>.*)", ProfilePage)
+    address = URL(r"/show_adresse.pl(?P<urlid>.*)", ProfilePage)
     contracts = URL(r"/afficher-cgv.pl(?P<urlid>.*)", ContractPage)
 
     def __init__(self, private_user_agent, *args, **kwargs):
@@ -42,7 +42,7 @@ class FreeBrowser(LoginBrowser):
         self.status = "active"
 
         if private_user_agent:
-            self.session.headers['User-Agent'] = private_user_agent
+            self.session.headers["User-Agent"] = private_user_agent
 
     def do_login(self):
         self.login.go()
@@ -50,16 +50,16 @@ class FreeBrowser(LoginBrowser):
         self.page.login(self.username, self.password)
 
         if self.login.is_here():
-            if all(var in self.url for var in ('error=1', '$flink')):
+            if all(var in self.url for var in ("error=1", "$flink")):
                 # when login or password is incorrect they redirect us to login page but with $flink at the end of url
                 # and when this is present, error message is not there, we remove it and reload page to get it
-                self.location(self.url.replace('$flink', ''))
+                self.location(self.url.replace("$flink", ""))
             error = self.page.get_error()
-            if error and 'mot de passe' in error:
+            if error and "mot de passe" in error:
                 raise BrowserIncorrectPassword(error)
-            if error and 'reeconnecter' in error:
+            if error and "reeconnecter" in error:
                 raise BrowserUnavailable(error)
-            raise AssertionError('Unhandled behavior at login: error is "{}"'.format(error))
+            raise AssertionError(f'Unhandled behavior at login: error is "{error}"')
 
         elif self.documents.is_here():
             self.email = self.username
@@ -75,7 +75,7 @@ class FreeBrowser(LoginBrowser):
             # user has subscribed recently and his subscription is still being processed
             return []
 
-        self.urlid = self.page.url.rsplit('.pl', 2)[1]
+        self.urlid = self.page.url.rsplit(".pl", 2)[1]
         if self.status == "inactive":
             return self.documents.stay_or_go(urlid=self.urlid).get_list()
         return self.home.stay_or_go(urlid=self.urlid).get_list()
@@ -88,8 +88,7 @@ class FreeBrowser(LoginBrowser):
         self.documents.stay_or_go(urlid=self.urlid)
         bills_iterator = sorted_documents(self.page.get_documents(subid=subscription.id))
 
-        for doc in merge_iterators(contracts_iterator, bills_iterator):
-            yield doc
+        yield from merge_iterators(contracts_iterator, bills_iterator)
 
     @need_login
     def get_profile(self):

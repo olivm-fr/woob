@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -18,7 +16,7 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.browser.exceptions import HTTPNotFound
 from woob.capabilities.parcel import ParcelNotFound
 
@@ -26,9 +24,9 @@ from .pages import SearchPage
 
 
 class GLSBrowser(PagesBrowser):
-    BASEURL = 'https://gls-group.eu'
+    BASEURL = "https://gls-group.eu"
 
-    search_page = URL('/app/service/open/rest/EU/en/rstt001\?match=(?P<id>.+)', SearchPage)
+    search_page = URL(r"/app/service/open/rest/EU/en/rstt029\?match=(?P<id>.+)", SearchPage)
 
     def get_tracking_info(self, _id):
         try:

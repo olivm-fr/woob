@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2016 Romain Bignon
 #
 # This file is part of a woob module.
@@ -24,18 +22,18 @@ from woob.capabilities.profile import CapProfile
 from woob.tools.backend import AbstractModule
 
 
-__all__ = ['BarclaysModule']
+__all__ = ["BarclaysModule"]
 
 
 class BarclaysModule(AbstractModule, CapBankWealth, CapProfile):
-    NAME = 'barclays'
-    MAINTAINER = u'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    VERSION = '3.6'
-    DEPENDENCIES = ('milleis',)
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = 'Milleis'
-    PARENT = 'milleis'
+    NAME = "barclays"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    VERSION = "3.7"
+    DEPENDENCIES = ("milleis",)
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Milleis"
+    PARENT = "milleis"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -18,7 +18,7 @@
 # flake8: compatible
 
 try:
-    from woob.tools.antibot.akamai import AkamaiMixin, AkamaiHTMLPage
+    from woob.tools.antibot.akamai import AkamaiHTMLPage, AkamaiMixin
 
 except ModuleNotFoundError:
     from woob.browser.pages import HTMLPage
@@ -28,12 +28,12 @@ except ModuleNotFoundError:
 
     class FakeAkamaiHTMLPage(HTMLPage):
         def get_akamai_url(self):
-            return ''
+            return ""
 
-    class FakeAkamaiSolver(object):
+    class FakeAkamaiSolver:
         html_doc = None
 
-    class FakeAkamaiMixin(object):
+    class FakeAkamaiMixin:
         def get_akamai_solver(self, *args, **kwargs):
             return FakeAkamaiSolver()
 
@@ -50,7 +50,7 @@ except ModuleNotFoundError:
             akamai_solver = self.get_akamai_solver(akamai_url, self.url)
             if html_doc:
                 akamai_solver.html_doc = html_doc
-            cookie_abck = self.session.cookies['_abck']
+            cookie_abck = self.session.cookies["_abck"]
             self.post_sensor_data(akamai_solver, cookie_abck)
 
     AkamaiMixin = FakeAkamaiMixin

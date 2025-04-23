@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2012 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,15 +15,11 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.filters.standard import (
-    CleanText
-)
-from woob.browser.selenium import (
-        SeleniumPage, VisibleXPath
-)
-from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
-
 from selenium.webdriver.common.by import By
+
+from woob.browser.filters.standard import CleanText
+from woob.browser.selenium import SeleniumPage, VisibleXPath
+from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 
 
 class LoginPage(SeleniumPage):
@@ -40,21 +34,31 @@ class LoginPage(SeleniumPage):
 
     def on_load(self):
         for message in self.doc.xpath('//div[contains(@class, "alertBox")]'):
-            error_msg = CleanText('.')(message)
-            if any(msg in error_msg for msg in ['The username you entered doesn\'t match our records. Please try again.',
-                                                'Please enter your memorable answer and password.',
-                                                'The information you entered does not match our records. Please try again.',
-                                                'mot de passe invalide']):
+            error_msg = CleanText(".")(message)
+            if any(
+                msg in error_msg
+                for msg in [
+                    "The username you entered doesn't match our records. Please try again.",
+                    "Please enter your memorable answer and password.",
+                    "The information you entered does not match our records. Please try again.",
+                    "mot de passe invalide",
+                ]
+            ):
                 raise BrowserIncorrectPassword(error_msg)
             else:
                 raise BrowserUnavailable(error_msg)
 
     def get_error(self):
         for message in self.doc.xpath('//div[contains(@data-dojo-type, "hsbcwidget/alertBox")]'):
-            error_msg = CleanText('.')(message)
-            if any(msg in error_msg for msg in ['The username you entered doesn\'t match our records. Please try again.',
-                                                'Please enter a valid Username.',
-                                                'mot de passe invalide']):
+            error_msg = CleanText(".")(message)
+            if any(
+                msg in error_msg
+                for msg in [
+                    "The username you entered doesn't match our records. Please try again.",
+                    "Please enter a valid Username.",
+                    "mot de passe invalide",
+                ]
+            ):
                 raise BrowserIncorrectPassword(error_msg)
             else:
                 raise BrowserUnavailable(error_msg)
@@ -70,13 +74,13 @@ class LoginPage(SeleniumPage):
     def login_w_secure(self, password, secret):
         self.driver.find_element_by_name("memorableAnswer").send_keys(secret)
         if len(password) < 8:
-            raise BrowserIncorrectPassword('The password must be at least %d characters' % 8)
+            raise BrowserIncorrectPassword("The password must be at least %d characters" % 8)
         elif len(password) > 8:
             # HSBC only use 6 first and last two from the password
             password = password[:6] + password[-2:]
 
         elts = self.driver.find_elements(By.XPATH, "//input[@type='password' and contains(@id,'pass')]")
         for elt in elts:
-            if elt.get_attribute('disabled') is None and elt.get_attribute('class') == "smallestInput active":
-                elt.send_keys(password[int(elt.get_attribute('id')[-1]) - 1])
+            if elt.get_attribute("disabled") is None and elt.get_attribute("class") == "smallestInput active":
+                elt.send_keys(password[int(elt.get_attribute("id")[-1]) - 1])
         self.driver.find_element_by_xpath("//input[@class='submit_input']").click()

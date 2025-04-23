@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Mickaël Thomas
 #
 # This file is part of a woob module.
@@ -17,27 +15,28 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
 from woob.capabilities.base import NotAvailable
 from woob.capabilities.parcel import CapParcel, Parcel, ParcelNotFound
-from woob.tools.value import Value
 from woob.exceptions import BrowserQuestion
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value
 
 from .browser import RelaiscolisBrowser
 
-__all__ = ['RelaiscolisModule']
+
+__all__ = ["RelaiscolisModule"]
 
 
 class RelaiscolisModule(Module, CapParcel):
-    NAME = 'relaiscolis'
-    DESCRIPTION = 'Relais colis parcel tracking website'
-    MAINTAINER = 'Mickaël Thomas'
-    EMAIL = 'mickael9@gmail.com'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "relaiscolis"
+    DESCRIPTION = "Relais colis parcel tracking website"
+    MAINTAINER = "Mickaël Thomas"
+    EMAIL = "mickael9@gmail.com"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        Value('last_name', label='Last name'),
-        Value('merchant', label='Merchant (leave blank)', default=''),
+        Value("last_name", label="Last name"),
+        Value("merchant", label="Merchant (leave blank)", default=""),
     )
 
     BROWSER = RelaiscolisBrowser
@@ -70,23 +69,25 @@ class RelaiscolisModule(Module, CapParcel):
             merchant = _id[:2]
             code = _id[2:12]
         else:
-            raise ParcelNotFound(
-                "Tracking number must be 10, 12 or 14 characters long."
-            )
+            raise ParcelNotFound("Tracking number must be 10, 12 or 14 characters long.")
 
-        merchant = merchant or self.config['merchant'].get()
+        merchant = merchant or self.config["merchant"].get()
 
         if not merchant:
             # No merchant info in the tracking number
             # we have to ask the user to select it
             merchants = self.browser.get_merchants()
-            raise BrowserQuestion(Value(
-                'merchant', label='Merchant prefix (prepend to tracking number): ', tiny=False,
-                choices=merchants,
-            ))
+            raise BrowserQuestion(
+                Value(
+                    "merchant",
+                    label="Merchant prefix (prepend to tracking number): ",
+                    tiny=False,
+                    choices=merchants,
+                )
+            )
 
-        self.config['merchant'].set(None)
-        name = self.config['last_name'].get()[:4].ljust(4).upper()
+        self.config["merchant"].set(None)
+        name = self.config["last_name"].get()[:4].ljust(4).upper()
 
         events = list(self.browser.iter_events(merchant, code, name))
 
@@ -106,9 +107,7 @@ class RelaiscolisModule(Module, CapParcel):
 
         parcel.info = events[0].activity
 
-        arrived_event = next((event for event in events
-                             if "Votre colis est disponible" in event.activity),
-                             None)
+        arrived_event = next((event for event in events if "Votre colis est disponible" in event.activity), None)
 
         if arrived_event:
             parcel.status = Parcel.STATUS_ARRIVED

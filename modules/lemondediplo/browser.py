@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,30 +16,27 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import BrowserIncorrectPassword
-from .pages import LoginPage, ArticlesPage, LoginErrorPage, BlogsPage
+
+from .pages import ArticlesPage, BlogsPage, LoginErrorPage, LoginPage
 
 
 class LemondediploBrowser(LoginBrowser):
     TIMEOUT = 30
-    BASEURL = 'https://www.monde-diplomatique.fr'
-    BLOGURL = 'https://blog.mondediplo.net'
+    BASEURL = "https://www.monde-diplomatique.fr"
+    BLOGURL = "https://blog.mondediplo.net"
 
-    login_page = URL('/load_mon_compte', LoginPage)
-    login_error = URL(fr'{BASEURL}\?erreur_connexion=.*', LoginErrorPage)
+    login_page = URL("/load_mon_compte", LoginPage)
+    login_error = URL(rf"{BASEURL}\?erreur_connexion=.*", LoginErrorPage)
 
-    articles_page = URL(r'/(?P<id>.+)', fr'{BASEURL}', ArticlesPage)
-    blogs_page = URL(fr'{BLOGURL}/(?P<id>.+)', fr'{BLOGURL}', BlogsPage)
+    articles_page = URL(r"/(?P<id>.+)", rf"{BASEURL}", ArticlesPage)
+    blogs_page = URL(rf"{BLOGURL}/(?P<id>.+)", rf"{BLOGURL}", BlogsPage)
 
     def do_login(self):
-        self.session.headers['X-Requested-With'] = 'XMLHttpRequest'
+        self.session.headers["X-Requested-With"] = "XMLHttpRequest"
 
-        data = {
-            'retour': self.BASEURL,
-            'erreur_connexion': '',
-            'triggerAjaxLoad': ''
-        }
+        data = {"retour": self.BASEURL, "erreur_connexion": "", "triggerAjaxLoad": ""}
         self.login_page.go(data=data).login(self.username, self.password)
 
         if not self.page.logged or self.login_error.is_here():
@@ -63,7 +58,7 @@ class LemondediploBrowser(LoginBrowser):
 
     @need_login
     def handle_archives(self, path):
-        return self.articles_page.go(id=path.replace('-', '/')).iter_archive_threads()
+        return self.articles_page.go(id=path.replace("-", "/")).iter_archive_threads()
 
     def iter_blog_threads(self):
         return self.blogs_page.go().iter_blog_thread()

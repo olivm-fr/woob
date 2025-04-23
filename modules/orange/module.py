@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Nicolas Duhamel
 #
 # This file is part of a woob module.
@@ -19,55 +17,59 @@
 
 # flake8: compatible
 
-from woob.capabilities.bill import (
-    DocumentCategory, DocumentTypes, CapDocument, Subscription,
-    Document, DocumentNotFound,
-)
-from woob.capabilities.base import find_object, NotAvailable
 from woob.capabilities.account import CapAccount
+from woob.capabilities.base import NotAvailable, find_object
+from woob.capabilities.bill import (
+    CapDocument,
+    Document,
+    DocumentCategory,
+    DocumentNotFound,
+    DocumentTypes,
+    Subscription,
+)
 from woob.capabilities.profile import CapProfile
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword, ValueTransient
 
 from .browser import OrangeBillBrowser
 
 
-__all__ = ['OrangeModule']
+__all__ = ["OrangeModule"]
 
 
 class OrangeModule(Module, CapAccount, CapDocument, CapProfile):
-    NAME = 'orange'
-    MAINTAINER = 'Florian Duguet'
-    EMAIL = 'florian.duguet@budget-insight.com'
-    VERSION = '3.6'
-    DESCRIPTION = 'Orange French mobile phone provider'
-    LICENSE = 'LGPLv3+'
+    NAME = "orange"
+    MAINTAINER = "Florian Duguet"
+    EMAIL = "florian.duguet@budget-insight.com"
+    VERSION = "3.7"
+    DESCRIPTION = "Orange French mobile phone provider"
+    LICENSE = "LGPLv3+"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Login'),
-        ValueBackendPassword('password', label='Password', regexp=r'\S{8,36}'),
-        ValueTransient('specific_header', label='Specific Header'),
+        ValueBackendPassword("login", label="Login"),
+        ValueBackendPassword("password", label="Password", regexp=r"\S{8,36}"),
+        ValueTransient("specific_header", label="Specific Header"),
     )
     BROWSER = OrangeBillBrowser
 
     def __init__(self, *args, **kwargs):
         self._browsers = dict()
-        super(OrangeModule, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     accepted_document_types = (DocumentTypes.BILL,)
     document_categories = {DocumentCategory.INTERNET_TELEPHONY}
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['specific_header'].get(),
-            self.config['login'].get(),
-            self.config['password'].get(),
+            self.config["specific_header"].get(),
+            self.config["login"].get(),
+            self.config["password"].get(),
         )
 
     def iter_subscription(self):
         return self.browser.get_subscription_list()
 
     def get_document(self, _id):
-        subid = _id.rsplit('_', 1)[0]
+        subid = _id.rsplit("_", 1)[0]
         subscription = self.get_subscription(subid)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -22,25 +20,25 @@ from woob.tools.value import Value
 
 
 class PoleEmploiTest(BackendTest):
-    MODULE = 'poleemploi'
+    MODULE = "poleemploi"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['metier'] = Value(value='informaticien')
-            self.backend.config['place'] = Value(value='100|PAYS|01')
-            self.backend.config['salary'] = Value(value='15000')
-            self.backend.config['qualification'] = Value(value='9')
-            self.backend.config['domain'] = Value(value='M18')
-            self.backend.config['limit_data'] = Value(value='93')
+            self.backend.config["metier"] = Value(value="informaticien")
+            self.backend.config["place"] = Value(value="100|PAYS|01")
+            self.backend.config["salary"] = Value(value="15000")
+            self.backend.config["qualification"] = Value(value="9")
+            self.backend.config["domain"] = Value(value="M18")
+            self.backend.config["limit_data"] = Value(value="93")
 
     def test_poleemploi_search(self):
-        l = list(self.backend.search_job('infographiste'))
+        l = list(self.backend.search_job("infographiste"))
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, l[0])
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')
 
     def test_poleemploi_advanced_search(self):
         l = list(self.backend.advanced_search_job())
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, l[0])
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')

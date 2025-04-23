@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Celande
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import SerebiiModule
 
 
-__all__ = ['SerebiiModule']
+__all__ = ["SerebiiModule"]

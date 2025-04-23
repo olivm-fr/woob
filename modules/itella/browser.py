@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -25,6 +23,7 @@ from .pages import SearchPage
 class ItellaBrowser(APIBrowser):
 
     def get_tracking_info(self, _id):
-        r = self.open('https://www.posti.fi/henkiloasiakkaat/seuranta/api/shipments',
-                      data={"trackingCodes": ["%s" % _id]})
+        r = self.open(
+            "https://www.posti.fi/henkiloasiakkaat/seuranta/api/shipments", data={"trackingCodes": ["%s" % _id]}
+        )
         return SearchPage(self, r).get_info(_id)

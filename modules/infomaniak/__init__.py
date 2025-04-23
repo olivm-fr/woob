@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 
 # flake8: compatible
@@ -23,4 +21,4 @@
 from .module import InfomaniakModule
 
 
-__all__ = ['InfomaniakModule']
+__all__ = ["InfomaniakModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2021 Romain Bignon
 #
 # This file is part of woob.
@@ -17,25 +15,25 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.date import real_datetime, closest_date
+from woob.tools.date import closest_date, real_datetime
 
 
 def test_closest():
     dt = real_datetime
-    range1 = [dt(2012,12,20), dt(2013,1,10)]
+    range1 = [dt(2012, 12, 20), dt(2013, 1, 10)]
 
-    assert closest_date(dt(2012,12,15), *range1) == dt(2012,12,15)
-    assert closest_date(dt(2000,12,15), *range1) == dt(2012,12,15)
-    assert closest_date(dt(2020,12,15), *range1) == dt(2012,12,15)
+    assert closest_date(dt(2012, 12, 15), *range1) == dt(2012, 12, 15)
+    assert closest_date(dt(2000, 12, 15), *range1) == dt(2012, 12, 15)
+    assert closest_date(dt(2020, 12, 15), *range1) == dt(2012, 12, 15)
 
-    assert closest_date(dt(2013,1,15), *range1) == dt(2013,1,15)
-    assert closest_date(dt(2000,1,15), *range1) == dt(2013,1,15)
-    assert closest_date(dt(2020,1,15), *range1) == dt(2013,1,15)
+    assert closest_date(dt(2013, 1, 15), *range1) == dt(2013, 1, 15)
+    assert closest_date(dt(2000, 1, 15), *range1) == dt(2013, 1, 15)
+    assert closest_date(dt(2020, 1, 15), *range1) == dt(2013, 1, 15)
 
-    assert closest_date(dt(2013,1,1), *range1) == dt(2013,1,1)
-    assert closest_date(dt(2000,1,1), *range1) == dt(2013,1,1)
-    assert closest_date(dt(2020,1,1), *range1) == dt(2013,1,1)
+    assert closest_date(dt(2013, 1, 1), *range1) == dt(2013, 1, 1)
+    assert closest_date(dt(2000, 1, 1), *range1) == dt(2013, 1, 1)
+    assert closest_date(dt(2020, 1, 1), *range1) == dt(2013, 1, 1)
 
-    range2 = [dt(2012,12,20), dt(2014,1,10)]
-    assert closest_date(dt(2012,12,15), *range2) == dt(2013,12,15)
-    assert closest_date(dt(2014,1,15), *range2) == dt(2013,1,15)
+    range2 = [dt(2012, 12, 20), dt(2014, 1, 10)]
+    assert closest_date(dt(2012, 12, 15), *range2) == dt(2013, 12, 15)
+    assert closest_date(dt(2014, 1, 15), *range2) == dt(2013, 1, 15)

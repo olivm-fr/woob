@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Ludovic LANGE
 #
 # This file is part of a woob module.
@@ -18,45 +16,26 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.pages import (
-    JsonPage,
-    LoggedPage,
-    HTMLPage,
-)
-from woob.exceptions import (
-    BrowserIncorrectPassword,
-    BrowserUnavailable,
-)
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import (
-    CleanText,
-    Format,
-    Coalesce,
-    Date,
-    CleanDecimal,
-)
-from woob.capabilities.profile import Person
-from woob.capabilities.bill import DocumentTypes, Document
-from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Date, Format
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
 from woob.capabilities.base import NotAvailable
+from woob.capabilities.bill import Document, DocumentTypes
+from woob.capabilities.profile import Person
+from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 
 
 class HomePage(HTMLPage):
-  pass
+    pass
 
 
 class AprilJsonPage(JsonPage):
     def on_load(self):
-        if (
-            self.get("error")
-            and self.get("statusCode")
-            and (self.get("statusCode") == 401)
-        ):
-            raise BrowserIncorrectPassword("%s : %s" % (Dict("error"), Dict("message")))
+        if self.get("error") and self.get("statusCode") and (self.get("statusCode") == 401):
+            raise BrowserIncorrectPassword("{} : {}".format(Dict("error"), Dict("message")))
         elif self.get("error") or self.get("status") or self.get("message"):
-            raise BrowserUnavailable(
-                "%d - %s : %s" % (Dict("status"), Dict("error"), Dict("message"))
-            )
+            raise BrowserUnavailable("%d - %s : %s" % (Dict("status"), Dict("error"), Dict("message")))
 
 
 class LoginPage(HTMLPage):
@@ -73,9 +52,7 @@ class ProfilePage(LoggedPage, AprilJsonPage):
         klass = Person
 
         obj_id = Dict("numeroPersonne")
-        obj_name = Format(
-            "%s %s", Dict("prenom"), Coalesce(Dict("nomNaissance"), Dict("nom"))
-        )
+        obj_name = Format("%s %s", Dict("prenom"), Coalesce(Dict("nomNaissance"), Dict("nom")))
         obj_address = CleanText(
             Format(
                 "%s %s %s %s %s %s %s %s",
@@ -101,9 +78,7 @@ class ProfilePage(LoggedPage, AprilJsonPage):
         obj_children = CleanDecimal(Dict("nombreEnfantsACharge"), default=NotAvailable)
         obj_family_situation = Dict("situationFamiliale/libelle", default=NotAvailable)
         obj_job = Dict("profession", default=NotAvailable)
-        obj_socioprofessional_category = Dict(
-            "categorieSocioProfessionnelle/libelle", default=NotAvailable
-        )
+        obj_socioprofessional_category = Dict("categorieSocioProfessionnelle/libelle", default=NotAvailable)
 
         def obj_gender(self):
             if not Dict("civilite"):
@@ -124,9 +99,7 @@ class DocumentsPage(JsonPage):
             klass = Document
             obj_id = Dict("reference")
             obj_label = Dict("libelle")
-            obj_date = Date(
-                Dict("dateEmission", default=NotAvailable), default=NotAvailable
-            )
+            obj_date = Date(Dict("dateEmission", default=NotAvailable), default=NotAvailable)
             obj_format = "pdf"
             obj_url = Format("/selfcare/documents/auth/%s", Dict("reference"))
 

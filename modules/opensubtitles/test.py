@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,22 +15,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
-
 from random import choice
+
+from woob.tools.test import BackendTest
 
 
 class OpensubtitlesTest(BackendTest):
-    MODULE = 'opensubtitles'
+    MODULE = "opensubtitles"
 
     def test_subtitle(self):
         lsub = []
-        subtitles = self.backend.iter_subtitles('fr', 'spiderman')
+        subtitles = self.backend.iter_subtitles("fr", "spiderman")
         for i in range(5):
             subtitle = next(subtitles)
             lsub.append(subtitle)
-            assert subtitle.url.startswith('https')
-        assert (len(lsub) > 0)
+            assert subtitle.url.startswith("https")
+        assert len(lsub) > 0
 
         # get the file of a random sub
         if len(lsub):

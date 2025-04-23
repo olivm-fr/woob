@@ -11,6 +11,20 @@ You can use ``pip`` to install the latest `woob package <https://pypi.org/projec
 
     $ pip install woob
 
+From Pipx
+=========
+
+To install woob system wide, we recommand to use ``pipx``.
+
+    $ pipx install woob
+
+To install the development version
+
+    $ pipx install git+https://gitlab.com/woob/woob.git
+
+Many modules require some dependencies, you suggest to inject these modules :
+
+    $ pipx inject woob prettytable python-jose feedparser selenium geopy cryptography pycryptodome xlrd cloudscraper jwt openai
 
 From source code
 ================

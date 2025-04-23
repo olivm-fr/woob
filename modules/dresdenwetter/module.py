@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2013 Romain Bignon, Florent Fourcot
 #
 # This file is part of a woob module.
@@ -18,32 +16,31 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .browser import DresdenWetterBrowser
-from woob.capabilities.gauge import CapGauge, GaugeSensor, Gauge,\
-        SensorNotFound
 from woob.capabilities.base import find_object
+from woob.capabilities.gauge import CapGauge, Gauge, GaugeSensor, SensorNotFound
 from woob.tools.backend import Module
 
+from .browser import DresdenWetterBrowser
 
-__all__ = ['DresdenWetterModule']
+
+__all__ = ["DresdenWetterModule"]
 
 
 class DresdenWetterModule(Module, CapGauge):
-    NAME = 'dresdenwetter'
-    MAINTAINER = u'Florent Fourcot'
-    EMAIL = 'weboob@flo.fourcot.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = u"Private wetter station Dresden"
+    NAME = "dresdenwetter"
+    MAINTAINER = "Florent Fourcot"
+    EMAIL = "weboob@flo.fourcot.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "Private wetter station Dresden"
     BROWSER = DresdenWetterBrowser
 
     def iter_gauges(self, pattern=None):
-        if pattern is None or pattern.lower() in u"dresden"\
-                or pattern.lower() in "weather":
+        if pattern is None or pattern.lower() in "dresden" or pattern.lower() in "weather":
             gauge = Gauge("wetter")
-            gauge.name = u"Private Wetterstation Dresden"
-            gauge.city = u"Dresden"
-            gauge.object = u"Weather"
+            gauge.name = "Private Wetterstation Dresden"
+            gauge.city = "Dresden"
+            gauge.object = "Weather"
             gauge.sensors = list(self.browser.get_sensors_list())
             yield gauge
 

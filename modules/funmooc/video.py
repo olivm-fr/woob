@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Vincent A
 #
 # This file is part of a woob module.
@@ -19,7 +17,8 @@
 
 from woob.capabilities.video import BaseVideo
 
+
 class MoocVideo(BaseVideo):
     @classmethod
     def id2url(cls, _id):
-        return 'https://d3gzh2mxagd143.cloudfront.net/videos/%s/HD.mp4' % _id
+        return "https://d3gzh2mxagd143.cloudfront.net/videos/%s/HD.mp4" % _id

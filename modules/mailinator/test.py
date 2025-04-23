@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Vincent A
 #
 # This file is part of a woob module.
@@ -22,10 +20,10 @@ from woob.tools.test import BackendTest
 
 
 class MailinatorTest(BackendTest):
-    MODULE = 'mailinator'
+    MODULE = "mailinator"
 
     def test_mailinator(self):
-        t = self.backend.get_thread('qwerty')
+        t = self.backend.get_thread("qwerty")
         assert t
         assert t.root
         assert t.root.title
@@ -33,5 +31,5 @@ class MailinatorTest(BackendTest):
         assert t.root.sender
         assert t.root.receivers
 
-        self.backend.fillobj(t.root, ('content',))
+        self.backend.fillobj(t.root, ("content",))
         assert t.root.content

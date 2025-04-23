@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -24,16 +22,16 @@ from woob.tools.backend import Module
 from .browser import IpinfodbBrowser
 
 
-__all__ = ['IpinfodbModule']
+__all__ = ["IpinfodbModule"]
 
 
 class IpinfodbModule(Module, CapGeolocIp):
-    NAME = 'ipinfodb'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = u"IPInfoDB IP addresses geolocation service"
+    NAME = "ipinfodb"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "julien.veyssier@aiur.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "IPInfoDB IP addresses geolocation service"
     BROWSER = IpinfodbBrowser
 
     def get_location(self, ipaddr):

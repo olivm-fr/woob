@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -18,26 +16,26 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.contact import CapDirectory
+from woob.tools.backend import Module
 
 from .browser import MeslieuxparisBrowser
 
 
-__all__ = ['MeslieuxparisModule']
+__all__ = ["MeslieuxparisModule"]
 
 
 class MeslieuxparisModule(Module, CapDirectory):
-    NAME = 'meslieuxparis'
-    DESCRIPTION = 'MesLieux public Paris places'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "meslieuxparis"
+    DESCRIPTION = "MesLieux public Paris places"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = MeslieuxparisBrowser
 
     def search_contacts(self, query, sortby):
-        if query.city and query.city.lower() != 'paris':
+        if query.city and query.city.lower() != "paris":
             return []
         return self.browser.search_contacts(query.name.lower())

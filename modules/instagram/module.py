@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Vincent A
 #
 # This file is part of a woob module.
@@ -19,33 +17,31 @@
 
 # flake8: compatible
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value
-from woob.capabilities.image import CapImage, BaseImage, Thumbnail
 from woob.capabilities.collection import CapCollection
+from woob.capabilities.image import BaseImage, CapImage, Thumbnail
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value
 
 from .browser import InstagramBrowser
 
 
-__all__ = ['InstagramModule']
+__all__ = ["InstagramModule"]
 
 
 class InstagramModule(Module, CapImage, CapCollection):
-    NAME = 'instagram'
-    DESCRIPTION = 'Instagram'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "instagram"
+    DESCRIPTION = "Instagram"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = InstagramBrowser
 
-    CONFIG = BackendConfig(
-        Value('user')
-    )
+    CONFIG = BackendConfig(Value("user"))
 
     def create_default_browser(self):
-        return self.create_browser(self.config['user'].get())
+        return self.create_browser(self.config["user"].get())
 
     def iter_resources(self, types, split_path):
         for type in types:
@@ -54,7 +50,7 @@ class InstagramModule(Module, CapImage, CapCollection):
                 break
 
     def fill_img(self, img, fields):
-        if 'data' in fields and img.url:
+        if "data" in fields and img.url:
             img.data = self.browser.open(img.url).content
 
     OBJECTS = {

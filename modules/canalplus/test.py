@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,23 +16,26 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.capabilities.video import BaseVideo
+from woob.tools.test import BackendTest
 
 
 class CanalPlusTest(BackendTest):
-    MODULE = 'canalplus'
+    MODULE = "canalplus"
 
     def test_canalplus(self):
-        l = list(self.backend.search_videos(u'guignol'))
+        l = list(self.backend.search_videos("guignol"))
         self.assertTrue(len(l) > 0)
         v = l[0]
-        self.backend.fillobj(v, ('url',))
-        self.assertTrue(v.url and (v.url.startswith('rtmp://') or v.url.startswith('http://')), 'URL for video "%s" not found: %s' % (v.id, v.url))
+        self.backend.fillobj(v, ("url",))
+        self.assertTrue(
+            v.url and (v.url.startswith("rtmp://") or v.url.startswith("http://")),
+            f'URL for video "{v.id}" not found: {v.url}',
+        )
 
     def test_ls(self):
-        l = list(self.backend.iter_resources((BaseVideo, ), []))
+        l = list(self.backend.iter_resources((BaseVideo,), []))
         self.assertTrue(len(l) > 0)
 
-        l = list(self.backend.iter_resources((BaseVideo, ), [u'sport']))
+        l = list(self.backend.iter_resources((BaseVideo,), ["sport"]))
         self.assertTrue(len(l) > 0)

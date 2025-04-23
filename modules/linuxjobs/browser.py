@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      François Revol
 #
 # This file is part of a woob module.
@@ -19,16 +17,16 @@
 
 from urllib.parse import quote_plus
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import SearchPage, AdvertPage
+from .pages import AdvertPage, SearchPage
 
 
 class LinuxJobsBrowser(PagesBrowser):
-    BASEURL = 'https://www.linuxjobs.fr'
+    BASEURL = "https://www.linuxjobs.fr"
 
-    advert_page = URL('/jobs/(?P<id>.+)', AdvertPage)
-    search_page = URL('/search/(?P<job>)', SearchPage)
+    advert_page = URL("/jobs/(?P<id>.+)", AdvertPage)
+    search_page = URL("/search/(?P<job>)", SearchPage)
 
     def get_job_advert(self, _id, advert):
         self.advert_page.go(id=_id)
@@ -39,7 +37,7 @@ class LinuxJobsBrowser(PagesBrowser):
     def search_job(self, pattern=None):
         if pattern is None:
             return []
-        self.search_page.go(job=quote_plus(pattern.encode('utf-8')))
+        self.search_page.go(job=quote_plus(pattern.encode("utf-8")))
 
         assert self.search_page.is_here()
         return self.page.iter_job_adverts()

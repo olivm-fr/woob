@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,31 +16,31 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
+from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser.profiles import Wget
+from woob.browser.url import URL
 
-from .pages import SearchPage, TorrentPage, HomePage
+from .pages import HomePage, SearchPage, TorrentPage
 
 
-__all__ = ['BtmonBrowser']
+__all__ = ["BtmonBrowser"]
 
 
 class BtmonBrowser(PagesBrowser):
     PROFILE = Wget()
     TIMEOUT = 30
 
-    BASEURL = 'http://www.btmon.com/'
-    home = URL('$', HomePage)
-    search = URL(r'/torrent/\?sort=relevance&f=(?P<pattern>.*)', SearchPage)
-    torrent = URL(r'/(?P<torrent_id>.*)\.torrent\.html', TorrentPage)
+    BASEURL = "http://www.btmon.com/"
+    home = URL("$", HomePage)
+    search = URL(r"/torrent/\?sort=relevance&f=(?P<pattern>.*)", SearchPage)
+    torrent = URL(r"/(?P<torrent_id>.*)\.torrent\.html", TorrentPage)
 
     def get_bpc_cookie(self):
-        if 'BPC' not in self.session.cookies:
+        if "BPC" not in self.session.cookies:
             self.home.go()
-            bpcCookie = str(self.page.content).split('BPC=')[-1].split('"')[0]
-            self.session.cookies['BPC'] = bpcCookie
+            bpcCookie = str(self.page.content).split("BPC=")[-1].split('"')[0]
+            self.session.cookies["BPC"] = bpcCookie
 
     def iter_torrents(self, pattern):
         self.get_bpc_cookie()

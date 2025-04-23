@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Vincent A
 #
 # This file is part of a woob module.
@@ -22,34 +20,34 @@
 import re
 from urllib.parse import urljoin
 
-from woob.tools.backend import Module, BackendConfig
-from woob.capabilities.paste import CapPaste, BasePaste
+from woob.capabilities.paste import BasePaste, CapPaste
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.capabilities.paste import image_mime
 from woob.tools.value import Value
 
 from .browser import LutimBrowser
 
 
-__all__ = ['LutimModule']
+__all__ = ["LutimModule"]
 
 
 class LutimModule(Module, CapPaste):
-    NAME = 'lutim'
-    DESCRIPTION = u"Lutim (Let's Upload That IMage)"
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "lutim"
+    DESCRIPTION = "Lutim (Let's Upload That IMage)"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = LutimBrowser
 
-    CONFIG = BackendConfig(Value('base_url', label='Hoster base URL'))
+    CONFIG = BackendConfig(Value("base_url", label="Hoster base URL"))
 
     @property
     def base_url(self):
-        url = self.config['base_url'].get()
-        if not url.endswith('/'):
-            url = url + '/'
+        url = self.config["base_url"].get()
+        if not url.endswith("/"):
+            url = url + "/"
         return url
 
     def create_default_browser(self):
@@ -60,14 +58,14 @@ class LutimModule(Module, CapPaste):
             return 0
         elif max_age and max_age < 86400:
             return 0  # it cannot be shorter than one day
-        elif re.search(r'[^a-zA-Z0-9=+/\s]', contents):
+        elif re.search(r"[^a-zA-Z0-9=+/\s]", contents):
             return 0  # not base64, thus not binary
         else:
-            mime = image_mime(contents, ('gif', 'jpeg', 'png'))
+            mime = image_mime(contents, ("gif", "jpeg", "png"))
             return 20 * int(mime is not None)
 
     def get_paste(self, url):
-        if not url.startswith('http'):
+        if not url.startswith("http"):
             url = urljoin(self.base_url, url)
         paste = self.new_paste(url)
         self.browser.fetch(paste)

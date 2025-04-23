@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,30 +16,31 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+import itertools
+
 from woob.tools.test import BackendTest
 from woob.tools.value import Value
-import itertools
 
 
 class AdeccoTest(BackendTest):
-    MODULE = 'adecco'
+    MODULE = "adecco"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['publication_date'] = Value(value='000000')
-            self.backend.config['place'] = Value(value='')
-            self.backend.config['job'] = Value(value='')
-            self.backend.config['town'] = Value(value='')
-            self.backend.config['contract'] = Value(value='ADCFREMP004')
+            self.backend.config["publication_date"] = Value(value="000000")
+            self.backend.config["place"] = Value(value="")
+            self.backend.config["job"] = Value(value="")
+            self.backend.config["town"] = Value(value="")
+            self.backend.config["contract"] = Value(value="ADCFREMP004")
 
     def test_adecco_search(self):
-        l = list(itertools.islice(self.backend.search_job(u'manutentionnaire'), 0, 20))
+        l = list(itertools.islice(self.backend.search_job("manutentionnaire"), 0, 20))
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, None)
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')
 
     def test_adecco_advanced_search(self):
         l = list(itertools.islice(self.backend.advanced_search_job(), 0, 20))
         assert len(l)
         advert = self.backend.get_job_advert(l[0].id, None)
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')

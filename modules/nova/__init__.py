@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import NovaModule
 
-__all__ = ['NovaModule']
+
+__all__ = ["NovaModule"]

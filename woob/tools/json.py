@@ -15,11 +15,13 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from datetime import date, datetime, time, timedelta
+
 # because we don't want to import this file by "import json"
 from decimal import Decimal
-from datetime import datetime, date, time, timedelta
 
-__all__ = ['json', 'mini_jsonpath']
+
+__all__ = ["json", "mini_jsonpath"]
 
 try:
     # try simplejson first because it is faster
@@ -54,7 +56,7 @@ def mini_jsonpath(node, path):
         return range(len(i)) if isinstance(i, list) else i
 
     def cut(s):
-        p = s.split('.', 1) if s else [None]
+        p = s.split(".", 1) if s else [None]
         return p + [None] if len(p) == 1 else p
 
     if isinstance(node, str):
@@ -66,7 +68,7 @@ def mini_jsonpath(node, path):
         if name is None:
             yield node
             continue
-        elif name == '*':
+        elif name == "*":
             keys = iterkeys(node)
         elif type(node) not in (dict, list) or name not in node:
             continue
@@ -87,9 +89,9 @@ class WoobEncoder(json.JSONEncoder):
 
     def __init__(self, *args, **kwargs):
         # avoid simplejson internal Decimal handling
-        if 'use_decimal' in kwargs:
-            kwargs['use_decimal'] = False
-        super(WoobEncoder, self).__init__(*args, **kwargs)
+        if "use_decimal" in kwargs:
+            kwargs["use_decimal"] = False
+        super().__init__(*args, **kwargs)
 
     def default(self, o):
         if o is NotAvailable:
@@ -104,7 +106,7 @@ class WoobEncoder(json.JSONEncoder):
             return o.isoformat()
         elif isinstance(o, timedelta):
             return o.total_seconds()
-        return super(WoobEncoder, self).default(o)
+        return super().default(o)
 
 
 WeboobEncoder = WoobEncoder

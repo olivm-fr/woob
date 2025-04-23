@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Roger Philibert
 #
 # This file is part of a woob module.
@@ -17,19 +15,19 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import VideoPage, SearchPage
+from .pages import SearchPage, VideoPage
 
 
 class XHamsterBrowser(PagesBrowser):
-    BASEURL = 'https://fr.xhamster.com'
+    BASEURL = "https://fr.xhamster.com"
 
-    video = URL('/videos/(?P<id>.+)', VideoPage)
-    search = URL('/search\?q=(?P<pattern>[^&]+)', SearchPage)
+    video = URL(r"/videos/(?P<id>.+)", VideoPage)
+    search = URL(r"/search\?q=(?P<pattern>[^&]+)", SearchPage)
 
     def do_search(self, pattern):
-        self.location('/search', params={'q': pattern})
+        self.location("/search", params={"q": pattern})
         return self.page.iter_videos()
 
     def get_video(self, _id):

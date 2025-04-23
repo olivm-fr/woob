@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Christophe Lampin
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class ErehsbcTest(BackendTest):
-    MODULE = 'erehsbc'
+    MODULE = "erehsbc"
 
     def test_bank(self):
         l = list(self.backend.iter_accounts())

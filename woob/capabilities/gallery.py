@@ -16,13 +16,14 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.image import BaseImage as CIBaseImage, Thumbnail
-from .base import Capability, BaseObject, NotLoaded, Field, StringField, \
-                  IntField, FloatField, Enum
+from woob.capabilities.image import BaseImage as CIBaseImage
+from woob.capabilities.image import Thumbnail
+
+from .base import BaseObject, Capability, Enum, Field, FloatField, IntField, NotLoaded, StringField
 from .date import DateField
 
 
-__all__ = ['BaseGallery', 'BaseImage', 'CapGallery']
+__all__ = ["BaseGallery", "BaseImage", "CapGallery"]
 
 
 class BaseGallery(BaseObject):
@@ -31,17 +32,29 @@ class BaseGallery(BaseObject):
 
     This object has to be inherited to specify how to calculate the URL of the gallery from its ID.
     """
-    title =         StringField('Title of gallery')
-    description =   StringField('Description of gallery')
-    cardinality =   IntField('Cardinality of gallery')
-    date =          DateField('Date of gallery')
-    rating =        FloatField('Rating of this gallery')
-    rating_max =    FloatField('Max rating available')
-    thumbnail =     Field('Thumbnail', Thumbnail)
 
-    def __init__(self, _id, title=NotLoaded, url=NotLoaded, cardinality=NotLoaded, date=NotLoaded,
-                 rating=NotLoaded, rating_max=NotLoaded, thumbnail=NotLoaded, thumbnail_url=None, nsfw=False):
-        super(BaseGallery, self).__init__(str(_id), url)
+    title = StringField("Title of gallery")
+    description = StringField("Description of gallery")
+    cardinality = IntField("Cardinality of gallery")
+    date = DateField("Date of gallery")
+    rating = FloatField("Rating of this gallery")
+    rating_max = FloatField("Max rating available")
+    thumbnail = Field("Thumbnail", Thumbnail)
+
+    def __init__(
+        self,
+        _id,
+        title=NotLoaded,
+        url=NotLoaded,
+        cardinality=NotLoaded,
+        date=NotLoaded,
+        rating=NotLoaded,
+        rating_max=NotLoaded,
+        thumbnail=NotLoaded,
+        thumbnail_url=None,
+        nsfw=False,
+    ):
+        super().__init__(str(_id), url)
 
         self.title = title
         self.date = date
@@ -72,13 +85,12 @@ class BaseImage(CIBaseImage):
     """
     Base class for images.
     """
-    index =     IntField('Usually page number')
-    gallery =   Field('Reference to the Gallery object', BaseGallery)
 
-    def __init__(self, _id='', index=None, thumbnail=NotLoaded, url=NotLoaded,
-            ext=NotLoaded, gallery=None):
+    index = IntField("Usually page number")
+    gallery = Field("Reference to the Gallery object", BaseGallery)
 
-        super(BaseImage, self).__init__(str(_id), url)
+    def __init__(self, _id="", index=None, thumbnail=NotLoaded, url=NotLoaded, ext=NotLoaded, gallery=None):
+        super().__init__(str(_id), url)
 
         self.index = index
         self.thumbnail = thumbnail
@@ -106,6 +118,7 @@ class CapGallery(Capability):
     """
     This capability represents the ability for a website backend to provide videos.
     """
+
     SEARCH_RELEVANCE = SearchSort.RELEVANCE
     SEARCH_RATING = SearchSort.RATING
     SEARCH_VIEWS = SearchSort.VIEWS

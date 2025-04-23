@@ -16,12 +16,12 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import BaseObject, StringField, DecimalField, UserError
-from .date import DateField
+from .base import BaseObject, DecimalField, StringField, UserError
 from .collection import CapCollection
+from .date import DateField
 
 
-__all__ = ['OrderNotFound', 'Order', 'Payment', 'Item', 'CapShop']
+__all__ = ["OrderNotFound", "Order", "Payment", "Item", "CapShop"]
 
 
 class OrderNotFound(UserError):
@@ -29,46 +29,48 @@ class OrderNotFound(UserError):
     Raised when an order is not found.
     """
 
-    def __init__(self, msg='Order not found'):
-        super(OrderNotFound, self).__init__(msg)
+    def __init__(self, msg="Order not found"):
+        super().__init__(msg)
 
 
 class Order(BaseObject):
     """
     Purchase order.
     """
-    date     = DateField('Date when the order was placed')
-    shipping = DecimalField('Shipping price')
-    discount = DecimalField('Discounts')
-    tax      = DecimalField('Tax')
-    total    = DecimalField('Total')
+
+    date = DateField("Date when the order was placed")
+    shipping = DecimalField("Shipping price")
+    discount = DecimalField("Discounts")
+    tax = DecimalField("Tax")
+    total = DecimalField("Total")
 
     def __repr__(self):
-        return "<Order id=%r date=%r>" % (self.id, self.date)
+        return f"<Order id={self.id!r} date={self.date!r}>"
 
 
 class Payment(BaseObject):
     """
     Payment for an order.
     """
-    date   = DateField('The date when payment was applied')
+
+    date = DateField("The date when payment was applied")
     method = StringField('Payment method; e.g. "VISA 1234"')
-    amount = DecimalField('Payment amount')
+    amount = DecimalField("Payment amount")
 
     def __repr__(self):
-        return "<Payment date=%r method=%r amount=%r>" % \
-            (self.date, self.method, self.amount)
+        return f"<Payment date={self.date!r} method={self.method!r} amount={self.amount!r}>"
 
 
 class Item(BaseObject):
     """
     Purchased item within an order.
     """
-    label = StringField('Item label')
-    price = DecimalField('Item price')
+
+    label = StringField("Item label")
+    price = DecimalField("Item price")
 
     def __repr__(self):
-        return "<Item label=%r price=%r>" % (self.label, self.price)
+        return f"<Item label={self.label!r} price={self.price!r}>"
 
 
 class CapShop(CapCollection):

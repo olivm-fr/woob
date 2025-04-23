@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2022  Budget Insight
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import KrakenModule
 
 
-__all__ = ['KrakenModule']
+__all__ = ["KrakenModule"]

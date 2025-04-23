@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Bezleputh
 #
 # This file is part of a woob module.
@@ -17,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.calendar import BaseCalendarEvent, TRANSP, STATUS, CATEGORIES
+from woob.capabilities.calendar import CATEGORIES, STATUS, TRANSP, BaseCalendarEvent
 
 
 class RazibusCalendarEvent(BaseCalendarEvent):
@@ -28,4 +26,4 @@ class RazibusCalendarEvent(BaseCalendarEvent):
         self.transp = TRANSP.TRANSPARENT
         self.status = STATUS.CONFIRMED
         self.category = CATEGORIES.CONCERT
-        self.timezone = 'Europe/Paris'
+        self.timezone = "Europe/Paris"

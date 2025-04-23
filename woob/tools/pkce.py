@@ -27,19 +27,20 @@ from hashlib import sha256
 from os import urandom
 from typing import NamedTuple
 
+
 __all__ = [
-    'PKCEChallengeType',
-    'PKCEData',
+    "PKCEChallengeType",
+    "PKCEData",
 ]
 
 
 class PKCEChallengeType(str, Enum):
     """PKCE challenge type."""
 
-    PLAIN = ('PLAIN')
+    PLAIN = "PLAIN"
     """Plaintext challenge."""
 
-    S256 = ('S256')
+    S256 = "S256"
     """SHA-256 challenge."""
 
 
@@ -75,11 +76,11 @@ class PKCEData(NamedTuple):
         verifier = urandom(32).hex()
 
         if type_ == PKCEChallengeType.S256:
-            digest = sha256(verifier.encode('ascii')).digest()
-            challenge = urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
-            return cls(verifier=verifier, method='S256', challenge=challenge)
+            digest = sha256(verifier.encode("ascii")).digest()
+            challenge = urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+            return cls(verifier=verifier, method="S256", challenge=challenge)
 
         if type_ == PKCEChallengeType.PLAIN:
-            return cls(verifier=verifier, method='plain', challenge=verifier)
+            return cls(verifier=verifier, method="plain", challenge=verifier)
 
         raise ValueError(f'Unsupported PKCE challenge type "{type_}"')

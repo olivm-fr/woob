@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Budget Insight
 #
 # This file is part of a woob module.
@@ -27,7 +25,7 @@ from .phenix.browser import BnpcartesentreprisePhenixBrowser
 
 class ProxyBrowser(SwitchingBrowser):
     BROWSERS = {
-        'main': BnpcartesentrepriseBrowser,
-        'corporate': BnpcartesentrepriseCorporateBrowser,
-        'phenix': BnpcartesentreprisePhenixBrowser,
+        "main": BnpcartesentrepriseBrowser,
+        "corporate": BnpcartesentrepriseCorporateBrowser,
+        "phenix": BnpcartesentreprisePhenixBrowser,
     }

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      P4ncake
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class CityscootTest(BackendTest):
-    MODULE = 'cityscoot'
+    MODULE = "cityscoot"
 
     def test_document(self):
         subscriptions = list(self.backend.iter_subscription())

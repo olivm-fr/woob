@@ -15,19 +15,20 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from codecs import open
 import csv
+from codecs import open
 
 from woob.tools.misc import to_unicode
 
 from .iformatter import IFormatter
 
-__all__ = ['CSVFormatter']
+
+__all__ = ["CSVFormatter"]
 
 
 class CSVFormatter(IFormatter):
     def __init__(self, field_separator=";"):
-        super(CSVFormatter, self).__init__()
+        super().__init__()
         self.started = False
         self.field_separator = field_separator
 
@@ -38,7 +39,7 @@ class CSVFormatter(IFormatter):
         if not isinstance(self.outfile, str):
             return self.write_dict(item, self.outfile)
 
-        with open(self.outfile, "a+", encoding='utf-8') as fp:
+        with open(self.outfile, "a+", encoding="utf-8") as fp:
             return self.write_dict(item, fp)
 
     def write_dict(self, item, fp):

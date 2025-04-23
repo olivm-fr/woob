@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Romain Bignon
 #
 # This file is part of woob.
@@ -17,12 +15,10 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from tempfile import mkstemp
 from os import remove
+from tempfile import mkstemp
 
-from woob.tools.application.formatters.json import (
-    JsonFormatter, JsonLineFormatter,
-)
+from woob.tools.application.formatters.json import JsonFormatter, JsonLineFormatter
 from woob.tools.application.formatters.table import TableFormatter
 
 
@@ -43,16 +39,12 @@ def formatter_test_output(Formatter, obj):
 
 
 def test_json():
-    assert formatter_test_output(JsonFormatter, {'foo': 'bar'}) == '[{"foo": "bar"}]\n'
-    assert formatter_test_output(JsonLineFormatter, {'foo': 'bar'}) == '{"foo": "bar"}\n'
-    assert formatter_test_output(JsonLineFormatter, {'foo': 'bar'}) == '{"foo": "bar"}\n'
+    assert formatter_test_output(JsonFormatter, {"foo": "bar"}) == '[{"foo": "bar"}]\n'
+    assert formatter_test_output(JsonLineFormatter, {"foo": "bar"}) == '{"foo": "bar"}\n'
+    assert formatter_test_output(JsonLineFormatter, {"foo": "bar"}) == '{"foo": "bar"}\n'
 
 
 def test_table():
-    assert formatter_test_output(TableFormatter, {'foo': 'bar'}) == (
-        '┌─────┐\n'
-        '│ Foo │\n'
-        '├─────┤\n'
-        '│ bar │\n'
-        '└─────┘\n'
+    assert formatter_test_output(TableFormatter, {"foo": "bar"}) == (
+        "┌─────┐\n" "│ Foo │\n" "├─────┤\n" "│ bar │\n" "└─────┘\n"
     )

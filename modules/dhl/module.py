@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.parcel import CapParcel, ParcelNotFound
+from woob.tools.backend import Module
 
-from .browser import DHLExpressBrowser, DeutschePostDHLBrowser
+from .browser import DeutschePostDHLBrowser, DHLExpressBrowser
 
 
-__all__ = ['DHLModule']
+__all__ = ["DHLModule"]
 
 
 class DHLModule(Module, CapParcel):
-    NAME = 'dhl'
-    DESCRIPTION = u'DHL website'
-    MAINTAINER = u'Matthieu Weber'
-    EMAIL = 'mweber+weboob@free.fr'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "dhl"
+    DESCRIPTION = "DHL website"
+    MAINTAINER = "Matthieu Weber"
+    EMAIL = "mweber+weboob@free.fr"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     def get_parcel_tracking(self, id):
         """

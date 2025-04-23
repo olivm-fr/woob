@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a woob module.
@@ -24,25 +22,24 @@ from woob.tools.value import ValueBackendPassword
 
 from .browser import CourtoisBrowser
 
-__all__ = ['CourtoisModule']
+
+__all__ = ["CourtoisModule"]
 
 
 class CourtoisModule(AbstractModule, CapBankWealth, CapProfile):
-    NAME = 'courtois'
-    MAINTAINER = u'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    VERSION = '3.6'
-    DEPENDENCIES = ('creditdunord',)
-    DESCRIPTION = u'Banque Courtois'
-    LICENSE = 'LGPLv3+'
-    CONFIG = BackendConfig(ValueBackendPassword('login',    label='Identifiant', masked=False),
-                           ValueBackendPassword('password', label='Code confidentiel'))
-    PARENT = 'creditdunord'
+    NAME = "courtois"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    VERSION = "3.7"
+    DEPENDENCIES = ("creditdunord",)
+    DESCRIPTION = "Banque Courtois"
+    LICENSE = "LGPLv3+"
+    CONFIG = BackendConfig(
+        ValueBackendPassword("login", label="Identifiant", masked=False),
+        ValueBackendPassword("password", label="Code confidentiel"),
+    )
+    PARENT = "creditdunord"
     BROWSER = CourtoisBrowser
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config['login'].get(),
-            self.config['password'].get(),
-            woob=self.woob
-    )
+        return self.create_browser(self.config["login"].get(), self.config["password"].get(), woob=self.woob)

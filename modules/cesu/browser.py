@@ -22,108 +22,147 @@ from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, need_login
 from woob.browser.exceptions import ClientError
 from woob.capabilities.bill import Subscription
 from woob.exceptions import BrowserIncorrectPassword
+from woob_modules.franceconnect.browser import FranceConnectBrowser
 
 from .pages import (
-    LoginPage,
-    HomePage,
-    StatusPage,
-    EmployerPage,
-    EmployeesPage,
-    RegistrationPage,
-    RegistrationDashboardPage,
+    CurrentFiscalAdvantagePage,
+    DirectDebitDownloadPage,
+    DirectDebitsDetailPage,
+    DirectDebitsHeaderPage,
     DirectDebitSummaryPage,
     EmployeesDashboardPage,
-    CurrentFiscalAdvantagePage,
+    EmployeesPage,
+    EmployerPage,
+    FranceConnectFinalizePage,
+    FranceConnectGetUrlPage,
+    FranceConnectRedirectPage,
+    HomePage,
     LastDayMonthPage,
-    DirectDebitsHeaderPage,
-    DirectDebitsDetailPage,
+    LoginPage,
     PayslipDownloadPage,
-    DirectDebitDownloadPage,
+    RegistrationDashboardPage,
+    RegistrationPage,
+    StartPage,
+    StatusPage,
     TaxCertificateDownloadPage,
     TaxCertificatesPage,
 )
 
 
-class CesuBrowser(LoginBrowser):
-    BASEURL = 'https://www.cesu.urssaf.fr'
+class CesuBrowser(FranceConnectBrowser):
+    BASEURL = "https://www.cesu.urssaf.fr"
 
-    login = URL(r'/cesuwebdec/authentication$', LoginPage)
-    homepage = URL(r'/info/accueil\.login\.do$', HomePage)
-    logout = URL(r'/cesuwebdec/deconnexion$')
-    status = URL(r'/cesuwebdec/status', StatusPage)
+    france_connect_get_url = URL(
+        r"/cesuwebdec/login-franceconnect\?callback=https%3A%2F%2Fwww.cesu.urssaf.fr%2Fdecla%2Findex.html%3FLANG%3DFR%26page%3Dpage_se_connecter%26callback%3Dlogin-franceconnect",
+        FranceConnectGetUrlPage,
+    )
+    france_connect_redirect = URL(r"https://app.franceconnect.gouv.fr/api/v1/authorize\?.*", FranceConnectRedirectPage)
+    france_connect_finalize = URL(r"/cesuwebdec/authentication-or-franceconnect-complement", FranceConnectFinalizePage)
+    login = URL(r"/cesuwebdec/authentication$", LoginPage)
+    start = URL(r"/decla/index.html", StartPage)
+    homepage = URL(r"/info/accueil\.login\.do$", HomePage)
+    logout = URL(r"/cesuwebdec/deconnexion$")
+    status = URL(r"/cesuwebdec/status", StatusPage)
 
-    employer = URL(r'/cesuwebdec/employeursIdentite/(?P<employer>.*)', EmployerPage)
-    employees = URL(r'/cesuwebdec/employeurs/(?P<employer>.*)/salaries', EmployeesPage)
+    employer = URL(r"/cesuwebdec/employeursIdentite/(?P<employer>.*)", EmployerPage)
+    employees = URL(r"/cesuwebdec/employeurs/(?P<employer>.*)/salaries", EmployeesPage)
     employees_dashboard = URL(
-        r'/cesuwebdec/salariesTdb?pseudoSiret=(?P<employer>.*)&maxResult=8',
-        EmployeesDashboardPage
+        r"/cesuwebdec/salariesTdb?pseudoSiret=(?P<employer>.*)&maxResult=8", EmployeesDashboardPage
     )
 
-    registrations = URL(r'/cesuwebdec/employeurs/(?P<employer>.*)/declarationsby\?.*', RegistrationPage)
+    registrations = URL(r"/cesuwebdec/employeurs/(?P<employer>.*)/declarationsby\?.*", RegistrationPage)
     registrations_dashboard = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/declarationsTdBby\?.*',
-        RegistrationDashboardPage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/declarationsTdBby\?.*", RegistrationDashboardPage
     )
 
-    direct_debits_summary = URL(r'/cesuwebdec/employeurs/(?P<employer>.*)/recapprelevements', DirectDebitSummaryPage)
+    direct_debits_summary = URL(r"/cesuwebdec/employeurs/(?P<employer>.*)/recapprelevements", DirectDebitSummaryPage)
     direct_debits_header = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/entetePrelevements\?.*',
-        DirectDebitsHeaderPage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/entetePrelevements\?.*", DirectDebitsHeaderPage
     )
     direct_debits_detail = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/detailPrelevements\?periode=202001&type=IPVT&reference=0634675&idPrelevement=0',
-        DirectDebitsDetailPage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/detailPrelevements\?periode=202001&type=IPVT&reference=0634675&idPrelevement=0",
+        DirectDebitsDetailPage,
     )
     direct_debit_download = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/editions/avisPrelevement\?reference=(?P<reference>.*)&periode=(?P<period>.*)&type=(?P<type>.*)',
-        DirectDebitDownloadPage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/editions/avisPrelevement\?reference=(?P<reference>.*)&periode=(?P<period>.*)&type=(?P<type>.*)",
+        DirectDebitDownloadPage,
     )
 
     current_fiscal_advantage = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/avantagefiscalencours',
-        CurrentFiscalAdvantagePage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/avantagefiscalencours", CurrentFiscalAdvantagePage
     )
-    last_day_month = URL(r'/cesuwebdec/employeurs/(?P<employer>.*)/dernierJourOuvreMois', LastDayMonthPage)
+    last_day_month = URL(r"/cesuwebdec/employeurs/(?P<employer>.*)/dernierJourOuvreMois", LastDayMonthPage)
     payslip_download = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/editions/bulletinSalairePE\?refDoc=(?P<ref_doc>.*)',
-        PayslipDownloadPage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/editions/bulletinSalairePE\?refDoc=(?P<ref_doc>.*)",
+        PayslipDownloadPage,
     )
-    tax_certificates = URL(r'/cesuwebdec/employeurs/(?P<employer>.*)/attestationsfiscales', TaxCertificatesPage)
+    tax_certificates = URL(r"/cesuwebdec/employeurs/(?P<employer>.*)/attestationsfiscales", TaxCertificatesPage)
     tax_certificate_download = URL(
-        r'/cesuwebdec/employeurs/(?P<employer>.*)/editions/attestation_fiscale_annee\?periode=(?P<year>.*)',
-        TaxCertificateDownloadPage
+        r"/cesuwebdec/employeurs/(?P<employer>.*)/editions/attestation_fiscale_annee\?periode=(?P<year>.*)",
+        TaxCertificateDownloadPage,
     )
 
     employer = None
     compteur = 0
 
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.login_source = config["login_source"].get()
+
     def do_login(self):
         self.session.cookies.clear()
-        self.session.headers.update({
-            "Accept": "*/*",
-            "Content-Type": "application/json; charset=utf-8",
-            "X-Requested-With": "XMLHttpRequest",
-        })
 
-        try:
-            self.login.go(json={
-                'username': self.username,
-                'password': self.password,
-            })
-        except ClientError as error:
-            response = error.response.json()
+        if self.login_source == "direct":
+            self.session.headers.update(
+                {
+                    "Accept": "*/*",
+                    "Content-Type": "application/json; charset=utf-8",
+                    "X-Requested-With": "XMLHttpRequest",
+                }
+            )
 
-            error_messages_list = response.get('listeMessages', [])
+            try:
+                self.login.go(
+                    json={
+                        "username": self.username,
+                        "password": self.password,
+                    }
+                )
+            except ClientError as error:
+                response = error.response.json()
 
-            for error_message in error_messages_list:
-                if error_message.get('contenu', '') == 'Identifiant / mot de passe non reconnus':
-                    raise BrowserIncorrectPassword(error_message['contenu'])
+                error_messages_list = response.get("listeMessages", [])
 
-            raise
+                for error_message in error_messages_list:
+                    if error_message.get("contenu", "") == "Identifiant / mot de passe non reconnus":
+                        raise BrowserIncorrectPassword(error_message["contenu"])
+
+                raise
+
+        else:
+            page = self.france_connect_get_url.open()
+            if not isinstance(page, FranceConnectGetUrlPage):
+                raise AssertionError(f"Unexpected page: {self.page} while getting FranceConnect URL")
+
+            fc_url = page.value()
+            self.location(fc_url)
+
+            if self.login_source == "fc_impots":
+                self.login_impots()
+            else:
+                raise AssertionError(f"Unexpected login source: {self.login_source}")
+
+            self.page = self.start.handle(self.response)
+            if not isinstance(self.page, StartPage):
+                raise AssertionError(f"Unexpected page: {self.page} after FranceConnect redirects")
+
+            self.france_connect_finalize.go(
+                json={"code": self.page.parameters["code"], "state": self.page.parameters["state"]}
+            )
 
         self.status.go()
         self.employer = self.page.get_object().get("numero")
@@ -136,8 +175,7 @@ class CesuBrowser(LoginBrowser):
     def iter_subscription(self):
         self.employees.go(employer=self.employer)
 
-        for sub in self.page.iter_subscriptions():
-            yield sub
+        yield from self.page.iter_subscriptions()
 
         s = Subscription()
         s.label = "Prélèvements"
@@ -151,9 +189,7 @@ class CesuBrowser(LoginBrowser):
         s._type = s.id
         yield s
 
-    def _search_registrations(
-        self, subscription, begin_date, end_date, num_start, step
-    ):
+    def _search_registrations(self, subscription, begin_date, end_date, num_start, step):
         self.registrations.go(
             employer=self.employer,
             params={
@@ -193,18 +229,13 @@ class CesuBrowser(LoginBrowser):
             step = 24
 
             while has_results:
-                self._search_registrations(
-                    subscription, begin_date, end_date, num_start, step
-                )
+                self._search_registrations(subscription, begin_date, end_date, num_start, step)
 
                 num_start += step
 
                 has_results = len(self.page.get_objects()) > 0
 
-                for doc in self.page.iter_documents(
-                    subscription=subscription.id, employer=self.employer
-                ):
-                    yield doc
+                yield from self.page.iter_documents(subscription=subscription.id, employer=self.employer)
 
         elif subscription._type == "prelevements":
             # Start end of month
@@ -223,14 +254,8 @@ class CesuBrowser(LoginBrowser):
 
             has_results = len(self.page.get_objects()) > 0
 
-            for doc in self.page.iter_documents(
-                subscription=subscription.id, employer=self.employer
-            ):
-                yield doc
+            yield from self.page.iter_documents(subscription=subscription.id, employer=self.employer)
 
         elif subscription._type == "taxcertificates":
             self.tax_certificates.go(employer=self.employer)
-            for doc in self.page.iter_documents(
-                subscription=subscription.id, employer=self.employer
-            ):
-                yield doc
+            yield from self.page.iter_documents(subscription=subscription.id, employer=self.employer)

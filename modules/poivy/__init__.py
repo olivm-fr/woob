@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2014 Florent Fourcot
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import PoivyModule
 
-__all__ = ['PoivyModule']
+
+__all__ = ["PoivyModule"]

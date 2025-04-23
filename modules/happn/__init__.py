@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Roger Philibert
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import HappnModule
 
 
-__all__ = ['HappnModule']
+__all__ = ["HappnModule"]

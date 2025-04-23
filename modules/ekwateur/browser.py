@@ -19,20 +19,19 @@
 
 import itertools
 
-
-from woob.browser import LoginBrowser, need_login, URL
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import BrowserIncorrectPassword
 
 from .pages import BillsPage, DocumentsPage, LoginPage, ProfilePage
 
 
 class EkwateurBrowser(LoginBrowser):
-    BASEURL = 'https://mon-espace.ekwateur.fr/'
+    BASEURL = "https://mon-espace.ekwateur.fr/"
 
-    login_page = URL('/se_connecter', LoginPage)
-    bills_page = URL('/mes_factures_et_acomptes', BillsPage)
-    documents_page = URL('/documents', DocumentsPage)
-    profile = URL('/informations_personnelles', ProfilePage)
+    login_page = URL("/se_connecter", LoginPage)
+    bills_page = URL("/mes_factures_et_acomptes", BillsPage)
+    documents_page = URL("/documents", DocumentsPage)
+    profile = URL("/informations_personnelles", ProfilePage)
 
     def do_login(self):
         self.login_page.go().do_login(self.username, self.password)
@@ -50,7 +49,7 @@ class EkwateurBrowser(LoginBrowser):
             self.documents_page.stay_or_go().get_documents(sub_id=sub_id),
             self.documents_page.stay_or_go().get_cgv(sub_id),
             self.documents_page.stay_or_go().get_justificatif(sub_id),
-            self.bills_page.stay_or_go().get_bills(sub_id=sub_id)
+            self.bills_page.stay_or_go().get_bills(sub_id=sub_id),
         )
 
     @need_login

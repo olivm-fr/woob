@@ -19,14 +19,14 @@
 import re
 from ast import literal_eval
 
-from woob.browser.filters.standard import Filter, Regexp, RegexpError, FormatError, ItemNotFound
+from woob.browser.filters.standard import Filter, FormatError, ItemNotFound, Regexp, RegexpError
 
 
-__all__ = ['JSPayload', 'JSValue', 'JSVar']
+__all__ = ["JSPayload", "JSValue", "JSVar"]
 
 
 def _quoted(q):
-    return r'(?<!\\){0}(?:\\{0}|[^{0}])*{0}'.format(q)
+    return r"(?<!\\){0}(?:\\{0}|[^{0}])*{0}".format(q)
 
 
 class JSPayload(Filter):
@@ -47,16 +47,16 @@ class JSPayload(Filter):
     'someString = "An example comment: /* example */";\n\nsome_code();\n'
 
     """
-    _single_line_comment = r'[ \t\v\f]*//.*\r?(?:\n|$)'
-    _multi_line_comment = r'/\*(?:.|[\r\n])*?\*/'
-    _splitter = re.compile('(?:(%s|%s)|%s|%s)' % (_quoted('"'),
-                                                  _quoted("'"),
-                                                  _single_line_comment,
-                                                  _multi_line_comment))
+
+    _single_line_comment = r"[ \t\v\f]*//.*\r?(?:\n|$)"
+    _multi_line_comment = r"/\*(?:.|[\r\n])*?\*/"
+    _splitter = re.compile(
+        "(?:({}|{})|{}|{})".format(_quoted('"'), _quoted("'"), _single_line_comment, _multi_line_comment)
+    )
 
     @classmethod
     def filter(cls, value):
-        return ''.join(filter(bool, cls._splitter.split(value)))
+        return "".join(filter(bool, cls._splitter.split(value)))
 
 
 class JSValue(Regexp):
@@ -75,6 +75,7 @@ class JSValue(Regexp):
     >>> JSValue(nth='*').filter('foo([1, 2, 3], "blah", 5.0, true, null]);')
     [1, 2, 3, u'blah', 5.0, True, None]
     """
+
     pattern = r"""(?x:                                # re.X
         (?:(?P<float>(?:[-+]\s*)?                     # float ?
                (?:(?:\d+\.\d*|\d*\.\d+)(?:[eE]\d+)?
@@ -83,10 +84,13 @@ class JSValue(Regexp):
                                  |0[oO][0-7]+
                                  |0[xX][0-9a-fA-F]+
                                  |\d+))
-          |(?:(?:(?:new\s+)?String\()?(?P<str>(?:%s|%s)))  # str ?
+          |(?:(?:(?:new\s+)?String\()?(?P<str>(?:{}|{})))  # str ?
           |(?P<bool>true|false)                       # bool ?
           |(?P<None>null))                            # None ?
-    )""" % (_quoted('"'), _quoted("'"))
+    )""".format(
+        _quoted('"'),
+        _quoted("'"),
+    )
 
     def to_python(self, m):
         "Convert MatchObject to python value"
@@ -95,25 +99,26 @@ class JSValue(Regexp):
             if v is not None:
                 break
         if self.need_type and t != self.need_type:
-            raise ItemNotFound('Value with type %s not found' % self.need_type)
-        if t in ('int', 'float'):
+            raise ItemNotFound("Value with type %s not found" % self.need_type)
+        if t in ("int", "float"):
             return literal_eval(v)
-        if t == 'str':
+        if t == "str":
             return literal_eval(v)
-        if t == 'bool':
-            return v == 'true'
-        if t == 'None':
+        if t == "bool":
+            return v == "true"
+        if t == "None":
             return
         if self.default:
             return self.default
-        raise FormatError('Unable to parse %r value' % m.group(0))
+        raise FormatError("Unable to parse %r value" % m.group(0))
 
     def __init__(self, selector=None, need_type=None, **kwargs):
-        assert 'pattern' not in kwargs and 'flags' not in kwargs, \
-               "It would be meaningless to define a pattern and/or flags, use Regexp"
-        assert 'template' not in kwargs, "Can't use a template, use Regexp if you have to"
+        assert (
+            "pattern" not in kwargs and "flags" not in kwargs
+        ), "It would be meaningless to define a pattern and/or flags, use Regexp"
+        assert "template" not in kwargs, "Can't use a template, use Regexp if you have to"
         self.need_type = need_type.__name__ if type(need_type) == type else need_type
-        super(JSValue, self).__init__(selector, pattern=self.pattern, template=self.to_python, **kwargs)
+        super().__init__(selector, pattern=self.pattern, template=self.to_python, **kwargs)
 
 
 class JSVar(JSValue):
@@ -136,20 +141,24 @@ class JSVar(JSValue):
     >>> JSVar(var='test', nth=1).filter("var test = false; test = true;\nsomecode()")
     True
     """
-    pattern_template = r"""(?x:                       # re.X
+
+    pattern_template = (
+        r"""(?x:                       # re.X
         (?:var\s+)?                                   # optional var keyword
         \b%s                                          # var name
         \s*=\s*                                       # equal sign
-    )""" + JSValue.pattern
+    )"""
+        + JSValue.pattern
+    )
 
     def __init__(self, selector=None, var=None, need_type=None, **kwargs):
-        assert var is not None, 'Please give a var parameter'
+        assert var is not None, "Please give a var parameter"
         self.var = var
         self.pattern = self.pattern_template % re.escape(var)
-        super(JSVar, self).__init__(selector, need_type=need_type, **kwargs)
+        super().__init__(selector, need_type=need_type, **kwargs)
 
     def filter(self, txt):
         try:
-            return super(JSVar, self).filter(txt)
+            return super().filter(txt)
         except RegexpError:
-            raise ItemNotFound('Variable %r not found' % self.var)
+            raise ItemNotFound("Variable %r not found" % self.var)

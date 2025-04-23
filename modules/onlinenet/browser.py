@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
 #
 # This file is part of a woob module.
@@ -18,20 +16,20 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import LoginBrowser, URL, need_login
-from woob.exceptions import BrowserIncorrectPassword
+from woob.browser import URL, LoginBrowser, need_login
 from woob.browser.exceptions import ClientError
+from woob.exceptions import BrowserIncorrectPassword
 
-from .pages import LoginPage, ProfilePage, DocumentsPage
+from .pages import DocumentsPage, LoginPage, ProfilePage
 
 
 class OnlinenetBrowser(LoginBrowser):
-    BASEURL = 'https://console.online.net/en/'
+    BASEURL = "https://console.online.net/en/"
     TIMEOUT = 60
 
-    login = URL('login', LoginPage)
-    profile = URL('account/edit', ProfilePage)
-    documents = URL('bill/list', DocumentsPage)
+    login = URL("login", LoginPage)
+    profile = URL("account/edit", ProfilePage)
+    documents = URL("bill/list", DocumentsPage)
 
     def do_login(self):
         self.login.go()
@@ -50,7 +48,5 @@ class OnlinenetBrowser(LoginBrowser):
 
     @need_login
     def iter_documents(self, subscription):
-        for b in self.documents.stay_or_go().get_bills():
-            yield b
-        for d in self.documents.stay_or_go().get_documents():
-            yield d
+        yield from self.documents.stay_or_go().get_bills()
+        yield from self.documents.stay_or_go().get_documents()

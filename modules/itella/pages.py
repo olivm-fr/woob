@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Matthieu Weber
 #
 # This file is part of a woob module.
@@ -20,16 +18,17 @@
 from dateutil.parser import parse as parse_date
 
 from woob.browser.pages import JsonPage
-from woob.capabilities.parcel import Parcel, Event, ParcelNotFound
+from woob.capabilities.parcel import Event, Parcel, ParcelNotFound
 
 
 class SearchPage(JsonPage):
     STATUSES = {
-            "WAITING": Parcel.STATUS_PLANNED,
-            "IN_TRANSPORT": Parcel.STATUS_IN_TRANSIT,
-            "READY_FOR_PICKUP": Parcel.STATUS_ARRIVED,
-            "DELIVERED": Parcel.STATUS_ARRIVED,
-            }
+        "WAITING": Parcel.STATUS_PLANNED,
+        "IN_TRANSPORT": Parcel.STATUS_IN_TRANSIT,
+        "READY_FOR_PICKUP": Parcel.STATUS_ARRIVED,
+        "DELIVERED": Parcel.STATUS_ARRIVED,
+    }
+
     def get_info(self, _id):
         shipments = self.doc["shipments"]
         if not shipments:
@@ -37,7 +36,7 @@ class SearchPage(JsonPage):
         shipment = shipments[0]
         result_id = shipment["items"][0]["trackingNumbers"][0]
         if result_id != _id:
-            raise ParcelNotFound("ID mismatch: expecting %s, got %s" % (_id, result_id))
+            raise ParcelNotFound(f"ID mismatch: expecting {_id}, got {result_id}")
 
         p = Parcel(_id)
         if shipment["estimatedDeliveryTime"]:

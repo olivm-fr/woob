@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class BibliothequesparisTest(BackendTest):
-    MODULE = 'bibliothequesparis'
+    MODULE = "bibliothequesparis"
 
     def test_rented(self):
         books = list(self.backend.iter_rented())

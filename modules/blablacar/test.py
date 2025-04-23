@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,13 +16,14 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from datetime import datetime
+
+from woob.tools.test import BackendTest
 
 
 class BlablacarTest(BackendTest):
-    MODULE = 'blablacar'
+    MODULE = "blablacar"
 
     def test_blablacar(self):
-        departures = list(self.backend.iter_station_departures('lille', None, datetime.now()))
+        departures = list(self.backend.iter_station_departures("lille", None, datetime.now()))
         self.assertTrue(len(departures) > 0)

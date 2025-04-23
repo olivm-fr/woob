@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Bezleputh
 #
 # This file is part of a woob module.
@@ -17,17 +15,17 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.calendar import BaseCalendarEvent, TRANSP, STATUS, CATEGORIES
+from woob.capabilities.calendar import CATEGORIES, STATUS, TRANSP, BaseCalendarEvent
 
 
 class HybrideCalendarEvent(BaseCalendarEvent):
 
     def __init__(self):
         BaseCalendarEvent.__init__(self)
-        self.city = u'Lille'
-        self.location = u'18 rue Gosselet'
+        self.city = "Lille"
+        self.location = "18 rue Gosselet"
         self.sequence = 1
         self.transp = TRANSP.TRANSPARENT
         self.status = STATUS.CONFIRMED
         self.category = CATEGORIES.CINE
-        self.timezone = u'Europe/Paris'
+        self.timezone = "Europe/Paris"

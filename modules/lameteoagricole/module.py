@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -18,22 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.weather import CapWeather
+from woob.tools.backend import Module
 
 from .browser import LameteoagricoleBrowser
 
 
-__all__ = ['LameteoagricoleModule']
+__all__ = ["LameteoagricoleModule"]
 
 
 class LameteoagricoleModule(Module, CapWeather):
-    NAME = 'lameteoagricole'
-    DESCRIPTION = u'lameteoagricole website'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "lameteoagricole"
+    DESCRIPTION = "lameteoagricole website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = LameteoagricoleBrowser
 

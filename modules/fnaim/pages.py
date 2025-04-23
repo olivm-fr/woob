@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Antoine BOSSY
 #
 # This file is part of a woob module.
@@ -17,16 +15,25 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.elements import ItemElement, ListElement, method, DictElement
-from woob.browser.filters.html import Attr, AbsoluteLink, Link, XPath
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
+from woob.browser.filters.html import AbsoluteLink, Attr, Link, XPath
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import CleanDecimal, CleanText, Regexp, MultiJoin, Env
+from woob.browser.filters.standard import CleanDecimal, CleanText, Env, MultiJoin, Regexp
 from woob.browser.pages import HTMLPage, JsonPage, pagination
 from woob.capabilities.address import PostalAddress
-from woob.capabilities.base import NotAvailable, Currency
-from woob.capabilities.housing import City, Housing, UTILITIES, HousingPhoto, ADVERT_TYPES, \
-    ENERGY_CLASS, HOUSE_TYPES, POSTS_TYPES
+from woob.capabilities.base import Currency, NotAvailable
+from woob.capabilities.housing import (
+    ADVERT_TYPES,
+    ENERGY_CLASS,
+    HOUSE_TYPES,
+    POSTS_TYPES,
+    UTILITIES,
+    City,
+    Housing,
+    HousingPhoto,
+)
 from woob.tools.capabilities.housing.housing import PricePerMeterFilter
+
 from .constants import HOUSE_TYPES_LABELS
 
 
@@ -37,11 +44,8 @@ class SearchCityPage(JsonPage):
 
         class item(ItemElement):
             klass = City
-            obj_id = MultiJoin(Dict('id', default=''),
-                               Dict('type', default=''),
-                               Dict('insee', default=''),
-                               pattern='#')
-            obj_name = Dict('label', default='')
+            obj_id = MultiJoin(Dict("id", default=""), Dict("type", default=""), Dict("insee", default=""), pattern="#")
+            obj_name = Dict("label", default="")
 
 
 class SearchPage(HTMLPage):
@@ -54,24 +58,28 @@ class SearchPage(HTMLPage):
 
         class item(ItemElement):
             klass = Housing
-            obj_id = Attr('./div[@class="itemImage"]/a', 'data-id')
+            obj_id = Attr('./div[@class="itemImage"]/a', "data-id")
             obj_url = AbsoluteLink('./div[@class="itemImage"]/a')
             obj_cost = CleanDecimal('./div[@class="itemContent"]/div/h4', default=NotAvailable)
-            obj_currency = Currency.get_currency(u'€')
-            obj_area = CleanDecimal(Regexp(CleanText('./div[@class="itemImage"]/a/@data-title'),
-                                           r' (\d+)m²',
-                                           default=NotAvailable),
-                                    default=NotAvailable)
-            obj_title = CleanText('./h3/a')
-            obj_text = MultiJoin(CleanText('./div[@class="itemContent"]/div/p'),
-                                 CleanText('./div[@class="itemContent"]/div/div[@class="nom"]'),
-                                 CleanText('./div[@class="itemContent"]/div/div/div[@class="actions"]/span'),
-                                 pattern=' / ')
-            obj_rooms = CleanDecimal(Regexp(CleanText('./div[@class="itemImage"]/a/@data-title'), r' (\d+) pièces',
-                                            default=NotAvailable),
-                                     default=NotAvailable)
-            obj_phone = CleanText('./div[@class="itemContent"]/div/div/div/span[@class="telNumber"]',
-                                  default=NotAvailable)
+            obj_currency = Currency.get_currency("€")
+            obj_area = CleanDecimal(
+                Regexp(CleanText('./div[@class="itemImage"]/a/@data-title'), r" (\d+)m²", default=NotAvailable),
+                default=NotAvailable,
+            )
+            obj_title = CleanText("./h3/a")
+            obj_text = MultiJoin(
+                CleanText('./div[@class="itemContent"]/div/p'),
+                CleanText('./div[@class="itemContent"]/div/div[@class="nom"]'),
+                CleanText('./div[@class="itemContent"]/div/div/div[@class="actions"]/span'),
+                pattern=" / ",
+            )
+            obj_rooms = CleanDecimal(
+                Regexp(CleanText('./div[@class="itemImage"]/a/@data-title'), r" (\d+) pièces", default=NotAvailable),
+                default=NotAvailable,
+            )
+            obj_phone = CleanText(
+                './div[@class="itemContent"]/div/div/div/span[@class="telNumber"]', default=NotAvailable
+            )
             obj_utilities = UTILITIES.UNKNOWN
             obj_advert_type = ADVERT_TYPES.PROFESSIONAL
 
@@ -81,10 +89,10 @@ class SearchPage(HTMLPage):
 
             def obj_type(self):
                 url = self.obj_url(self)
-                return POSTS_TYPES.SALE if 'acheter' in url else POSTS_TYPES.RENT
+                return POSTS_TYPES.SALE if "acheter" in url else POSTS_TYPES.RENT
 
             def obj_photos(self):
-                return [HousingPhoto(AbsoluteLink('./div[@class="itemImage"]/a/img', 'src')(self))]
+                return [HousingPhoto(AbsoluteLink('./div[@class="itemImage"]/a/img', "src")(self))]
 
 
 class HousingPage(HTMLPage):
@@ -92,10 +100,10 @@ class HousingPage(HTMLPage):
     class get_housing(ItemElement):
         klass = Housing
 
-        obj_id = Env('id')
+        obj_id = Env("id")
         obj_title = CleanText('//h1[@class="titreFiche"]')
         obj_cost = CleanDecimal('.//span[@itemprop="price"]', default=NotAvailable)
-        obj_currency = Attr('//meta[@itemprop="priceCurrency"]', 'content', default=NotAvailable)
+        obj_currency = Attr('//meta[@itemprop="priceCurrency"]', "content", default=NotAvailable)
         obj_price_per_meter = PricePerMeterFilter()
         obj_area = CleanDecimal('.//li[has-class("surface")]//b', default=NotAvailable)
         obj_text = CleanText('.//p[@itemprop="description"]')
@@ -107,22 +115,22 @@ class HousingPage(HTMLPage):
         def obj_phone(self):
             _ = CleanText('.//span[@id="agence_call"]', default=None)(self)
             if _:
-                return _.split(' : ')[-1]
+                return _.split(" : ")[-1]
 
         def obj_photos(self):
             photos = []
             for photo in self.xpath('.//a[has-class("imageAnnonce")]'):
-                photos.append(HousingPhoto(Link('.')(photo)))
+                photos.append(HousingPhoto(Link(".")(photo)))
             return photos
 
         def obj_type(self):
             url = self.obj_url(self)
-            return POSTS_TYPES.SALE if 'acheter' in url else POSTS_TYPES.RENT
+            return POSTS_TYPES.SALE if "acheter" in url else POSTS_TYPES.RENT
 
         def obj_details(self):
             details = {}
             for el in XPath('//ul[@class="infos"]/li')(self):
-                _ = CleanText('.')(el).split(':')
+                _ = CleanText(".")(el).split(":")
                 if _:
                     details[_[0]] = _[1]
             return details
@@ -140,8 +148,9 @@ class HousingPage(HTMLPage):
             return HOUSE_TYPES_LABELS[_] if _ in HOUSE_TYPES_LABELS.keys() else HOUSE_TYPES.UNKNOWN
 
         def obj_DPE(self):
-            electric_consumption = CleanDecimal('//div[@data-id="dpeValue"]/div/div[@class="dpeValue"]',
-                                                default=None)(self)
+            electric_consumption = CleanDecimal('//div[@data-id="dpeValue"]/div/div[@class="dpeValue"]', default=None)(
+                self
+            )
 
             if electric_consumption is not None:
                 if electric_consumption <= 50:
@@ -161,8 +170,7 @@ class HousingPage(HTMLPage):
             return NotAvailable
 
         def obj_GES(self):
-            gas_consumption = CleanDecimal('//div[@data-id="dpeValue"]/div/div[@class="gesValue"]',
-                                           default=None)(self)
+            gas_consumption = CleanDecimal('//div[@data-id="dpeValue"]/div/div[@class="gesValue"]', default=None)(self)
 
             if gas_consumption is not None:
                 if gas_consumption <= 5:

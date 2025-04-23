@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Romain Bignon
 #
 # This file is part of a woob module.
@@ -17,33 +15,33 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
 from woob.capabilities.bank import CapBank
 from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
+
 from .browser import ThemisBrowser
 
 
-__all__ = ['ThemisModule']
+__all__ = ["ThemisModule"]
 
 
 class ThemisModule(Module, CapBank, CapProfile):
-    NAME = 'themisbanque'
-    DESCRIPTION = 'Themis'
-    MAINTAINER = 'Romain Bignon'
-    EMAIL = 'romain@weboob.org'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "themisbanque"
+    DESCRIPTION = "Themis"
+    MAINTAINER = "Romain Bignon"
+    EMAIL = "romain@weboob.org"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label="Numéro d'abonné", masked=False),
-        ValueBackendPassword('password', label='Code secret'),
+        ValueBackendPassword("login", label="Numéro d'abonné", masked=False),
+        ValueBackendPassword("password", label="Code secret"),
     )
 
     BROWSER = ThemisBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

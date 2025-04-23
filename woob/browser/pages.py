@@ -18,19 +18,18 @@
 from __future__ import annotations
 
 import codecs
+import csv
 import importlib
 import re
 import warnings
-from typing import (
-    Dict, Callable, List, Any, Iterator, Type, ClassVar, TYPE_CHECKING
-)
+from ast import literal_eval
 from collections import OrderedDict
+from collections.abc import Iterator
+from datetime import datetime
 from functools import wraps
 from io import BytesIO, StringIO
+from typing import TYPE_CHECKING, Any, Callable, ClassVar
 from urllib.parse import urljoin
-from ast import literal_eval
-import csv
-from datetime import datetime
 
 import lxml
 import requests
@@ -42,6 +41,7 @@ from woob.tools.log import getLogger
 from woob.tools.pdf import decompress_pdf
 
 from .exceptions import LoggedOut
+
 
 if TYPE_CHECKING:
     from woob.browser.browsers import Browser
@@ -81,8 +81,7 @@ def pagination(func: Callable):
     def inner(page: Page, *args, **kwargs):
         while True:
             try:
-                for r in func(page, *args, **kwargs):
-                    yield r
+                yield from func(page, *args, **kwargs)
             except NextPage as e:
                 if isinstance(e.request, Page):
                     page = e.request
@@ -162,7 +161,7 @@ class Page:
     """
 
     def __new__(cls, *args, **kwargs):
-        """ Accept any arguments, necessary for AbstractPage __new__ override.
+        """Accept any arguments, necessary for AbstractPage __new__ override.
 
         AbstractPage, in its overridden __new__, removes itself from class hierarchy
         so its __new__ is called only once. In python 3, default (object) __new__ is
@@ -175,8 +174,8 @@ class Page:
         self,
         browser: Browser,
         response: requests.Response,
-        params: None | Dict[str, str] = None,
-        encoding: str | None = None
+        params: None | dict[str, str] = None,
+        encoding: str | None = None,
     ):
         self.browser = browser
         self.logger = getLogger(self.__class__.__name__.lower(), browser.logger)
@@ -262,7 +261,7 @@ class Page:
         Make sure we can easily compare encodings by formatting them the same way.
         """
         if isinstance(encoding, bytes):
-            encoding = encoding.decode('utf-8')
+            encoding = encoding.decode("utf-8")
         return encoding.lower() if encoding else encoding
 
     def absurl(self, url: str) -> str:
@@ -303,28 +302,23 @@ class Form(OrderedDict):
                       and if set to False, it takes none.
     """
 
-    def __init__(
-        self,
-        page: Page,
-        el: lxml.etree._Element,
-        submit_el: lxml.etree._Element | None = None
-    ):
+    def __init__(self, page: Page, el: lxml.etree._Element, submit_el: lxml.etree._Element | None = None):
         super().__init__()
         self.page: Page = page
         self.el: lxml.etree._Element = el
-        self.submit_el: lxml.etree._Element | None  = submit_el
-        self.method: str = el.attrib.get('method', 'GET')
-        self.url: str = el.attrib.get('action', page.url)
-        self.name: str = el.attrib.get('name', '')
+        self.submit_el: lxml.etree._Element | None = submit_el
+        self.method: str = el.attrib.get("method", "GET")
+        self.url: str = el.attrib.get("action", page.url)
+        self.name: str = el.attrib.get("name", "")
         self.req: None | requests.Request = None
-        self.headers: None | Dict[str, str] = None
+        self.headers: None | dict[str, str] = None
         submits = 0
 
         # Find all elements of the form that will be useful to create the request
-        for inp in el.xpath('.//input | .//select | .//textarea'):
+        for inp in el.xpath(".//input | .//select | .//textarea"):
             # Step 1: Ignore some elements
             try:
-                name = inp.attrib['name']
+                name = inp.attrib["name"]
             except KeyError:
                 continue
 
@@ -332,14 +326,14 @@ class Form(OrderedDict):
             # as they are just not present in the request instead of being empty
             # values.
             try:
-                if inp.attrib['type'] in ('checkbox', 'radio') and 'checked' not in inp.attrib:
+                if inp.attrib["type"] in ("checkbox", "radio") and "checked" not in inp.attrib:
                     continue
             except KeyError:
                 pass
 
             # Either filter the submit buttons, or count how many we have found
             try:
-                if inp.attrib['type'] == 'submit':
+                if inp.attrib["type"] == "submit":
                     # If we chose a submit button, ignore all others
                     if self.submit_el is not None and inp is not self.submit_el:
                         continue
@@ -351,24 +345,26 @@ class Form(OrderedDict):
                 pass
 
             # Step 2: Extract the key-value pair from the remaining elements
-            if inp.tag == 'select':
-                options = inp.xpath('.//option[@selected]')
+            if inp.tag == "select":
+                options = inp.xpath(".//option[@selected]")
                 if len(options) == 0:
-                    options = inp.xpath('.//option')
+                    options = inp.xpath(".//option")
                 if len(options) == 0:
-                    value = ''
+                    value = ""
                 else:
-                    value = options[0].attrib.get('value', options[0].text or '')
+                    value = options[0].attrib.get("value", options[0].text or "")
             else:
-                value = inp.attrib.get('value', inp.text or '')
+                value = inp.attrib.get("value", inp.text or "")
             # TODO check if value already exists, emit warning
             self[name] = value
 
         # Sanity checks
         if submits > 1:
-            warnings.warn('Form has more than one submit input, you should chose the correct one', FormSubmitWarning, stacklevel=3)
+            warnings.warn(
+                "Form has more than one submit input, you should chose the correct one", FormSubmitWarning, stacklevel=3
+            )
         if self.submit_el is not None and self.submit_el is not False and submits == 0:
-            warnings.warn('Form had a submit element provided, but it was not found', FormSubmitWarning, stacklevel=3)
+            warnings.warn("Form had a submit element provided, but it was not found", FormSubmitWarning, stacklevel=3)
 
     @property
     def request(self) -> requests.Request:
@@ -376,11 +372,11 @@ class Form(OrderedDict):
         Get the Request object from the form.
         """
         if self.req is None:
-            if self.method.lower() == 'get':
+            if self.method.lower() == "get":
                 self.req = requests.Request(self.method, self.url, params=self)
             else:
                 self.req = requests.Request(self.method, self.url, data=self)
-            self.req.headers.setdefault('Referer', self.page.url)
+            self.req.headers.setdefault("Referer", self.page.url)
             if self.headers:
                 self.req.headers.update(self.headers)
         return self.req
@@ -392,8 +388,8 @@ class Form(OrderedDict):
         :param data_encoding: force encoding used to submit form data (defaults to the current page encoding)
         :type data_encoding: :class:`str`
         """
-        kwargs.setdefault('data_encoding', self.page.encoding)
-        self.headers = kwargs.pop('headers', None)
+        kwargs.setdefault("data_encoding", self.page.encoding)
+        self.headers = kwargs.pop("headers", None)
         return self.page.browser.location(self.request, **kwargs)
 
 
@@ -402,17 +398,17 @@ class CsvPage(Page):
     Page which parses CSV files.
     """
 
-    DIALECT: ClassVar[str] = 'excel'
+    DIALECT: ClassVar[str] = "excel"
     """
     Dialect given to the :mod:`csv` module.
     """
 
-    FMTPARAMS: ClassVar[Dict] = {}
+    FMTPARAMS: ClassVar[dict] = {}
     """
     Parameters given to the :mod:`csv` module.
     """
 
-    ENCODING = 'utf-8'
+    ENCODING = "utf-8"
     """
     Encoding of the file.
     """
@@ -428,19 +424,19 @@ class CsvPage(Page):
     This means the rows will be also available as dictionaries.
     """
 
-    def build_doc(self, content: bytes) -> List:
+    def build_doc(self, content: bytes) -> list:
         # We may need to temporarily convert content to utf-8 because csv
         # does not support Unicode.
         encoding = self.encoding
-        if encoding == 'utf-16le':
+        if encoding == "utf-16le":
             # If there is a BOM, decode('utf-16') will get rid of it
-            content = content.decode('utf-16').encode('utf-8')
-            encoding = 'utf-8'
+            content = content.decode("utf-16").encode("utf-8")
+            encoding = "utf-8"
         if self.NEWLINES_HACK:
-            content = content.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+            content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
         return self.parse(StringIO(content.decode(encoding)))
 
-    def parse(self, data: StringIO, encoding: str | None = None) -> List:
+    def parse(self, data: StringIO, encoding: str | None = None) -> list:
         """
         Method called by the constructor of :class:`CsvPage` to parse the document.
 
@@ -451,10 +447,10 @@ class CsvPage(Page):
         """
         reader = csv.reader(data, dialect=self.DIALECT, **self.FMTPARAMS)
         header = None
-        drows: List = []
-        rows: List = []
+        drows: list = []
+        rows: list = []
         for i, row in enumerate(reader):
-            if self.HEADER and i+1 < self.HEADER:
+            if self.HEADER and i + 1 < self.HEADER:
                 continue
             row = [c.strip() for c in row]
             if header is None and self.HEADER:
@@ -468,7 +464,7 @@ class CsvPage(Page):
                     drows.append(drow)
         return drows if header is not None else rows
 
-    def decode_row(self, row: List, encoding: str) -> List:
+    def decode_row(self, row: list, encoding: str) -> list:
         """
         Method called by :meth:`CsvPage.parse` to decode a row using the given encoding.
         """
@@ -488,7 +484,7 @@ class JsonPage(Page):
     A little subtlety is that JSON Unicode surrogate escape sequence (used for characters > U+FFFF) are UTF-16 style, but that should be handled by libraries (some don't… Even if JSON is one of the simplest formats around…).
     """
 
-    ENCODING = 'utf-8-sig'
+    ENCODING = "utf-8-sig"
 
     @property
     def data(self) -> str:
@@ -500,14 +496,10 @@ class JsonPage(Page):
         except StopIteration:
             return default
 
-    def path(
-        self,
-        path: str,
-        context: str | Dict | List | None = None
-    ) -> Iterator:
+    def path(self, path: str, context: str | dict | list | None = None) -> Iterator:
         return mini_jsonpath(context or self.doc, path)
 
-    def build_doc(self, text) -> Dict | List:
+    def build_doc(self, text) -> dict | list:
         return json.loads(text)
 
 
@@ -526,27 +518,28 @@ class XLSPage(Page):
     Specify the index of the worksheet to use.
     """
 
-    def build_doc(self, content: bytes) -> List:
+    def build_doc(self, content: bytes) -> list:
         return self.parse(content)
 
-    def parse(self, data: bytes) -> List:
+    def parse(self, data: bytes) -> list:
         """
         Method called by the constructor of :class:`XLSPage` to parse the document.
         """
         # TODO make as a global import, and add to dependencies
         import xlrd
+
         wb = xlrd.open_workbook(file_contents=data)
         sh = wb.sheet_by_index(self.SHEET_INDEX)
 
         header = None
-        drows: List = []
-        rows: List = []
+        drows: list = []
+        rows: list = []
         for i in range(sh.nrows):
             if self.HEADER and i + 1 < self.HEADER:
                 continue
             row = sh.row_values(i)
             if header is None and self.HEADER:
-                header = [s.replace('/', '') for s in row]
+                header = [s.replace("/", "") for s in row]
             else:
                 rows.append(row)
                 if header:
@@ -564,7 +557,8 @@ class XMLPage(Page):
 
     def detect_encoding(self) -> str | None:
         import re
-        m = re.search(br'<\?xml version="1.0" encoding="(.*)"\?>', self.data)
+
+        m = re.search(rb'<\?xml version="1.0" encoding="(.*)"\?>', self.data)
         if m:
             return self.normalize_encoding(m.group(1))
 
@@ -599,7 +593,7 @@ class HTMLPage(Page):
 
     """
 
-    FORM_CLASS: ClassVar[Type[Form]] = Form
+    FORM_CLASS: ClassVar[type[Form]] = Form
     """
     The class to instanciate when using :meth:`HTMLPage.get_form`. Default to :class:`Form`.
     """
@@ -635,18 +629,18 @@ class HTMLPage(Page):
             return
 
         for refresh in self.doc.xpath(self.REFRESH_XPATH):
-            m = self.browser.REFRESH_RE.match(refresh.get('content', ''))
+            m = self.browser.REFRESH_RE.match(refresh.get("content", ""))
             if not m:
                 continue
-            url = urljoin(self.url, m.groupdict().get('url', None))
-            sleep = float(m.groupdict()['sleep'])
+            url = urljoin(self.url, m.groupdict().get("url", None))
+            sleep = float(m.groupdict()["sleep"])
 
             if sleep <= self.REFRESH_MAX:
-                self.logger.info('Redirecting to %s', url)
+                self.logger.info("Redirecting to %s", url)
                 self.browser.location(url)
                 break
             else:
-                self.logger.debug('Do not refresh to %s because %s > REFRESH_MAX(%s)' % (url, sleep, self.REFRESH_MAX))
+                self.logger.debug(f"Do not refresh to {url} because {sleep} > REFRESH_MAX({self.REFRESH_MAX})")
 
     @classmethod
     def setup_xpath_functions(cls):
@@ -663,8 +657,8 @@ class HTMLPage(Page):
         This method is called in constructor of :class:`HTMLPage` and can be
         overloaded by children classes to add extra functions.
         """
-        ns['lower-case'] = lambda context, args: ' '.join([s.lower() for s in args])
-        ns['replace'] = lambda context, args, old, new: ' '.join([s.replace(old, new) for s in args])
+        ns["lower-case"] = lambda context, args: " ".join([s.lower() for s in args])
+        ns["replace"] = lambda context, args, old, new: " ".join([s.replace(old, new) for s in args])
 
         def has_class(context, *classes):
             """
@@ -691,8 +685,10 @@ class HTMLPage(Page):
             >>> len(root.xpath('//b[has-class("not-exists")]'))
             0
             """
-            expressions = ' and '.join(["contains(concat(' ', normalize-space(@class), ' '), ' {0} ')".format(c) for c in classes])
-            xpath = 'self::*[@class and {0}]'.format(expressions)
+            expressions = " and ".join(
+                [f"contains(concat(' ', normalize-space(@class), ' '), ' {c} ')" for c in classes]
+            )
+            xpath = f"self::*[@class and {expressions}]"
             return bool(context.context_node.xpath(xpath))
 
         def starts_with(context, text, prefix):
@@ -720,28 +716,29 @@ class HTMLPage(Page):
         def distinct_values(context, text):
             return list(set(text))
 
-        ns['has-class'] = has_class
-        ns['starts-with'] = starts_with
-        ns['ends-with'] = ends_with
-        ns['matches'] = matches
-        ns['first-non-empty'] = first_non_empty
-        ns['distinct-values'] = distinct_values
+        ns["has-class"] = has_class
+        ns["starts-with"] = starts_with
+        ns["ends-with"] = ends_with
+        ns["matches"] = matches
+        ns["first-non-empty"] = first_non_empty
+        ns["distinct-values"] = distinct_values
 
     def build_doc(self, content: bytes) -> lxml.etree._ElementTree:
         """
         Method to build the lxml document from response and given encoding.
         """
         encoding = self.encoding
-        if encoding == 'latin-1':
-            encoding = 'latin1'
+        if encoding == "latin-1":
+            encoding = "latin1"
         if encoding:
-            encoding = encoding.replace('iso8859_', 'iso8859-')
+            encoding = encoding.replace("iso8859_", "iso8859-")
         import lxml.html as html
+
         parser = html.HTMLParser(encoding=encoding)
         doc = html.parse(BytesIO(content), parser, base_url=self.url)
 
         if self.ABSOLUTE_LINKS:
-            doc.getroot().make_links_absolute(handle_failures='ignore')
+            doc.getroot().make_links_absolute(handle_failures="ignore")
 
         return doc
 
@@ -755,32 +752,28 @@ class HTMLPage(Page):
 
             # Use request's method to get encoding from headers, so we simulate
             # an headers dict.
-            encoding = self.normalize_encoding(
-                requests.utils.get_encoding_from_headers(
-                    {'content-type': content}
-                )
-            )
+            encoding = self.normalize_encoding(requests.utils.get_encoding_from_headers({"content-type": content}))
 
-        for charset in self.doc.xpath('//head/meta[@charset]/@charset'):
+        for charset in self.doc.xpath("//head/meta[@charset]/@charset"):
             # meta charset=...
             encoding = self.normalize_encoding(charset)
 
-        if encoding == 'iso-8859-1' or not encoding:
-            encoding = 'windows-1252'
+        if encoding == "iso-8859-1" or not encoding:
+            encoding = "windows-1252"
         try:
             codecs.lookup(encoding)
         except LookupError:
-            encoding = 'windows-1252'
+            encoding = "windows-1252"
 
         return encoding
 
     def get_form(
         self,
-        xpath: str = '//form',
+        xpath: str = "//form",
         name: str | None = None,
         id: str | None = None,
         nr: int | None = None,
-        submit: None | str | lxml.etree._Element = None
+        submit: None | str | lxml.etree._Element = None,
     ) -> Form:
         """
         Get a :class:`Form` object from a selector.
@@ -802,9 +795,9 @@ class HTMLPage(Page):
         """
         i = 0
         for el in self.doc.xpath(xpath):
-            if name is not None and el.attrib.get('name', '') != name:
+            if name is not None and el.attrib.get("name", "") != name:
                 continue
-            if id is not None and el.attrib.get('id', '') != id:
+            if id is not None and el.attrib.get("id", "") != id:
                 continue
             if nr is not None and i != nr:
                 i += 1
@@ -837,7 +830,7 @@ class PartialHTMLPage(HTMLPage):
             except lxml.etree.XMLSyntaxError:
                 pass
 
-        content = b'<html>%s</html>' % content
+        content = b"<html>%s</html>" % content
         return super().build_doc(content)
 
 
@@ -848,7 +841,7 @@ class GWTPage(Page):
     More info about GWT protcol here : https://goo.gl/GP5dv9
     """
 
-    def build_doc(self, content: str | bytes) -> List:
+    def build_doc(self, content: str | bytes) -> list:
         """
         Reponse starts with "//" followed by "OK" or "EX".
         2 last elements in list are protocol and flag.
@@ -859,8 +852,8 @@ class GWTPage(Page):
             content = content.decode(self.encoding)
 
         assert content[2:4] == "OK"
-        doc: List[Any] = []
-        array: List[Any] = []
+        doc: list[Any] = []
+        array: list[Any] = []
         for el in reversed(literal_eval(content[4:])[:-2]):
             # If we find an array, args after are indices or date
             if not array and isinstance(el, list):
@@ -878,9 +871,9 @@ class GWTPage(Page):
 
         base = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$"
         timestamp = sum(base.index(data[el]) * (len(base) ** (len(data) - el - 1)) for el in range(len(data)))
-        return datetime.fromtimestamp(int(str(timestamp)[:10])).strftime('%d/%m/%Y')
+        return datetime.fromtimestamp(int(str(timestamp)[:10])).strftime("%d/%m/%Y")
 
-    def get_elements(self, type: str = "String") -> List:
+    def get_elements(self, type: str = "String") -> list:
         """
         Get elements of specified type
         """
@@ -896,11 +889,12 @@ class PDFPage(Page):
     """
     Parse a PDF and write raw data in the "doc" attribute as a string.
     """
+
     def build_doc(self, content: bytes) -> bytes:
         try:
             doc = decompress_pdf(content)
         except OSError as e:
-            raise ParseError(f'Make sure mupdf-tools is installed ({e})')
+            raise ParseError(f"Make sure mupdf-tools is installed ({e})")
 
         return doc
 
@@ -913,6 +907,7 @@ class LoggedPage:
     Do not use this class for page with mixed content (logged/anonymous) or for
     pages with a login form.
     """
+
     logged: bool = True
 
 
@@ -925,26 +920,29 @@ class MetaPage(type):
     def __new__(mcs, name, bases, dct):
         from woob.tools.backend import Module  # here to avoid file wide circular dependency
 
-        if name != 'AbstractPage' and AbstractPage in bases:
-            warnings.warn('AbstractPage is deprecated and will be removed in woob 4.0. '
-                          'Use standard "from woob_modules.other_module import Page" instead.',
-                          DeprecationWarning, stacklevel=2)
+        if name != "AbstractPage" and AbstractPage in bases:
+            warnings.warn(
+                "AbstractPage is deprecated and will be removed in woob 4.0. "
+                'Use standard "from woob_modules.other_module import Page" instead.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
-            parent_attr = dct.get('BROWSER_ATTR')
+            parent_attr = dct.get("BROWSER_ATTR")
             if parent_attr:
-                m = re.match(r'^[^.]+\.(.*)\.([^.]+)$', parent_attr)
+                m = re.match(r"^[^.]+\.(.*)\.([^.]+)$", parent_attr)
                 path, klass_name = m.group(1, 2)
-                module = importlib.import_module('woob_modules.%s.%s' % (dct['PARENT'], path))
+                module = importlib.import_module("woob_modules.{}.{}".format(dct["PARENT"], path))
                 browser_klass = getattr(module, klass_name)
             else:
-                module = importlib.import_module('woob_modules.%s' % dct['PARENT'])
+                module = importlib.import_module("woob_modules.%s" % dct["PARENT"])
                 for attrname in dir(module):
                     attr = getattr(module, attrname)
                     if isinstance(attr, type) and issubclass(attr, Module) and attr != Module:
                         browser_klass = attr.BROWSER
                         break
 
-            url = getattr(browser_klass, dct['PARENT_URL'])
+            url = getattr(browser_klass, dct["PARENT_URL"])
             klass = url.klass
 
             bases = tuple(klass if isinstance(base, mcs) else base for base in bases)

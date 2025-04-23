@@ -1,5 +1,4 @@
 "init of Newspaper20minutesModule"
-# -*- coding: utf-8 -*-
 
 # Copyright(C) 2011  Julien Hebert
 #
@@ -19,4 +18,6 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from .module import Newspaper20minutesModule
-__all__ = ['Newspaper20minutesModule']
+
+
+__all__ = ["Newspaper20minutesModule"]

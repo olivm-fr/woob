@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Romain Bignon
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import ThemisModule
 
 
-__all__ = ['ThemisModule']
+__all__ = ["ThemisModule"]

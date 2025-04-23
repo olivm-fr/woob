@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Cédric Félizard
 #
 # This file is part of a woob module.
@@ -21,11 +19,11 @@
 from woob.tools.test import BackendTest
 
 
-__all__ = ['KiwibankTest']
+__all__ = ["KiwibankTest"]
 
 
 class KiwibankTest(BackendTest):
-    MODULE = 'kiwibank'
+    MODULE = "kiwibank"
 
     def test_kiwibank(self):
         l = list(self.backend.iter_accounts())

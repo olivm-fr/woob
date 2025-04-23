@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      ZeHiro
 #
 # This file is part of a woob module.
@@ -18,13 +16,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
+from woob.capabilities.housing import HOUSE_TYPES, POSTS_TYPES, Query
 from woob.tools.capabilities.housing.housing_test import HousingTest
-from woob.capabilities.housing import Query, POSTS_TYPES, HOUSE_TYPES
+from woob.tools.test import BackendTest
 
 
 class AvendrealouerTest(BackendTest, HousingTest):
-    MODULE = 'avendrealouer'
+    MODULE = "avendrealouer"
 
     def test_avendre_rent(self):
         # la rechercher de bien en location ne distingue pas meublé ou non
@@ -34,7 +32,7 @@ class AvendrealouerTest(BackendTest, HousingTest):
         query.cost_max = 1500
         query.type = POSTS_TYPES.RENT
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -48,7 +46,7 @@ class AvendrealouerTest(BackendTest, HousingTest):
         query.type = POSTS_TYPES.FURNISHED_RENT
         query.house_types = [HOUSE_TYPES.APART]
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -58,7 +56,7 @@ class AvendrealouerTest(BackendTest, HousingTest):
         query.area_min = 20
         query.type = POSTS_TYPES.SALE
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)
@@ -67,7 +65,7 @@ class AvendrealouerTest(BackendTest, HousingTest):
         query = Query()
         query.type = POSTS_TYPES.VIAGER
         query.cities = []
-        for city in self.backend.search_city('paris'):
+        for city in self.backend.search_city("paris"):
             city.backend = self.backend.name
             query.cities.append(city)
         self.check_against_query(query)

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Guilhem Bonnefille
 #
 # This file is part of a woob module.
@@ -24,7 +22,7 @@ from woob.capabilities.video import BaseVideo
 class RmllVideo(BaseVideo):
     @classmethod
     def id2url(cls, _id):
-        if _id.startswith('http'):
+        if _id.startswith("http"):
             return _id
         else:
-            return 'http://video.rmll.info/permalink/%s/' % (_id)
+            return "http://video.rmll.info/permalink/%s/" % (_id)

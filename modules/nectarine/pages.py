@@ -1,5 +1,3 @@
-# * -*- coding: utf-8 -*-
-
 # Copyright(C) 2013  Thomas Lecavelier
 #
 # This file is part of a woob module.
@@ -18,30 +16,30 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 from woob.browser.pages import XMLPage
-from woob.capabilities.radio import Radio
 from woob.capabilities.audiostream import BaseAudioStream
+from woob.capabilities.radio import Radio
 from woob.tools.capabilities.streaminfo import StreamInfo
 
 
 class StreamsPage(XMLPage):
     def iter_radios_list(self):
-        radio = Radio('necta')
-        radio.title = u'Nectarine'
-        radio.description = u'Nectarine Demoscene Radio'
+        radio = Radio("necta")
+        radio.title = "Nectarine"
+        radio.description = "Nectarine Demoscene Radio"
         radio.streams = []
 
         index = -1
 
-        for el in self.doc.xpath('//stream'):
+        for el in self.doc.xpath("//stream"):
             index += 1
-            stream_url = el.findtext('url')
-            bitrate = el.findtext('bitrate')
-            encode = el.findtext('type')
-            country = el.findtext('country').upper()
+            stream_url = el.findtext("url")
+            bitrate = el.findtext("bitrate")
+            encode = el.findtext("type")
+            country = el.findtext("country").upper()
             stream = BaseAudioStream(index)
             stream.bitrate = int(bitrate)
             stream.format = encode
-            stream.title = ' '.join([radio.title, country, encode, str(bitrate), 'kbps'])
+            stream.title = " ".join([radio.title, country, encode, str(bitrate), "kbps"])
             stream.url = stream_url
             radio.streams.append(stream)
 
@@ -51,6 +49,6 @@ class StreamsPage(XMLPage):
 class LivePage(XMLPage):
     def get_current_emission(self):
         current = StreamInfo(0)
-        current.who = self.doc.xpath('//playlist/now/entry/artist')[0].text
-        current.what = self.doc.xpath('//playlist/now/entry/song')[0].text
+        current.who = self.doc.xpath("//playlist/now/entry/artist")[0].text
+        current.what = self.doc.xpath("//playlist/now/entry/song")[0].text
         return current

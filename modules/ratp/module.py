@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Phyks (Lucas Verney)
 #
 # This file is part of a woob module.
@@ -18,29 +16,29 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.base import find_object
-from woob.capabilities.gauge import CapGauge, GaugeSensor, SensorNotFound, Gauge
+from woob.capabilities.gauge import CapGauge, Gauge, GaugeSensor, SensorNotFound
+from woob.tools.backend import Module
 
 from .browser import RATPBrowser
 
 
-__all__ = ['RATPModule']
+__all__ = ["RATPModule"]
 
 
 class RATPSensor(GaugeSensor):
     def __init__(self, gauge):
-        super(RATPSensor, self).__init__(id="%s_sensor" % gauge.id)
+        super().__init__(id="%s_sensor" % gauge.id)
         self.name = "%s status" % (gauge.name)
 
 
 class RATPModule(Module, CapGauge):
-    NAME = 'ratp'
-    DESCRIPTION = u'RATP network status'
-    MAINTAINER = u'Phyks (Lucas Verney)'
-    EMAIL = 'phyks@phyks.me'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "ratp"
+    DESCRIPTION = "RATP network status"
+    MAINTAINER = "Phyks (Lucas Verney)"
+    EMAIL = "phyks@phyks.me"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = RATPBrowser
 
@@ -69,11 +67,7 @@ class RATPModule(Module, CapGauge):
         if not pattern:
             return self.browser.list_gauges()
         else:
-            return [
-                gauge
-                for gauge in self.browser.list_gauges()
-                if pattern in gauge.name
-            ]
+            return [gauge for gauge in self.browser.list_gauges() if pattern in gauge.name]
 
     def iter_sensors(self, gauge, pattern=None):
         """

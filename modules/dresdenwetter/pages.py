@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2012 Romain Bignon, Florent Fourcot
 #
 # This file is part of a woob module.
@@ -17,28 +15,28 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+from woob.browser.elements import ItemElement, ListElement, method
+from woob.browser.filters.standard import CleanText, Field, Filter, Regexp, debug
 from woob.browser.pages import HTMLPage
-from woob.browser.elements import ListElement, ItemElement, method
-from woob.browser.filters.standard import CleanText, Regexp, Field, Filter, debug
-from woob.capabilities.gauge import GaugeMeasure, GaugeSensor
 from woob.capabilities.base import NotAvailable
+from woob.capabilities.gauge import GaugeMeasure, GaugeSensor
 
 
 class Split(Filter):
     def __init__(self, selector, mode):
-        super(Split, self).__init__(selector)
+        super().__init__(selector)
         self.mode = mode
 
     @debug()
     def filter(self, txt):
-        if u"Temperatur" in txt:
-            value = txt.split(': ')[1].split(u'°')[0]
-            unit = u'°C'
+        if "Temperatur" in txt:
+            value = txt.split(": ")[1].split("°")[0]
+            unit = "°C"
         else:
-            value = txt.split(':')[-1].split()[0]
-            unit = txt.split(':')[-1].split()[1]
-            if unit == u"W/m":
-                unit = u"W/m²"
+            value = txt.split(":")[-1].split()[0]
+            unit = txt.split(":")[-1].split()[1]
+            if unit == "W/m":
+                unit = "W/m²"
         try:
             value = float(value)
         except ValueError:
@@ -55,14 +53,14 @@ class StartPage(HTMLPage):
         class item(ItemElement):
             klass = GaugeSensor
 
-            obj_name = Regexp(CleanText('.'), '(.*?) {0,}: .*', "\\1")
-            obj_id = CleanText(Regexp(Field('name'), '(.*)', "dd-\\1"), " .():")
-            obj_gaugeid = u"wetter"
+            obj_name = Regexp(CleanText("."), "(.*?) {0,}: .*", "\\1")
+            obj_id = CleanText(Regexp(Field("name"), "(.*)", "dd-\\1"), " .():")
+            obj_gaugeid = "wetter"
             obj_forecast = NotAvailable
-            obj_unit = Split(CleanText('.'), 1)
+            obj_unit = Split(CleanText("."), 1)
 
             def obj_lastvalue(self):
                 lastvalue = GaugeMeasure()
-                lastvalue.level = Split(CleanText('.'), 0)(self)
+                lastvalue.level = Split(CleanText("."), 0)(self)
                 lastvalue.alarm = NotAvailable
                 return lastvalue

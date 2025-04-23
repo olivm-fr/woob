@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -17,31 +15,31 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+from woob.capabilities.audio import Album, BaseAudio, CapAudio
 from woob.tools.backend import Module
-from woob.capabilities.audio import CapAudio, BaseAudio, Album
 
 from .browser import BandcampBrowser
 
 
-__all__ = ['BandcampModule']
+__all__ = ["BandcampModule"]
 
 
 class BandcampModule(Module, CapAudio):
-    NAME = 'bandcamp'
-    DESCRIPTION = u'Bandcamp music website'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "bandcamp"
+    DESCRIPTION = "Bandcamp music website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = BandcampBrowser
 
     def get_album(self, _id):
-        _, band, album = _id.split('.')
+        _, band, album = _id.split(".")
         return self.browser.fetch_album_by_id(band, album)
 
     def get_audio(self, _id):
-        _, band, track = _id.split('.')
+        _, band, track = _id.split(".")
         return self.browser.fetch_track_by_id(band, track)
 
     def search_album(self, pattern, sortby=0):

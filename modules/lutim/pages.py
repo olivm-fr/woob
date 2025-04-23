@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Vincent A
 #
 # This file is part of a woob module.
@@ -32,14 +30,14 @@ class ImagePage(RawPage):
 
     @property
     def filename(self):
-        header = self.response.headers['content-disposition']
+        header = self.response.headers["content-disposition"]
         m = re.match('inline;filename="(.*)"', header)
         return m.group(1)
 
 
 class UploadPage(JsonPage):
     def fetch_info(self):
-        if not self.doc['success']:
-            raise UserError(self.doc['msg']['msg'])
+        if not self.doc["success"]:
+            raise UserError(self.doc["msg"]["msg"])
 
-        return self.doc['msg']
+        return self.doc["msg"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Budget Insight
 #
 # This file is part of a woob module.
@@ -19,25 +17,20 @@
 
 from datetime import date
 
-from woob.browser.filters.standard import (
-    CleanText, CleanDecimal, Date, MapIn, Field,
-    Currency, Regexp, Format, Eval,
-)
-from woob.browser.filters.json import Dict
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import Attr, Link
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanDecimal, CleanText, Currency, Date, Eval, Field, Format, MapIn, Regexp
+from woob.browser.pages import CsvPage, HTMLPage, LoggedPage
 from woob.capabilities.bank import Account, Transaction
-from woob.browser.elements import (
-    DictElement, ListElement, ItemElement, method,
-)
 from woob.capabilities.base import NotAvailable
-from woob.browser.pages import HTMLPage, LoggedPage, CsvPage
 
 
 class LoginPage(HTMLPage):
     def login(self, username, password):
-        form = self.get_form(id='fm1')
-        form['username'] = username
-        form['password'] = password
+        form = self.get_form(id="fm1")
+        form["username"] = username
+        form["password"] = password
         form.submit()
 
 
@@ -52,7 +45,7 @@ class DashboardPage(LoggedPage, HTMLPage):
             def condition(self):
                 return CleanText('./span[@class="lanNavSel_succes_carte"]')(self)
 
-            obj_url = Link('.')
+            obj_url = Link(".")
 
     @method
     class fill_account(ItemElement):
@@ -62,33 +55,41 @@ class DashboardPage(LoggedPage, HTMLPage):
         # they are not displayed but still present, so the xpaths can catch them
         # and we want to avoid that
         obj_number = CleanText('//div[@class="row bnp_carte_dashboard_one"]//span[@id="carte_dashboard_numero_compte"]')
-        obj_id = Field('number')
+        obj_id = Field("number")
 
         obj_label = Format(
-            '%s %s',
+            "%s %s",
             CleanText('//div[@class="row bnp_carte_dashboard_one"]//span[@id="carte_dashboard_title"]'),
-            CleanText('//div[contains(@class,"hidden-xs")]//div[contains(@class,"bnp_info_general_one")]//ul[@class="list-group bnp_information"]/li[2]')
+            CleanText(
+                '//div[contains(@class,"hidden-xs")]//div[contains(@class,"bnp_info_general_one")]//ul[@class="list-group bnp_information"]/li[2]'
+            ),
         )
 
         # TODO Handle 'Fin du mois'
         obj_paydate = Date(
             Regexp(
-                CleanText('//div[@class="row prelevement"]/div[@class="prelevement-box"][1]/span[@class="prelevement_le"]'),
-                r'(\d{2}/\d{2}/\d{4})',
-                default=NotAvailable
+                CleanText(
+                    '//div[@class="row prelevement"]/div[@class="prelevement-box"][1]/span[@class="prelevement_le"]'
+                ),
+                r"(\d{2}/\d{2}/\d{4})",
+                default=NotAvailable,
             ),
             dayfirst=True,
-            default=NotAvailable
+            default=NotAvailable,
         )
 
-        obj_currency = Currency(
-            CleanText('//div[@class="plafondStyle"]//p[@class="paiement_content_color"]')
-        )
+        obj_currency = Currency(CleanText('//div[@class="plafondStyle"]//p[@class="paiement_content_color"]'))
 
         obj_coming = Eval(
             lambda x, y: x + y,
-            CleanDecimal.French('//div[contains(@class, "hidden-xs")]//div[contains(@class, "cumul_content_dashboard")]//span[@class = "content_paiement"]', default=NotAvailable),
-            CleanDecimal.French('//div[contains(@class, "hidden-xs")]//div[contains(@class, "cumul_content_dashboard")]//span[@class = "content_retrait"]', default=NotAvailable)
+            CleanDecimal.French(
+                '//div[contains(@class, "hidden-xs")]//div[contains(@class, "cumul_content_dashboard")]//span[@class = "content_paiement"]',
+                default=NotAvailable,
+            ),
+            CleanDecimal.French(
+                '//div[contains(@class, "hidden-xs")]//div[contains(@class, "cumul_content_dashboard")]//span[@class = "content_retrait"]',
+                default=NotAvailable,
+            ),
         )
 
 
@@ -98,8 +99,8 @@ class TransactionPage(LoggedPage, HTMLPage):
 
     def get_instance_id(self):
         return Regexp(
-            Attr('//span[contains(@id,"p_Phenix_Transactions_Portlet_INSTANCE_")]', 'id', default=''),
-            r'INSTANCE_([^_]*)',
+            Attr('//span[contains(@id,"p_Phenix_Transactions_Portlet_INSTANCE_")]', "id", default=""),
+            r"INSTANCE_([^_]*)",
             default=None,
         )(self.doc)
 
@@ -107,13 +108,13 @@ class TransactionPage(LoggedPage, HTMLPage):
 class TransactionCSV(LoggedPage, CsvPage):
     HEADER = 9
 
-    FMTPARAMS = {'delimiter': ';'}
+    FMTPARAMS = {"delimiter": ";"}
 
     def build_doc(self, content):
         # Dict splits keys on '/' it is intended behaviour because it's primary
         # use is with json files, but it means I have to replace '/' here
-        content = content.replace(b'/', b'-')
-        return super(TransactionCSV, self).build_doc(content)
+        content = content.replace(b"/", b"-")
+        return super().build_doc(content)
 
     @method
     class iter_history(DictElement):
@@ -121,24 +122,21 @@ class TransactionCSV(LoggedPage, CsvPage):
             klass = Transaction
 
             TRANSACTION_TYPES = {
-                'FACTURE CB': Transaction.TYPE_CARD,
-                'RETRAIT CB': Transaction.TYPE_WITHDRAWAL,
+                "FACTURE CB": Transaction.TYPE_CARD,
+                "RETRAIT CB": Transaction.TYPE_WITHDRAWAL,
                 "TRANSACTION INITIALE RECUE D'AVOIR": Transaction.TYPE_PAYBACK,
             }
 
-            obj_label = CleanText(Dict('Raison sociale commerçant'))
-            obj_amount = CleanDecimal.French(Dict('Montant EUR'))
+            obj_label = CleanText(Dict("Raison sociale commerçant"))
+            obj_amount = CleanDecimal.French(Dict("Montant EUR"))
             obj_original_currency = CleanText(Dict("Devise d'origine"))
             obj_rdate = Date(CleanText(Dict("Date d'opération")), dayfirst=True)
-            obj_date = Date(CleanText(Dict('Date débit-crédit')), dayfirst=True)
+            obj_date = Date(CleanText(Dict("Date débit-crédit")), dayfirst=True)
 
-            obj_type = MapIn(
-                CleanText(Dict('Libellé opération')),
-                TRANSACTION_TYPES
-            )
+            obj_type = MapIn(CleanText(Dict("Libellé opération")), TRANSACTION_TYPES)
 
             def obj_commission(self):
-                commission = CleanDecimal.French(Dict('Commission'))(self)
+                commission = CleanDecimal.French(Dict("Commission"))(self)
                 if commission != 0:  # We don't want to return null commissions
                     return commission
                 return NotAvailable
@@ -149,8 +147,8 @@ class TransactionCSV(LoggedPage, CsvPage):
                     return original_amount
                 return NotAvailable
 
-            def obj__coming(self):
-                return Field('date')(self) >= date.today()
+            def obj_coming(self) -> bool:
+                return bool(Field("date")(self) >= date.today())
 
 
 class PasswordExpiredPage(LoggedPage, HTMLPage):

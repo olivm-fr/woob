@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Phyks (Lucas Verney)
 #
 # This file is part of a woob module.
@@ -18,23 +16,23 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.browser.exceptions import ClientError
 from woob.exceptions import BrowserIncorrectPassword
 
-from .pages import LoginPage, BillsPage
+from .pages import BillsPage, LoginPage
 
 
 class LampirisBrowser(LoginBrowser):
-    BASEURL = 'https://espaceclient.total-spring.fr/'
+    BASEURL = "https://espaceclient.total-spring.fr/"
 
-    loginpage = URL('/user/login', LoginPage)
-    billspage = URL('/factures-et-paiements', BillsPage)
-    selectcus = URL('/set_selected_cus')
+    loginpage = URL("/user/login", LoginPage)
+    billspage = URL("/factures-et-paiements", BillsPage)
+    selectcus = URL("/set_selected_cus")
 
     def __init__(self, *args, **kwargs):
         self.logged = False
-        super(LampirisBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def do_login(self):
         if self.logged:
@@ -54,9 +52,9 @@ class LampirisBrowser(LoginBrowser):
     @need_login
     def get_documents(self, subscription):
         # Select subscription
-        self.selectcus.go(params={'cus': subscription.id})
+        self.selectcus.go(params={"cus": subscription.id})
 
         # Then, fetch documents
         for doc in self.billspage.go().get_documents():
-            doc.id = "{}#{}".format(subscription.id, doc.id)
+            doc.id = f"{subscription.id}#{doc.id}"
             yield doc

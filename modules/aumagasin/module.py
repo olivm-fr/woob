@@ -16,21 +16,21 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenskes/>.
 
 
-from woob.tools.backend import Module
 from woob.capabilities.contact import CapDirectory
+from woob.tools.backend import Module
 
 from .browser import AumagasinBrowser
 
 
-__all__ = ['AumagasinModule']
+__all__ = ["AumagasinModule"]
 
 
 class AumagasinModule(Module, CapDirectory):
-    NAME = 'aumagasin'
-    DESCRIPTION = 'Liste des magasins de France'
-    MAINTAINER = 'Bezleputh'
-    EMAIL = 'carton_ben@yahoo.fr'
-    LICENSE = 'LGPLv3+'
+    NAME = "aumagasin"
+    DESCRIPTION = "Liste des magasins de France"
+    MAINTAINER = "Bezleputh"
+    EMAIL = "carton_ben@yahoo.fr"
+    LICENSE = "LGPLv3+"
 
     BROWSER = AumagasinBrowser
 

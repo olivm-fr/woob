@@ -17,10 +17,10 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 from .date import DeltaField
-from .image import CapImage, BaseImage
+from .image import BaseImage, CapImage
 
 
-__all__ = ['BaseVideo', 'CapVideo']
+__all__ = ["BaseVideo", "CapVideo"]
 
 
 class BaseVideo(BaseImage):
@@ -29,7 +29,8 @@ class BaseVideo(BaseImage):
 
     This object has to be inherited to specify how to calculate the URL of the video from its ID.
     """
-    duration =  DeltaField('file duration')
+
+    duration = DeltaField("file duration")
 
 
 class CapVideo(CapImage):

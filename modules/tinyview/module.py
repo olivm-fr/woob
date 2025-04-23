@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Vincent A
 #
 # This file is part of a woob module.
@@ -20,9 +18,9 @@
 # flake8: compatible
 
 from woob.capabilities.messages import CapMessages, Message, Thread
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.capabilities.messages.threading import build_linear_thread
+from woob.tools.value import Value
 
 from .browser import TinyViewBrowser
 
@@ -36,7 +34,7 @@ class TinyViewModule(Module, CapMessages):
     MAINTAINER = "Vincent A"
     EMAIL = "dev@indigo.re"
     LICENSE = "LGPLv3+"
-    VERSION = "3.6"
+    VERSION = "3.7"
 
     BROWSER = TinyViewBrowser
 

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2017 Romain Bignon
 #
 # This file is part of a woob module.
@@ -27,11 +25,17 @@ from .old.browser import OldCaisseEpargneBrowser
 class ProxyBrowser(SwitchingBrowserWithState):
     KEEP_SESSION = True
     KEEP_ATTRS = (
-        'login_otp_validation', 'term_id', 'twofa_logged_date',
-        'csid', 'snid', 'nonce', 'continue_url', 'second_client_id',
+        "login_otp_validation",
+        "term_id",
+        "twofa_logged_date",
+        "csid",
+        "snid",
+        "nonce",
+        "continue_url",
+        "second_client_id",
     )
     BROWSERS = {
-        'main': CaisseEpargne,
-        'cenet': CenetBrowser,
-        'old': OldCaisseEpargneBrowser,
+        "main": CaisseEpargne,
+        "cenet": CenetBrowser,
+        "old": OldCaisseEpargneBrowser,
     }

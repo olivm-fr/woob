@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
 import os
 import re
 import subprocess
+from pathlib import Path
 
 
 def get_lines(command):
@@ -33,15 +33,14 @@ def search_dependencies(command, pattern):
 os.chdir(Path(__file__).parent.parent)
 gitroot = Path.cwd()
 
-dependencies = search_dependencies(
-    ["git", "grep", "-l", "PARENT", "modules"],
-    r"""^\s+PARENT = ["'](\w+)["']()$"""
-)
+dependencies = search_dependencies(["git", "grep", "-l", "PARENT", "modules"], r"""^\s+PARENT = ["'](\w+)["']()$""")
 
-dependencies.update(search_dependencies(
-    ["git", "grep", "-l", "woob_modules", "modules"],
-    r"""^from woob_modules\.(\w+)\b(?:.*) import |import woob_modules\.(\w+)\b"""
-))
+dependencies.update(
+    search_dependencies(
+        ["git", "grep", "-l", "woob_modules", "modules"],
+        r"""^from woob_modules\.(\w+)\b(?:.*) import |import woob_modules\.(\w+)\b""",
+    )
+)
 
 deps_regex = re.compile(r"^(\s+)DEPENDENCIES = .*$", re.M)
 version_regex = re.compile(r"^(\s+)(VERSION = .*)$", re.M)
@@ -52,8 +51,8 @@ for module_name in dependencies:
 
     deps_tuple = tuple(sorted(dependencies[module_name]))
     if deps_regex.search(source):
-        source = deps_regex.sub(r"\1DEPENDENCIES = {!r}".format(deps_tuple), source)
+        source = deps_regex.sub(rf"\1DEPENDENCIES = {deps_tuple!r}", source)
     else:
-        source = version_regex.sub(r"\1\2\n\1DEPENDENCIES = {!r}".format(deps_tuple), source)
+        source = version_regex.sub(rf"\1\2\n\1DEPENDENCIES = {deps_tuple!r}", source)
 
     module_path.write_text(source)

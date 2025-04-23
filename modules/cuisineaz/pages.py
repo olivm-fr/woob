@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,40 +15,35 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.pages import HTMLPage, pagination
-from woob.browser.elements import ItemElement, method, ListElement
+import datetime
+import re
+
+from woob.browser.elements import ItemElement, ListElement, method
 from woob.browser.filters.html import XPath
 from woob.browser.filters.json import Dict
-from woob.capabilities.recipe import Recipe, Comment
+from woob.browser.filters.standard import CleanText, Env, Eval, Format, Join, Regexp, Time
+from woob.browser.pages import HTMLPage, pagination
 from woob.capabilities.image import BaseImage, Thumbnail
-from woob.browser.filters.standard import (
-    CleanText, Regexp, Env, Time, Join, Format, Eval,
-)
+from woob.capabilities.recipe import Comment, Recipe
 from woob.tools.json import json
-
-
-import re
-import datetime
 
 
 class CuisineazDuration(Time):
     klass = datetime.timedelta
-    _regexp = re.compile(r'PT((?P<hh>\d+)H)?((?P<mm>\d+)M)?')
-    kwargs = {'hours': 'hh', 'minutes': 'mm'}
+    _regexp = re.compile(r"PT((?P<hh>\d+)H)?((?P<mm>\d+)M)?")
+    kwargs = {"hours": "hh", "minutes": "mm"}
 
 
 class ResultsPage(HTMLPage):
-    """ Page which contains results as a list of recipies
-    """
+    """Page which contains results as a list of recipies"""
 
     @pagination
     @method
     class iter_recipes(ListElement):
-        item_xpath = '//article[@id]'
+        item_xpath = "//article[@id]"
 
         def next_page(self):
-            next = CleanText('//li[@class="pagination-next"]/span/a/@href',
-                             default=None)(self)
+            next = CleanText('//li[@class="pagination-next"]/span/a/@href', default=None)(self)
             if next:
                 return next
 
@@ -58,69 +51,67 @@ class ResultsPage(HTMLPage):
             klass = Recipe
 
             def condition(self):
-                return Regexp(CleanText('./div/h2/a/@href'),
-                              '/recettes/(.*).aspx',
-                              default=None)(self.el)
+                return Regexp(CleanText("./div/h2/a/@href"), "/recettes/(.*).aspx", default=None)(self.el)
 
-            obj_id = Regexp(CleanText('./div/h2/a/@href'),
-                            '/recettes/(.*).aspx')
-            obj_title = CleanText('./div/h2/a')
+            obj_id = Regexp(CleanText("./div/h2/a/@href"), "/recettes/(.*).aspx")
+            obj_title = CleanText("./div/h2/a")
 
             class obj_picture(ItemElement):
                 klass = BaseImage
 
-                url = CleanText('./div[has-class("searchImg")]/span/img[@data-src!=""]/@data-src|./div[has-class("searchImg")]/div/span/img[@src!=""]/@src',
-                                default=None)
-                obj_thumbnail = Eval(Thumbnail, Format('http:%s', url))
+                url = CleanText(
+                    './div[has-class("searchImg")]/span/img[@data-src!=""]/@data-src|./div[has-class("searchImg")]/div/span/img[@src!=""]/@src',
+                    default=None,
+                )
+                obj_thumbnail = Eval(Thumbnail, Format("http:%s", url))
 
                 def validate(self, obj):
-                    return obj.thumbnail.url != 'http:'
+                    return obj.thumbnail.url != "http:"
 
             obj_short_description = CleanText('./div[has-class("show-for-medium")]')
 
 
 class RecipePage(HTMLPage):
-    """ Page which contains a recipe
-    """
+    """Page which contains a recipe"""
+
     @method
     class get_recipe(ItemElement):
         klass = Recipe
 
         def parse(self, el):
-            items = XPath(u'//script[@type="application/ld+json"]')(self)
+            items = XPath('//script[@type="application/ld+json"]')(self)
             for item in items:
-                content = json.loads(CleanText(u'.')(item))
+                content = json.loads(CleanText(".")(item))
                 for el in content:
-                    if el['@type'] == "Recipe":
+                    if el["@type"] == "Recipe":
                         self.el = el
                         break
 
-        obj_id = Env('id')
-        obj_title = Dict('name')
-        obj_ingredients = Dict('recipeIngredient')
+        obj_id = Env("id")
+        obj_title = Dict("name")
+        obj_ingredients = Dict("recipeIngredient")
 
         class obj_picture(ItemElement):
             klass = BaseImage
 
             def obj_url(self):
-                url = Dict('image', default='')(self)
+                url = Dict("image", default="")(self)
                 return url[0] if url else url
 
             obj_thumbnail = Eval(Thumbnail, obj_url)
 
-        obj_instructions = Join('\n\n - ', Dict('recipeInstructions'),
-                                addBefore=' - ')
+        obj_instructions = Join("\n\n - ", Dict("recipeInstructions"), addBefore=" - ")
 
         def obj_preparation_time(self):
-            duration = CuisineazDuration(Dict('prepTime'))(self)
+            duration = CuisineazDuration(Dict("prepTime"))(self)
             return int(duration.total_seconds() / 60)
 
         def obj_cooking_time(self):
-            duration = CuisineazDuration(Dict('cookTime'))(self)
+            duration = CuisineazDuration(Dict("cookTime"))(self)
             return int(duration.total_seconds() / 60)
 
         def obj_nb_person(self):
-            return [Dict('recipeYield')(self)]
+            return [Dict("recipeYield")(self)]
 
     @method
     class get_comments(ListElement):
@@ -131,7 +122,7 @@ class RecipePage(HTMLPage):
 
             obj_author = CleanText('./div[@class="author"]')
 
-            obj_text = CleanText('./p')
+            obj_text = CleanText("./p")
 
             def obj_rate(self):
                 return len(XPath('./div/div/div[@class="icon-star"]')(self))

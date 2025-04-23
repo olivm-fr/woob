@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -19,19 +17,18 @@
 
 import re
 
-from woob.capabilities.lyrics import SongLyrics
-from woob.capabilities.base import NotLoaded, NotAvailable
-
 from woob.browser.elements import ItemElement, ListElement, method
-from woob.browser.pages import HTMLPage
-from woob.browser.filters.standard import Regexp, CleanText
 from woob.browser.filters.html import CleanHTML
+from woob.browser.filters.standard import CleanText, Regexp
+from woob.browser.pages import HTMLPage
+from woob.capabilities.base import NotAvailable, NotLoaded
+from woob.capabilities.lyrics import SongLyrics
 
 
 class HomePage(HTMLPage):
     def search_lyrics(self, pattern):
         form = self.get_form(xpath='//form[@class="search-block"]')
-        form['query'] = pattern
+        form["query"] = pattern
         form.submit()
 
 
@@ -44,20 +41,26 @@ class SearchPage(HTMLPage):
             klass = SongLyrics
 
             def obj_id(self):
-                href = CleanText('.//a[has-class("link") and has-class("grey") and has-class("font-small")]/@href')(self)
-                subid = href.replace('.html','').replace('paroles-','').split('/')[-2:]
-                id = '%s|%s'%(subid[0], subid[1])
+                href = CleanText('.//a[has-class("link") and has-class("grey") and has-class("font-small")]/@href')(
+                    self
+                )
+                subid = href.replace(".html", "").replace("paroles-", "").split("/")[-2:]
+                id = f"{subid[0]}|{subid[1]}"
                 return id
 
-            obj_title = CleanText('.//a[has-class("link") and has-class("grey") and has-class("font-small")]',
-                    default=NotAvailable)
-            obj_artist = CleanText('.//a[has-class("link") and has-class("black") and has-class("font-default")]',
-                    default=NotAvailable)
+            obj_title = CleanText(
+                './/a[has-class("link") and has-class("grey") and has-class("font-small")]', default=NotAvailable
+            )
+            obj_artist = CleanText(
+                './/a[has-class("link") and has-class("black") and has-class("font-default")]', default=NotAvailable
+            )
             obj_content = NotLoaded
 
     def get_artist_ids(self):
-        artists_href = self.doc.xpath('//p[text()="Artistes" and has-class("pull-left")]/../..//li[has-class("item")]//a[has-class("link")]/@href')
-        aids = [href.split('/')[-1].replace('paroles-','') for href in artists_href]
+        artists_href = self.doc.xpath(
+            '//p[text()="Artistes" and has-class("pull-left")]/../..//li[has-class("item")]//a[has-class("link")]/@href'
+        )
+        aids = [href.split("/")[-1].replace("paroles-", "") for href in artists_href]
         return aids
 
 
@@ -69,15 +72,14 @@ class ArtistPage(HTMLPage):
         class item(ItemElement):
             klass = SongLyrics
 
-            obj_title = CleanText('.//a[has-class("link")]',
-                    default=NotAvailable)
-            obj_artist = Regexp(CleanText('//title'),
-                    'Paroles (.*) :.*')
+            obj_title = CleanText('.//a[has-class("link")]', default=NotAvailable)
+            obj_artist = Regexp(CleanText("//title"), "Paroles (.*) :.*")
             obj_content = NotLoaded
+
             def obj_id(self):
                 href = CleanText('.//a[has-class("link")]/@href')(self)
-                subid = href.replace('.html','').replace('paroles-','').split('/')[-2:]
-                id = '%s|%s'%(subid[0], subid[1])
+                subid = href.replace(".html", "").replace("paroles-", "").split("/")[-2:]
+                id = f"{subid[0]}|{subid[1]}"
                 return id
 
 
@@ -87,10 +89,17 @@ class LyricsPage(HTMLPage):
         klass = SongLyrics
 
         def obj_id(self):
-            subid = self.page.url.replace('.html','').replace('paroles-','').split('/')[-2:]
-            id = '%s|%s'%(subid[0], subid[1])
+            subid = self.page.url.replace(".html", "").replace("paroles-", "").split("/")[-2:]
+            id = f"{subid[0]}|{subid[1]}"
             return id
-        obj_content = Regexp(CleanText(CleanHTML('//div[has-class("top-listing")]//div[has-class("text-center")]', default=NotAvailable), newlines=False), r'^(.*?)\s+Paroles2Chansons dispose d', flags=re.DOTALL)
-        obj_title = Regexp(CleanText('//title', default=NotAvailable), 'Paroles (.*) - .*')
-        obj_artist = Regexp(CleanText('//title', default=NotAvailable), 'Paroles .* - (.*) \(tra.*')
 
+        obj_content = Regexp(
+            CleanText(
+                CleanHTML('//div[has-class("top-listing")]//div[has-class("text-center")]', default=NotAvailable),
+                newlines=False,
+            ),
+            r"^(.*?)\s+Paroles2Chansons dispose d",
+            flags=re.DOTALL,
+        )
+        obj_title = Regexp(CleanText("//title", default=NotAvailable), r"Paroles (.*) - .*")
+        obj_artist = Regexp(CleanText("//title", default=NotAvailable), r"Paroles .* - (.*) \(tra.*")

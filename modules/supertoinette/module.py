@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -22,26 +20,27 @@ from woob.tools.backend import Module
 
 from .browser import SupertoinetteBrowser
 
-__all__ = ['SupertoinetteModule']
+
+__all__ = ["SupertoinetteModule"]
 
 
 class SupertoinetteModule(Module, CapRecipe):
-    NAME = 'supertoinette'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '3.6'
-    DESCRIPTION = u'Super Toinette, la cuisine familiale French recipe website'
-    LICENSE = 'AGPLv3+'
+    NAME = "supertoinette"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "julien.veyssier@aiur.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Super Toinette, la cuisine familiale French recipe website"
+    LICENSE = "AGPLv3+"
     BROWSER = SupertoinetteBrowser
 
     def get_recipe(self, id):
         return self.browser.get_recipe(id)
 
     def iter_recipes(self, pattern):
-        return self.browser.iter_recipes(pattern.encode('utf-8'))
+        return self.browser.iter_recipes(pattern.encode("utf-8"))
 
     def fill_recipe(self, recipe, fields):
-        if 'nb_person' in fields or 'instructions' in fields:
+        if "nb_person" in fields or "instructions" in fields:
             rec = self.get_recipe(recipe.id)
             recipe.picture = rec.picture
             recipe.instructions = rec.instructions

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Roger Philibert
 #
 # This file is part of a woob module.
@@ -18,28 +16,28 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.video import BaseVideo
 from woob.tools.misc import limit
 from woob.tools.test import BackendTest
-from woob.capabilities.video import BaseVideo
 
 
 class PornhubTest(BackendTest):
-    MODULE = 'pornhub'
+    MODULE = "pornhub"
 
     def test_search(self):
-        self.assertTrue(len(self.backend.search_videos('anus', nsfw=False)) == 0)
+        self.assertTrue(len(self.backend.search_videos("anus", nsfw=False)) == 0)
 
-        l = list(limit(self.backend.search_videos('anus', nsfw=True), 100))
+        l = list(limit(self.backend.search_videos("anus", nsfw=True), 100))
         self.assertTrue(len(l) > 0)
         v = l[0]
-        self.backend.fillobj(v, ('url',))
-        self.assertTrue(v.url and v.url.startswith('http://'), 'URL for video "%s" not found: %s' % (v.id, v.url))
+        self.backend.fillobj(v, ("url",))
+        self.assertTrue(v.url and v.url.startswith("http://"), f'URL for video "{v.id}" not found: {v.url}')
         r = self.backend.browser.open(v.url, stream=True)
         self.assertTrue(r.status_code == 200)
 
     def test_latest(self):
-        l = list(limit(self.backend.iter_resources([BaseVideo], [u'latest_nsfw']), 100))
+        l = list(limit(self.backend.iter_resources([BaseVideo], ["latest_nsfw"]), 100))
         self.assertTrue(len(l) > 0)
         v = l[0]
-        self.backend.fillobj(v, ('url',))
-        self.assertTrue(v.url and v.url.startswith('http://'), 'URL for video "%s" not found: %s' % (v.id, v.url))
+        self.backend.fillobj(v, ("url",))
+        self.assertTrue(v.url and v.url.startswith("http://"), f'URL for video "{v.id}" not found: {v.url}')

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      François Revol
 #
 # This file is part of a woob module.
@@ -18,25 +16,29 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.job import BaseJobAdvert
-from woob.browser.pages import HTMLPage
 from woob.browser.elements import ItemElement, ListElement, method
-from woob.browser.filters.standard import Regexp, CleanText, Date, Env, BrowserURL
-from woob.browser.filters.html import Link, CleanHTML
+from woob.browser.filters.html import CleanHTML, Link
+from woob.browser.filters.standard import BrowserURL, CleanText, Date, Env, Regexp
+from woob.browser.pages import HTMLPage
+from woob.capabilities.job import BaseJobAdvert
 from woob.tools.date import parse_french_date
+
 
 class AdvertPage(HTMLPage):
     @method
     class get_job_advert(ItemElement):
         klass = BaseJobAdvert
 
-        obj_id = Env('id')
-        obj_url = BrowserURL('advert_page', id=Env('id'))
-        obj_title = CleanText('//title')
-        obj_job_name = CleanText('//title')
+        obj_id = Env("id")
+        obj_url = BrowserURL("advert_page", id=Env("id"))
+        obj_title = CleanText("//title")
+        obj_job_name = CleanText("//title")
         obj_society_name = CleanText('//div[2]/div[@class="col-md-9"]/h4[1]')
-        obj_publication_date = Date(CleanText('//div[2]/div[@class="col-md-9"]/small', replace=[(u'Ajoutée le', '')]), parse_func=parse_french_date)
-        obj_place = Regexp(CleanText('//div[2]/div[@class="col-md-9"]/h4[2]'), '(.*) \(.*\)')
+        obj_publication_date = Date(
+            CleanText('//div[2]/div[@class="col-md-9"]/small', replace=[("Ajoutée le", "")]),
+            parse_func=parse_french_date,
+        )
+        obj_place = Regexp(CleanText('//div[2]/div[@class="col-md-9"]/h4[2]'), r"(.*) \(.*\)")
         obj_description = CleanHTML('//div[4]/div[@class="col-md-9"]')
 
 
@@ -48,7 +50,7 @@ class SearchPage(HTMLPage):
         class item(ItemElement):
             klass = BaseJobAdvert
 
-            obj_id = Regexp(Link('.'), '.*fr/jobs/(\d+)/.*')
+            obj_id = Regexp(Link("."), r".*fr/jobs/(\d+)/.*")
             obj_title = CleanText('h4/span[@class="job-title"]')
             obj_society_name = CleanText('h4/span[@class="job-company"]')
             obj_publication_date = Date(CleanText('h4/span[@class="badge pull-right"]'), parse_func=parse_french_date)

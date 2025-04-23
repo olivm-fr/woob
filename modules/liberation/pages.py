@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Florent Fourcot
 #
 # This file is part of a woob module.
@@ -17,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.filters.html import XPathNotFound, CSS
+from woob.browser.filters.html import CSS, XPathNotFound
 from woob.browser.filters.standard import CleanText
 from woob_modules.genericnewspaper.pages import GenericNewsPage
 
@@ -32,29 +30,29 @@ class ArticlePage(GenericNewsPage):
         self.element_body_selector = "div.article-body, div[itemprop=articleBody]"
 
     def get_body(self):
-        if '.blogs.liberation.fr/' in self.url:
+        if ".blogs.liberation.fr/" in self.url:
             self.element_body_selector = "div.entry-content"
         try:
             element_body = self.get_element_body()
             self.try_remove(element_body, "script")
-            return CleanText('.')(element_body)
+            return CleanText(".")(element_body)
         except XPathNotFound:
             meta = self.doc.xpath('//meta[@name="description"]')[0]
-            txt = meta.attrib['content']
+            txt = meta.attrib["content"]
             return txt
         except AttributeError:
             return "No content found"
 
     def get_title(self):
         title = super(self.__class__, self).get_title()
-        return title.replace(u' - Libération', '')
+        return title.replace(" - Libération", "")
 
     def get_author(self):
         try:
-            author = CleanText('.')(self.get_element_author())
-            if author.startswith('Par '):
-                return author.split('Par ', 1)[1]
+            author = CleanText(".")(self.get_element_author())
+            if author.startswith("Par "):
+                return author.split("Par ", 1)[1]
             else:
                 return author
         except AttributeError:
-            return ''
+            return ""

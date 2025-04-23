@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Romain Bignon
 # Copyright(C) 2012 François Revol
 #
@@ -18,35 +16,34 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.video import CapVideo, BaseVideo
+from woob.capabilities.video import BaseVideo, CapVideo
 from woob.tools.backend import Module
 from woob.tools.capabilities.video.ytdl import video_info
-
 
 from .browser import VimeoBrowser
 
 
-__all__ = ['VimeoModule']
+__all__ = ["VimeoModule"]
 
 
 class VimeoModule(Module, CapVideo):
-    NAME = 'vimeo'
-    MAINTAINER = u'François Revol'
-    EMAIL = 'revol@free.fr'
-    VERSION = '3.6'
-    DESCRIPTION = 'Vimeo video streaming website'
-    LICENSE = 'AGPLv3+'
+    NAME = "vimeo"
+    MAINTAINER = "François Revol"
+    EMAIL = "revol@free.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Vimeo video streaming website"
+    LICENSE = "AGPLv3+"
     BROWSER = VimeoBrowser
 
     def search_videos(self, pattern, sortby=CapVideo.SEARCH_RELEVANCE, nsfw=False):
         return self.browser.search_videos(pattern, sortby, nsfw)
 
     def fill_video(self, video, fields):
-        if fields != ['thumbnail']:
+        if fields != ["thumbnail"]:
             # if we don't want only the thumbnail, we probably want also every fields
-            video = video_info(self.browser.absurl('/%s' % video.id, base=True))
+            video = video_info(self.browser.absurl("/%s" % video.id, base=True))
 
-        if 'thumbnail' in fields and video and video.thumbnail:
+        if "thumbnail" in fields and video and video.thumbnail:
             video.thumbnail.data = self.browser.open(video.thumbnail.url).content
 
         return video

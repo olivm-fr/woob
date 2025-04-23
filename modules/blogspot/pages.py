@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -22,16 +20,16 @@ from ast import literal_eval
 
 import lxml.html
 
-from woob.browser.pages import HTMLPage, RawPage
 from woob.browser.elements import ItemElement, method
 from woob.browser.filters.standard import CleanText
+from woob.browser.pages import HTMLPage, RawPage
 from woob.capabilities.messages import Message
 
 
 class DatePage(RawPage):
     def get_articles(self):
-        data = literal_eval(re.search(r',(\{.*\})\);', self.doc.decode('utf-8')).group(1))
-        return data['posts']
+        data = literal_eval(re.search(r",(\{.*\})\);", self.doc.decode("utf-8")).group(1))
+        return data["posts"]
 
 
 class IndexPage(HTMLPage):

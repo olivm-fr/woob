@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent Ardisson
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import LinebourseModule
 
 
-__all__ = ['LinebourseModule']
+__all__ = ["LinebourseModule"]

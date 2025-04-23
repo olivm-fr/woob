@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Vincent A
 #
 # This file is part of a woob module.
@@ -21,53 +19,41 @@
 
 import datetime
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.capabilities.base import find_object
 from woob.capabilities.gauge import Gauge, GaugeSensor
 
 from .pages import (
-    LoginPage, SubscriptionPage, StatsPage,
-    BillsPage, ProfilePage,
-    YearlyPage, MonthlyPage, DailyPage, HourlyPage,
+    BillsPage,
+    DailyPage,
+    HourlyPage,
+    LoginPage,
+    MonthlyPage,
+    ProfilePage,
+    StatsPage,
+    SubscriptionPage,
+    YearlyPage,
 )
 
 
 class EnercoopBrowser(LoginBrowser):
-    BASEURL = 'https://mon-espace.enercoop.fr'
+    BASEURL = "https://mon-espace.enercoop.fr"
 
-    login = URL('/clients/sign_in', LoginPage)
-    bills = URL('/factures', BillsPage)
-    profile = URL('/mon-compte', ProfilePage)
-    subscription = URL('/contrat', SubscriptionPage)
+    login = URL("/clients/sign_in", LoginPage)
+    bills = URL("/factures", BillsPage)
+    profile = URL("/mon-compte", ProfilePage)
+    subscription = URL("/contrat", SubscriptionPage)
 
     # Consumption sensor URLs
     pre_yearly = URL(r"/consommation$", StatsPage)
-    c_yearly = URL(
-        r"/consommation/conso_glo/(?P<y1>\d{4})-(?P<y2>\d{4})$",
-        YearlyPage
-    )
-    c_monthly = URL(
-        r"/consommation/conso_glo/(?P<year>\d{4})$",
-        MonthlyPage
-    )
-    c_daily = URL(
-        r"/consommation/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})$",
-        DailyPage
-    )
-    c_hourly = URL(
-        r"/consommation/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})/(?P<day>\d{2})$",
-        HourlyPage
-    )
+    c_yearly = URL(r"/consommation/conso_glo/(?P<y1>\d{4})-(?P<y2>\d{4})$", YearlyPage)
+    c_monthly = URL(r"/consommation/conso_glo/(?P<year>\d{4})$", MonthlyPage)
+    c_daily = URL(r"/consommation/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})$", DailyPage)
+    c_hourly = URL(r"/consommation/conso_glo/(?P<year>\d{4})/(?P<month>\d{2})/(?P<day>\d{2})$", HourlyPage)
 
     # Max power sensor URLs
-    p_monthly = URL(
-        r"/consommation/puissance_max/(?P<year>\d{4})$",
-        MonthlyPage
-    )
-    p_daily = URL(
-        r"/consommation/puissance_max/(?P<year>\d{4})/(?P<month>\d{2})$",
-        DailyPage
-    )
+    p_monthly = URL(r"/consommation/puissance_max/(?P<year>\d{4})$", MonthlyPage)
+    p_daily = URL(r"/consommation/puissance_max/(?P<year>\d{4})/(?P<month>\d{2})$", DailyPage)
 
     def do_login(self):
         self.location("/clients/sign_in")
@@ -82,7 +68,7 @@ class EnercoopBrowser(LoginBrowser):
     def export_session(self):
         return {
             **super().export_session(),
-            'url': self.bills.build(),
+            "url": self.bills.build(),
         }
 
     @need_login
@@ -101,8 +87,7 @@ class EnercoopBrowser(LoginBrowser):
     @need_login
     def iter_documents(self, _):
         self.bills.go()
-        for doc in self.page.iter_documents():
-            yield doc
+        yield from self.page.iter_documents()
 
     @need_login
     def download_document(self, document):
@@ -114,11 +99,15 @@ class EnercoopBrowser(LoginBrowser):
         # and for disabled contracts, consumption pages won't work
         self.subscription.go()
         pdl = self.page.get_pdl_number()
-        return [Gauge.from_dict({
-            "id": f"{pdl}",
-            "name": "Consommation",
-            "object": "Consommation",
-        })]
+        return [
+            Gauge.from_dict(
+                {
+                    "id": f"{pdl}",
+                    "name": "Consommation",
+                    "object": "Consommation",
+                }
+            ),
+        ]
 
     consumption_periods = {
         "yearly": "annuelle",
@@ -137,24 +126,32 @@ class EnercoopBrowser(LoginBrowser):
         assert g
 
         sensors = []
-        sensors.extend([
-            GaugeSensor.from_dict({
-                "id": f"{id}.c.{subid}",
-                "name": f"Consommation électrique {name}",
-                "unit": "kWh",
-                "gaugeid": id,
-            })
-            for subid, name in self.consumption_periods.items()
-        ])
-        sensors.extend([
-            GaugeSensor.from_dict({
-                "id": f"{id}.p.{subid}",
-                "name": f"Puissance max {name}",
-                "unit": "kVA",
-                "gaugeid": id,
-            })
-            for subid, name in self.maxpower_periods.items()
-        ])
+        sensors.extend(
+            [
+                GaugeSensor.from_dict(
+                    {
+                        "id": f"{id}.c.{subid}",
+                        "name": f"Consommation électrique {name}",
+                        "unit": "kWh",
+                        "gaugeid": id,
+                    }
+                )
+                for subid, name in self.consumption_periods.items()
+            ]
+        )
+        sensors.extend(
+            [
+                GaugeSensor.from_dict(
+                    {
+                        "id": f"{id}.p.{subid}",
+                        "name": f"Puissance max {name}",
+                        "unit": "kVA",
+                        "gaugeid": id,
+                    }
+                )
+                for subid, name in self.maxpower_periods.items()
+            ]
+        )
         return sensors
 
     @need_login

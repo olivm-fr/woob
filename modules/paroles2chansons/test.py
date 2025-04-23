@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,14 +15,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
 from woob.capabilities.base import NotLoaded
+from woob.tools.test import BackendTest
+
 
 class Paroles2chansonsTest(BackendTest):
-    MODULE = 'paroles2chansons'
+    MODULE = "paroles2chansons"
 
     def test_search_song_n_get(self):
-        l_lyrics = list(self.backend.iter_lyrics('song', 'chien'))
+        l_lyrics = list(self.backend.iter_lyrics("song", "chien"))
         for songlyrics in l_lyrics:
             assert songlyrics.id
             assert songlyrics.title
@@ -37,7 +36,7 @@ class Paroles2chansonsTest(BackendTest):
             assert full_lyr.content is not NotLoaded
 
     def test_search_artist(self):
-        l_lyrics = list(self.backend.iter_lyrics('artist', 'boris'))
+        l_lyrics = list(self.backend.iter_lyrics("artist", "boris"))
         for songlyrics in l_lyrics:
             assert songlyrics.id
             assert songlyrics.title

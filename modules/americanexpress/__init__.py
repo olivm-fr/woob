@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Romain Bignon
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import AmericanExpressModule
 
-__all__ = ['AmericanExpressModule']
+
+__all__ = ["AmericanExpressModule"]

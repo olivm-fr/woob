@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -17,12 +15,13 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
 from itertools import chain
+
+from woob.tools.test import BackendTest
 
 
 class CitibankTest(BackendTest):
-    MODULE = 'citibank'
+    MODULE = "citibank"
 
     def test_history(self):
         """

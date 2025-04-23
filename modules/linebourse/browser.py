@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent Ardisson
 #
 # This file is part of a woob module.
@@ -21,47 +19,46 @@
 
 from datetime import datetime, timedelta
 
-from woob.browser import LoginBrowser, URL
+from woob.browser import URL, LoginBrowser
 from woob.browser.exceptions import ClientError
 from woob.tools.capabilities.bank.transactions import sorted_transactions
 
-from .pages import (
-    PortfolioPage, NewWebsiteFirstConnectionPage, AccountCodesPage, HistoryAPIPage, MarketOrderPage,
-)
+from .pages import AccountCodesPage, HistoryAPIPage, MarketOrderPage, NewWebsiteFirstConnectionPage, PortfolioPage
 
 
 class LinebourseNoSpace(AssertionError):
     """
     Raise when the account has no linebourse space.
     """
+
     pass
 
 
 class LinebourseAPIBrowser(LoginBrowser):
-    BASEURL = 'https://www.offrebourse.com'
+    BASEURL = "https://www.offrebourse.com"
 
     # This is temporary because direct import woob_modules feature is not yet possible with woob oss
     # TODO: when possible, remove this, and import directly in the other modules
     # (from woob_modules.linebourse.browser import LinebourseNoSpace)
     LinebourseNoSpace = LinebourseNoSpace
 
-    new_website_first = URL(r'/rest/premiereConnexion', NewWebsiteFirstConnectionPage)
-    account_codes = URL(r'/rest/compte/liste/vide/0', AccountCodesPage)
+    new_website_first = URL(r"/rest/premiereConnexion", NewWebsiteFirstConnectionPage)
+    account_codes = URL(r"/rest/compte/liste/vide/0", AccountCodesPage)
 
     # The API works with an encrypted account_code that starts with 'CRY'
-    portfolio = URL(r'/rest/portefeuille/(?P<account_code>CRY[\w\d]+)/vide/true/false', PortfolioPage)
+    portfolio = URL(r"/rest/portefeuille/(?P<account_code>CRY[\w\d]+)/vide/true/false", PortfolioPage)
     history = URL(
-        r'/rest/historiqueOperations/rwd2/(?P<account_code>CRY[\w\d]+)/(?P<start_date>[^/]+)/(?P<end_date>[^/]+)/7/1',
-        HistoryAPIPage
+        r"/rest/historiqueOperations/rwd2/(?P<account_code>CRY[\w\d]+)/(?P<start_date>[^/]+)/(?P<end_date>[^/]+)/7/1",
+        HistoryAPIPage,
     )
     market_order = URL(
-        r'/rest/carnetOrdre/(?P<account_code>CRY[\w\d]+)/segmentation/(?P<index>\d+)/2/1',
-        MarketOrderPage
+        r"/rest/carnetOrdre/(?P<account_code>CRY[\w\d]+)/segmentation/(?P<index>\d+)/2/1", MarketOrderPage
     )
 
     def __init__(self, baseurl, *args, **kwargs):
         self.BASEURL = baseurl
-        super(LinebourseAPIBrowser, self).__init__(username='', password='', *args, **kwargs)
+        # Pass placeholder values for username / password
+        super().__init__("", "", *args, **kwargs)
 
     def get_account_code(self, account_id):
         # 'account_codes' is a JSON containing the id_contracts
@@ -70,7 +67,7 @@ class LinebourseAPIBrowser(LoginBrowser):
         # Some connections have no linebourse space available
         if self.page.is_linebourse_space_available():
             return self.page.get_contract_number(account_id)
-        self.logger.warning('Linebourse space is not available for this account.')
+        self.logger.warning("Linebourse space is not available for this account.")
 
     def go_account_codes(self, params):
         """
@@ -83,7 +80,7 @@ class LinebourseAPIBrowser(LoginBrowser):
                 # if bred user have no linebourse space it returns a 400
                 raise LinebourseNoSpace()
             raise AssertionError(
-                'Unhandled error while fetching linebourse accounts (status code: %d)' % e.response.status_code
+                "Unhandled error while fetching linebourse accounts (status code: %d)" % e.response.status_code
             )
         else:
             # This may happen when requesting accounts twice. The status will be 200 but the content contains the error.
@@ -144,7 +141,7 @@ class LinebourseAPIBrowser(LoginBrowser):
                 index=4,
             )
         except ClientError:
-            self.logger.warning('Foreign orders book is not accessible for this account.')
+            self.logger.warning("Foreign orders book is not accessible for this account.")
         else:
             market_orders.extend(self.page.iter_market_orders())
 

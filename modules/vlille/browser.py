@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,18 +16,18 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import ListStationsPage
 
 
-__all__ = ['VlilleBrowser']
+__all__ = ["VlilleBrowser"]
 
 
 class VlilleBrowser(PagesBrowser):
 
-    BASEURL = 'https://www.ilevia.fr'
-    list_page = URL('/cms/institutionnel/velo/stations-vlille/', ListStationsPage)
+    BASEURL = "https://www.ilevia.fr"
+    list_page = URL("/cms/institutionnel/velo/stations-vlille/", ListStationsPage)
 
     def get_station_list(self):
         return self.list_page.go().get_station_list()

@@ -18,63 +18,74 @@
 # flake8: compatible
 
 from woob.browser import LoginBrowser, need_login
-from woob.browser.url import BrowserParamURL, URL
-from woob.capabilities.base import empty
+from woob.browser.url import URL, BrowserParamURL
 from woob.capabilities.bank import Account
+from woob.capabilities.base import empty
+from woob.capabilities.bill import Subscription
 from woob.exceptions import (
-    BrowserIncorrectPassword, BrowserPasswordExpired,
-    ActionNeeded, ActionType, BrowserHTTPError, BrowserUnavailable,
+    ActionNeeded,
+    ActionType,
+    BrowserHTTPError,
+    BrowserIncorrectPassword,
+    BrowserPasswordExpired,
+    BrowserUnavailable,
 )
 from woob.tools.capabilities.bank.transactions import sorted_transactions
 
 from .pages import (
-    LoginPage, MigrationPage, AccountsPage, InvestmentPage, HistoryPage, ActionNeededPage,
-    InvestDetailPage, PrevoyancePage, ValidationPage, InvestPerformancePage, MaintenancePage,
+    AccountsPage,
+    ActionNeededPage,
+    AllDocumentsPage,
+    HistoryPage,
+    InvestDetailPage,
+    InvestmentPage,
+    InvestPerformancePage,
+    LoginPage,
+    MaintenancePage,
+    MigrationPage,
+    PrevoyancePage,
+    ValidationPage,
 )
 
 
 class AbeilleAssurancesBrowser(LoginBrowser):
     TIMEOUT = 120
-    BASEURL = 'https://www.abeille-assurances.fr'
+    BASEURL = "https://www.abeille-assurances.fr"
 
     validation = BrowserParamURL(
-        r'/conventions/acceptation\?backurl=/(?P<browser_subsite>[^/]+)/Accueil',
-        ValidationPage
+        r"/conventions/acceptation\?backurl=/(?P<browser_subsite>[^/]+)/Accueil", ValidationPage
     )
     login = BrowserParamURL(
-        r'/(?P<browser_subsite>[^/]+)/MonCompte/Connexion',
-        r'/(?P<browser_subsite>[^/]+)/conventions/acceptation',
-        LoginPage
+        r"/(?P<browser_subsite>[^/]+)/MonCompte/Connexion",
+        r"/(?P<browser_subsite>[^/]+)/conventions/acceptation",
+        LoginPage,
     )
-    migration = BrowserParamURL(r'/(?P<browser_subsite>[^/]+)/MonCompte/Migration', MigrationPage)
-    accounts = BrowserParamURL(r'/(?P<browser_subsite>[^/]+)/Accueil/Synthese-Contrats', AccountsPage)
-    investment = BrowserParamURL(r'/(?P<browser_subsite>[^/]+)/contrat/epargne/-(?P<page_id>[0-9]{10})', InvestmentPage)
+    migration = BrowserParamURL(r"/(?P<browser_subsite>[^/]+)/MonCompte/Migration", MigrationPage)
+    accounts = BrowserParamURL(r"/(?P<browser_subsite>[^/]+)/Accueil/Synthese-Contrats", AccountsPage)
+    investment = BrowserParamURL(r"/(?P<browser_subsite>[^/]+)/contrat/epargne/-(?P<page_id>[0-9]{10})", InvestmentPage)
     prevoyance = BrowserParamURL(
-        r'/(?P<browser_subsite>[^/]+)/contrat/prevoyance/-(?P<page_id>[0-9]{10})',
-        PrevoyancePage
+        r"/(?P<browser_subsite>[^/]+)/contrat/prevoyance/-(?P<page_id>[0-9]{10})", PrevoyancePage
     )
     history = BrowserParamURL(
-        r'/(?P<browser_subsite>[^/]+)/contrat/getOperations\?param1=(?P<history_token>.*)',
-        HistoryPage
+        r"/(?P<browser_subsite>[^/]+)/contrat/getOperations\?param1=(?P<history_token>.*)", HistoryPage
     )
     action_needed = BrowserParamURL(
-        r'/(?P<browser_subsite>[^/]+)/coordonnees/detailspersonne\?majcontacts=true',
-        r'/(?P<browser_subsite>[^/]+)/web/\?src=/tunnel',
-        ActionNeededPage
+        r"/(?P<browser_subsite>[^/]+)/coordonnees/detailspersonne\?majcontacts=true",
+        r"/(?P<browser_subsite>[^/]+)/web/\?src=/tunnel",
+        ActionNeededPage,
     )
+    all_documents = BrowserParamURL(r"/(?P<browser_subsite>[^/]+)/contact/message/myDocuments", AllDocumentsPage)
     invest_detail = BrowserParamURL(
-        r'https://fonds-ext2.abeille-assurances.fr/sheet/fund/(?P<isin>[A-Z0-9]+)',
-        InvestDetailPage
+        r"https://fonds-ext2.abeille-assurances.fr/sheet/fund/(?P<isin>[A-Z0-9]+)", InvestDetailPage
     )
     invest_performance = BrowserParamURL(
-        r'https://fonds-ext2.abeille-assurances.fr/sheet/fund-calculator',
-        InvestPerformancePage
+        r"https://fonds-ext2.abeille-assurances.fr/sheet/fund-calculator", InvestPerformancePage
     )
-    maintenance = URL(r'/maintenancepage', MaintenancePage)
+    maintenance = URL(r"/maintenancepage", MaintenancePage)
 
     def __init__(self, *args, **kwargs):
-        self.subsite = 'espacepersonnel'
-        super(AbeilleAssurancesBrowser, self).__init__(*args, **kwargs)
+        self.subsite = "espacepersonnel"
+        super().__init__(*args, **kwargs)
 
     def post_login_credentials(self):
         # Method to be overloaded by Abeille Assurances's child (Afer)
@@ -86,7 +97,7 @@ class AbeilleAssurancesBrowser(LoginBrowser):
             raise BrowserUnavailable()
         self.post_login_credentials()
         if self.login.is_here():
-            if 'acceptation' in self.url:
+            if "acceptation" in self.url:
                 raise ActionNeeded(
                     locale="fr-FR",
                     message="Veuillez accepter les conditions générales d'utilisation sur le site.",
@@ -116,7 +127,7 @@ class AbeilleAssurancesBrowser(LoginBrowser):
                     # When it happens, we try the request again; if the balance
                     # still does not appear we raise BrowserUnavailable
                     # to yield a consistent list of accounts everytime.
-                    self.logger.warning('Account %s has no balance, try the request again.', account.label)
+                    self.logger.warning("Account %s has no balance, try the request again.", account.label)
                     self.accounts.go()
                     self.location(account.url)
                     if not self.page.is_valuation_available():
@@ -125,12 +136,23 @@ class AbeilleAssurancesBrowser(LoginBrowser):
                 self.page.fill_account(obj=account)
                 if account.type == Account.TYPE_UNKNOWN:
                     self.logger.warning(
-                        'Account "%s" is untyped, please check the related type in account details.',
-                        account.label
+                        'Account "%s" is untyped, please check the related type in account details.', account.label
                     )
                 yield account
             except BrowserHTTPError:
-                self.logger.warning('Could not get the account details: account %s will be skipped', account.id)
+                self.logger.warning("Could not get the account details: account %s will be skipped", account.id)
+
+    def iter_subscriptions(self):
+        for account in self.iter_accounts():
+            sub = Subscription()
+            sub.id = account.id
+            sub.label = account.label
+            yield sub
+
+    @need_login
+    def iter_documents(self, subscription):
+        self.all_documents.go()
+        return self.page.iter_documents(subid=subscription.id)
 
     @need_login
     def iter_investment(self, account):
@@ -138,7 +160,7 @@ class AbeilleAssurancesBrowser(LoginBrowser):
         try:
             self.location(account.url)
         except BrowserHTTPError:
-            self.logger.warning('Could not get the account investments for account %s', account.id)
+            self.logger.warning("Could not get the account investments for account %s", account.id)
             return
         for inv in self.page.iter_investment():
             if not empty(inv.code):
@@ -159,7 +181,7 @@ class AbeilleAssurancesBrowser(LoginBrowser):
         try:
             self.location(account.url)
         except BrowserHTTPError:
-            self.logger.warning('Could not get the history for account %s', account.id)
+            self.logger.warning("Could not get the history for account %s", account.id)
             return
 
         history_link = self.page.get_history_link()

@@ -16,23 +16,25 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.base import BaseObject, StringField, NotLoaded
+from woob.capabilities.base import BaseObject, NotLoaded, StringField
 
-__all__ = ['StreamInfo']
+
+__all__ = ["StreamInfo"]
 
 
 class StreamInfo(BaseObject):
     """
     Stream related information.
     """
-    who = StringField('Who is currently on air')
-    what = StringField('What is currently on air')
+
+    who = StringField("Who is currently on air")
+    what = StringField("What is currently on air")
 
     def __iscomplete__(self):
         return self.who is not NotLoaded or self.what is not NotLoaded
 
     def __str__(self):
         if self.who:
-            return '%s - %s' % (self.who, self.what)
+            return f"{self.who} - {self.what}"
         else:
             return self.what

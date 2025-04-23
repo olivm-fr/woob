@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -24,24 +22,24 @@ from woob.tools.value import ValueBackendPassword
 
 from .browser import MyHabit
 
-__all__ = ['MyHabitModule']
+
+__all__ = ["MyHabitModule"]
 
 
 class MyHabitModule(Module, CapShop):
-    NAME = 'myhabit'
-    MAINTAINER = u'Oleg Plakhotniuk'
-    EMAIL = 'olegus8@gmail.com'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = u'MYHABIT'
+    NAME = "myhabit"
+    MAINTAINER = "Oleg Plakhotniuk"
+    EMAIL = "olegus8@gmail.com"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "MYHABIT"
     CONFIG = BackendConfig(
-        ValueBackendPassword('email', label='E-mail', masked=False),
-        ValueBackendPassword('password', label='Password'))
+        ValueBackendPassword("email", label="E-mail", masked=False), ValueBackendPassword("password", label="Password")
+    )
     BROWSER = MyHabit
 
     def create_default_browser(self):
-        return self.create_browser(self.config['email'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(self.config["email"].get(), self.config["password"].get())
 
     def get_currency(self):
         return self.browser.get_currency()

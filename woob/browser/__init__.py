@@ -16,15 +16,32 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 from .browsers import (
-    Browser, DomainBrowser, UrlNotAllowed, PagesBrowser,
-    LoginBrowser, need_login, AbstractBrowser, StatesMixin,
-    APIBrowser, OAuth2Mixin, OAuth2PKCEMixin,
+    AbstractBrowser,
+    APIBrowser,
+    Browser,
+    DomainBrowser,
+    LoginBrowser,
+    OAuth2Mixin,
+    OAuth2PKCEMixin,
+    PagesBrowser,
+    StatesMixin,
+    UrlNotAllowed,
+    need_login,
 )
 from .url import URL
 
 
 __all__ = [
-    'Browser', 'DomainBrowser', 'UrlNotAllowed', 'PagesBrowser', 'URL',
-    'LoginBrowser', 'need_login', 'AbstractBrowser', 'StatesMixin',
-    'APIBrowser', 'OAuth2Mixin', 'OAuth2PKCEMixin',
+    "Browser",
+    "DomainBrowser",
+    "UrlNotAllowed",
+    "PagesBrowser",
+    "URL",
+    "LoginBrowser",
+    "need_login",
+    "AbstractBrowser",
+    "StatesMixin",
+    "APIBrowser",
+    "OAuth2Mixin",
+    "OAuth2PKCEMixin",
 ]

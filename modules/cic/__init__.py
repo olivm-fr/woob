@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import CICModule
 
-__all__ = ['CICModule']
+
+__all__ = ["CICModule"]

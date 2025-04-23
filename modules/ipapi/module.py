@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,47 +16,47 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.browser.browsers import Browser
 from woob.capabilities.geolocip import CapGeolocIp, IpLocation
 from woob.tools.backend import Module
-from woob.browser.browsers import Browser
 from woob.tools.json import json
 
 
-__all__ = ['IpapiModule']
+__all__ = ["IpapiModule"]
 
 
 class IpapiModule(Module, CapGeolocIp):
-    NAME = 'ipapi'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
-    DESCRIPTION = u"IP-API Geolocation API"
+    NAME = "ipapi"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "julien.veyssier@aiur.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
+    DESCRIPTION = "IP-API Geolocation API"
     BROWSER = Browser
 
     def get_location(self, ipaddr):
-        res = self.browser.location(u'http://ip-api.com/json/%s' % ipaddr)
+        res = self.browser.location("http://ip-api.com/json/%s" % ipaddr)
         jres = json.loads(res.text)
 
         if "status" in jres and jres["status"] == "fail":
             raise Exception("IPAPI failure : %s" % jres["message"])
 
         iploc = IpLocation(ipaddr)
-        iploc.city = u'%s'%jres['city']
-        iploc.region = u'%s'%jres['regionName']
-        iploc.zipcode = u'%s'%jres['zip']
-        iploc.country = u'%s'%jres['country']
-        if jres['lat'] != '':
-            iploc.lt = float(jres['lat'])
+        iploc.city = "%s" % jres["city"]
+        iploc.region = "%s" % jres["regionName"]
+        iploc.zipcode = "%s" % jres["zip"]
+        iploc.country = "%s" % jres["country"]
+        if jres["lat"] != "":
+            iploc.lt = float(jres["lat"])
         else:
             iploc.lt = 0.0
-        if jres['lon'] != '':
-            iploc.lg = float(jres['lon'])
+        if jres["lon"] != "":
+            iploc.lg = float(jres["lon"])
         else:
             iploc.lg = 0.0
-        #iploc.host = 'NA'
-        #iploc.tld = 'NA'
-        if 'isp' in jres:
-            iploc.isp = u'%s'%jres['isp']
+        # iploc.host = 'NA'
+        # iploc.tld = 'NA'
+        if "isp" in jres:
+            iploc.isp = "%s" % jres["isp"]
 
         return iploc

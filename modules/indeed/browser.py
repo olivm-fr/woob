@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,32 +15,36 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import PagesBrowser, URL
-from .pages import SearchPage, AdvertPage
+from woob.browser import URL, PagesBrowser
+
+from .pages import AdvertPage, SearchPage
 
 
-__all__ = ['IndeedBrowser']
+__all__ = ["IndeedBrowser"]
 
 
 class IndeedBrowser(PagesBrowser):
 
-    BASEURL = 'https://www.indeed.fr'
+    BASEURL = "https://www.indeed.fr"
 
-    search_page = URL('/emplois(?P<parameters>.*)',
-                      SearchPage)
-    advert_page = URL('/cmp/(?P<company>.*)/jobs/(?P<title>.*)-(?P<nb>.*)', AdvertPage)
+    search_page = URL("/emplois(?P<parameters>.*)", SearchPage)
+    advert_page = URL("/cmp/(?P<company>.*)/jobs/(?P<title>.*)-(?P<nb>.*)", AdvertPage)
 
-    def search_job(self, metier='', contrat='', limit_date='', radius='', place=''):
-        params = '?q=%s&limit=10&sort=date&st=employer&sr=directhire&jt=%s&fromage=%s&radius=%s'\
-                 % (metier.replace(' ', '+'), contrat, limit_date, radius)
+    def search_job(self, metier="", contrat="", limit_date="", radius="", place=""):
+        params = "?q={}&limit=10&sort=date&st=employer&sr=directhire&jt={}&fromage={}&radius={}".format(
+            metier.replace(" ", "+"),
+            contrat,
+            limit_date,
+            radius,
+        )
         if place:
-            params = '%s&l=%s' % (params, place)
+            params = f"{params}&l={place}"
         self.search_page.go(parameters=params)
         assert self.search_page.is_here(parameters=params)
         return self.page.iter_job_adverts()
 
     def get_job_advert(self, _id, advert):
-        splitted_id = _id.split('#')
-        return self.advert_page.go(nb=splitted_id[0],
-                                   title=splitted_id[1],
-                                   company=splitted_id[2]).get_job_advert(obj=advert)
+        splitted_id = _id.split("#")
+        return self.advert_page.go(nb=splitted_id[0], title=splitted_id[1], company=splitted_id[2]).get_job_advert(
+            obj=advert
+        )

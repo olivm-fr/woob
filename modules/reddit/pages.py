@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -20,19 +18,19 @@
 from collections import OrderedDict
 from urllib.parse import urljoin
 
-from woob.browser.elements import method, ListElement, ItemElement, SkipItem
-from woob.browser.filters.standard import CleanText, Regexp, Field, DateTime
-from woob.browser.filters.html import AbsoluteLink, Link, Attr, CleanHTML
+from woob.browser.elements import ItemElement, ListElement, SkipItem, method
+from woob.browser.filters.html import AbsoluteLink, Attr, CleanHTML, Link
+from woob.browser.filters.standard import CleanText, DateTime, Field, Regexp
 from woob.browser.pages import HTMLPage, RawPage, pagination
 from woob.capabilities.image import BaseImage, Thumbnail
-from woob.capabilities.messages import Thread, Message
+from woob.capabilities.messages import Message, Thread
 
 
 class list_entry(ItemElement):
     obj_title = CleanText('.//a[has-class("title")]')
-    obj_date = DateTime(Attr('.//time[@class="live-timestamp"]', 'datetime'))
+    obj_date = DateTime(Attr('.//time[@class="live-timestamp"]', "datetime"))
     obj__page = AbsoluteLink('.//a[has-class("comments")]')
-    obj_id = Regexp(Field('_page'), '/comments/([^/]+)/')
+    obj_id = Regexp(Field("_page"), "/comments/([^/]+)/")
 
 
 class ListPage(HTMLPage):
@@ -47,16 +45,16 @@ class ListPage(HTMLPage):
             obj_author = CleanText('.//a[has-class("author")]')
 
             def obj_thumbnail(self):
-                path = Attr('..//a[has-class("thumbnail")]/img', 'src', default=None)(self)
+                path = Attr('..//a[has-class("thumbnail")]/img', "src", default=None)(self)
                 if path is None:
-                    raise SkipItem('not an image thread')
+                    raise SkipItem("not an image thread")
                 return Thumbnail(urljoin(self.page.url, path))
 
             def obj_url(self):
                 self.obj_thumbnail()
 
                 url = urljoin(self.page.url, Link('..//a[has-class("thumbnail")]')(self))
-                if url != Field('_page')(self):
+                if url != Field("_page")(self):
                     return url
                 # TODO lazy load with fillobj?
                 return self.page.browser.open(url).page.get_image_url()
@@ -71,7 +69,7 @@ class ListPage(HTMLPage):
         class item(list_entry):
             klass = Thread
 
-            obj_url = Field('_page')
+            obj_url = Field("_page")
 
         next_page = Link('//a[contains(@rel,"next")]', default=None)
 
@@ -86,22 +84,22 @@ class SearchPage(HTMLPage):
             klass = BaseImage
 
             obj__page = AbsoluteLink('.//a[has-class("search-comments")]')
-            obj_id = Regexp(Field('_page'), '/comments/([^/]+)/')
-            obj_date = DateTime(Attr('.//time', 'datetime'))
+            obj_id = Regexp(Field("_page"), "/comments/([^/]+)/")
+            obj_date = DateTime(Attr(".//time", "datetime"))
             obj_title = CleanText('.//a[has-class("search-title")]')
             obj_author = CleanText('.//a[has-class("author")]')
 
             def obj_thumbnail(self):
-                path = Attr('./a[has-class("thumbnail")]/img', 'src', default=None)(self)
+                path = Attr('./a[has-class("thumbnail")]/img', "src", default=None)(self)
                 if path is None:
-                    raise SkipItem('not an image thread')
+                    raise SkipItem("not an image thread")
                 return Thumbnail(urljoin(self.page.url, path))
 
             def obj_url(self):
                 self.obj_thumbnail()
 
                 url = urljoin(self.page.url, Link('./a[has-class("thumbnail")]')(self))
-                if url != Field('_page')(self):
+                if url != Field("_page")(self):
                     return url
                 # TODO lazy load with fillobj?
                 return self.page.browser.open(url).page.get_image_url()
@@ -113,13 +111,13 @@ class EntryPage(HTMLPage):
         klass = BaseImage
 
         obj_title = CleanText('//div[@id="siteTable"]//a[has-class("title")]')
-        obj_date = DateTime(Attr('//div[@id="siteTable"]//time', 'datetime'))
+        obj_date = DateTime(Attr('//div[@id="siteTable"]//time', "datetime"))
         obj_author = CleanText('//div[@id="siteTable"]//a[has-class("author")]')
 
         def obj_thumbnail(self):
-            path = Attr('//div[@id="siteTable"]//a[has-class("thumbnail")]/img', 'src', default=None)(self)
+            path = Attr('//div[@id="siteTable"]//a[has-class("thumbnail")]/img', "src", default=None)(self)
             if path is None:
-                raise SkipItem('not an image thread')
+                raise SkipItem("not an image thread")
             return Thumbnail(urljoin(self.page.url, path))
 
         def obj_url(self):
@@ -130,7 +128,7 @@ class EntryPage(HTMLPage):
 
     def get_image_url(self):
         if self.doc.xpath('//video[@class="preview"]'):
-            raise SkipItem('Videos are not implemented')
+            raise SkipItem("Videos are not implemented")
         return urljoin(self.url, Link('//a[img[@class="preview"]]')(self.doc))
 
     def get_thread(self, id):
@@ -150,7 +148,7 @@ class EntryPage(HTMLPage):
         for m in self.iter_messages():
             m.thread = thread
             if not m.url:
-                assert not thread.root, 'there cannot be 2 roots'
+                assert not thread.root, "there cannot be 2 roots"
                 thread.root = m
                 m.id = thread.id
                 m.parent = None
@@ -158,7 +156,7 @@ class EntryPage(HTMLPage):
             else:
                 assert m.id not in msgs
                 msgs[m.id] = m
-                m.id = '%s.%s' % (thread.id, m.id)
+                m.id = f"{thread.id}.{m.id}"
 
         for m in msgs.values():
             if m is thread.root:
@@ -169,7 +167,7 @@ class EntryPage(HTMLPage):
             else:
                 m.parent = thread.root
             m.parent.children.append(m)
-            m.title = 'Re: %s' % title
+            m.title = "Re: %s" % title
 
         thread.root.title = title
 
@@ -193,10 +191,10 @@ class EntryPage(HTMLPage):
 
             obj_content = CleanHTML('.//div[has-class("usertext-body")]')
             obj_sender = CleanText('.//a[has-class("author")]')
-            obj_date = DateTime(Attr('.//time[@class="live-timestamp"]', 'datetime'))
-            obj_url = AbsoluteLink('.//a[@data-event-action="permalink"]', default='')
-            obj_id = Regexp(Field('url'), '/(\w+)/$', default=None)
-            obj__parent_part = Regexp(Link('.//a[@data-event-action="parent"]', default=''), r'#(\w+)', default=None)
+            obj_date = DateTime(Attr('.//time[@class="live-timestamp"]', "datetime"))
+            obj_url = AbsoluteLink('.//a[@data-event-action="permalink"]', default="")
+            obj_id = Regexp(Field("url"), r"/(\w+)/$", default=None)
+            obj__parent_part = Regexp(Link('.//a[@data-event-action="parent"]', default=""), r"#(\w+)", default=None)
 
             def obj_children(self):
                 return []

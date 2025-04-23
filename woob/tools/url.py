@@ -19,19 +19,24 @@
 
 from __future__ import annotations
 
-from typing import Dict
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 from woob.tools.misc import NO_DEFAULT, NoDefaultType
 
+
 __all__ = [
-    'get_url_fragment_param', 'get_url_fragment_params',
-    'get_url_param', 'get_url_params', 'get_url_with_params',
+    "get_url_fragment_param",
+    "get_url_fragment_params",
+    "get_url_param",
+    "get_url_params",
+    "get_url_with_params",
 ]
 
 
 def get_url_param(
-    url: str, name: str, *,
+    url: str,
+    name: str,
+    *,
     default: str | NoDefaultType | None = NO_DEFAULT,
 ) -> str | None:
     """Get a specific query parameter from an URL.
@@ -48,7 +53,7 @@ def get_url_param(
     if name not in params:
         if default is NO_DEFAULT:
             raise ValueError(
-                f'URL {url!r} has no query parameter named {name!r}.',
+                f"URL {url!r} has no query parameter named {name!r}.",
             )
 
         return default
@@ -57,7 +62,9 @@ def get_url_param(
 
 
 def get_url_fragment_param(
-    url: str, name: str, *,
+    url: str,
+    name: str,
+    *,
     default: str | NoDefaultType | None = NO_DEFAULT,
 ) -> str | None:
     """Get a specific fragment parameter from an URL.
@@ -77,7 +84,7 @@ def get_url_fragment_param(
     if name not in params:
         if default is NO_DEFAULT:
             raise ValueError(
-                f'URL {url!r} has no fragment parameter named {name!r}.',
+                f"URL {url!r} has no fragment parameter named {name!r}.",
             )
 
         return default
@@ -85,7 +92,7 @@ def get_url_fragment_param(
     return params[name]
 
 
-def get_url_params(url: str) -> Dict[str, str]:
+def get_url_params(url: str) -> dict[str, str]:
     """Get query parameters from an URL.
 
     :param url: The URL to get the parameters from.
@@ -94,7 +101,7 @@ def get_url_params(url: str) -> Dict[str, str]:
     return dict(parse_qsl(parsed_url.query, keep_blank_values=True))
 
 
-def get_url_fragment_params(url: str) -> Dict[str, str]:
+def get_url_fragment_params(url: str) -> dict[str, str]:
     """Get fragment parameters from an URL.
 
     Note that this function is only for cases where the fragment is encoded

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import CourtoisModule
 
-__all__ = ['CourtoisModule']
+
+__all__ = ["CourtoisModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021      Damien Ramelet
 #
 # This file is part of a woob module.
@@ -24,13 +22,13 @@ from .pages import DashboardPage, InvestmentsDetailsPage, InvestmentsListPage, L
 
 
 class LitaBrowser(LoginBrowser):
-    BASEURL = 'https://fr.lita.co'
+    BASEURL = "https://fr.lita.co"
 
-    login = URL(r'/users/sign_in', LoginPage)
-    dashboard = URL(r'/investors/dashboard', DashboardPage)
-    profile = URL(r'/investors/identity/edit', ProfilePage)
-    investments_list = URL(r'/investors/subscriptions$', InvestmentsListPage)
-    investments_details = URL(r'investors/subscriptions/(?P<id>\d+)/shares', InvestmentsDetailsPage)
+    login = URL(r"/users/sign_in", LoginPage)
+    dashboard = URL(r"/investors/dashboard", DashboardPage)
+    profile = URL(r"/investors/identity/edit", ProfilePage)
+    investments_list = URL(r"/investors/subscriptions$", InvestmentsListPage)
+    investments_details = URL(r"investors/subscriptions/(?P<id>\d+)/shares", InvestmentsDetailsPage)
 
     def do_login(self):
         self.login.go()

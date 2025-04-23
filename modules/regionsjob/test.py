@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,24 +16,25 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+import itertools
+
 from woob.tools.test import BackendTest
 from woob.tools.value import Value
-import itertools
 
 
 class RegionsjobTest(BackendTest):
-    MODULE = 'regionsjob'
+    MODULE = "regionsjob"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['website'] = Value(value='www.parisjob.com')
-            self.backend.config['experience'] = Value(value='')
-            self.backend.config['secteur'] = Value(value='')
-            self.backend.config['contract'] = Value(value='CDI')
-            self.backend.config['metier'] = Value(value='')
+            self.backend.config["website"] = Value(value="www.parisjob.com")
+            self.backend.config["experience"] = Value(value="")
+            self.backend.config["secteur"] = Value(value="")
+            self.backend.config["contract"] = Value(value="CDI")
+            self.backend.config["metier"] = Value(value="")
 
     def test_regionjob_search(self):
-        l = list(itertools.islice(self.backend.search_job(u'informaticien'), 0, 41))
+        l = list(itertools.islice(self.backend.search_job("informaticien"), 0, 41))
         assert len(l)
         assert l[0].id
         assert l[0].url
@@ -44,7 +43,7 @@ class RegionsjobTest(BackendTest):
         assert l[0].title
 
         advert = self.backend.get_job_advert(l[0].id, None)
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')
         assert advert.id
         assert advert.publication_date
         assert advert.society_name
@@ -60,7 +59,7 @@ class RegionsjobTest(BackendTest):
         assert l[0].title
 
         advert = self.backend.get_job_advert(l[0].id, None)
-        self.assertTrue(advert.url, 'URL for announce "%s" not found: %s' % (advert.id, advert.url))
+        self.assertTrue(advert.url, f'URL for announce "{advert.id}" not found: {advert.url}')
         assert advert.id
         assert advert.publication_date
         assert advert.society_name

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Arno Renevier
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import WeatherModule
 
-__all__ = ['WeatherModule']
+
+__all__ = ["WeatherModule"]

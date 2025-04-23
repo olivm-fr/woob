@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012      Gabriel Serme
 # Copyright(C) 2011      Gabriel Kerneis
 # Copyright(C) 2010-2011 Jocelyn Jaubert
@@ -23,39 +21,44 @@
 
 import re
 
-from woob.capabilities.bank import (
-    Account, CapCurrencyRate,
-    CapBankTransferAddRecipient, CapBankWealth,
-)
+from woob.capabilities.bank import Account, CapBankTransferAddRecipient, CapBankWealth, CapCurrencyRate
 from woob.capabilities.bank.pfm import CapBankMatching
 from woob.capabilities.base import empty, find_object
 from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
 from woob.capabilities.contact import CapContact
 from woob.capabilities.profile import CapProfile
 from woob.tools.backend import BackendConfig, Module
-from woob.tools.value import ValueBackendPassword, ValueTransient
+from woob.tools.value import Value, ValueBackendPassword, ValueTransient
 
 from .browser import BoursoramaBrowser
 
-__all__ = ['BoursoramaModule']
+
+__all__ = ["BoursoramaModule"]
 
 
 class BoursoramaModule(
-    Module, CapBankWealth, CapBankTransferAddRecipient, CapProfile,
-    CapContact, CapCurrencyRate, CapDocument, CapBankMatching,
+    Module,
+    CapBankWealth,
+    CapBankTransferAddRecipient,
+    CapProfile,
+    CapContact,
+    CapCurrencyRate,
+    CapDocument,
+    CapBankMatching,
 ):
-    NAME = 'boursorama'
-    MAINTAINER = 'Gabriel Kerneis'
-    EMAIL = 'gabriel@kerneis.info'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = 'Boursorama'
+    NAME = "boursorama"
+    MAINTAINER = "Gabriel Kerneis"
+    EMAIL = "gabriel@kerneis.info"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Boursorama"
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Identifiant', masked=False, regexp=r'^[0-9]+$'),
-        ValueBackendPassword('password', label='Mot de passe', regexp=r'[a-zA-Z0-9]+'),
-        ValueTransient('code'),
-        ValueTransient('email_code'),
-        ValueTransient('resume'),
-        ValueTransient('request_information'),
+        ValueBackendPassword("login", label="Identifiant", masked=False, regexp=r"^[0-9]+$"),
+        ValueBackendPassword("password", label="Mot de passe", regexp=r"[a-zA-Z0-9]+"),
+        Value("identity", label="ID d'identité", required=False),
+        ValueTransient("code"),
+        ValueTransient("email_code"),
+        ValueTransient("resume"),
+        ValueTransient("request_information"),
     )
 
     BROWSER = BoursoramaBrowser
@@ -70,12 +73,12 @@ class BoursoramaModule(
 
     def iter_history(self, account):
         for tr in self.browser.get_history(account):
-            if not tr._is_coming:
+            if not tr.coming:
                 yield tr
 
     def iter_coming(self, account):
         for tr in self.browser.get_history(account, coming=True):
-            if tr._is_coming:
+            if tr.coming:
                 yield tr
 
     def iter_investment(self, account):
@@ -115,19 +118,19 @@ class BoursoramaModule(
     def get_transfer(self, id):
         # we build the id of the transfer by prefixing the account id (in pages.py)
         # precisely for this use case, because we want to only query on the right account
-        account_id, _, transfer_id = id.partition('.')
+        account_id, _, transfer_id = id.partition(".")
         return find_object(self.browser.iter_transfers_for_account(account_id), id=id)
 
     def transfer_check_label(self, old, new):
         # In the confirm page the '<' is interpeted like a html tag
         # If no '>' is present the following chars are deleted
         # Else: inside '<>' chars are deleted
-        old = re.sub(r'<[^>]*>', '', old).strip()
-        old = old.split('<')[0]
+        old = re.sub(r"<[^>]*>", "", old).strip()
+        old = old.split("<")[0]
 
         # replace � by ?, like the bank does
-        old = old.replace('\ufffd', '?')
-        return super(BoursoramaModule, self).transfer_check_label(old, new)
+        old = old.replace("\ufffd", "?")
+        return super().transfer_check_label(old, new)
 
     def transfer_check_account_id(self, old, new):
         # We can't verify here automatically that the account_id has not changed
@@ -148,14 +151,14 @@ class BoursoramaModule(
 
     def fill_account(self, account, fields):
         if (
-            'opening_date' in fields
+            "opening_date" in fields
             and account.type == Account.TYPE_LIFE_INSURANCE
-            and '/compte/derive' not in account.url
+            and "/compte/derive" not in account.url
         ):
             account.opening_date = self.browser.get_opening_date(account.url)
 
     def get_document(self, _id):
-        subscription_id = _id.split('_')[0]
+        subscription_id = _id.split("_")[0]
         subscription = self.get_subscription(subscription_id)
         return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
 
@@ -189,14 +192,11 @@ class BoursoramaModule(
 
         if account.type == Account.TYPE_CARD:
             for old_account in old_accounts:
-                if (
-                    old_account.type == Account.TYPE_CARD
-                    and old_account.number == account.number
-                ):
+                if old_account.type == Account.TYPE_CARD and old_account.number == account.number:
                     matched_accounts.append(old_account)
 
         if len(matched_accounts) > 1:
-            raise AssertionError(f'Found multiple candidates to match the card {account.label}.')
+            raise AssertionError(f"Found multiple candidates to match the card {account.label}.")
 
         if len(matched_accounts) == 1:
             return matched_accounts[0]

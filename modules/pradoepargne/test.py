@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Edouard Lambert
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class PradoepargneTest(BackendTest):
-    MODULE = 'pradoepargne'
+    MODULE = "pradoepargne"
 
     def test_pradoepargne(self):
         raise NotImplementedError()

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Vincent A
 #
 # This file is part of a woob module.
@@ -19,34 +17,34 @@
 
 # flake8: compatible
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import ValueBackendPassword
 from woob.capabilities.base import find_object
 from woob.capabilities.messages import CapMessages, Thread
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import ValueBackendPassword
 
 from .browser import DonnonsBrowser
 
 
-__all__ = ['DonnonsModule']
+__all__ = ["DonnonsModule"]
 
 
 class DonnonsModule(Module, CapMessages):
-    NAME = 'donnons'
-    DESCRIPTION = 'donnons website'
-    MAINTAINER = 'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "donnons"
+    DESCRIPTION = "donnons website"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     CONFIG = BackendConfig(
-        ValueBackendPassword('login', label='Email', masked=False),
-        ValueBackendPassword('password', label='Mot de passe'),
+        ValueBackendPassword("login", label="Email", masked=False),
+        ValueBackendPassword("password", label="Mot de passe"),
     )
 
     BROWSER = DonnonsBrowser
 
     def create_default_browser(self):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get())
+        return self.create_browser(self.config["login"].get(), self.config["password"].get())
 
     def iter_threads(self):
         return self.browser.iter_threads()

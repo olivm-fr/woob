@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011  Romain Bignon
 #
 # This file is part of a woob module.
@@ -21,20 +19,21 @@
 from datetime import datetime
 
 from woob.tools.test import BackendTest, skip_without_config
+
 from .browser import DLFP
 
 
 class DLFPTest(BackendTest):
-    MODULE = 'dlfp'
+    MODULE = "dlfp"
 
     def __init__(self, *args, **kwargs):
-        super(DLFPTest, self).__init__(*args, **kwargs)
-        DLFP.DOMAIN = 'alpha.linuxfr.org'
+        super().__init__(*args, **kwargs)
+        DLFP.DOMAIN = "alpha.linuxfr.org"
 
     def test_new_messages(self):
         feeds = {}
         for name, feed in self.backend.FEEDS.items():
-            feeds[name] = feed.replace('//linuxfr.org', '//alpha.linuxfr.org')
+            feeds[name] = feed.replace("//linuxfr.org", "//alpha.linuxfr.org")
         self.backend.FEEDS = feeds
 
         for message in self.backend.iter_unread_messages():
@@ -42,15 +41,15 @@ class DLFPTest(BackendTest):
 
     @skip_without_config("username")
     def test_get_content(self):
-        self.backend.get_content(u"Ceci-est-un-test")
+        self.backend.get_content("Ceci-est-un-test")
 
     @skip_without_config("username")
     def test_push_content(self):
-        content = self.backend.get_content(u"Ceci-est-un-test")
+        content = self.backend.get_content("Ceci-est-un-test")
         content.content = "test " + str(datetime.now())
         self.backend.push_content(content, message="test woob", minor=True)
 
     @skip_without_config("username")
     def test_content_preview(self):
-        content = self.backend.get_content(u"Ceci-est-un-test")
+        content = self.backend.get_content("Ceci-est-un-test")
         self.backend.get_content_preview(content)

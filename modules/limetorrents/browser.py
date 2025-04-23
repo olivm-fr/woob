@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,31 +16,31 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
+from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser.profiles import Wget
+from woob.browser.url import URL
 
 from .pages import SearchPage, TorrentPage
 
 
-__all__ = ['LimetorrentsBrowser']
+__all__ = ["LimetorrentsBrowser"]
 
 
 class LimetorrentsBrowser(PagesBrowser):
     PROFILE = Wget()
     TIMEOUT = 30
 
-    BASEURL = 'https://www.limetorrents.info/'
-    search = URL(r'/search/all/(?P<pattern>.*)/seeds/(?P<page>[0-9]+)/', SearchPage)
-    torrent = URL(r'/(?P<torrent_name>.*)-torrent-(?P<torrent_id>[0-9]+)\.html', TorrentPage)
+    BASEURL = "https://www.limetorrents.info/"
+    search = URL(r"/search/all/(?P<pattern>.*)/seeds/(?P<page>[0-9]+)/", SearchPage)
+    torrent = URL(r"/(?P<torrent_name>.*)-torrent-(?P<torrent_id>[0-9]+)\.html", TorrentPage)
 
     def iter_torrents(self, pattern):
         return self.search.go(pattern=pattern, page=1).iter_torrents()
 
     def get_torrent(self, id):
         try:
-            self.torrent.go(torrent_id=id, torrent_name='whatever')
+            self.torrent.go(torrent_id=id, torrent_name="whatever")
             torrent = self.page.get_torrent()
             return torrent
         except BrowserHTTPNotFound:

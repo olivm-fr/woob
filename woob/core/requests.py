@@ -16,12 +16,12 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from threading import RLock
-from collections import defaultdict
 import warnings
+from collections import defaultdict
+from threading import RLock
 
 
-__all__ = ['RequestsManager']
+__all__ = ["RequestsManager"]
 
 
 class RequestsManager:
@@ -30,12 +30,12 @@ class RequestsManager:
         self.lock = RLock()
 
     def request(self, name, *args, **kwargs):
-        warnings.warn('RequestManager will be removed in woob4', DeprecationWarning, stacklevel=2)
+        warnings.warn("RequestManager will be removed in woob4", DeprecationWarning, stacklevel=2)
 
         with self.lock:
             return self.callbacks[name](*args, **kwargs)
 
     def register(self, name, callback):
-        warnings.warn('RequestManager will be removed in woob4', DeprecationWarning, stacklevel=2)
+        warnings.warn("RequestManager will be removed in woob4", DeprecationWarning, stacklevel=2)
 
         self.callbacks[name] = callback

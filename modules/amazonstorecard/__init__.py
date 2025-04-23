@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014-2015      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import AmazonStoreCardModule
 
-__all__ = ['AmazonStoreCardModule']
+
+__all__ = ["AmazonStoreCardModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Lucien Loiseau
 #
 # This file is part of a woob module.
@@ -17,26 +15,26 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-import re
 import json
+import re
 
-from woob.capabilities import NotAvailable
 from woob.browser.pages import RawPage
+from woob.capabilities import NotAvailable
 
 
 class TranslatePage(RawPage):
 
     def build_doc(self, content):
         encoding = self.encoding
-        if encoding == u'latin-1':
-            encoding = u'latin1'
+        if encoding == "latin-1":
+            encoding = "latin1"
         if encoding:
-            encoding = encoding.replace(u'iso8859_', u'iso8859-')
+            encoding = encoding.replace("iso8859_", "iso8859-")
 
         return content.decode(encoding)
 
     def get_translation(self, result_handler):
-        m = re.search(r'^(\[\[.*\]\]$)', self.doc, re.MULTILINE)
+        m = re.search(r"^(\[\[.*\]\]$)", self.doc, re.MULTILINE)
         if m:
             try:
                 subdata = json.loads(json.loads(m.group(1))[0][2])
@@ -52,12 +50,12 @@ class TranslatePage(RawPage):
 class SupportedLanguagesPage(RawPage):
     def build_doc(self, content):
         encoding = self.encoding
-        if encoding == u'latin-1':
-            encoding = u'latin1'
+        if encoding == "latin-1":
+            encoding = "latin1"
         if encoding:
-            encoding = encoding.replace(u'iso8859_', u'iso8859-')
+            encoding = encoding.replace("iso8859_", "iso8859-")
 
-        m = re.search(r'.*({.*}).*', content.decode(encoding).replace("\'", "\""))
+        m = re.search(r".*({.*}).*", content.decode(encoding).replace("'", '"'))
         if m:
             return json.loads(m.group(1))
         return {}

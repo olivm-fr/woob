@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021 Vincent A
 #
 # This file is part of a woob module.
@@ -21,11 +19,9 @@
 
 import re
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
-from .pages import (
-    TrackPage, FormPage,
-)
+from .pages import FormPage, TrackPage
 
 
 class MondialrelayBrowser(PagesBrowser):

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,19 +16,18 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.capabilities.lyrics import SongLyrics
-from woob.capabilities.base import NotLoaded, NotAvailable
-
 from woob.browser.elements import ItemElement, ListElement, method
-from woob.browser.pages import HTMLPage
-from woob.browser.filters.standard import Regexp, CleanText
 from woob.browser.filters.html import CleanHTML
+from woob.browser.filters.standard import CleanText, Regexp
+from woob.browser.pages import HTMLPage
+from woob.capabilities.base import NotAvailable, NotLoaded
+from woob.capabilities.lyrics import SongLyrics
 
 
 class HomePage(HTMLPage):
     def search_lyrics(self, pattern):
         form = self.get_form(xpath='//form[@id="search-form-round"]')
-        form['search'] = pattern
+        form["search"] = pattern
         form.submit()
 
 
@@ -44,20 +41,18 @@ class ResultsPage(HTMLPage):
 
             def obj_id(self):
                 href = CleanText('.//td[has-class("song-name")]//a/@href')(self)
-                aid = href.split('/')[-2]
-                sid = href.split('/')[-1].replace('paroles-','')
-                id = '%s|%s'%(aid, sid)
+                aid = href.split("/")[-2]
+                sid = href.split("/")[-1].replace("paroles-", "")
+                id = f"{aid}|{sid}"
                 return id
 
-            obj_title = CleanText('.//td[has-class("song-name")]',
-                    default=NotAvailable)
-            obj_artist = CleanText('.//td[has-class("song-artist")]',
-                    default=NotAvailable)
+            obj_title = CleanText('.//td[has-class("song-name")]', default=NotAvailable)
+            obj_artist = CleanText('.//td[has-class("song-artist")]', default=NotAvailable)
             obj_content = NotLoaded
 
     def get_artist_ids(self):
         artists_href = self.doc.xpath('//h2[text()="Artiste"]/following-sibling::div[position() <= 2]//tr//a/@href')
-        aids = [href.split('/')[-1] for href in artists_href]
+        aids = [href.split("/")[-1] for href in artists_href]
         return aids
 
 
@@ -69,16 +64,17 @@ class ArtistSongsPage(HTMLPage):
         class item(ItemElement):
             klass = SongLyrics
 
-            obj_title = CleanText('.',
-                    default=NotAvailable)
-            obj_artist = Regexp(CleanText('//div[has-class("breadcrumb")]//span[has-class("breadcrumb-current")]'),
-                    'Paroles (.*)')
+            obj_title = CleanText(".", default=NotAvailable)
+            obj_artist = Regexp(
+                CleanText('//div[has-class("breadcrumb")]//span[has-class("breadcrumb-current")]'), "Paroles (.*)"
+            )
             obj_content = NotLoaded
+
             def obj_id(self):
-                href = CleanText('./@href')(self)
-                aid = href.split('/')[-2]
-                sid = href.split('/')[-1].replace('paroles-','')
-                id = '%s|%s'%(aid, sid)
+                href = CleanText("./@href")(self)
+                aid = href.split("/")[-2]
+                sid = href.split("/")[-1].replace("paroles-", "")
+                id = f"{aid}|{sid}"
                 return id
 
 
@@ -88,10 +84,10 @@ class SongLyricsPage(HTMLPage):
         klass = SongLyrics
 
         def obj_id(self):
-            subid = self.page.url.replace('paroles-','').split('/')[-2:]
-            id = '%s|%s'%(subid[0], subid[1])
+            subid = self.page.url.replace("paroles-", "").split("/")[-2:]
+            id = f"{subid[0]}|{subid[1]}"
             return id
+
         obj_content = CleanText(CleanHTML('//div[has-class("song-text")]', default=NotAvailable), newlines=False)
         obj_title = CleanText('//span[@property="v:name"]', default=NotAvailable)
         obj_artist = CleanText('//span[@property="v:artist"]', default=NotAvailable)
-

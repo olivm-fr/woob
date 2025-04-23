@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2015      Christophe Lampin
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import AmeliProModule
 
 
-__all__ = ['AmeliProModule']
+__all__ = ["AmeliProModule"]

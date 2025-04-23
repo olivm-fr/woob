@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2020  Budget Insight
 #
 # This file is part of a woob module.
@@ -20,33 +18,32 @@
 import re
 from urllib.parse import unquote
 
-from woob.browser.pages import RawPage, JsonPage, HTMLPage
 from woob.browser.filters.standard import CleanText
+from woob.browser.pages import HTMLPage, JsonPage, RawPage
 from woob.exceptions import BrowserIncorrectPassword
 
 
 class RootPage(HTMLPage):
     def requires_auth(self):
-        return 'try logging' in self.get_error()
+        return "try logging" in self.get_error()
 
     def get_error(self):
         return CleanText('//div[has-class("alert")]')(self.doc)
 
     def check_error(self):
         msg = self.get_error()
-        if 'Invalid' in msg:
+        if "Invalid" in msg:
             raise BrowserIncorrectPassword()
         elif msg:
-            raise AssertionError('%r is not handled' % msg)
+            raise AssertionError("%r is not handled" % msg)
 
 
 class NotePage(RawPage):
     def get_title(self):
         return unquote(
-            re.search(
-                r'filename=(?P<q>"?)(?P<name>.*?)(?P=q)(;|$)',
-                self.response.headers['Content-Disposition']
-            )['name']
+            re.search(r'filename=(?P<q>"?)(?P<name>.*?)(?P=q)(;|$)', self.response.headers["Content-Disposition"])[
+                "name"
+            ]
         )
 
 
@@ -56,12 +53,12 @@ class MePage(JsonPage):
 
 class RevisionListPage(JsonPage):
     def get_list(self):
-        return [r['time'] for r in self.doc['revision']]
+        return [r["time"] for r in self.doc["revision"]]
 
 
 class RevisionPage(JsonPage):
     def get_content(self):
-        return self.doc['content']
+        return self.doc["content"]
 
 
 class NewNotePage(RawPage):

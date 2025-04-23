@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -19,19 +17,20 @@
 
 from woob.capabilities.recipe import CapRecipe, Recipe
 from woob.tools.backend import Module
+
 from .browser import CuisineazBrowser
 
 
-__all__ = ['CuisineazModule']
+__all__ = ["CuisineazModule"]
 
 
 class CuisineazModule(Module, CapRecipe):
-    NAME = 'cuisineaz'
-    MAINTAINER = u'Julien Veyssier'
-    EMAIL = 'julien.veyssier@aiur.fr'
-    VERSION = '3.6'
-    DESCRIPTION = u'Cuisine AZ French recipe website'
-    LICENSE = 'AGPLv3+'
+    NAME = "cuisineaz"
+    MAINTAINER = "Julien Veyssier"
+    EMAIL = "julien.veyssier@aiur.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Cuisine AZ French recipe website"
+    LICENSE = "AGPLv3+"
     BROWSER = CuisineazBrowser
 
     def get_recipe(self, id):
@@ -41,10 +40,10 @@ class CuisineazModule(Module, CapRecipe):
         return self.browser.iter_recipes(pattern)
 
     def fill_recipe(self, recipe, fields):
-        if 'nb_person' in fields or 'instructions' in fields:
+        if "nb_person" in fields or "instructions" in fields:
             recipe = self.browser.get_recipe(recipe.id, recipe)
 
-        if 'comments' in fields:
+        if "comments" in fields:
             recipe.comments = list(self.browser.get_comments(recipe.id))
         return recipe
 

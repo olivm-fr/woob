@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # flake8: compatible
 
 # Copyright(C) 2012-2020  Budget Insight
@@ -24,18 +22,25 @@ import re
 
 from dateutil.relativedelta import relativedelta
 
+from woob.browser.elements import ItemElement, ListElement, SkipItem, method
 from woob.browser.filters.html import AbsoluteLink, Link
 from woob.browser.filters.json import Dict
-from woob.browser.pages import HTMLPage, LoggedPage, RawPage, JsonPage
-from woob.capabilities.address import PostalAddress
-from woob.capabilities.base import NotAvailable
-from woob.capabilities.profile import Profile
-from woob.capabilities.bill import Subscription, Bill
-from woob.browser.elements import ListElement, ItemElement, method, SkipItem
 from woob.browser.filters.standard import (
-    CleanText, Field, Format, Date, CleanDecimal, Currency, Env, Filter,
+    CleanDecimal,
+    CleanText,
+    Currency,
+    Date,
+    Env,
+    Field,
+    Filter,
+    Format,
     QueryValue,
 )
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage
+from woob.capabilities.address import PostalAddress
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.bill import Bill, Subscription
+from woob.capabilities.profile import Profile
 from woob.tools.date import parse_french_date
 
 
@@ -45,7 +50,7 @@ class ErrorPage(HTMLPage):
 
 class FormatDate(Filter):
     def __init__(self, pattern, selector):
-        super(FormatDate, self).__init__(selector)
+        super().__init__(selector)
         self.pattern = pattern
 
     def filter(self, _date):
@@ -54,16 +59,16 @@ class FormatDate(Filter):
 
 class LoginPage(HTMLPage):
     def is_here(self):
-        if 'text/html' not in self.response.headers.get('content-type', ''):
+        if "text/html" not in self.response.headers.get("content-type", ""):
             return False
         if not self.doc.xpath('//input[@id="login-username"]'):
             return False
         return True
 
     def login(self, login, password):
-        form = self.get_form('//form')
-        form['login-username'] = login
-        form['login-password'] = password
+        form = self.get_form("//form")
+        form["login-username"] = login
+        form["login-password"] = password
         form.submit()
 
     def get_error(self):
@@ -88,7 +93,7 @@ class MainPage(LoggedPage, HTMLPage):
             n = 1
             while _id in self.objects:
                 n += 1
-                _id = '%s-%s' % (obj.id, n)
+                _id = f"{obj.id}-{n}"
             obj.id = _id
             self.objects[obj.id] = obj
             return obj
@@ -99,8 +104,8 @@ class MainPage(LoggedPage, HTMLPage):
             obj_url = AbsoluteLink('.//a[@data-title="Télécharger ma facture"]')
             obj_total_price = CleanDecimal.SI('.//div[has-class("table-price")]')
             obj_currency = Currency('.//div[has-class("table-price")]')
-            obj_format = 'pdf'
-            obj__raw_date = QueryValue(Field('url'), 'date')
+            obj_format = "pdf"
+            obj__raw_date = QueryValue(Field("url"), "date")
 
             def obj__date_recap(self):
                 # Unfortunately the date of those 'recap' documents is lost (not
@@ -119,21 +124,15 @@ class MainPage(LoggedPage, HTMLPage):
                 if ("pdfrecap" in Field("url")(self)) != Env("is_recapitulatif")(self):
                     raise SkipItem()
                 if Env("is_recapitulatif")(self):
-                    return Format(
-                        "%s_%s", Env("sub"), FormatDate("%Y%m", Field("_date_recap"))
-                    )(self)
+                    return Format("%s_%s", Env("sub"), FormatDate("%Y%m", Field("_date_recap")))(self)
                 return Format("%s_%s", Env("sub"), Field("_raw_date"))(self)
 
             def obj_label(self):
                 if Env("is_recapitulatif")(self):
-                    return Format(
-                        "Multiligne - %s", CleanText('.//div[has-class("date")]')
-                    )(self)
+                    return Format("Multiligne - %s", CleanText('.//div[has-class("date")]'))(self)
                 return Format(
                     "%s - %s",
-                    CleanText(
-                        '//div[@class="table-container"]/p[@class="table-sub-title"]'
-                    ),
+                    CleanText('//div[@class="table-container"]/p[@class="table-sub-title"]'),
                     CleanText('.//div[has-class("date")]'),
                 )(self)
 
@@ -149,7 +148,7 @@ class ProfilePage(LoggedPage, HTMLPage):
         klass = Profile
 
         obj_id = CleanText('//div[contains(text(), "Mon adresse email")]/..', children=False)
-        obj_email = Field('id')
+        obj_email = Field("id")
         obj_name = CleanText('//div[contains(text(), "Titulaire")]/..', children=False)
         obj_phone = CleanText(
             '//div[@class="current-user__infos"]/div[contains(text(), "Ligne")]/span',
@@ -159,20 +158,20 @@ class ProfilePage(LoggedPage, HTMLPage):
         class obj_postal_address(ItemElement):
             klass = PostalAddress
 
-            obj_full_address = Env('full_address', default=NotAvailable)
-            obj_street = Env('street', default=NotAvailable)
-            obj_postal_code = Env('postal_code', default=NotAvailable)
-            obj_city = Env('city', default=NotAvailable)
+            obj_full_address = Env("full_address", default=NotAvailable)
+            obj_street = Env("street", default=NotAvailable)
+            obj_postal_code = Env("postal_code", default=NotAvailable)
+            obj_city = Env("city", default=NotAvailable)
 
             def parse(self, obj):
-                full_address = CleanText('//address')(self)
-                self.env['full_address'] = full_address
-                m = re.search(r'(\d{1,4}.*) (\d{5}) (.*)', full_address)
+                full_address = CleanText("//address")(self)
+                self.env["full_address"] = full_address
+                m = re.search(r"(\d{1,4}.*) (\d{5}) (.*)", full_address)
                 if m:
                     street, postal_code, city = m.groups()
-                    self.env['street'] = street
-                    self.env['postal_code'] = postal_code
-                    self.env['city'] = city
+                    self.env["street"] = street
+                    self.env["postal_code"] = postal_code
+                    self.env["city"] = city
 
 
 class PdfPage(RawPage):
@@ -185,17 +184,16 @@ class OfferPage(LoggedPage, HTMLPage):
         subscription._real_id = subscription.id
         offer_name = CleanText('//div[@class="title"]')(self.doc)
         if offer_name:
-            subscription.label = "%s - %s" % (subscription._phone_number, offer_name)
+            subscription.label = f"{subscription._phone_number} - {offer_name}"
 
     def get_first_subscription_id(self):
         """Return the first subscription id if available."""
         return QueryValue(
             Link(
-                '//div[@class="list-users"]/ul[@id="multi-ligne-selector"]'
-                + '/li/ul/li[1]/a',
+                '//div[@class="list-users"]/ul[@id="multi-ligne-selector"]' + "/li/ul/li[1]/a",
                 default=None,
             ),
-            'switch-user',
+            "switch-user",
             default=None,
         )(self.doc)
 
@@ -204,21 +202,23 @@ class OfferPage(LoggedPage, HTMLPage):
         klass = Subscription
 
         obj_id = CleanText('.//div[contains(text(), "Identifiant")]/span')
-        obj__phone_number = CleanText('//div[@class="current-user__infos"]/div[3]/span', replace=[(' ', '')])
+        obj__phone_number = CleanText('//div[@class="current-user__infos"]/div[3]/span', replace=[(" ", "")])
         obj_subscriber = CleanText('//div[@class="current-user__infos"]/div[has-class("identite")]')
-        obj_label = Field('id')
+        obj_label = Field("id")
 
     @method
     class iter_next_subscription(ListElement):
-        item_xpath = '//div[@class="list-users"]/ul[@id="multi-ligne-selector"]/li/ul/li[has-class("user")][position()>1]/a'
+        item_xpath = (
+            '//div[@class="list-users"]/ul[@id="multi-ligne-selector"]/li/ul/li[has-class("user")][position()>1]/a'
+        )
 
         class item(ItemElement):
             klass = Subscription
 
-            obj_id = CleanText(QueryValue(AbsoluteLink('.'), 'switch-user'))
+            obj_id = CleanText(QueryValue(AbsoluteLink("."), "switch-user"))
             obj__phone_number = CleanText('.//span[has-class("msidn")]', replace=[(" ", "")])
             obj_subscriber = CleanText('.//span[has-class("name-bold")]')
-            obj_label = Field('id')
+            obj_label = Field("id")
 
 
 class OptionsPage(LoggedPage, HTMLPage):
@@ -232,28 +232,28 @@ class OptionsPage(LoggedPage, HTMLPage):
 
 class CsrfPage(JsonPage):
     def get_token(self):
-        return Dict('csrfToken')(self.doc)
+        return Dict("csrfToken")(self.doc)
 
 
 class ProvidersPage(JsonPage):
     def get_auth_provider(self):
-        return Dict('credentials')(self.doc)
+        return Dict("credentials")(self.doc)
 
 
 class CredentialsPage(JsonPage):
     def get_error(self):
-        return QueryValue(Dict('url'), 'error', default=None)(self.doc)
+        return QueryValue(Dict("url"), "error", default=None)(self.doc)
 
 
 class SessionPage(JsonPage):
     def get_token(self):
-        return Dict('user/token')(self.doc)
+        return Dict("user/token")(self.doc)
 
     def get_2fa_type(self):
-        return Dict('user/type2FA', default=None)(self.doc)
+        return Dict("user/type2FA", default=None)(self.doc)
 
     def get_otp_id(self):
-        return Dict('user/otpId', default=None)(self.doc)
+        return Dict("user/otpId", default=None)(self.doc)
 
 
 class RSCPage(JsonPage):
@@ -274,18 +274,19 @@ class RSCPage(JsonPage):
 
     Here, it's mainly used to get the error messages sent by the server.
     """
+
     def is_here(self):
-        if 'text/x-component' not in self.response.headers.get('content-type', ''):
+        if "text/x-component" not in self.response.headers.get("content-type", ""):
             return False
         return True
 
     def build_doc(self, text: str) -> Dict:
-        forbidden_extra_chars = re.compile(r'\{|\[|n|\d')
+        forbidden_extra_chars = re.compile(r"\{|\[|n|\d")
         result = {}
         for line in text.splitlines():
-            if line.strip() == '':
+            if line.strip() == "":
                 continue
-            (rowID, sep, row) = line.partition(':')
+            (rowID, sep, row) = line.partition(":")
             mtch = forbidden_extra_chars.match(row[0])
             if mtch is None:
                 rowID += row[0]
@@ -312,12 +313,13 @@ class LoginRSCPage(RSCPage):
     * out_row[3] retrieves the 3rd element of the JSON array - a dict object `{"header":"Bienvenue","description":"Saisissez les identifiants.....`
     * this dict object has an entry `errorMessage` which is either `$undefined` or a message.
     """
+
     def get_error(self):
         result = None
-        our_row = Dict('2')(self.doc)
+        our_row = Dict("2")(self.doc)
         if our_row:
             try:
-                result = our_row[3].get('errorMessage', None)
+                result = our_row[3].get("errorMessage", None)
             except IndexError:
                 pass
         return result
@@ -336,9 +338,10 @@ class OtpPage(RSCPage):
     So:
     * Dict('1') retrives this JSON line.
     """
+
     def get_otp_id(self):
         result = None
-        our_row = Dict('1')(self.doc)
+        our_row = Dict("1")(self.doc)
         if our_row:
             result = our_row
         return result

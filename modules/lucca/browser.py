@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Vincent A
 #
 # This file is part of a woob module.
@@ -19,29 +17,29 @@
 
 from datetime import timedelta
 
-from woob.browser import LoginBrowser, need_login, URL
+from woob.browser import URL, LoginBrowser, need_login
 from woob.tools.date import new_datetime
 
-from .pages import (
-    LoginPage, CalendarPage, HomePage, UsersPage,
-    DocumentsPage, SubscriptionPage,
-)
+from .pages import CalendarPage, DocumentsPage, HomePage, LoginPage, SubscriptionPage, UsersPage
 
 
 class LuccaBrowser(LoginBrowser):
-    BASEURL = 'https://www.ilucca.net'
+    BASEURL = "https://www.ilucca.net"
 
-    login = URL('/identity/login', LoginPage)
-    home = URL('/home', HomePage)
-    calendar = URL('/api/v3/leaves', CalendarPage)
-    users = URL(r'/api/departments\?fields=id%2Cname%2Ctype%2Clevel%2Cusers.id%2Cusers.displayName%2Cusers.dtContractStart%2Cusers.dtContractEnd%2Cusers.manager.id%2Cusers.manager2.id%2Cusers.legalEntityID%2Cusers.calendar.id&date=since%2C1970-01-01', UsersPage)
-    subscription = URL(r'/api/v3/users/me', SubscriptionPage)
-    payslips = URL(r'/api/v3/payslips', DocumentsPage)
-    download_document = URL(r'/pagga/services/download/(?P<document_id>.+)')
+    login = URL("/identity/login", LoginPage)
+    home = URL("/home", HomePage)
+    calendar = URL("/api/v3/leaves", CalendarPage)
+    users = URL(
+        r"/api/departments\?fields=id%2Cname%2Ctype%2Clevel%2Cusers.id%2Cusers.displayName%2Cusers.dtContractStart%2Cusers.dtContractEnd%2Cusers.manager.id%2Cusers.manager2.id%2Cusers.legalEntityID%2Cusers.calendar.id&date=since%2C1970-01-01",
+        UsersPage,
+    )
+    subscription = URL(r"/api/v3/users/me", SubscriptionPage)
+    payslips = URL(r"/api/v3/payslips", DocumentsPage)
+    download_document = URL(r"/pagga/services/download/(?P<document_id>.+)")
 
     def __init__(self, subdomain, *args, **kwargs):
-        super(LuccaBrowser, self).__init__(*args, **kwargs)
-        self.BASEURL = 'https://%s.ilucca.net' % subdomain
+        super().__init__(*args, **kwargs)
+        self.BASEURL = "https://%s.ilucca.net" % subdomain
         self.id_card_doc = None
 
     def do_login(self):
@@ -50,7 +48,7 @@ class LuccaBrowser(LoginBrowser):
 
         if not self.home.is_here():
             self.page.check_error()
-            raise Exception('error is not handled')
+            raise Exception("error is not handled")
 
     @need_login
     def all_events(self, start, end):
@@ -64,15 +62,15 @@ class LuccaBrowser(LoginBrowser):
                     break
             else:
                 if last and last + timedelta(days=300) < start:
-                    self.logger.info('300 days without event, stopping')
+                    self.logger.info("300 days without event, stopping")
                     break
 
             window_end = start + timedelta(days=14)
 
             params = {
-                'date': 'between,%s,%s' % (start.strftime('%Y-%m-%d'), window_end.strftime('%Y-%m-%d')),
-                'leavePeriod.ownerId': ','.join(str(u.id) for u in users.values()),
-                'fields': 'leavePeriod[id,ownerId,isConfirmed],isAm,date,color,isRemoteWork,leaveAccount[name,isRemoteWork]',
+                "date": "between,{},{}".format(start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")),
+                "leavePeriod.ownerId": ",".join(str(u.id) for u in users.values()),
+                "fields": "leavePeriod[id,ownerId,isConfirmed],isAm,date,color,isRemoteWork,leaveAccount[name,isRemoteWork]",
             }
             self.calendar.go(params=params)
             events = self.page.iter_events(start, users=users)
@@ -86,7 +84,7 @@ class LuccaBrowser(LoginBrowser):
 
     @need_login
     def iter_subscriptions(self):
-        params = {'fields': 'id,employeeNumber,extendedData'}
+        params = {"fields": "id,employeeNumber,extendedData"}
         self.subscription.go(params=params)
         yield self.page.get_subscription()
 
@@ -97,10 +95,9 @@ class LuccaBrowser(LoginBrowser):
         yield self.id_card_doc
 
         params = {
-            'fields': 'id,import[name,startDate,endDate]',
-            'ownerId': subscription._owner_id,
-            'orderBy': 'import.endDate,desc,import.startDate,desc,import.creationDate,desc',
+            "fields": "id,import[name,startDate,endDate]",
+            "ownerId": subscription._owner_id,
+            "orderBy": "import.endDate,desc,import.startDate,desc,import.creationDate,desc",
         }
         self.payslips.go(params=params)
-        for doc in self.page.iter_documents():
-            yield doc
+        yield from self.page.iter_documents()

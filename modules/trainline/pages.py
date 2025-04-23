@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2022 Budget Insight
 #
 # This file is part of a woob module.
@@ -17,23 +15,20 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.pages import LoggedPage, JsonPage
 from woob.browser.elements import DictElement, ItemElement, method
-from woob.browser.filters.standard import (
-    Date, Format, CleanText,
-    Currency, CleanDecimal, Env, Coalesce,
-)
 from woob.browser.filters.json import Dict
-from woob.capabilities.bill import Subscription, Bill
+from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Env, Format
+from woob.browser.pages import JsonPage, LoggedPage
 from woob.capabilities import NotAvailable
+from woob.capabilities.bill import Bill, Subscription
 
 from .akamai import AkamaiHTMLPage
 
 
 class HomePage(AkamaiHTMLPage):
     def get_akamai_url(self):
-        url = super(HomePage, self).get_akamai_url()
-        if url.endswith('.js'):
+        url = super().get_akamai_url()
+        if url.endswith(".js"):
             # wrong url, the good one is very probably missing
             return
         return url
@@ -42,10 +37,10 @@ class HomePage(AkamaiHTMLPage):
 class SigninPage(JsonPage):
     @property
     def logged(self):
-        return Dict('authenticated', default=False)(self.doc) is True
+        return Dict("authenticated", default=False)(self.doc) is True
 
     def get_error(self):
-        return Dict('message', default=None)(self.doc)
+        return Dict("message", default=None)(self.doc)
 
 
 class UserPage(LoggedPage, JsonPage):
@@ -53,19 +48,19 @@ class UserPage(LoggedPage, JsonPage):
     class get_subscription(ItemElement):
         klass = Subscription
 
-        obj_id = CleanText(Dict('id'))
+        obj_id = CleanText(Dict("id"))
         obj_subscriber = Format(
-            '%s %s',
-            CleanText(Dict('firstName')),
-            CleanText(Dict('surname')),
+            "%s %s",
+            CleanText(Dict("firstName")),
+            CleanText(Dict("surname")),
         )
-        obj_label = CleanText(Dict('email'))
+        obj_label = CleanText(Dict("email"))
 
 
 class DocumentsPage(LoggedPage, JsonPage):
     @method
     class iter_documents(DictElement):
-        item_xpath = 'pastBookings/results'
+        item_xpath = "pastBookings/results"
         # when the seller is ouigo we have duplicate data
         ignore_duplicate = True
 
@@ -73,25 +68,25 @@ class DocumentsPage(LoggedPage, JsonPage):
             klass = Bill
 
             def condition(self):
-                return 'COMPLETE' in Dict('order/state')(self)
+                return "COMPLETE" in Dict("order/state")(self)
 
-            obj_id = Format('%s_%s', Env('subid'), CleanText(Dict('order/id')))
+            obj_id = Format("%s_%s", Env("subid"), CleanText(Dict("order/id")))
             obj_label = Format(
-                '%s to %s',
-                CleanText(Dict('booking/origin')),
-                CleanText(Dict('booking/destination')),
+                "%s to %s",
+                CleanText(Dict("booking/origin")),
+                CleanText(Dict("booking/destination")),
             )
-            obj_number = CleanText(Dict('order/friendlyOrderId'))
-            obj_date = Date(Dict('order/orderDate'))
+            obj_number = CleanText(Dict("order/friendlyOrderId"))
+            obj_date = Date(Dict("order/orderDate"))
             obj_currency = Coalesce(
-                Currency(Dict('order/payment/paid/currency', default=''), default=NotAvailable),
-                Currency(Dict('order/invoices/0/currencyCode', default=''), default=NotAvailable)
+                Currency(Dict("order/payment/paid/currency", default=""), default=NotAvailable),
+                Currency(Dict("order/invoices/0/currencyCode", default=""), default=NotAvailable),
             )
             obj_total_price = Coalesce(
-                CleanDecimal.SI(Dict('order/payment/paid/amount', default=''), default=NotAvailable),
-                CleanDecimal.SI(Dict('order/invoices/0/totalAmount', default=''), default=NotAvailable)
+                CleanDecimal.SI(Dict("order/payment/paid/amount", default=""), default=NotAvailable),
+                CleanDecimal.SI(Dict("order/invoices/0/totalAmount", default=""), default=NotAvailable),
             )
             obj_url = Format(
-                'https://www.thetrainline.com/fr/my-account/order/%s/expense-receipt',
-                CleanText(Dict('order/id')),
+                "https://www.thetrainline.com/fr/my-account/order/%s/expense-receipt",
+                CleanText(Dict("order/id")),
             )

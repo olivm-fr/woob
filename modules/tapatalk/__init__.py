@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Simon Lipp
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import TapatalkModule
 
 
-__all__ = ['TapatalkModule']
+__all__ = ["TapatalkModule"]

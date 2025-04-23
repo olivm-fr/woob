@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013-2015      Christophe Lampin
 #
 # This file is part of a woob module.
@@ -22,7 +20,7 @@ from woob.tools.test import BackendTest
 
 
 class AmeliProTest(BackendTest):
-    MODULE = 'amelipro'
+    MODULE = "amelipro"
 
     def test_AmeliPro(self):
         for subscription in self.backend.iter_subscription():

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2019  Budget-Insight
 #
 # This file is part of a woob module.
@@ -23,15 +21,16 @@ from woob.tools.backend import Module
 
 from .browser import NetfincaBrowser
 
-__all__ = ['NetfincaModule']
+
+__all__ = ["NetfincaModule"]
 
 
 class NetfincaModule(Module, CapBankWealth):
-    NAME = 'netfinca'
-    DESCRIPTION = 'netfinca website'
-    MAINTAINER = 'Martin Sicot'
-    EMAIL = 'martin.sicot@budget-insight.com'
-    LICENSE = 'LGPLv3+'
-    VERSION = '3.6'
+    NAME = "netfinca"
+    DESCRIPTION = "netfinca website"
+    MAINTAINER = "Martin Sicot"
+    EMAIL = "martin.sicot@budget-insight.com"
+    LICENSE = "LGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = NetfincaBrowser

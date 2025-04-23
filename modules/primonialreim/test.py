@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2019      Vincent A
 #
 # This file is part of a woob module.
@@ -23,7 +21,7 @@ from woob.tools.test import BackendTest
 
 
 class PrimonialreimTest(BackendTest):
-    MODULE = 'primonialreim'
+    MODULE = "primonialreim"
 
     def test_accounts(self):
         accounts = list(self.backend.iter_accounts())
@@ -35,7 +33,7 @@ class PrimonialreimTest(BackendTest):
             assert account.type
 
     def test_documents(self):
-        sub, = self.backend.iter_subscription()
+        (sub,) = self.backend.iter_subscription()
         docs = list(self.backend.iter_documents())
         assert docs
         for doc in docs:

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Antoine BOSSY
 #
 # This file is part of woob.
@@ -21,4 +19,4 @@
 from .module import BieniciModule
 
 
-__all__ = ['BieniciModule']
+__all__ = ["BieniciModule"]

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -17,16 +15,16 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.test import BackendTest
-
 from random import choice
+
+from woob.tools.test import BackendTest
 
 
 class BtmonTest(BackendTest):
-    MODULE = 'btmon'
+    MODULE = "btmon"
 
     def test_torrent(self):
-        torrents = list(self.backend.iter_torrents('spiderman'))
+        torrents = list(self.backend.iter_torrents("spiderman"))
         assert len(torrents) > 0
         for torrent in torrents:
             assert torrent.id

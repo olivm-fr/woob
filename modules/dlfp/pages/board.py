@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011  Romain Bignon
 #
 # This file is part of a woob module.
@@ -24,8 +22,8 @@ from logging import warning
 from woob.browser.pages import HTMLPage, LoggedPage
 
 
-class Message(object):
-    TIMESTAMP_REGEXP = re.compile(r'(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})')
+class Message:
+    TIMESTAMP_REGEXP = re.compile(r"(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})")
 
     def __init__(self, id, timestamp, login, message, is_me):
         self.id = id
@@ -36,9 +34,7 @@ class Message(object):
         self.norloge = timestamp
         m = self.TIMESTAMP_REGEXP.match(timestamp)
         if m:
-            self.norloge = '%02d:%02d:%02d' % (int(m.group(4)),
-                                               int(m.group(5)),
-                                               int(m.group(6)))
+            self.norloge = "%02d:%02d:%02d" % (int(m.group(4)), int(m.group(5)), int(m.group(6)))
         else:
             warning('Unable to parse timestamp "%s"' % timestamp)
 
@@ -46,12 +42,14 @@ class Message(object):
 class BoardIndexPage(LoggedPage, HTMLPage):
     def get_messages(self, last=None):
         msgs = []
-        for post in self.doc.xpath('//post'):
-            m = Message(int(post.attrib['id']),
-                        post.attrib['time'],
-                        post.find('login').text,
-                        post.find('message').text,
-                        post.find('login').text.lower() == self.browser.username.lower())
+        for post in self.doc.xpath("//post"):
+            m = Message(
+                int(post.attrib["id"]),
+                post.attrib["time"],
+                post.find("login").text,
+                post.find("message").text,
+                post.find("login").text.lower() == self.browser.username.lower(),
+            )
             if last is not None and last == m.id:
                 break
             msgs.append(m)

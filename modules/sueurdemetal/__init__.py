@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Vincent A
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import SueurDeMetalModule
 
 
-__all__ = ['SueurDeMetalModule']
+__all__ = ["SueurDeMetalModule"]

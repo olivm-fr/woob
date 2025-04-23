@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,20 +16,21 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from datetime import datetime
+
 from woob.tools.test import BackendTest
 from woob.tools.value import Value
-from datetime import datetime
 
 
 class AgendadulibreTest(BackendTest):
-    MODULE = 'agendadulibre'
+    MODULE = "agendadulibre"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['region'] = Value(value='https://www.agendadulibre.org')
+            self.backend.config["region"] = Value(value="https://www.agendadulibre.org")
 
     def test_agendadulibre(self):
         l = list(self.backend.list_events(datetime.now()))
         assert len(l)
         event = self.backend.get_event(l[0].id)
-        self.assertTrue(event.url, 'URL for event "%s" not found: %s' % (event.id, event.url))
+        self.assertTrue(event.url, f'URL for event "{event.id}" not found: {event.url}')

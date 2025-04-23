@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -21,7 +19,7 @@ from woob.tools.test import BackendTest
 
 
 class MyHabitTest(BackendTest):
-    MODULE = 'myhabit'
+    MODULE = "myhabit"
 
     def test_history(self):
         """

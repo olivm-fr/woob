@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011  Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,20 +16,20 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.tools.html import html2text
+from woob.tools.test import BackendTest
 from woob.tools.value import Value
 
 
 class LeFigaroTest(BackendTest):
-    MODULE = 'lefigaro'
+    MODULE = "lefigaro"
 
     def setUp(self):
         if not self.is_backend_configured():
-            self.backend.config['feed'] = Value(value='international')
+            self.backend.config["feed"] = Value(value="international")
 
     def test_lefigaro(self):
-        self.backend.RSS_FEED = "http://www.lefigaro.fr/rss/figaro_%s.xml" % self.backend.config['feed'].get()
+        self.backend.RSS_FEED = "http://www.lefigaro.fr/rss/figaro_%s.xml" % self.backend.config["feed"].get()
         l = list(self.backend.iter_threads())
         assert len(l)
         thread = self.backend.get_thread(l[0].id)

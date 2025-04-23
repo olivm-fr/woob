@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Guilhem Bonnefille
 #
 # This file is part of a woob module.
@@ -19,4 +17,5 @@
 
 from .module import RmllModule
 
-__all__ = ['RmllModule']
+
+__all__ = ["RmllModule"]

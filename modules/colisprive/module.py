@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014 Florent Fourcot
 #
 # This file is part of a woob module.
@@ -17,21 +15,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module
 from woob.capabilities.parcel import CapParcel
+from woob.tools.backend import Module
 
 from .browser import ColispriveBrowser
 
-__all__ = ['ColispriveModule']
+
+__all__ = ["ColispriveModule"]
 
 
 class ColispriveModule(Module, CapParcel):
-    NAME = 'colisprive'
-    DESCRIPTION = u'Colisprive parcel tracking website'
-    MAINTAINER = u'Florent Fourcot'
-    EMAIL = 'weboob@flo.fourcot.fr'
-    VERSION = '3.6'
-    LICENSE = 'AGPLv3+'
+    NAME = "colisprive"
+    DESCRIPTION = "Colisprive parcel tracking website"
+    MAINTAINER = "Florent Fourcot"
+    EMAIL = "weboob@flo.fourcot.fr"
+    VERSION = "3.7"
+    LICENSE = "AGPLv3+"
 
     BROWSER = ColispriveBrowser
 

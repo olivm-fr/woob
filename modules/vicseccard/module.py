@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Oleg Plakhotniuk
 #
 # This file is part of a woob module.
@@ -23,24 +21,25 @@ from woob.tools.value import ValueBackendPassword
 
 from .browser import VicSecCard
 
-__all__ = ['VicSecCardModule']
+
+__all__ = ["VicSecCardModule"]
 
 
 class VicSecCardModule(Module, CapBank):
-    NAME = 'vicseccard'
-    MAINTAINER = u'Oleg Plakhotniuk'
-    EMAIL = 'olegus8@gmail.com'
-    VERSION = '3.6'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = u'Victoria\'s Secret Angel Card'
+    NAME = "vicseccard"
+    MAINTAINER = "Oleg Plakhotniuk"
+    EMAIL = "olegus8@gmail.com"
+    VERSION = "3.7"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "Victoria's Secret Angel Card"
     CONFIG = BackendConfig(
-        ValueBackendPassword('username', label='User name', masked=False),
-        ValueBackendPassword('password', label='Password'))
+        ValueBackendPassword("username", label="User name", masked=False),
+        ValueBackendPassword("password", label="Password"),
+    )
     BROWSER = VicSecCard
 
     def create_default_browser(self):
-        return self.create_browser(self.config['username'].get(),
-                                   self.config['password'].get())
+        return self.create_browser(self.config["username"].get(), self.config["password"].get())
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

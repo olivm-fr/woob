@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Cédric Félizard
 #
 # This file is part of a woob module.
@@ -18,12 +16,13 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import LoginBrowser, URL, need_login
+from woob.browser import URL, LoginBrowser, need_login
 from woob.exceptions import BrowserIncorrectPassword
-from .pages import LoginPage, AccountPage, HistoryPage
+
+from .pages import AccountPage, HistoryPage, LoginPage
 
 
-__all__ = ['Kiwibank']
+__all__ = ["Kiwibank"]
 
 
 class HistoryUnavailable(Exception):
@@ -31,13 +30,13 @@ class HistoryUnavailable(Exception):
 
 
 class Kiwibank(LoginBrowser):
-    BASEURL = 'https://www.ib.kiwibank.co.nz/mobile/'
+    BASEURL = "https://www.ib.kiwibank.co.nz/mobile/"
     TIMEOUT = 30
 
-    login = URL('login/', LoginPage)
-    login_error = URL('login-error/', LoginPage)
-    accounts = URL('accounts/$', AccountPage)
-    account = URL('/accounts/view/[0-9A-F]+$', HistoryPage)
+    login = URL("login/", LoginPage)
+    login_error = URL("login-error/", LoginPage)
+    accounts = URL("accounts/$", AccountPage)
+    account = URL("/accounts/view/[0-9A-F]+$", HistoryPage)
 
     def do_login(self):
         self.login.stay_or_go()

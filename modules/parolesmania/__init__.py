@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -20,4 +18,5 @@
 
 from .module import ParolesmaniaModule
 
-__all__ = ['ParolesmaniaModule']
+
+__all__ = ["ParolesmaniaModule"]

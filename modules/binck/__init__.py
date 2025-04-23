@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2016      Edouard Lambert
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import BinckModule
 
 
-__all__ = ['BinckModule']
+__all__ = ["BinckModule"]

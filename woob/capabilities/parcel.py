@@ -16,17 +16,17 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import Capability, BaseObject, Field, StringField, UserError, Enum
+from .base import BaseObject, Capability, Enum, Field, StringField, UserError
 from .date import DateField
 
 
 class Event(BaseObject):
-    date = DateField('Date')
-    activity = StringField('Activity')
-    location = StringField('Location')
+    date = DateField("Date")
+    activity = StringField("Activity")
+    location = StringField("Location")
 
     def __repr__(self):
-        return '<Event date=%r activity=%r location=%r>' % (self.date, self.activity, self.location)
+        return f"<Event date={self.date!r} activity={self.activity!r} location={self.location!r}>"
 
 
 class ParcelState(Enum):
@@ -42,10 +42,10 @@ class Parcel(BaseObject):
     STATUS_IN_TRANSIT = ParcelState.IN_TRANSIT
     STATUS_ARRIVED = ParcelState.ARRIVED
 
-    arrival = DateField('Scheduled arrival date')
-    status = Field('Status of parcel', int, default=STATUS_UNKNOWN)
-    info = StringField('Information about parcel status')
-    history = Field('History', list)
+    arrival = DateField("Scheduled arrival date")
+    status = Field("Status of parcel", int, default=STATUS_UNKNOWN)
+    info = StringField("Information about parcel status")
+    history = Field("History", list)
 
 
 class CapParcel(Capability):
@@ -68,5 +68,5 @@ class ParcelNotFound(UserError):
     It can be an user error, or an expired parcel
     """
 
-    def __init__(self, msg='Parcel not found'):
-        super(ParcelNotFound, self).__init__(msg)
+    def __init__(self, msg="Parcel not found"):
+        super().__init__(msg)

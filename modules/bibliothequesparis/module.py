@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -17,33 +15,33 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.tools.backend import Module, BackendConfig
 from woob.capabilities.library import CapBook
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import BibliothequesparisBrowser
 
 
-__all__ = ['BibliothequesparisModule']
+__all__ = ["BibliothequesparisModule"]
 
 
 class BibliothequesparisModule(Module, CapBook):
-    NAME = 'bibliothequesparis'
-    DESCRIPTION = u'Bibliotheques de Paris'
-    MAINTAINER = u'Vincent A'
-    EMAIL = 'dev@indigo.re'
-    LICENSE = 'AGPLv3+'
-    VERSION = '3.6'
+    NAME = "bibliothequesparis"
+    DESCRIPTION = "Bibliotheques de Paris"
+    MAINTAINER = "Vincent A"
+    EMAIL = "dev@indigo.re"
+    LICENSE = "AGPLv3+"
+    VERSION = "3.7"
 
     BROWSER = BibliothequesparisBrowser
 
     CONFIG = BackendConfig(
-        Value('login', label='Library card number'),
-        ValueBackendPassword('password', label='Password (usually birthdate)'),
+        Value("login", label="Library card number"),
+        ValueBackendPassword("password", label="Password (usually birthdate)"),
     )
 
     def create_default_browser(self, *args, **kwargs):
-        return self.create_browser(self.config['login'].get(), self.config['password'].get(), *args, **kwargs)
+        return self.create_browser(self.config["login"].get(), self.config["password"].get(), *args, **kwargs)
 
     def iter_rented(self):
         return self.browser.get_loans()

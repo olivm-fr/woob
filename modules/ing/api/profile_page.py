@@ -17,12 +17,12 @@
 
 # flake8: compatible
 
-from woob.browser.pages import LoggedPage, JsonPage, HTMLPage
+from woob.browser.elements import ItemElement, method
 from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Format
-from woob.browser.elements import ItemElement, method
-from woob.capabilities.profile import Profile
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
 from woob.capabilities.base import NotAvailable
+from woob.capabilities.profile import Profile
 
 
 class ProfilePage(LoggedPage, JsonPage):
@@ -30,21 +30,23 @@ class ProfilePage(LoggedPage, JsonPage):
     class get_profile(ItemElement):
         klass = Profile
 
-        obj_name = Format('%s %s', Dict('name/firstName'), Dict('name/lastName'))
-        obj_country = Dict('mailingAddress/country')
-        obj_phone = Dict('phones/0/number', default=NotAvailable)
-        obj_email = Dict('emailAddress')
+        obj_name = Format("%s %s", Dict("name/firstName"), Dict("name/lastName"))
+        obj_country = Dict("mailingAddress/country")
+        obj_phone = Dict("phones/0/number", default=NotAvailable)
+        obj_email = Dict("emailAddress")
 
-        obj_address = CleanText(Format(
-            '%s %s %s %s %s %s %s',
-            Dict('mailingAddress/address1'),
-            Dict('mailingAddress/address2'),
-            Dict('mailingAddress/address3'),
-            Dict('mailingAddress/address4'),
-            Dict('mailingAddress/city'),
-            Dict('mailingAddress/postCode'),
-            Dict('mailingAddress/country')
-        ))
+        obj_address = CleanText(
+            Format(
+                "%s %s %s %s %s %s %s",
+                Dict("mailingAddress/address1"),
+                Dict("mailingAddress/address2"),
+                Dict("mailingAddress/address3"),
+                Dict("mailingAddress/address4"),
+                Dict("mailingAddress/city"),
+                Dict("mailingAddress/postCode"),
+                Dict("mailingAddress/country"),
+            )
+        )
 
 
 class UselessProfilePage(LoggedPage, HTMLPage):

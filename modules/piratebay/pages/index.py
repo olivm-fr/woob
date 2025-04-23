@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -23,4 +21,4 @@ from woob.browser.pages import HTMLPage
 
 class IndexPage(HTMLPage):
     def is_logged(self):
-        return 'id' in self.document.find('body').attrib
+        return "id" in self.document.find("body").attrib

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2021      Vincent A
 #
 # This file is part of a woob module.
@@ -39,7 +37,7 @@ def encode(input):
 
 
 def decode(input):
-    nb = sum(ralphabet[val] * 58 ** pos for pos, val in enumerate(reversed(input)))
+    nb = sum(ralphabet[val] * 58**pos for pos, val in enumerate(reversed(input)))
     output = bytearray()
     # warning: might ignore trailing nulls
     while nb:

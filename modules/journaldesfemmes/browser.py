@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Phyks (Lucas Verney)
 #
 # This file is part of a woob module.
@@ -18,16 +16,16 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import RecipePage, SearchPage
 
 
 class JournaldesfemmesBrowser(PagesBrowser):
-    BASEURL = 'https://cuisine.journaldesfemmes.fr'
+    BASEURL = "https://cuisine.journaldesfemmes.fr"
 
-    recipe = URL(r'/recette/(?P<id>.+)', RecipePage)
-    search = URL(r'/s/\?f_recherche=(?P<search>.+)', SearchPage)
+    recipe = URL(r"/recette/(?P<id>.+)", RecipePage)
+    search = URL(r"/s/\?f_recherche=(?P<search>.+)", SearchPage)
 
     @recipe.id2url
     def get_recipe(self, url, obj=None):

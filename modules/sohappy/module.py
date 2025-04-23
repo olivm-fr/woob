@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2022      Guillaume Thomas
 #
 # This file is part of a woob module.
@@ -18,16 +16,11 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import BackendConfig, Module
-from woob.tools.value import ValueBackendPassword, Value
 from woob.capabilities.base import find_object
-from woob.capabilities.bill import (
-    CapDocument,
-    Document,
-    DocumentNotFound,
-    Subscription,
-)
+from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, Subscription
 from woob.capabilities.profile import CapProfile
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import SohappyBrowser
 
@@ -41,7 +34,7 @@ class SohappyModule(Module, CapDocument, CapProfile):
     MAINTAINER = "Guillaume Thomas"
     EMAIL = "guillaume.thomas642@gmail.com"
     LICENSE = "LGPLv3+"
-    VERSION = "3.6"
+    VERSION = "3.7"
 
     BROWSER = SohappyBrowser
 
@@ -51,9 +44,7 @@ class SohappyModule(Module, CapDocument, CapProfile):
     )
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config["username"].get(), self.config["password"].get()
-        )
+        return self.create_browser(self.config["username"].get(), self.config["password"].get())
 
     def get_profile(self):
         return self.browser.get_profile()

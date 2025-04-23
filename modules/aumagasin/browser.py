@@ -15,35 +15,34 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.exceptions import ParseError
+
 from .pages import EnseignesListPage, MagasinPage
 
 
 class AumagasinBrowser(PagesBrowser):
-    BASEURL = 'https://www.au-magasin.fr'
+    BASEURL = "https://www.au-magasin.fr"
 
-    enseignes_list_page = URL(r'/enseignes/lettre/(?P<first_letter>\w*)/', EnseignesListPage)
-    magasins_page = URL(r'/enseigne/(?P<enseigne_id>\d*-\w*)(?P<page>/\d+)?',
-                        MagasinPage)
+    enseignes_list_page = URL(r"/enseignes/lettre/(?P<first_letter>\w*)/", EnseignesListPage)
+    magasins_page = URL(r"/enseigne/(?P<enseigne_id>\d*-\w*)(?P<page>/\d+)?", MagasinPage)
 
     def search_contacts(self, query):
         assert query.name
 
-        self.magasins_page.go(enseigne_id=self.get_enseigne_id(query.name),
-                              page=1)
+        self.magasins_page.go(enseigne_id=self.get_enseigne_id(query.name), page=1)
         return self.page.iter_contacts()
 
     def get_enseigne_id(self, name: str):
         first_letter = name[0].upper()
 
         if not first_letter.isalpha():
-            first_letter = 'etc'
+            first_letter = "etc"
 
         self.enseignes_list_page.go(first_letter=first_letter)
 
         for item in self.page.list_enseignes():
             if item.id.upper() == name.upper():
-                return item.url.split('/')[-1]
+                return item.url.split("/")[-1]
 
         raise ParseError(f"Aucune enseigne ne correspond à cette recherche: {name}")

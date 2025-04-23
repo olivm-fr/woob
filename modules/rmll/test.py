@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015 Guilhem Bonnefille
 #
 # This file is part of a woob module.
@@ -18,23 +16,23 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.capabilities.video import BaseVideo
+from woob.tools.test import BackendTest
 
 
 class RmllTest(BackendTest):
-    MODULE = 'rmll'
+    MODULE = "rmll"
 
     def test_video_search(self):
-        videos = self.backend.search_videos('test')
+        videos = self.backend.search_videos("test")
         self.assertTrue(videos)
         for video in videos:
-            self.assertTrue(video.id, 'ID for video not found')
+            self.assertTrue(video.id, "ID for video not found")
 
     def test_video_page(self):
         for slug in ["v124f0bc409e704d92cf", "%s/permalink/v124f0bc409e704d92cf/" % self.backend.browser.BASEURL]:
             video = self.backend.browser.get_video(slug)
-            self.assertTrue(video.id, 'ID for video not found')
+            self.assertTrue(video.id, "ID for video not found")
             self.assertTrue(video.url, 'URL for video "%s" not found' % (video.id))
             self.assertTrue(video.thumbnail, 'Thumbnail for video "%s" not found' % (video.id))
             self.assertTrue(video.title, 'Title for video "%s" not found' % (video.id))
@@ -50,15 +48,15 @@ class RmllTest(BackendTest):
         self.assertTrue(video.url, 'URL for video "%s" not found' % (video.id))
 
     def test_browse(self):
-        for path in [[], ['latest']]:
+        for path in [[], ["latest"]]:
             videos = self.backend.iter_resources([BaseVideo], path)
             self.assertTrue(videos)
             for video in videos:
-                self.assertTrue(video.id, 'ID for video not found')
+                self.assertTrue(video.id, "ID for video not found")
 
     def test_missing_duration(self):
-        videos = self.backend.search_videos('woob')
+        videos = self.backend.search_videos("woob")
         self.assertTrue(videos)
         for video in videos:
-            self.assertTrue(video.id, 'ID for video not found')
+            self.assertTrue(video.id, "ID for video not found")
             video = self.backend.fill_video(video, ["$full"])

@@ -15,9 +15,9 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.elements import ItemElement, method, DictElement
-from woob.browser.filters.standard import CleanDecimal, Date, Field, Env
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import CleanDecimal, Date, Env, Field
 from woob.capabilities.bank.wealth import Investment
 from woob.capabilities.base import NotAvailable
 from woob.tools.capabilities.bank.investments import is_isin_valid
@@ -28,25 +28,25 @@ class AccountsPage(AmundiAccountsPage):
     @method
     class iter_investments(DictElement):
         def find_elements(self):
-            for psds in Dict('listPositionsSalarieFondsDto')(self):
-                for psd in psds.get('positionsSalarieDispositifDto'):
-                    if psd.get('codeDispositif') == Env('account_id')(self):
-                        return psd.get('positionsSalarieFondsDto')
+            for psds in Dict("listPositionsSalarieFondsDto")(self):
+                for psd in psds.get("positionsSalarieDispositifDto"):
+                    if psd.get("codeDispositif") == Env("account_id")(self):
+                        return psd.get("positionsSalarieFondsDto")
             return {}
 
         class item(ItemElement):
             klass = Investment
 
-            obj_label = Dict('libelleFonds')
-            obj_unitvalue = Dict('vl') & CleanDecimal
-            obj_quantity = Dict('nbParts') & CleanDecimal
-            obj_valuation = Dict('mtBrut') & CleanDecimal
-            obj_code = Dict('codeIsin', default=NotAvailable)
-            obj_vdate = Date(Dict('dtVl'))
+            obj_label = Dict("libelleFonds")
+            obj_unitvalue = Dict("vl") & CleanDecimal
+            obj_quantity = Dict("nbParts") & CleanDecimal
+            obj_valuation = Dict("mtBrut") & CleanDecimal
+            obj_code = Dict("codeIsin", default=NotAvailable)
+            obj_vdate = Date(Dict("dtVl"))
             # The "diff" is only present on the CAELS website but not its parent (amundi):
-            obj_diff = Dict('mtPMV') & CleanDecimal
+            obj_diff = Dict("mtPMV") & CleanDecimal
 
             def obj_code_type(self):
-                if is_isin_valid(Field('code')(self)):
+                if is_isin_valid(Field("code")(self)):
                     return Investment.CODE_TYPE_ISIN
                 return NotAvailable

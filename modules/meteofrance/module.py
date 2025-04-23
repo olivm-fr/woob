@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2011 Cedric Defortis
 #
 # This file is part of a woob module.
@@ -18,22 +16,23 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from woob.capabilities.base import find_object
 from woob.capabilities.weather import CapWeather, CityNotFound
 from woob.tools.backend import Module
-from woob.capabilities.base import find_object
+
 from .browser import MeteofranceBrowser
 
 
-__all__ = ['MeteofranceModule']
+__all__ = ["MeteofranceModule"]
 
 
 class MeteofranceModule(Module, CapWeather):
-    NAME = 'meteofrance'
-    MAINTAINER = u'Cedric Defortis'
-    EMAIL = 'cedric@aiur.fr'
-    VERSION = '3.6'
-    DESCRIPTION = 'Get forecasts from the MeteoFrance website'
-    LICENSE = 'AGPLv3+'
+    NAME = "meteofrance"
+    MAINTAINER = "Cedric Defortis"
+    EMAIL = "cedric@aiur.fr"
+    VERSION = "3.7"
+    DESCRIPTION = "Get forecasts from the MeteoFrance website"
+    LICENSE = "AGPLv3+"
     BROWSER = MeteofranceBrowser
 
     def get_current(self, city_id):

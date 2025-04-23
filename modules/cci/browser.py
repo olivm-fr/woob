@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,19 +15,19 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.capabilities.job import BaseJobAdvert
 
 from .pages import SearchPage
 
 
-__all__ = ['CciBrowser']
+__all__ = ["CciBrowser"]
 
 
 class CciBrowser(PagesBrowser):
-    BASEURL = 'http://www.cci.fr'
+    BASEURL = "http://www.cci.fr"
 
-    search_page = URL('/web/recrutement/les-offres-d-emploi', SearchPage)
+    search_page = URL("/web/recrutement/les-offres-d-emploi", SearchPage)
 
     def search_job(self, pattern):
         return self.search_page.go().iter_job_adverts(pattern=pattern)

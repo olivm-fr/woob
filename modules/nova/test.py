@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2011 Romain Bignon
 #
 # This file is part of a woob module.
@@ -18,15 +16,15 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
 from woob.capabilities.radio import Radio
+from woob.tools.test import BackendTest
 
 
 class NovaTest(BackendTest):
-    MODULE = 'nova'
+    MODULE = "nova"
 
     def test_nova(self):
-        l = list(self.backend.iter_resources((Radio, ), []))
+        l = list(self.backend.iter_resources((Radio,), []))
         self.assertTrue(len(l) > 0)
         for r in l:
             self.assertTrue(r.title)

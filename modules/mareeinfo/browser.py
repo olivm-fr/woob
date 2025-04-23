@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -18,15 +16,15 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import IndexPage
 
 
 class MareeinfoBrowser(PagesBrowser):
-    BASEURL = 'http://maree.info'
+    BASEURL = "http://maree.info"
 
-    harbor_page = URL('', '(?P<_id>.*)', IndexPage)
+    harbor_page = URL("", "(?P<_id>.*)", IndexPage)
 
     def get_harbor_list(self, pattern):
         return self.harbor_page.go().get_harbor_list(pattern=pattern)

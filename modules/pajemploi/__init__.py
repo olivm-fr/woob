@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Ludovic LANGE
 #
 # This file is part of a woob module.
@@ -21,4 +19,4 @@
 from .module import PajemploiModule
 
 
-__all__ = ['PajemploiModule']
+__all__ = ["PajemploiModule"]

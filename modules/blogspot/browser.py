@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -20,21 +18,25 @@
 from collections import OrderedDict
 from datetime import date
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 from woob.capabilities.messages import Message
 
-from .pages import DatePage, IndexPage, ArticlePage
+from .pages import ArticlePage, DatePage, IndexPage
 
 
 class BlogspotBrowser(PagesBrowser):
-    BASEURL = 'http://www.blogspot.com'
+    BASEURL = "http://www.blogspot.com"
 
-    index = URL(r'/$', IndexPage)
-    date = URL(r'/\?action=getTitles&widgetId=BlogArchive1&widgetType=BlogArchive&responseType=js&path=(?P<query>.*)', r'/(?P<year>\d+)/(?P<month>\d+)/$', DatePage)
-    article = URL(r'/(?P<year>\d+)/(?P<month>\d+)/(?P<title>.*).html$', ArticlePage)
+    index = URL(r"/$", IndexPage)
+    date = URL(
+        r"/\?action=getTitles&widgetId=BlogArchive1&widgetType=BlogArchive&responseType=js&path=(?P<query>.*)",
+        r"/(?P<year>\d+)/(?P<month>\d+)/$",
+        DatePage,
+    )
+    article = URL(r"/(?P<year>\d+)/(?P<month>\d+)/(?P<title>.*).html$", ArticlePage)
 
     def __init__(self, baseurl, *args, **kwargs):
-        super(BlogspotBrowser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.BASEURL = baseurl
         self.cache = OrderedDict()
 
@@ -43,7 +45,7 @@ class BlogspotBrowser(PagesBrowser):
             self.index.go()
             for url in self.page.get_dates():
                 m = self.date.match(url)
-                key = (m.group('year'), m.group('month'))
+                key = (m.group("year"), m.group("month"))
                 self.cache[key] = None
 
         for k in self.cache:
@@ -59,23 +61,23 @@ class BlogspotBrowser(PagesBrowser):
             yield self.build_article(j)
 
     def build_date(self, k):
-        ret = Message(id='%s.%s' % k)
-        ret.title = '%s/%s' % k
-        ret.content = ''
+        ret = Message(id="%s.%s" % k)
+        ret.title = "%s/%s" % k
+        ret.content = ""
         ret.date = date(int(k[0]), int(k[1]), 1)
-        ret._type = 'date'
+        ret._type = "date"
         ret._key = k
         return ret
 
     def build_article(self, j):
-        m = self.article.match(j['url'])
-        ret = Message(id=m.group('title'))
-        ret.title = j['title']
-        ret.url = j['url']
+        m = self.article.match(j["url"])
+        ret = Message(id=m.group("title"))
+        ret.title = j["title"]
+        ret.url = j["url"]
         ret.flags = Message.IS_HTML
-        ret.date = date(int(m.group('year')), int(m.group('month')), 1)
+        ret.date = date(int(m.group("year")), int(m.group("month")), 1)
         ret.children = []
-        ret._type = 'article'
+        ret._type = "article"
         return ret
 
     def get_article(self, url):

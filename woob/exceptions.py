@@ -17,70 +17,63 @@
 
 from __future__ import annotations
 
-import warnings
 import importlib
-
+import warnings
 from datetime import datetime
 from functools import wraps
-from typing import List, Any, Tuple
+from typing import Any, Callable
 
 from woob.tools.value import Value
 
 
 __all__ = [
-    'BrowserIncorrectPassword',
-    'BrowserForbidden',
-    'BrowserUserBanned',
-    'BrowserUnavailable',
-    'ScrapingBlocked',
-    'BrowserInteraction',
-    'BrowserQuestion',
-    'OTPQuestion',
-    'OTPSentType',
-    'SentOTPQuestion',
-    'OfflineOTPQuestion',
-    'DecoupledMedium',
-    'DecoupledValidation',
-    'AppValidation',
-    'AppValidationError',
-    'AppValidationCancelled',
-    'AppValidationExpired',
-    'BrowserRedirect',
-    'CaptchaQuestion',
-    'WrongCaptchaResponse',
-    'BrowserHTTPNotFound',
-    'BrowserHTTPError',
-    'BrowserHTTPSDowngrade',
-    'BrowserSSLError',
-    'ParseError',
-    'FormFieldConversionWarning',
-    'ModuleInstallError',
-    'ModuleLoadError',
-    'ActionType',
-    'ActionNeeded',
-    'AuthMethodNotImplemented',
-    'BrowserPasswordExpired',
-    'NeedInteractive',
-    'NeedInteractiveForRedirect',
-    'NeedInteractiveFor2FA',
-    'NotImplementedWebsite',
+    "BrowserIncorrectPassword",
+    "BrowserForbidden",
+    "BrowserUserBanned",
+    "BrowserUnavailable",
+    "ScrapingBlocked",
+    "BrowserInteraction",
+    "BrowserQuestion",
+    "OTPQuestion",
+    "OTPSentType",
+    "SentOTPQuestion",
+    "OfflineOTPQuestion",
+    "DecoupledMedium",
+    "DecoupledValidation",
+    "AppValidation",
+    "AppValidationError",
+    "AppValidationCancelled",
+    "AppValidationExpired",
+    "BrowserRedirect",
+    "CaptchaQuestion",
+    "WrongCaptchaResponse",
+    "BrowserHTTPNotFound",
+    "BrowserHTTPError",
+    "BrowserHTTPSDowngrade",
+    "BrowserSSLError",
+    "ParseError",
+    "FormFieldConversionWarning",
+    "ModuleInstallError",
+    "ModuleLoadError",
+    "ActionType",
+    "ActionNeeded",
+    "AuthMethodNotImplemented",
+    "BrowserPasswordExpired",
+    "NeedInteractive",
+    "NeedInteractiveForRedirect",
+    "NeedInteractiveFor2FA",
+    "NotImplementedWebsite",
 ]
 
 
 class BrowserIncorrectPassword(Exception):
     """The site signals to us our credentials are invalid.
 
-    :type message: str
     :param message: compatibility message for the user (mostly when bad_fields is not given)
-    :type bad_fields: list[str]
     :param bad_fields: list of config field names which are incorrect, if it is known
     """
 
-    def __init__(
-        self,
-        message: str = "",
-        bad_fields: List[str] | None = None
-    ):
+    def __init__(self, message: str = "", bad_fields: list[str] | None = None) -> None:
         super().__init__(*filter(None, [message]))
         self.bad_fields = bad_fields
 
@@ -92,9 +85,7 @@ class BrowserForbidden(Exception):
 class BrowserUserBanned(BrowserIncorrectPassword):
     """The site signals to us the user we are logging in as is banned.
 
-    :type message: str
     :param message: compatibility message for the user (mostly when bad_fields is not given)
-    :type bad_fields: list[str]
     :param bad_fields: list of config field names which are incorrect, if it is known
     """
 
@@ -116,14 +107,13 @@ class BrowserQuestion(BrowserInteraction):
 
     :param fields: The Value objects to be provided by the end user.
     """
-    def __init__(self, *fields):
+
+    def __init__(self, *fields: Value[Any]) -> None:
         super().__init__()
         self.fields = fields
 
-    def __str__(self):
-        return ", ".join("{}: {}".format(
-            field.id or field.label, field.description) for field in self.fields
-        )
+    def __str__(self) -> str:
+        return ", ".join(f"{field.id or field.label}: {field.description}" for field in self.fields)
 
 
 class OTPQuestion(BrowserQuestion):
@@ -134,12 +124,12 @@ class OTPQuestion(BrowserQuestion):
 
 
 class OTPSentType:
-    UNKNOWN = 'unknown'
-    SMS = 'sms'
-    PHONE_CALL = 'phone_call'
-    MOBILE_APP = 'mobile_app'
-    EMAIL = 'email'
-    DEVICE = 'device'
+    UNKNOWN = "unknown"
+    SMS = "sms"
+    PHONE_CALL = "phone_call"
+    MOBILE_APP = "mobile_app"
+    EMAIL = "email"
+    DEVICE = "device"
 
 
 class SentOTPQuestion(OTPQuestion):
@@ -149,17 +139,12 @@ class SentOTPQuestion(OTPQuestion):
     phone number associated with the end user, and we need to ask the end
     user to provide this code to us to send it back to the site.
 
-    :type field_name: str
     :param field_name: name of the config field in which the OTP shall
                        be given to the module
-    :type medium_type: OTPSentType
     :param medium_type: if known, where the OTP was sent
-    :type medium_label: str
     :param medium_label: if known, label of where the OTP was sent,
                          e.g. the phone number in case of an SMS
-    :type message: str
     :param message: compatibility message (used as the Value label)
-    :type expires_at: datetime.datetime
     :param expires_at: date when the OTP expires and when replying is too late
     """
 
@@ -170,7 +155,7 @@ class SentOTPQuestion(OTPQuestion):
         medium_label: str | None = None,
         message: str = "",
         expires_at: datetime | None = None,
-    ):
+    ) -> None:
         super().__init__(Value(field_name, label=message))
         self.message = message
         self.medium_type = medium_type
@@ -186,17 +171,12 @@ class OfflineOTPQuestion(OTPQuestion):
     provided, so this exception gets raised to obtain one we can send back
     to the site.
 
-    :type field_name: str
     :param field_name: name of the config field in which the OTP shall
                        be given to the module
-    :type input: str
     :param input: if relevant, input data for computing the OTP
-    :type message: str
     :param message: compatibility message (used as the Value label)
-    :type medium_label: str
     :param medium_label: if known, label of the device to use for generating
                          or reading the OTP, e.g. the card index for paper OTP
-    :type expires_at: datetime.datetime
     :param expires_at: date when the OTP expires and when replying is too late
     """
 
@@ -206,8 +186,8 @@ class OfflineOTPQuestion(OTPQuestion):
         input: str | None = None,
         medium_label: str | None = None,
         message: str = "",
-        expires_at: datetime | None = None
-    ):
+        expires_at: datetime | None = None,
+    ) -> None:
         super().__init__(Value(field_name, label=message))
         self.input = input
         self.medium_label = medium_label
@@ -215,10 +195,10 @@ class OfflineOTPQuestion(OTPQuestion):
 
 
 class DecoupledMedium:
-    UNKNOWN = 'unknown'
-    SMS = 'sms'
-    MOBILE_APP = 'mobile_app'
-    EMAIL = 'email'
+    UNKNOWN = "unknown"
+    SMS = "sms"
+    MOBILE_APP = "mobile_app"
+    EMAIL = "email"
 
 
 class DecoupledValidation(BrowserInteraction):
@@ -227,47 +207,32 @@ class DecoupledValidation(BrowserInteraction):
     For example, the site requires the user to click on a link sent in an
     e-mail to pursue logging in on the current session.
 
-    :type medium_type: DecoupledMedium
+    :param message: message to display to user
     :param medium_type: if known, where the decoupled validation was sent
-    :type medium_label: str
     :param medium_label: if known, label of where the decoupled validation was
                          sent, e.g. the phone number in case of an app
-    :type expires_at: datetime.datetime
     :param expires_at: date when the OTP expires and when replying is too late
     """
+
     def __init__(
         self,
-        message: str = '',
+        message: str = "",
         resource: Any = None,
         medium_type: str = DecoupledMedium.UNKNOWN,
         medium_label: str | None = None,
         expires_at: datetime | None = None,
-        *values: Any
-    ):
-        """
-        :param message: message to display to user
-        :type message: str
-        :param medium_type: if known, where the decoupled validation was sent
-        :type medium_type: DecoupledMedium
-        :param medium_label: if known, label of where the decoupled validation was sent,
-                             e.g. the phone number in case of an app
-        :type medium_label: str
-        :param expires_at: date when the OTP expires and when replying is too late
-        :type expires_at: datetime.datetime
-        """
+        *values: Any,
+    ) -> None:
+        """ """
         if values:
-            warnings.warn(
-                'Variable arguments will be removed in woob 4.',
-                DeprecationWarning,
-                stacklevel=2
-            )
+            warnings.warn("Variable arguments will be removed in woob 4.", DeprecationWarning, stacklevel=2)
         if resource:
             warnings.warn(
                 'The "resource" argument will be removed in woob 4. '
-                'Maybe you should inherit this exception class in a '
-                'capability to add specific metadata?',
+                "Maybe you should inherit this exception class in a "
+                "capability to add specific metadata?",
                 DeprecationWarning,
-                stacklevel=2
+                stacklevel=2,
             )
 
         super().__init__(*values)
@@ -277,7 +242,7 @@ class DecoupledValidation(BrowserInteraction):
         self.resource = resource
         self.expires_at = expires_at
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.message
 
 
@@ -288,15 +253,13 @@ class AppValidation(DecoupledValidation):
     corresponding to the site, enter a specific password to the application,
     and click on "Validate" for the current operation to be validated.
 
-    :type medium_label: str
     :param medium_label: if known, label of where the decoupled validation was
                          sent, e.g. the phone number in case of an app
-    :type expires_at: datetime.datetime
     :param expires_at: date when the OTP expires and when replying is too late
     """
 
-    def __init__(self, *args, **kwargs):
-        kwargs['medium_type'] = DecoupledMedium.MOBILE_APP
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["medium_type"] = DecoupledMedium.MOBILE_APP
         super().__init__(*args, **kwargs)
 
 
@@ -331,28 +294,24 @@ class BrowserRedirect(BrowserInteraction):
     be set to the callback URI with parameters for processing by the module.
 
     :param url: The URL to redirect the end user to.
-    :type url: str
     """
-    def __init__(
-        self,
-        url: str,
-        resource: Any = None
-    ):
+
+    def __init__(self, url: str, resource: Any = None) -> None:
         self.url = url
 
         if resource:
             warnings.warn(
                 'The "resource" argument will be removed in woob 4. '
-                'Maybe you should inherit this exception class in a '
-                'capability to add specific metadata?',
+                "Maybe you should inherit this exception class in a "
+                "capability to add specific metadata?",
                 DeprecationWarning,
-                stacklevel=2
+                stacklevel=2,
             )
 
         self.resource = resource
 
-    def __str__(self):
-        return 'Redirecting to %s' % self.url
+    def __str__(self) -> str:
+        return "Redirecting to %s" % self.url
 
 
 class CaptchaQuestion(Exception):
@@ -365,12 +324,8 @@ class CaptchaQuestion(Exception):
     """
 
     # could be improved to pass the name of the backendconfig key
-    def __init__(
-        self,
-        type: str | None = None,
-        **kwargs
-    ):
-        super().__init__('The site requires solving a captcha')
+    def __init__(self, type: str | None = None, **kwargs: Any) -> None:
+        super().__init__("The site requires solving a captcha")
         self.type = type
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -379,10 +334,7 @@ class CaptchaQuestion(Exception):
 class WrongCaptchaResponse(Exception):
     """The site signals to us that our captcha response is incorrect."""
 
-    def __init__(
-        self,
-        message: str | None = None
-    ):
+    def __init__(self, message: str | None = None) -> None:
         super().__init__(message or "Captcha response is wrong")
 
 
@@ -417,11 +369,7 @@ class ModuleInstallError(Exception):
 
 
 class ModuleLoadError(Exception):
-    def __init__(
-        self,
-        module_name: str,
-        msg: str
-    ):
+    def __init__(self, module_name: str, msg: str) -> None:
         super().__init__(msg)
         self.module = module_name
 
@@ -457,14 +405,10 @@ class ActionNeeded(Exception):
     """An action must be performed directly, often on website.
 
     :param message: message from the site
-    :type message: str
     :param locale: ISO4646 language tag of `message` (e.g. "en-US")
-    :type locale: str
     :param action_type: type of action to perform
     :param url: URL of the page to go to resolve the action needed
-    :type url: str
     :param page: user hint for when no URL can be given and the place where to perform the action is not obvious
-    :type page: str
     """
 
     def __init__(
@@ -475,8 +419,8 @@ class ActionNeeded(Exception):
         action_type: int | None = None,
         url: str | None = None,
         page: Any = None,
-    ):
-        args: Tuple[str, ...] = ()
+    ) -> None:
+        args: tuple[str, ...] = ()
         if message:
             args = (message,)
 
@@ -487,11 +431,7 @@ class ActionNeeded(Exception):
         self.url = url
 
         if page:
-            warnings.warn(
-                'ActionNeeded.page is deprecated and will be removed',
-                DeprecationWarning,
-                stacklevel=2
-            )
+            warnings.warn("ActionNeeded.page is deprecated and will be removed", DeprecationWarning, stacklevel=2)
 
 
 class AuthMethodNotImplemented(ActionNeeded):
@@ -517,25 +457,24 @@ class NeedInteractiveFor2FA(NeedInteractive):
     """Require an interactive call by user to perform a 2FA."""
 
 
-def implemented_websites(*cfg):
+def implemented_websites(*cfg: list[str]) -> Callable[..., Any]:
     """
     Decorator to raise NotImplementedWebsite for concerned website
     Will raise the exception for website not in arguments: ex ('ent', 'pro')
     """
-    warnings.warn(
-        'Do not use this decorator.',
-        DeprecationWarning,
-        stacklevel=2
-    )
+    warnings.warn("Do not use this decorator.", DeprecationWarning, stacklevel=2)
 
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if not self.config['website'].get() in cfg:
-                raise NotImplementedWebsite('This website is not yet implemented')
+        def wrapper(self: object, *args: Any, **kwargs: Any) -> Any:
+            assert hasattr(self, "config") and "website" in self.config
+            if not self.config["website"].get() in cfg:
+                raise NotImplementedWebsite("This website is not yet implemented")
 
             return func(self, *args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -543,50 +482,42 @@ class NotImplementedWebsite(NotImplementedError):
     """
     Exception for modules when a website is not yet available.
     """
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'Do not use this exception.',
-            DeprecationWarning,
-            stacklevel=2
-        )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn("Do not use this exception.", DeprecationWarning, stacklevel=2)
         super().__init__(*args, **kwargs)
 
 
 __deprecated__ = {
-    'ImageCaptchaQuestion': 'woob.capabilities.captcha.ImageCaptchaQuestion',
-    'RecaptchaV2Question': 'woob.capabilities.captcha.RecaptchaV2Question',
-    'RecaptchaQuestion': 'woob.capabilities.captcha.RecaptchaQuestion',
-    'GeetestV4Question': 'woob.capabilities.captcha.GeetestV4Question',
-    'RecaptchaV3Question': 'woob.capabilities.captcha.RecaptchaV3Question',
-    'FuncaptchaQuestion': 'woob.capabilities.captcha.FuncaptchaQuestion',
-    'HcaptchaQuestion': 'woob.capabilities.captcha.HcaptchaQuestion',
-    'TurnstileQuestion': 'woob.capabilities.captcha.TurnstileQuestion',
-    'NoAccountsException': 'woob.capabilities.bank.NoAccountsException',
+    "ImageCaptchaQuestion": "woob.capabilities.captcha.ImageCaptchaQuestion",
+    "RecaptchaV2Question": "woob.capabilities.captcha.RecaptchaV2Question",
+    "RecaptchaQuestion": "woob.capabilities.captcha.RecaptchaQuestion",
+    "GeetestV4Question": "woob.capabilities.captcha.GeetestV4Question",
+    "RecaptchaV3Question": "woob.capabilities.captcha.RecaptchaV3Question",
+    "FuncaptchaQuestion": "woob.capabilities.captcha.FuncaptchaQuestion",
+    "HcaptchaQuestion": "woob.capabilities.captcha.HcaptchaQuestion",
+    "TurnstileQuestion": "woob.capabilities.captcha.TurnstileQuestion",
+    "NoAccountsException": "woob.capabilities.bank.NoAccountsException",
 }
 
 
-def __getattr__(name: str) -> Exception:
-    if name in __deprecated__:
-        new_path = __deprecated__[name]
-        warnings.warn(
-            f"'{name}' is deprecated. Use '{new_path}' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        module_name = '.'.join(new_path.split('.')[:-1])
-        class_name = new_path.split('.')[-1]
-        try:
-            module = importlib.import_module(module_name)
-        except ModuleNotFoundError as exc:
-            raise AttributeError(f"{name} is deprecated, but unable to import {new_path}") from exc
+def __getattr__(name: str) -> object:
+    if name not in __deprecated__:
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-        try:
-            return getattr(module, class_name)
-        except AttributeError as exc:
-            raise AttributeError(f"{name} is deprecated, but unable to import {new_path}") from exc
-
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    new_path = __deprecated__[name]
+    warnings.warn(
+        f"'{name}' is deprecated. Use '{new_path}' instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    module_path, class_name = new_path.rsplit(".", 1)
+    try:
+        klass = getattr(importlib.import_module(module_path), class_name)
+    except (AttributeError, ModuleNotFoundError) as exc:
+        raise AttributeError(f"{name} is deprecated, but unable to import {new_path}") from exc
+    return klass
 
 
-def __dir__() -> List[str]:
+def __dir__() -> list[str]:
     return sorted(list(__all__) + list(__deprecated__.keys()))

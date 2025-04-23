@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2018      Antoine BOSSY
 #
 # This file is part of woob.
@@ -17,13 +15,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.browser.pages import JsonPage
-from woob.browser.elements import ItemElement, DictElement, method
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict, ItemNotFound
+from woob.browser.filters.standard import CleanDecimal, CleanText, Date, Field, Format
+from woob.browser.pages import JsonPage
 from woob.capabilities.base import NotAvailable, NotLoaded
-from woob.browser.filters.standard import CleanText, Date, CleanDecimal, Field, Format
-from woob.capabilities.housing import City, Housing, HousingPhoto, ENERGY_CLASS, POSTS_TYPES, \
-    ADVERT_TYPES, UTILITIES
+from woob.capabilities.housing import ADVERT_TYPES, ENERGY_CLASS, POSTS_TYPES, UTILITIES, City, Housing, HousingPhoto
 
 from .constants import HOUSE_TYPES_LABELS
 
@@ -35,78 +32,74 @@ class Cities(JsonPage):
         class item(ItemElement):
             klass = City
 
-            obj_id = Dict('zoneIds/0')
-            obj_name = CleanText(Dict('name'))
+            obj_id = Dict("zoneIds/0")
+            obj_name = CleanText(Dict("name"))
 
 
 class MyItemElement(ItemElement):
     klass = Housing
 
     def condition(self):
-        return not Dict('userRelativeData/isAdModifier')(self)
+        return not Dict("userRelativeData/isAdModifier")(self)
 
-    obj_id = Dict('id')
-    obj_url = Format('https://www.bienici.com/annonce/%s', Dict('id'))
-    obj_url = Format('https://www.bienici.com/annonce/%s', Dict('id'))
-    obj__id_polygone = Dict('district/id_polygone', default=None)
+    obj_id = Dict("id")
+    obj_url = Format("https://www.bienici.com/annonce/%s", Dict("id"))
+    obj_url = Format("https://www.bienici.com/annonce/%s", Dict("id"))
+    obj__id_polygone = Dict("district/id_polygone", default=None)
 
     def obj_house_type(self):
         for key, values in HOUSE_TYPES_LABELS.items():
-            if Dict('propertyType')(self) in values:
+            if Dict("propertyType")(self) in values:
                 return key
         return NotAvailable
 
     def obj_type(self):
-        if Dict('transactionType')(self) == 'buy':
-            return POSTS_TYPES.VIAGER \
-                if Dict('adTypeFR')(self) == "viager" else POSTS_TYPES.SALE
-        elif Dict('transactionType')(self) == 'rent':
-            return POSTS_TYPES.FURNISHED_RENT \
-                if Dict('isFurnished') else POSTS_TYPES.RENT
+        if Dict("transactionType")(self) == "buy":
+            return POSTS_TYPES.VIAGER if Dict("adTypeFR")(self) == "viager" else POSTS_TYPES.SALE
+        elif Dict("transactionType")(self) == "rent":
+            return POSTS_TYPES.FURNISHED_RENT if Dict("isFurnished") else POSTS_TYPES.RENT
 
         return NotLoaded
 
-    obj_title = Dict('title')
-    obj_area = Dict('surfaceArea')
-    obj_cost = Dict('price')
+    obj_title = Dict("title")
+    obj_area = Dict("surfaceArea")
+    obj_cost = Dict("price")
 
     def obj_advert_type(self):
-        return ADVERT_TYPES.PROFESSIONAL \
-            if Dict('adCreatedByPro')(self) else ADVERT_TYPES.PERSONAL
+        return ADVERT_TYPES.PROFESSIONAL if Dict("adCreatedByPro")(self) else ADVERT_TYPES.PERSONAL
 
     def obj_price_per_meter(self):
         try:
-            return Dict('pricePerSquareMeter')(self)
+            return Dict("pricePerSquareMeter")(self)
         except ItemNotFound:
             return NotAvailable
 
-    obj_currency = 'EUR'
-    obj_date = Date(Dict('publicationDate'))
-    obj_location = CleanDecimal(Dict('postalCode'))
-    obj_text = Dict('description', '')
+    obj_currency = "EUR"
+    obj_date = Date(Dict("publicationDate"))
+    obj_location = CleanDecimal(Dict("postalCode"))
+    obj_text = Dict("description", "")
 
     def obj_utilities(self):
-        if Field('type')(self) in [POSTS_TYPES.SALE, POSTS_TYPES.VIAGER]:
+        if Field("type")(self) in [POSTS_TYPES.SALE, POSTS_TYPES.VIAGER]:
             return UTILITIES.UNKNOWN
 
-        return UTILITIES.EXCLUDED \
-            if Dict('chargesMethod', default='')(self) == "real" else UTILITIES.INCLUDED
+        return UTILITIES.EXCLUDED if Dict("chargesMethod", default="")(self) == "real" else UTILITIES.INCLUDED
 
     def obj_photos(self):
-        return [HousingPhoto(photo['url']) for photo in Dict('photos')(self)]
+        return [HousingPhoto(photo["url"]) for photo in Dict("photos")(self)]
 
-    obj_rooms = Dict('roomsQuantity', 0)
-    obj_bedrooms = Dict('bedroomsQuantity', 0)
+    obj_rooms = Dict("roomsQuantity", 0)
+    obj_bedrooms = Dict("bedroomsQuantity", 0)
 
     def obj_DPE(self):
         try:
-            return ENERGY_CLASS[Dict('energyClassification')(self)]
+            return ENERGY_CLASS[Dict("energyClassification")(self)]
         except (KeyError, ItemNotFound):
             return NotAvailable
 
     def obj_GES(self):
         try:
-            return ENERGY_CLASS[Dict('greenhouseGazClassification')(self)]
+            return ENERGY_CLASS[Dict("greenhouseGazClassification")(self)]
         except (KeyError, ItemNotFound):
             return NotAvailable
 
@@ -114,7 +107,7 @@ class MyItemElement(ItemElement):
 class ResultsPage(JsonPage):
     @method
     class get_housings(DictElement):
-        item_xpath = 'realEstateAds'
+        item_xpath = "realEstateAds"
 
         class item(MyItemElement):
             pass
@@ -123,9 +116,9 @@ class ResultsPage(JsonPage):
 class HousingPage(JsonPage):
     @method
     class get_housing(MyItemElement):
-        obj_phone = Dict('contactRelativeData/phoneToDisplay', default=NotAvailable)
+        obj_phone = Dict("contactRelativeData/phoneToDisplay", default=NotAvailable)
 
 
 class NeighborhoodPage(JsonPage):
     def get_stations(self):
-        return str(Dict('transports')(self.doc))
+        return str(Dict("transports")(self.doc))

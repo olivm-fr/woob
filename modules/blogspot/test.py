@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -21,9 +19,9 @@ from woob.tools.test import BackendTest, skip_without_config
 
 
 class BlogspotTest(BackendTest):
-    MODULE = 'blogspot'
+    MODULE = "blogspot"
 
-    @skip_without_config('url')
+    @skip_without_config("url")
     def test_blog(self):
         threads = list(self.backend.iter_threads())
         assert threads

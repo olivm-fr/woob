@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012 Arno Renevier
 #
 # This file is part of a woob module.
@@ -18,26 +16,29 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser import PagesBrowser, URL
-from .pages import WeatherPage, CityPage
+from woob.browser import URL, PagesBrowser
 
-__all__ = ['WeatherBrowser']
+from .pages import CityPage, WeatherPage
+
+
+__all__ = ["WeatherBrowser"]
 
 
 class WeatherBrowser(PagesBrowser):
-    BASEURL = 'https://weather.com'
+    BASEURL = "https://weather.com"
 
-    city_page = URL('/api/v1/p/redux-dal', CityPage)
-    weather_page = URL('/weather/today/l/(?P<city_id>.*)', WeatherPage)
+    city_page = URL("/api/v1/p/redux-dal", CityPage)
+    weather_page = URL("/weather/today/l/(?P<city_id>.*)", WeatherPage)
 
     def iter_city_search(self, pattern):
-        params = [{"name": "getSunV3LocationSearchUrlConfig",
-                   "params": {"query": pattern,
-                              "language": "en-US",
-                              "locationType": "locale"}
-                   }]
+        params = [
+            {
+                "name": "getSunV3LocationSearchUrlConfig",
+                "params": {"query": pattern, "language": "en-US", "locationType": "locale"},
+            }
+        ]
 
-        headers = {'Host': 'weather.com'}
+        headers = {"Host": "weather.com"}
         return self.city_page.go(json=params, headers=headers).iter_cities(pattern=pattern)
 
     def get_current(self, city_id):

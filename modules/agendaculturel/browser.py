@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2015      Bezleputh
 #
 # This file is part of a woob module.
@@ -17,22 +15,23 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+import re
 from urllib.parse import urlparse
 
-from woob.browser import PagesBrowser, URL
+from woob.browser import URL, PagesBrowser
 
 from .pages import BasePage
 
-import re
-
 
 class AgendaculturelBrowser(PagesBrowser):
-    BASEURL = ''
+    BASEURL = ""
 
-    base = URL('https://www.agendaculturel.fr/search_bw',
-               'https://(?P<region>\d{2}).agendaculturel.fr/(?P<_id>.*).html',
-               'https://\d{2}.agendaculturel.fr/.*',
-               BasePage)
+    base = URL(
+        "https://www.agendaculturel.fr/search_bw",
+        r"https://(?P<region>\d{2})\.agendaculturel\.fr/(?P<_id>.*)\.html",
+        r"https://\d{2}\.agendaculturel\.fr/.*",
+        BasePage,
+    )
 
     def __init__(self, place, *args, **kwargs):
         self.default_place = place
@@ -41,19 +40,19 @@ class AgendaculturelBrowser(PagesBrowser):
     def set_base_url(self, place):
         if not place:
             place = self.default_place
-        self.base.go(data={'query': place})
+        self.base.go(data={"query": place})
         parsed_uri = urlparse(self.page.url)
-        self.BASEURL = '{uri.scheme}://{uri.netloc}/'.format(uri=parsed_uri)
+        self.BASEURL = "{uri.scheme}://{uri.netloc}/".format(uri=parsed_uri)
 
     def list_events(self, place, date_from, date_to, categories=None):
         self.set_base_url(place)
-        query_date_from = date_from.strftime('%Y%m')
+        query_date_from = date_from.strftime("%Y%m")
         self.page.search_events(query_date_from)
-        region = re.match('https://(\d{2}).agendaculturel.fr/.*', self.page.url).group(1)
+        region = re.match(r"https://(\d{2})\.agendaculturel\.fr/.*", self.page.url).group(1)
         return self.page.list_events(region=region, date_from=date_from, date_to=date_to, categories=categories)
 
     def get_event(self, id, event=None):
-        splitted_id = id.split('.')
+        splitted_id = id.split(".")
         region = splitted_id[0]
         _id = splitted_id[1]
         return self.base.go(_id=_id, region=region).get_event(obj=event)

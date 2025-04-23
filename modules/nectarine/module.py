@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright(C) 2013 Thomas Lecavelier
 #
 # This file is part of a woob module.
@@ -16,22 +15,24 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.radio import CapRadio, Radio
 from woob.capabilities.collection import CapCollection
+from woob.capabilities.radio import CapRadio, Radio
 from woob.tools.backend import Module
+
 from .browser import NectarineBrowser
 
-__all__ = ['NectarineModule']
+
+__all__ = ["NectarineModule"]
 
 
 class NectarineModule(Module, CapRadio, CapCollection):
-    NAME = 'nectarine'
-    MAINTAINER = u'Thomas Lecavelier'
-    EMAIL = 'thomas-weboob@lecavelier.name'
-    VERSION = '3.6'
-    DESCRIPTION = u'Nectarine Demoscene Radio'
+    NAME = "nectarine"
+    MAINTAINER = "Thomas Lecavelier"
+    EMAIL = "thomas-weboob@lecavelier.name"
+    VERSION = "3.7"
+    DESCRIPTION = "Nectarine Demoscene Radio"
     # License of your module
-    LICENSE = 'AGPLv3+'
+    LICENSE = "AGPLv3+"
 
     BROWSER = NectarineBrowser
 
@@ -59,7 +60,7 @@ class NectarineModule(Module, CapRadio, CapCollection):
         return None
 
     def fill_radio(self, radio, fields):
-        if 'current' in fields:
+        if "current" in fields:
             return self.get_radio(radio.id)
         return radio
 

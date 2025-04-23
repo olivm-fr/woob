@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2010-2016 Julien Veyssier
 #
 # This file is part of a woob module.
@@ -18,31 +16,28 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser import PagesBrowser
-from woob.browser.url import URL
+from woob.browser.exceptions import BrowserHTTPNotFound
 from woob.browser.profiles import Firefox
+from woob.browser.url import URL
 
 from .pages import SearchPage, TorrentPage
 
 
-__all__ = ['KickassBrowser']
+__all__ = ["KickassBrowser"]
 
 
 class KickassBrowser(PagesBrowser):
     PROFILE = Firefox()
     TIMEOUT = 30
 
-    BASEURL = 'https://kat.cr/'
-    search = URL('usearch/(?P<pattern>.*)/\?field=seeders&sorder=desc',
-                 SearchPage)
-    torrent = URL('torrent-t(?P<id>.*).html',
-                  '.*-t[0-9]*\.html',
-                  TorrentPage)
+    BASEURL = "https://kat.cr/"
+    search = URL(r"usearch/(?P<pattern>.*)/\?field=seeders&sorder=desc", SearchPage)
+    torrent = URL(r"torrent-t(?P<id>.*)\.html", r".*-t[0-9]*\.html", TorrentPage)
 
     def iter_torrents(self, pattern):
         self.search.go(pattern=pattern)
-        #print( self.page.content)
+        # print( self.page.content)
         return self.page.iter_torrents()
 
     def get_torrent(self, fullid):

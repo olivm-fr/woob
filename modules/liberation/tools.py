@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013  Florent Fourcot
 # This file is part of a woob module.
 #
@@ -21,7 +19,7 @@ import re
 
 
 def url2id(url):
-    return re.sub(u'[^\d]', '', url.split('0Dxtor')[0].split('0I')[-1])
+    return re.sub(r"[^\d]", "", url.split("0Dxtor")[0].split("0I")[-1])
 
 
 def rssid(entry):

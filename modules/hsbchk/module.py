@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2012-2013 Romain Bignon
 #
 # This file is part of a woob module.
@@ -19,44 +17,42 @@
 
 
 from woob.capabilities.bank import CapBankWealth
-from woob.tools.backend import Module, BackendConfig
+from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import ValueBackendPassword
+
 from .browser import HSBCHK
 
 
-__all__ = ['HSBCHKModule']
+__all__ = ["HSBCHKModule"]
 
 
 class HSBCHKModule(Module, CapBankWealth):
-    NAME = 'hsbchk'
-    MAINTAINER = u'sinopsysHK'
-    EMAIL = 'sinofwd@gmail.com'
-    VERSION = '3.6'
-    LICENSE = 'LGPLv3+'
-    DESCRIPTION = 'HSBC Hong Kong'
-    CONFIG = BackendConfig(ValueBackendPassword('login',      label='User identifier', masked=False),
-                           ValueBackendPassword('password',   label='Password'),
-                           ValueBackendPassword('secret',     label=u'Memorable answer'))
+    NAME = "hsbchk"
+    MAINTAINER = "sinopsysHK"
+    EMAIL = "sinofwd@gmail.com"
+    VERSION = "3.7"
+    LICENSE = "LGPLv3+"
+    DESCRIPTION = "HSBC Hong Kong"
+    CONFIG = BackendConfig(
+        ValueBackendPassword("login", label="User identifier", masked=False),
+        ValueBackendPassword("password", label="Password"),
+        ValueBackendPassword("secret", label="Memorable answer"),
+    )
     BROWSER = HSBCHK
 
     def create_default_browser(self):
         return self.create_browser(
-            self.config['login'].get(),
-            self.config['password'].get(),
-            self.config['secret'].get()
+            self.config["login"].get(), self.config["password"].get(), self.config["secret"].get()
         )
 
     def iter_accounts(self):
-        for account in self.browser.iter_accounts():
-            yield account
+        yield from self.browser.iter_accounts()
 
     def iter_history(self, account):
-        for tr in self.browser.get_history(account):
-            yield tr
+        yield from self.browser.get_history(account)
 
     def iter_investment(self, account):
         raise NotImplementedError
 
     def iter_coming(self, account):
-        for tr in self.browser.get_history(account, coming=True):
-            yield tr
+        yield from self.browser.get_history(account, coming=True)

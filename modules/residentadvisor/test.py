@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Alexandre Morignot
 #
 # This file is part of a woob module.
@@ -18,18 +16,18 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.test import BackendTest
-from woob.capabilities.calendar import Query
-
 from datetime import datetime, timedelta
+
+from woob.capabilities.calendar import Query
+from woob.tools.test import BackendTest
 
 
 class ResidentadvisorTest(BackendTest):
-    MODULE = 'residentadvisor'
+    MODULE = "residentadvisor"
 
     def test_searchcity(self):
         query = Query()
-        query.city = u'Melbourne'
+        query.city = "Melbourne"
 
         self.assertTrue(len(list(self.backend.search_events(query))) > 0)
 
@@ -38,7 +36,7 @@ class ResidentadvisorTest(BackendTest):
 
     def test_datefrom(self):
         query = Query()
-        later = (datetime.now() + timedelta(days=31))
+        later = datetime.now() + timedelta(days=31)
         query.start_date = later
 
         event = next(self.backend.search_events(query))

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2020      Ludovic LANGE
 #
 # This file is part of a woob module.
@@ -18,17 +16,11 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
-from woob.tools.backend import Module, BackendConfig
-from woob.tools.value import Value, ValueBackendPassword
-from woob.capabilities.bill import (
-    DocumentTypes,
-    CapDocument,
-    Subscription,
-    DocumentNotFound,
-    Document,
-)
+from woob.capabilities.base import NotAvailable, find_object
+from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
 from woob.capabilities.profile import CapProfile
-from woob.capabilities.base import find_object, NotAvailable
+from woob.tools.backend import BackendConfig, Module
+from woob.tools.value import Value, ValueBackendPassword
 
 from .browser import AprilBrowser
 
@@ -45,7 +37,7 @@ class AprilModule(Module, CapDocument, CapProfile):
     MAINTAINER = "Ludovic LANGE"
     EMAIL = "llange@users.noreply.github.com"
     LICENSE = "LGPLv3+"
-    VERSION = "3.6"
+    VERSION = "3.7"
 
     BROWSER = AprilBrowser
 
@@ -63,9 +55,7 @@ class AprilModule(Module, CapDocument, CapProfile):
     )
 
     def create_default_browser(self):
-        return self.create_browser(
-            self.config["username"].get(), self.config["password"].get()
-        )
+        return self.create_browser(self.config["username"].get(), self.config["password"].get())
 
     def download_document(self, document):
         if not isinstance(document, Document):
@@ -76,9 +66,7 @@ class AprilModule(Module, CapDocument, CapProfile):
         return self.browser.open(document.url).content
 
     def get_document(self, _id):
-        return find_object(
-            self.iter_documents(None), id=_id, error=DocumentNotFound
-        )
+        return find_object(self.iter_documents(None), id=_id, error=DocumentNotFound)
 
     def iter_documents(self, subscription):
         return self.browser.iter_documents()

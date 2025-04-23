@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2014      Bezleputh
 #
 # This file is part of a woob module.
@@ -19,69 +17,72 @@
 
 from urllib.parse import urlencode
 
-from woob.browser import PagesBrowser, URL
-from woob.capabilities.housing import (TypeNotSupported, POSTS_TYPES,
-                                         HOUSE_TYPES)
-from .pages import CitiesPage, SearchPage, HousingPage, HousingPage2, PhonePage
+from woob.browser import URL, PagesBrowser
+from woob.capabilities.housing import HOUSE_TYPES, POSTS_TYPES, TypeNotSupported
+
+from .pages import CitiesPage, HousingPage, HousingPage2, PhonePage, SearchPage
 
 
 class ExplorimmoBrowser(PagesBrowser):
-    BASEURL = 'https://immobilier.lefigaro.fr'
+    BASEURL = "https://immobilier.lefigaro.fr"
 
-    cities = URL('/rest/locations\?q=(?P<city>.*)', CitiesPage)
-    search = URL('/annonces/resultat/annonces.html\?(?P<query>.*)', SearchPage)
-    housing_html = URL('/annonces/annonce-(?P<_id>.*).html', HousingPage)
-    phone = URL('/rest/classifieds/(?P<_id>.*)/phone', PhonePage)
-    housing = URL('/rest/classifieds/(?P<_id>.*)',
-                  '/rest/classifieds/\?(?P<js_datas>.*)', HousingPage2)
+    cities = URL(r"/rest/locations\?q=(?P<city>.*)", CitiesPage)
+    search = URL(r"/annonces/resultat/annonces\.html\?(?P<query>.*)", SearchPage)
+    housing_html = URL(r"/annonces/annonce-(?P<_id>.*)\.html", HousingPage)
+    phone = URL(r"/rest/classifieds/(?P<_id>.*)/phone", PhonePage)
+    housing = URL(r"/rest/classifieds/(?P<_id>.*)", r"/rest/classifieds/\?(?P<js_datas>.*)", HousingPage2)
 
-    TYPES = {POSTS_TYPES.RENT: 'location',
-             POSTS_TYPES.SALE: 'vente',
-             POSTS_TYPES.FURNISHED_RENT: 'location',
-             POSTS_TYPES.VIAGER: 'vente'}
+    TYPES = {
+        POSTS_TYPES.RENT: "location",
+        POSTS_TYPES.SALE: "vente",
+        POSTS_TYPES.FURNISHED_RENT: "location",
+        POSTS_TYPES.VIAGER: "vente",
+    }
 
-    RET = {HOUSE_TYPES.HOUSE: 'Maison',
-           HOUSE_TYPES.APART: 'Appartement',
-           HOUSE_TYPES.LAND: 'Terrain',
-           HOUSE_TYPES.PARKING: 'Parking',
-           HOUSE_TYPES.OTHER: 'Divers'}
+    RET = {
+        HOUSE_TYPES.HOUSE: "Maison",
+        HOUSE_TYPES.APART: "Appartement",
+        HOUSE_TYPES.LAND: "Terrain",
+        HOUSE_TYPES.PARKING: "Parking",
+        HOUSE_TYPES.OTHER: "Divers",
+    }
 
     def get_cities(self, pattern):
         return self.cities.open(city=pattern).get_cities()
 
-    def search_housings(self, type, cities, nb_rooms, area_min, area_max,
-                        cost_min, cost_max, house_types, advert_types):
+    def search_housings(
+        self, type, cities, nb_rooms, area_min, area_max, cost_min, cost_max, house_types, advert_types
+    ):
 
         if type not in self.TYPES:
             raise TypeNotSupported()
 
         ret = []
         if type == POSTS_TYPES.VIAGER:
-            ret = ['Viager']
+            ret = ["Viager"]
         else:
             for house_type in house_types:
                 if house_type in self.RET:
                     ret.append(self.RET.get(house_type))
 
-        data = {'location': ','.join(cities).encode('iso 8859-1'),
-                'furnished': type == POSTS_TYPES.FURNISHED_RENT,
-                'areaMin': area_min or '',
-                'areaMax': area_max or '',
-                'priceMin': cost_min or '',
-                'priceMax': cost_max or '',
-                'transaction': self.TYPES.get(type, 'location'),
-                'recherche': '',
-                'mode': '',
-                'proximity': '0',
-                'roomMin': nb_rooms or '',
-                'page': '1'}
+        data = {
+            "location": ",".join(cities).encode("iso 8859-1"),
+            "furnished": type == POSTS_TYPES.FURNISHED_RENT,
+            "areaMin": area_min or "",
+            "areaMax": area_max or "",
+            "priceMin": cost_min or "",
+            "priceMax": cost_max or "",
+            "transaction": self.TYPES.get(type, "location"),
+            "recherche": "",
+            "mode": "",
+            "proximity": "0",
+            "roomMin": nb_rooms or "",
+            "page": "1",
+        }
 
-        query = u'%s%s%s' % (urlencode(data), '&type=', '&type='.join(ret))
+        query = "{}{}{}".format(urlencode(data), "&type=", "&type=".join(ret))
 
-        return self.search.go(query=query).iter_housings(
-            query_type=type,
-            advert_types=advert_types
-        )
+        return self.search.go(query=query).iter_housings(query_type=type, advert_types=advert_types)
 
     def get_housing(self, _id, housing=None):
         return self.housing.go(_id=_id).get_housing(obj=housing)

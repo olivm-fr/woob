@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2017      Vincent A
 #
 # This file is part of a woob module.
@@ -34,18 +32,17 @@ def using_url(backend, url):
 
 
 class RedditTest(BackendTest):
-    MODULE = 'reddit'
+    MODULE = "reddit"
 
     def test_colls(self):
         colls = list(self.backend.iter_resources((BaseImage,), []))
         self.assertTrue(all(len(c.split_path) == 1 for c in colls))
-        self.assertSetEqual({'hot', 'top', 'new', 'controversial', 'rising'},
-                            set(c.split_path[0] for c in colls))
+        self.assertSetEqual({"hot", "top", "new", "controversial", "rising"}, {c.split_path[0] for c in colls})
 
     def test_images(self):
-        with using_url(self.backend, 'https://www.reddit.com/r/BotanicalPorn/'):
+        with using_url(self.backend, "https://www.reddit.com/r/BotanicalPorn/"):
             n = -1
-            for n, img in zip(range(10), self.backend.iter_resources((BaseImage,), ['hot'])):
+            for n, img in zip(range(10), self.backend.iter_resources((BaseImage,), ["hot"])):
                 self.assertTrue(img.id)
                 self.assertTrue(img.title)
                 self.assertTrue(img.url)
@@ -64,9 +61,9 @@ class RedditTest(BackendTest):
             self.assertEqual(new.author, img.author)
 
     def test_search(self):
-        with using_url(self.backend, 'https://www.reddit.com/r/BotanicalPorn/'):
+        with using_url(self.backend, "https://www.reddit.com/r/BotanicalPorn/"):
             n = -1
-            for n, img in zip(range(10), self.backend.search_image('lily')):
+            for n, img in zip(range(10), self.backend.search_image("lily")):
                 self.assertTrue(img.id)
                 self.assertTrue(img.title)
                 self.assertTrue(img.url)
@@ -106,4 +103,3 @@ class RedditTest(BackendTest):
                     expanded = True
 
         self.assertEqual(i, 9)
-

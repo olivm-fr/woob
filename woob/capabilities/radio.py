@@ -17,21 +17,23 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
-from .base import Capability, BaseObject, Field, StringField
 from woob.tools.capabilities.streaminfo import StreamInfo
 
+from .base import BaseObject, Capability, Field, StringField
 
-__all__ = ['Radio', 'CapRadio']
+
+__all__ = ["Radio", "CapRadio"]
 
 
 class Radio(BaseObject):
     """
     Radio object.
     """
-    title =         StringField('Title of radio')
-    description =   StringField('Description of radio')
-    current =       Field('Current emission', StreamInfo)
-    streams =       Field('List of streams', list)
+
+    title = StringField("Title of radio")
+    description = StringField("Description of radio")
+    current = Field("Current emission", StreamInfo)
+    streams = Field("List of streams", list)
 
 
 class CapRadio(Capability):

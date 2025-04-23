@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright(C) 2013      Vincent A
 #
 # This file is part of a woob module.
@@ -18,21 +16,22 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 
+from datetime import date, datetime
+
 from woob.tools.test import BackendTest
-from datetime import datetime, date
 
 
 class ParisKiwiTest(BackendTest):
-    MODULE = 'pariskiwi'
+    MODULE = "pariskiwi"
 
     def test_pariskiwi_event(self):
-        event = self.backend.get_event('11-9-2013_-Event_2')
+        event = self.backend.get_event("11-9-2013_-Event_2")
         self.assertTrue(event)
-        self.assertIn('Belleville', event.location)
+        self.assertIn("Belleville", event.location)
         self.assertEqual(event.price, 5)
         self.assertTrue(event.summary)
         self.assertEqual(event.start_date, datetime(2013, 11, 9, 20, 30))
-        self.assertEqual(event.url, 'https://pariskiwi.org/index.php/Agenda/Detruire_Ennui_Paris/11-9-2013_-Event_2')
+        self.assertEqual(event.url, "https://pariskiwi.org/index.php/Agenda/Detruire_Ennui_Paris/11-9-2013_-Event_2")
 
     def test_pariskiwi_list(self):
         it = self.backend.list_events(datetime.now())
