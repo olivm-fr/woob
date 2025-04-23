@@ -614,23 +614,23 @@ def parse_outgoing_transfer_transaction(line: str | None) -> dict[str, str | BIC
             logger.error("Transaction %s refers to non-existing BIC %s", line, tr_data["CHEZ"])
         tr_data["BIC"] = bic
 
-    if m := re.search(
-        r"(?P<recipient>.+) (?P<day>\d{2}) (?P<month>\d{2}) "
-        r"(?:SG (?P<branchid>\d+)|BQ (?P<bankid>\d+|\w+)) CPT (?P<acctid>\w+)",
-        tr_data["POUR"],
-    ):
-        tr_data["POUR"] = m["recipient"]
-        bankid = m["bankid"]
+        if m := re.search(
+          r"(?P<recipient>.+) (?P<day>\d{2}) (?P<month>\d{2}) "
+          r"(?:SG (?P<branchid>\d+)|BQ (?P<bankid>\d+|\w+)) CPT (?P<acctid>\w+)",
+          tr_data["POUR"],
+        ):
+          tr_data["POUR"] = m["recipient"]
+          bankid = m["bankid"]
 
-        if bankid and not bankid.isnumeric():
+          if bankid and not bankid.isnumeric():
             bankid = bic.domestic_bank_codes[0]
 
-        tr_data["IBAN"] = IBAN.generate(
+          tr_data["IBAN"] = IBAN.generate(
             bic.country_code,
             bic.domestic_bank_codes[0] if m["branchid"] else bankid,
             m["acctid"],
             m["branchid"] or "",
-        )
+          )
 
     return tr_data
 
@@ -776,7 +776,7 @@ class TransactionItemElement(ItemElement):
                 # On societe generale recipients are immediatly available.
                 recipient.enabled_at = datetime.datetime.now().replace(microsecond=0)
                 recipient.currency = "EUR"
-                recipient.bank_name = recipient.iban.bank_name
+                recipient.bank_name = recipient.iban.bank_name if recipient.iban else ''
                 self.env["recipient"] = recipient
 
         return

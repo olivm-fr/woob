@@ -374,7 +374,7 @@ class TransferHistoryPage(LoggedPage, JsonPage):
 
             def obj__recipient(self) -> Recipient:
                 beneficiary_name = Dict("libelleBeneficiaireToDisplay")(self)
-                beneficiary_iban = IBAN(Dict("ibanBeneficiaire")(self))
+                beneficiary_iban = IBAN(Dict("ibanBeneficiaire")(self), allow_invalid=True)
 
                 for recipient in Env("recipients", [])(self):
                     if recipient.iban == beneficiary_iban:
