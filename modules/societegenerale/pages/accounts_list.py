@@ -425,13 +425,13 @@ class Transaction(FrenchTransaction):
             FrenchTransaction.TYPE_PAYBACK,
         ),
         (
-            re.compile(r"^(?P<category>CARTE (?P<card>\w+)) (?P<dd>\d{2})\/(?P<mm>(0[1-9]|1[0-2])) (?P<text>.*)"),
+            re.compile(r"^(?P<category>CARTE (?P<card>\w+)) (?P<dd>\d{2})\/(?P<mm>(0[1-9]|1[0-2])) (?P<text>.*?)(?:(?: \d+)? COMMERCE ELECTRONIQUE)?$"),
             FrenchTransaction.TYPE_CARD,
         ),
         (re.compile(r"^(?P<dd>\d{2})(?P<mm>\d{2})\/(?P<text>.*?)\/?(-[\d,]+)?$"), FrenchTransaction.TYPE_CARD),
         (
             re.compile(
-                r"^(?P<category>(COTISATION(?: MENSUELLE)?|PRELEVEMENT(?: EUROPEEN)?|PRLV EUROP PONCTUEL|TELEREGLEMENT|TIP))(?: (?P<_ref>\d+))? (?:POUR CPTE DE:|DE: )?(?P<text>.*)"
+                r"^(?:SOU \w+ )?(?P<category>(COTISATION(?: MENSUELLE)?|PRELEVEMENT(?: EUROPEEN)?|PRLV EUROP PONCTUEL|TELEREGLEMENT|TIP))(?: (?P<_ref>\d+))? (?:POUR CPTE DE:|DE: )?(?P<text>.*)"
             ),
             FrenchTransaction.TYPE_ORDER,
         ),
@@ -441,7 +441,13 @@ class Transaction(FrenchTransaction):
         ),
         (
             re.compile(
-                r"^(\d+ )?VIR INSTANTANE EMIS LOGITEL POUR: (?P<text>.*) (?:\d{2} \d{2} .*?) DATE: (?P<dd>\d{2})\/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<HH>\d{2}):(?P<MM>\d{2}) (?:REF: (\d+)) (?:REF: (\w+))"
+                r"^(\d+ )?VIR INSTANTANE EMIS LOGITEL POUR: (?P<text>.*?) (?:\d{2} \d{2} .*?)?(BQ|SG) .* DATE: (?P<dd>\d{2})\/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<HH>\d{2}):(?P<MM>\d{2}) (?:REF: (\d+))(?: REF: (\w+))?"
+            ),
+            FrenchTransaction.TYPE_TRANSFER,
+        ),
+        (
+            re.compile(
+                r"^(\d+ )?VIR INSTANTANE EMIS WERO POUR: (?P<text>.*) (?:IBAN: .*?) DATE: (?P<dd>\d{2})\/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<HH>\d{2}):(?P<MM>\d{2}) (?:REF: (\d+))(?: REF: (\w+))?"
             ),
             FrenchTransaction.TYPE_TRANSFER,
         ),
