@@ -86,7 +86,7 @@ class Transaction(FrenchTransaction):
         ),
         (
             re.compile(
-                r'^(?P<category>VIR(EMEN)?T? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>[^|]*)'
+                r'^(?P<category>VIR(EMEN)?T?( INST)? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>[^|]*)'
             ),
             FrenchTransaction.TYPE_TRANSFER,
         ),
