@@ -25,9 +25,12 @@ import sys
 import traceback
 import types
 import unicodedata
+from collections.abc import Iterable, Iterator
 from time import sleep, time
+from typing import Any, Callable, Generic, Literal, TextIO, TypeVar, cast
 
 import unidecode
+from typing_extensions import Self
 
 
 __all__ = [
@@ -45,29 +48,30 @@ __all__ = [
 ]
 
 NEWLINES_RE = re.compile(r"\s+", flags=re.UNICODE)
+T = TypeVar("T")
 
 
 class NoDefaultType:
     """Type for the NO_DEFAULT constant."""
 
-    __slots__ = ()
+    __slots__: tuple[Any, ...] = ()
 
-    def __new__(mcls, *args, **kwargs):
+    def __new__(mcls, *args: Any, **kwargs: Any) -> Self:
         try:
-            return mcls.__unique_value__
+            return cast(Self, mcls.__unique_value__)  # type: ignore[has-type]
         except AttributeError:
             value = super().__new__(mcls, *args, **kwargs)
             mcls.__unique_value__ = value
             return value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "NO_DEFAULT"
 
 
 NO_DEFAULT = NoDefaultType()
 
 
-def get_backtrace(empty="Empty backtrace."):
+def get_backtrace(empty: str = "Empty backtrace.") -> str:
     """
     Try to get backtrace as string.
     Returns "Error while trying to get backtrace" on failure.
@@ -82,7 +86,9 @@ def get_backtrace(empty="Empty backtrace."):
     return empty
 
 
-def get_bytes_size(size, unit_name):
+def get_bytes_size(
+    size: float | int, unit_name: Literal["bytes", "KB", "Kib", "MB", "Mib", "GB", "GiB", "TB", "TiB"]
+) -> float:
     r"""Converts a unit and a number into a number of bytes.
 
     >>> get_bytes_size(2, 'KB')
@@ -102,7 +108,7 @@ def get_bytes_size(size, unit_name):
     return float(size * unit_data.get(unit_name, 1))
 
 
-def iter_fields(obj):
+def iter_fields(obj: object) -> Iterator[tuple[str, Any]]:
     for attribute_name in dir(obj):
         if attribute_name.startswith("_"):
             continue
@@ -111,7 +117,7 @@ def iter_fields(obj):
             yield attribute_name, attribute
 
 
-def to_unicode(text):
+def to_unicode(text: Any) -> str:
     r"""
     >>> to_unicode('ascii') == u'ascii'
     True
@@ -140,7 +146,7 @@ def to_unicode(text):
     return text.decode("windows-1252", "replace")
 
 
-def guess_encoding(stdio):
+def guess_encoding(stdio: TextIO) -> str:
     try:
         encoding = stdio.encoding or locale.getpreferredencoding()
     except AttributeError:
@@ -151,7 +157,7 @@ def guess_encoding(stdio):
     return encoding
 
 
-def limit(iterator, lim):
+def limit(iterator: Iterator[T], lim: int) -> Iterator[T]:
     """Iterate on the lim first elements of iterator."""
     count = 0
     iterator = iter(iterator)
@@ -160,7 +166,7 @@ def limit(iterator, lim):
         count += 1
 
 
-def ratelimit(group, delay):
+def ratelimit(group: str, delay: int) -> None:
     """
     Simple rate limiting.
 
@@ -198,7 +204,7 @@ def ratelimit(group, delay):
     os.utime(path, None)
 
 
-def find_exe(basename):
+def find_exe(basename: str) -> str | None:
     """
     Find the path to an executable by its base name (such as 'gpg').
 
@@ -222,12 +228,14 @@ def find_exe(basename):
             if os.path.exists(fpath) and os.access(fpath, os.X_OK):
                 return fpath
 
+    return None
+
 
 def clean_text(
     text: str,
     *,
     remove_newlines: bool = True,
-    normalize: str | bool | None = "NFC",
+    normalize: Literal["NFC", "NFD", "NFKC", "NFKD"] | bool | None = "NFC",
     transliterate: bool = False,
 ) -> str:
     """Clean a given text.
@@ -267,7 +275,7 @@ def clean_text(
     return text
 
 
-def polling_loop(*, count=None, timeout=None, delay=5):
+def polling_loop(*, count: int | None = None, timeout: float | None = None, delay: float = 5.0) -> Iterator[int]:
     """
     Delay iterator for polling loops.
 
@@ -276,11 +284,8 @@ def polling_loop(*, count=None, timeout=None, delay=5):
 
     :param count: Maximum number of iterations this loop can produce.
                   Can be None for unlimited retries.
-    :type count: int
     :param timeout: Maximum number of seconds to try the loop for.
-    :type timeout: float
     :param delay: Delay in seconds between each iteration.
-    :type delay: float
     """
 
     if count is None and timeout is None:
@@ -288,7 +293,7 @@ def polling_loop(*, count=None, timeout=None, delay=5):
             "polling_loop should be given at least a count or a timeout",
         )
 
-    counter = itertools.count()
+    counter: Iterable[int] = itertools.count()
     if count is not None:
         counter = range(count)
     if timeout is not None:
@@ -304,13 +309,13 @@ def polling_loop(*, count=None, timeout=None, delay=5):
         yield idx
 
 
-class classproperty:
+class classproperty(Generic[T]):
     """
     Use it as a decorator to define a class property.
 
     >>> class C:
     ...     @classproperty
-    ...     def VERSION(self):
+    ...     def VERSION(self) -> str:
     ...         return '3.3'
     ...
     >>> C.VERSION
@@ -319,8 +324,8 @@ class classproperty:
     '3.3'
     """
 
-    def __init__(self, f):
+    def __init__(self, f: Callable[..., T]) -> None:
         self.f = f
 
-    def __get__(self, obj, owner):
+    def __get__(self, obj: object, owner: object) -> T:
         return self.f(owner)
