@@ -1544,30 +1544,32 @@ class ContactDetailsPage(JsonBasePage):
                     elif typ == "PROFESSIONNEL":
                         obj.professional_phone = numero
 
-        location = PostalAddress()
+        if Dict("donnees/adresse", default=False)(self.doc):
 
-        ad1 = CleanText(Dict("donnees/adresse/complementAdresse1"), default=None)(self.doc)
-        ad2 = CleanText(Dict("donnees/adresse/complementAdresse2"), default=None)(self.doc)
-        num = CleanText(Dict("donnees/adresse/numeroEtVoie"), default=None)(self.doc)
+            location = PostalAddress()
 
-        adrs = []
-        if ad1:
-            adrs.append(ad1)
-        if ad2:
-            adrs.append(ad2)
-        if num:
-            adrs.append(num)
+            ad1 = CleanText(Dict("donnees/adresse/complementAdresse1"), default=None)(self.doc)
+            ad2 = CleanText(Dict("donnees/adresse/complementAdresse2"), default=None)(self.doc)
+            num = CleanText(Dict("donnees/adresse/numeroEtVoie"), default=None)(self.doc)
 
-        location.street = ", ".join(adrs)
-        location.postal_code = CleanText(Dict("donnees/adresse/codePostal", default=NotAvailable))(self.doc)
-        location.city = MultiJoin(
-            CleanText(Dict("donnees/adresse/serviceDistribution"), default=NotAvailable),
-            CleanText(Dict("donnees/adresse/ville"), default=NotAvailable),
-        )(self.doc)
-        location.country = CleanText(Dict("donnees/adresse/pays", default=NotAvailable))(self.doc)
-        location.country_code = CountryCode().filter(location.country)
+            adrs = []
+            if ad1:
+                adrs.append(ad1)
+            if ad2:
+                adrs.append(ad2)
+            if num:
+                adrs.append(num)
 
-        obj.postal_address = location
+            location.street = ", ".join(adrs)
+            location.postal_code = CleanText(Dict("donnees/adresse/codePostal", default=NotAvailable))(self.doc)
+            location.city = MultiJoin(
+                CleanText(Dict("donnees/adresse/serviceDistribution"), default=NotAvailable),
+                CleanText(Dict("donnees/adresse/ville"), default=NotAvailable),
+            )(self.doc)
+            location.country = CleanText(Dict("donnees/adresse/pays", default=NotAvailable))(self.doc)
+            location.country_code = CountryCode().filter(location.country)
+
+            obj.postal_address = location
 
         obj.email = CleanText(Dict("donnees/email", default=NotAvailable))(self.doc)
 
