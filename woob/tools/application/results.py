@@ -116,7 +116,10 @@ class ResultsCondition(IResultsCondition):
                         tocompare = condition.right
                         evalfullid = functions[condition.op](tocompare, d["id"])
                         evalid = functions[condition.op](tocompare, obj.id)
-                        myeval = evalfullid or evalid
+                        if condition.op == "!=":
+                            myeval = evalfullid and evalid
+                        else:
+                            myeval = evalfullid or evalid
                     else:
                         # We have to change the type of v, always gived as string by application
                         typed = type(d[condition.left])
