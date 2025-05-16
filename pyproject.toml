@@ -53,7 +53,17 @@ dependencies = [
     "deprecated",
 ]
 
-[project.optional-dependencies]
+[project.scripts]
+woob = "woob.launcher:Launcher.run"
+
+[project.urls]
+"Bug Tracker" = "https://gitlab.com/woob/woob/-/issues"
+"Documentation" = "https://woob.dev"
+"Homepage" = "https://woob.tech"
+"Release notes" = "https://gitlab.com/woob/woob/-/releases"
+"Source" = "https://gitlab.com/woob/woob"
+
+[dependency-groups]
 dev = [
     "asttokens",
     "commitizen",
@@ -92,16 +102,6 @@ typing = [
     "types-simplejson",
     "types-termcolor",
 ]
-
-[project.scripts]
-woob = "woob.launcher:Launcher.run"
-
-[project.urls]
-"Bug Tracker" = "https://gitlab.com/woob/woob/-/issues"
-"Documentation" = "https://woob.dev"
-"Homepage" = "https://woob.tech"
-"Release notes" = "https://gitlab.com/woob/woob/-/releases"
-"Source" = "https://gitlab.com/woob/woob"
 
 [tool.black]
 line-length = 120
@@ -188,7 +188,7 @@ deps = [
     "pytest",
     "pytest-cov",
 ]
-extras = ["tests"]
+dependency_groups = ["tests"]
 commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules", {replace = "posargs", default = [], extend = true}]]
 
 [tool.tox.env.bandit]
@@ -211,5 +211,5 @@ commands = [
 
 [tool.tox.env.docs]
 allowlist_externals = ["make"]
-extras = ["docs", "tests"]
+dependency_groups = ["docs", "tests"]
 commands = [["make", "-C", "docs", "html"]]

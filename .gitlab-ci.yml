@@ -23,7 +23,7 @@ stages:
   image: python:3.9
   before_script:
     - python -m pip install --upgrade pip setuptools
-    - python -m pip install --upgrade -e .[dev]
+    - python -m pip install --upgrade -e . --group dev
 
 .pre-commit:
   <<: *except-default
