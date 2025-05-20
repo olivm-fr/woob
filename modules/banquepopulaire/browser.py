@@ -55,9 +55,9 @@ from .pages import (
     HomePage,
     InfoTokensPage,
     JsFilePage,
-    JsFilePageSeConnecterChunk,
     JsFilePageEspaceClient,
     JsFilePageEspaceClientChunk,
+    JsFilePageSeConnecterChunk,
     LastConnectPage,
     LoggedOut,
     LoginPage,
@@ -145,7 +145,9 @@ class BanquePopulaire(TwoFactorBrowser):
     login_page = URL(r"https://[^/]+/auth/UI/Login.*", LoginPage)
     new_login = URL(r"https://www.icgauth.banquepopulaire.fr/se-connecter/sso", NewLoginPage)
     js_file = URL(r"https://[^/]+/.*se-connecter/main-.*.js$", JsFilePage)
-    js_seconnecter_chunk = URL(r"https://www.icgauth.banquepopulaire.fr/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk)
+    js_seconnecter_chunk = URL(
+        r"https://www.icgauth.banquepopulaire.fr/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk
+    )
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
@@ -480,7 +482,7 @@ class BanquePopulaire(TwoFactorBrowser):
         if oauth_token_client_id == "":
             self.logger.debug("No oauth_token_client_id found in chunks")
             raise BrowserUnavailable("No oauth_token_client_id found in chunks")
-        
+
         if oauth_autorize_client_id == "":
             self.logger.debug("No oauth_autorize_client_id found in chunks")
             raise BrowserUnavailable("No oauth_autorize_client_id found in chunks")
