@@ -128,9 +128,6 @@ class NewLoginPage(HTMLPage):
 
 
 class JsFilePage(_JsFilePage):
-    # def get_client_id(self):
-    #    return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
-
     def getChunkList(self):
         return re.findall(r"chunk-[A-Z0-9]{8}.js", self.text)
 
