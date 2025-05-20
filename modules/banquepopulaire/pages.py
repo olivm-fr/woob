@@ -17,6 +17,7 @@
 
 # flake8: compatible
 
+import json
 import re
 from io import BytesIO
 
@@ -385,3 +386,30 @@ class AccountsPage(LoggedPage, MyHTMLPage):
 
 class LastConnectPage(LoggedPage, RawPage):
     pass
+
+
+class CategoryPage(LoggedPage, RawPage):
+    pass
+
+
+class CategoryLoader:
+    def __init__(self):
+        self.data = None
+
+    def load(self, json_content):
+        self.data = json.loads(json_content)
+
+    def get_name_by_id(self, target_id):
+        def search(categories):
+            for cat in categories:
+                if cat["id"] == target_id:
+                    return cat["name"]
+                if "children" in cat and cat["children"]:
+                    result = search(cat["children"])
+                    if result:
+                        return result
+            return None
+
+        if not self.data:
+            raise ValueError("Data not loaded. Call load() first.")
+        return search(self.data.get("data", []))

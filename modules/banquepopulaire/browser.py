@@ -51,7 +51,12 @@ from .pages import (
     AuthorizeErrorPage,
     AuthorizePage,
     BPOVirtKeyboard,
+<<<<<<< HEAD
     ConstPage,
+=======
+    CategoryLoader,
+    CategoryPage,
+>>>>>>> d330feae8 (Implement category support on Banque Populaire)
     ErrorPage,
     HomePage,
     InfoTokensPage,
@@ -194,6 +199,8 @@ class BanquePopulaire(TwoFactorBrowser):
     )
 
     authorize_error = URL(r"/dacswebssoissuer/AuthnRequestServlet", AuthorizeErrorPage, base="URL_ICG")
+
+    category_page = URL(r"/pfm/user/v1.1/categories", CategoryPage, base="URL_RS_AUTH")
 
     redirect_error_page = URL(r"https://[^/]+/portailinternet/?$", RedirectErrorPage)
 
@@ -993,6 +1000,25 @@ class BanquePopulaire(TwoFactorBrowser):
     @need_login
     def iter_history(self, account: BanquePopulaireAccount, coming=False):
         self.updateBearerForDataConsumptionIfNeeded()
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
+            "Authorization": "Bearer %s" % self.access_token,
+            "Origin": "https://www.banquepopulaire.fr",
+            "Referer": "https://www.banquepopulaire.fr/",
+            "Host": "www.rs-ext-bad-ib.banquepopulaire.fr",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+        }
+
+        params = {"businessType": "UserProfile", "subcategoryStructure": "Tree", "culture": "fr-FR"}
+
+        self.category_page.go(headers=headers, params=params)
+
+        categories = CategoryLoader()
+        categories.load(self.page.doc)
+
         pagination_start = 0
         pagination_count = 25
         current_skip_value = pagination_start
@@ -1047,7 +1073,10 @@ class BanquePopulaire(TwoFactorBrowser):
                         transaction.label += parsedData["label3"]
 
                 transaction.amount = element["amount"]
-                # transaction.category  ####Must be done with a correlation with json content of www.rs-ex-ath-groupe.banquepopulaire.fr/pfm/user/v1.1/categories
+                try:
+                    transaction.category = categories.get_name_by_id(element["categoryId"])
+                except Exception as e:
+                    self.logger.debug("Fail to retrieve category for %s", transaction.label)
 
                 yield transaction
 
