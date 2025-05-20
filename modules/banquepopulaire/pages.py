@@ -124,17 +124,41 @@ class UnavailablePage(LoggedPage, MyHTMLPage):
 
 class NewLoginPage(HTMLPage):
     def get_main_js_file_url(self):
-        return Attr('//script[contains(@src, "main.")]', "src")(self.doc)
+        return Attr('//script[contains(@src, "main-")]', "src")(self.doc)
 
 
 class JsFilePage(_JsFilePage):
-    def get_client_id(self):
-        return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
+    #def get_client_id(self):
+    #    return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
+    
+    def getChunkList(self):
+        return re.findall(r"chunk-[A-Z0-9]{8}.js", self.text)
 
     def get_user_info_client_id(self):
         return Regexp(
             pattern=r'https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token",resourceServerUrl:"https://www.rs-ano-bad-ib.banquepopulaire.fr",clientId:"([^"]+)"'
         ).filter(self.text)
+
+
+class JsFilePageSeConnecterChunk(_JsFilePage):
+    #content to track : 
+    #,anonymous:{
+    #authServerUrl:"https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token",resourceServerUrl:"https://www.rs-ano-bad-ib.banquepopulaire.fr",clientId:"8f3121ec-126e-4acb-9f01-3130ecda458a",scopes:"",tokenLifeTime:"3600"}
+    #}
+    def contains_oauth_token_client_id(self):
+        #return bool(re.search(r"clientId: \"[a-z0-9-]{36}\"", self.text))
+        return bool(re.search(r'https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token",resourceServerUrl:"https://www.rs-ano-bad-ib.banquepopulaire.fr",clientId:"([^"]+)"', self.text))
+
+    def get_oauth_token_client_id(self):
+        return Regexp(
+            pattern=r'https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token",resourceServerUrl:"https://www.rs-ano-bad-ib.banquepopulaire.fr",clientId:"([^"]+)"'
+        ).filter(self.text)
+
+    def get_oauth_autorize_client_id(self):
+        return Regexp(
+            pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"'
+        ).filter(self.text)
+    #gatewayAccess:{"EXT-ATH":{authenticated:{authServerUrl:"https://www.as-ext-bad-ib.banquepopulaire.fr",resourceServerUrl:"https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi",authorizePath:"/api/oauth/v2/authorize",clientId:"adad0322-47dd-4372-8512-76f3929def9c",
 
 
 class RootDashBoardPage(HTMLPage):

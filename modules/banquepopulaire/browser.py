@@ -55,6 +55,7 @@ from .pages import (
     HomePage,
     InfoTokensPage,
     JsFilePage,
+    JsFilePageSeConnecterChunk,
     JsFilePageEspaceClient,
     JsFilePageEspaceClientChunk,
     LastConnectPage,
@@ -143,7 +144,8 @@ class BanquePopulaire(TwoFactorBrowser):
     new_first_login_page = URL(r"/se-connecter/sso")
     login_page = URL(r"https://[^/]+/auth/UI/Login.*", LoginPage)
     new_login = URL(r"https://www.icgauth.banquepopulaire.fr/se-connecter/sso", NewLoginPage)
-    js_file = URL(r"https://[^/]+/.*se-connecter/main\..*.js$", JsFilePage)
+    js_file = URL(r"https://[^/]+/.*se-connecter/main-.*.js$", JsFilePage)
+    js_seconnecter_chunk = URL(r"https://www.icgauth.banquepopulaire.fr/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk)
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
@@ -463,7 +465,26 @@ class BanquePopulaire(TwoFactorBrowser):
         main_js_file = self.page.get_main_js_file_url()
         self.location(main_js_file)
 
-        client_id = self.page.get_client_id()
+        oauth_token_client_id: str = ""
+        oauth_autorize_client_id: str = ""
+        chunk_list_urls = self.page.getChunkList()
+
+        # Retrieve the ids hidden in JS chunks
+        for chunk_url in chunk_list_urls:
+            self.location(chunk_url)
+            if self.page.contains_oauth_token_client_id():
+                oauth_token_client_id = self.page.get_oauth_token_client_id()
+                oauth_autorize_client_id = self.page.get_oauth_autorize_client_id()
+                break
+
+        if oauth_token_client_id == "":
+            self.logger.debug("No oauth_token_client_id found in chunks")
+            raise BrowserUnavailable("No oauth_token_client_id found in chunks")
+        
+        if oauth_autorize_client_id == "":
+            self.logger.debug("No oauth_autorize_client_id found in chunks")
+            raise BrowserUnavailable("No oauth_autorize_client_id found in chunks")
+
         nonce = str(uuid4())  # Not found anymore
 
         headers = {
@@ -475,7 +496,7 @@ class BanquePopulaire(TwoFactorBrowser):
 
         data = {
             "grant_type": "client_credentials",
-            "client_id": self.page.get_user_info_client_id(),
+            "client_id": oauth_token_client_id,
             "scope": " ",
             "cdetab": self.cdetab,
         }
@@ -514,7 +535,7 @@ class BanquePopulaire(TwoFactorBrowser):
 
         params = {
             "cdetab": self.cdetab,
-            "client_id": client_id,
+            "client_id": oauth_autorize_client_id,
             "response_type": "id_token token",
             "nonce": nonce,
             "response_mode": "form_post",
