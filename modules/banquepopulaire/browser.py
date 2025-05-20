@@ -1075,7 +1075,7 @@ class BanquePopulaire(TwoFactorBrowser):
                 transaction.amount = element["amount"]
                 try:
                     transaction.category = categories.get_name_by_id(element["categoryId"])
-                except Exception as e:
+                except Exception:
                     self.logger.debug("Fail to retrieve category for %s", transaction.label)
 
                 yield transaction
