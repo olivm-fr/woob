@@ -272,6 +272,7 @@ class AccountsPage(JsonBasePage):
             # Useful for navigation
             obj__internal_id = Dict("idTechnique")
             obj__prestation_id = Dict("id")
+            obj__internal_id_mobile = Dict("idTechniquePourMobile")
 
             def obj__loan_type(self):
                 if Field("type")(self) in (
@@ -1286,6 +1287,9 @@ class MarketPage(HTMLLoggedPage):
 
     def get_market_order_link(self):
         return Link('//a[contains(text(), "Suivi des ordres")]', default=None)(self.doc)
+
+    def get_code_type_gestion(self):
+        return CleanText(Attr('//input[@id="codeTypeGestion"]', "value", default=""))(self.doc)
 
     def market_pagination(self):
         # Next page is handled by js. Need to build the right url by changing params in current url

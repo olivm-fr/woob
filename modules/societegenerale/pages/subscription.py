@@ -24,6 +24,7 @@ from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import BrowserURL, CleanText, DateTime, Env, Eval, Field, Format, Regexp
 from woob.browser.pages import JsonPage, LoggedPage, RawPage
+from woob.capabilities.base import NotAvailable
 from woob.capabilities.bill import Document, DocumentTypes, Subscription
 from woob.tools.date import parse_french_date
 
@@ -173,6 +174,15 @@ class SubscriptionsPage(JsonBasePage):
                     return "docs-transverses"
                 else:
                     return CleanText(Dict("numeroCompteFormate", default="NOTFOUND"), replace=[(" ", "")])(self)
+
+            obj__id_technique = CleanText(Dict("prestationIdTechnique", default=NotAvailable))
+
+            def obj__is_investment(self):
+                return CleanText(Dict("infosProduitPrestation/typePrestation", default="NOTFOUND"))(
+                    self
+                ) == "EPARGNE_FINANCIERE" and not bool(
+                    Dict("infosProduitPrestation/documentTransverse", default=False)(self)
+                )
 
             obj_subscriber = Env("subscriber")
             obj__internal_id = Dict("prestationIdTechnique", default="NOTFOUND")

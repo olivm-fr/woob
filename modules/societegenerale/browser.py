@@ -20,6 +20,7 @@
 import time
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import quote_plus
 
 from dateutil import tz
 from dateutil.relativedelta import relativedelta
@@ -88,6 +89,7 @@ from .pages.login import (
     SkippableActionNeededPage,
     VkImage,
 )
+from .pages.managed import ManagedAvailableDates, ManagedDocTypes, ManagedDocument, ManagedIndex, ManagedVerify
 from .pages.subscription import DocumentsPage, PdfPage, SubscriptionsPage
 from .pages.transfer import AddRecipientPage, SignRecipientPage, SignTransferPage, TransferHistoryPage, TransferJson
 
@@ -322,6 +324,7 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
         data = {
             "code": self.code,
             "csa_op": "auth",
+            "cible": 300,
         }
         self.location("/sec/csa/check.json", data=data)
 
@@ -344,6 +347,17 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     )
     rib_pdf_page = URL(r"/com/icd-web/cbo/pdf/rib-authsec.pdf", PdfPage)
     subscriptions = URL(r"/icd/epe/data/get-all-abonnements-authsec.json", SubscriptionsPage)
+    managed_index = URL(r"/com/icd-web/tor/tor-gsm-index.html", ManagedIndex)
+    managed_verify = URL(
+        r"/icd/tor/data/tor-verifHashIdPrestation-authsec.json\?b64e200_hashIdPrestation=(?P<id_tech>.*)",
+        ManagedVerify,
+    )
+    managed_doc_types = URL(r"/icd/tor/data/tor-defineNavDocTypes-authsec.json", ManagedDocTypes)
+    managed_available_dates = URL(r"/icd/tor/data/tor-buildListeDate-authsec.json", ManagedAvailableDates)
+    managed_documents = URL(
+        r"/icd/tor/data/tor-getListDocByTypeDocAndYear-authsec.json\?cl200_typeDoc=(?P<type_doc>.*)&cl200_year=(?P<date_year>.*)",
+        ManagedDocument,
+    )
 
     # Bank
     accounts_main_page = URL(
@@ -987,8 +1001,18 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         except (ProfileMissing, BrowserUnavailable):
             subscriber = NotAvailable
 
+        self.accounts.go()
+        accounts = self.page.iter_accounts()
+        account_by_idT = {act._internal_id: act for act in accounts}
+
         self.subscriptions.go()
-        return self.page.iter_subscription(subscriber=subscriber)
+
+        for sub in self.page.iter_subscription(subscriber=subscriber):
+            if sub._id_technique in account_by_idT:
+                account = account_by_idT[sub._id_technique]
+                sub._prestation_id = account._prestation_id
+                sub._internal_id_mobile = account._internal_id_mobile
+            yield sub
 
     def _fetch_rib_document(self, subscription):
         d = Document()
@@ -1036,12 +1060,35 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
             end_date = begin_date - relativedelta(day=1)
             begin_date = end_date - relativedelta(months=3)
 
+    def _iter_managed_accounts(self, subscription):
+        if subscription._is_investment:
+            self.market.go(params={"action": 9, "idPrest": subscription._prestation_id})
+            code_type_gestion = self.page.get_code_type_gestion()
+            if code_type_gestion and code_type_gestion == "Gestion sous mandat":
+                self.managed_verify.go(id_tech=quote_plus(subscription._internal_id_mobile))
+                self.location(
+                    "https://particuliers.sg.fr/icd/tor/data/tor-listeMandat-authsec.json?cl200_filtreTypeGestion=gsm"
+                )
+                self.managed_doc_types.go()
+                doctypes = list(self.page.iter_document_types())
+
+                self.managed_available_dates.go()
+                dates = self.page.dates()
+
+                for date in sorted(dates, reverse=True):
+                    for doctype in doctypes:
+                        self.managed_documents.go(type_doc=doctype, date_year=date)
+                        yield from self.page.iter_documents(subid=subscription.id, type_doc=doctype)
+        return []
+
     @need_login
     def iter_documents(self, subscription):
         iterables = ()
         if subscription._has_rib:
             iterables += ([self._fetch_rib_document(subscription)],)
         iterables += (self._iter_statements(subscription),)
+
+        iterables += (self._iter_managed_accounts(subscription),)
 
         yield from merge_iterators(*iterables)
 
