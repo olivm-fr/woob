@@ -45,6 +45,7 @@ from woob.exceptions import (
     OTPSentType,
     SentOTPQuestion,
 )
+from woob.tools.capabilities.bill.documents import merge_iterators
 from woob.tools.decorators import retry
 from woob.tools.value import Value, ValueBool
 
@@ -994,6 +995,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         d.type = DocumentTypes.RIB
         d.format = "pdf"
         d.label = "RIB"
+        d.date = datetime.today()
         return d
 
     def _iter_statements(self, subscription):
@@ -1029,8 +1031,11 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
 
     @need_login
     def iter_documents(self, subscription):
-        yield self._fetch_rib_document(subscription)
-        yield from self._iter_statements(subscription)
+        iterables = ()
+        iterables += ([self._fetch_rib_document(subscription)],)
+        iterables += (self._iter_statements(subscription),)
+
+        yield from merge_iterators(*iterables)
 
     @need_login
     def iter_documents_by_types(self, subscription, accepted_types):

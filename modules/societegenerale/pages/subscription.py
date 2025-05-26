@@ -21,7 +21,7 @@ from datetime import datetime
 
 from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import BrowserURL, CleanText, Date, Env, Eval, Field, Format
+from woob.browser.filters.standard import BrowserURL, CleanText, DateTime, Env, Eval, Field, Format
 from woob.browser.pages import JsonPage, LoggedPage, RawPage
 from woob.capabilities.bill import Document, DocumentTypes
 
@@ -46,7 +46,7 @@ class DocumentsPage(LoggedPage, JsonPage):
             obj_label = Format(
                 "%s au %s", CleanText(Dict("labelReleve")), Eval(lambda x: x.strftime("%d/%m/%Y"), Field("date"))
             )
-            obj_date = Date(CleanText(Dict("dateArrete")), parse_func=parse_from_timestamp)
+            obj_date = DateTime(CleanText(Dict("dateArrete")), parse_func=parse_from_timestamp, strict=False)
             obj_type = DocumentTypes.STATEMENT
             obj_format = "pdf"
             # this url is stateful and has to be called when we are on
