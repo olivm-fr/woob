@@ -350,7 +350,9 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         AccountsMainPage,
     )
     account_details_page = URL(r"/restitution/cns_detailPrestation.html", AccountDetailsPage)
-    accounts = URL(r"/icd/cbo/data/liste-prestations-authsec.json\?n10_avecMontant=1", AccountsPage)
+    accounts = URL(
+        r"/icd/cbo/data/liste-prestation-v2-authsec.json\?an200_typePrestations=PRESTATIONS_AVEC_MONTANT", AccountsPage
+    )
     history = URL(r"/icd/cbo/data/liste-operations-authsec.json", HistoryPage)
     loans = URL(r"/icd/espaces-thematiques/data/getLoansRecovery.json", LoansPage)
     revolving_rate = URL(r"icd/cbo/data/recapitulatif-prestation-authsec.json", RevolvingDetailsPage)
