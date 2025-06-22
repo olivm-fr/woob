@@ -68,6 +68,7 @@ from .pages import (
     SynthesePage,
     TransactionPage,
     UnavailablePage,
+    KeysPage
 )
 
 
@@ -150,6 +151,7 @@ class BanquePopulaire(TwoFactorBrowser):
     )
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
+    keys_pages = URL(r"https://www.banquepopulaire.fr/espace-client/assets/xld-keys.json", KeysPage)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
     authorize = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/authorize", AuthorizePage)
     login_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/consume", LoginTokensPage)
@@ -273,7 +275,11 @@ class BanquePopulaire(TwoFactorBrowser):
             self.term_id = str(uuid4())
 
         try:
-            self.new_first_login_page.go(params={"service": "cyber"})
+            headers = {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",  # Mandatory, else you've got an HTML page.
+                "Referer": "https://www.banquepopulaire.fr/bpgo/",
+            }
+            self.new_first_login_page.go(headers=headers, params={"service": "cyber"})
         except (ClientError, HTTPNotFound) as e:
             if e.response.status_code in (403, 404):
                 # Sometimes the website makes some redirections that leads
@@ -776,25 +782,13 @@ class BanquePopulaire(TwoFactorBrowser):
 
         self.login_verifier, self.login_challenge = self.get_pkce_codes()
 
-        self.root_clientdashboard_page.go()
-
-        main_js_file, chunk_version = self.page.get_main_js_file_url_and_version()
-
-        self.location(main_js_file, params={"v": chunk_version})
-
-        client_id: str = ""
-        chunk_list_urls = self.page.getChunkList()
-
-        # Retrieve the ids hidden in JS chunks
-        for chunk_url in chunk_list_urls:
-            self.location(chunk_url, params={"v": chunk_version})
-            if self.page.contains_client_id():
-                client_id = self.page.get_client_id()
-                break
-
-        if client_id == "":
-            self.logger.debug("No client_id found in chunks")
-            raise BrowserUnavailable("No client_id found in chunks")
+        
+        headers = {
+            "Accept": "*/*",
+            "Referer": "https://www.banquepopulaire.fr/espace-client/",
+        }
+        self.keys_pages.go(headers=headers)
+        client_id = self.page.get_client_id()
 
         bpcesta = self.get_bpcesta_SSO()
         claims = {
@@ -831,6 +825,7 @@ class BanquePopulaire(TwoFactorBrowser):
             "display": "page",
             "code_challenge": self.login_challenge,
             "code_challenge_method": "S256",
+            "display": "page"
         }
 
         headers = {
