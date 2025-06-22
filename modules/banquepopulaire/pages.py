@@ -17,8 +17,8 @@
 
 # flake8: compatible
 
-import re
 import json
+import re
 from io import BytesIO
 
 from PIL import Image, ImageFilter
@@ -139,14 +139,6 @@ class JsFilePage(_JsFilePage):
 
 
 class JsFilePageSeConnecterChunk(_JsFilePage):
-    def contains_client_id(self):
-        return bool(re.search(r"clientId:\"[a-z0-9-]{36}\"", self.text))
-
-    def get_client_id(self):
-        match_e = re.search(r"clientId:\"[a-z0-9-]{36}\"", self.text).group(0)
-        client_id = re.search(r"[a-z0-9-]{36}", match_e).group(0)
-
-        return client_id
 
     def contains_oauth_token_client_id(self):
         return bool(
@@ -195,7 +187,8 @@ class KeysPage(JsonPage):
         data = json.loads(self.text)
 
         return data["#CLIENT_ID_PAS#"]
-    
+
+
 class SynthesePage(JsonPage):
     def get_raw_json(self):
         return self.text

@@ -58,6 +58,7 @@ from .pages import (
     JsFilePageEspaceClient,
     JsFilePageEspaceClientChunk,
     JsFilePageSeConnecterChunk,
+    KeysPage,
     LastConnectPage,
     LoggedOut,
     LoginPage,
@@ -68,7 +69,6 @@ from .pages import (
     SynthesePage,
     TransactionPage,
     UnavailablePage,
-    KeysPage
 )
 
 
@@ -782,7 +782,6 @@ class BanquePopulaire(TwoFactorBrowser):
 
         self.login_verifier, self.login_challenge = self.get_pkce_codes()
 
-        
         headers = {
             "Accept": "*/*",
             "Referer": "https://www.banquepopulaire.fr/espace-client/",
@@ -825,7 +824,7 @@ class BanquePopulaire(TwoFactorBrowser):
             "display": "page",
             "code_challenge": self.login_challenge,
             "code_challenge_method": "S256",
-            "display": "page"
+            "display": "page",
         }
 
         headers = {
