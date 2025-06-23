@@ -824,7 +824,6 @@ class BanquePopulaire(TwoFactorBrowser):
             "display": "page",
             "code_challenge": self.login_challenge,
             "code_challenge_method": "S256",
-            "display": "page",
         }
 
         headers = {
