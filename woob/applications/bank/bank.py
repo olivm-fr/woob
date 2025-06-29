@@ -821,7 +821,7 @@ class Appbank(CaptchaMixin, ReplApplication):
 
         self.start_format(
             account=account,
-            start_date=transactions[-1].date,
+            start_date=transactions[-1].date if transactions else end_date,
             end_date=datetime.date.today(),
         )
 
