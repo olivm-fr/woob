@@ -85,6 +85,7 @@ class OfxFormatter(IFormatter):
     coming = Decimal(0)
     account_type = 0
     seen = set()
+    document = None
 
     def start_format(
         self,
@@ -261,7 +262,8 @@ class OfxFormatter(IFormatter):
         return
 
     def flush(self):
-        self.output(ET.tostring(self.document, encoding="UTF-8", pretty_print=True).decode("utf-8"))
+        if self.document:
+            self.output(ET.tostring(self.document, encoding="UTF-8", pretty_print=True).decode("utf-8"))
 
 
 class QifFormatter(IFormatter):
