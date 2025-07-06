@@ -32,7 +32,7 @@ __all__ = ["BanquePopulaireModule"]
 
 class BanquePopulaireModule(Module, CapBankWealth):
     NAME = "banquepopulaire"
-    MAINTAINER = "Etienne RABY"
+    MAINTAINER = "Etienne raby"
     EMAIL = "mail@eraby.fr"
     DEPENDENCIES = ("caissedepargne", "linebourse")
     DESCRIPTION = "Banque Populaire"
