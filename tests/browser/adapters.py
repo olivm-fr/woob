@@ -17,8 +17,8 @@ class TestAdapter(TestCase):
             HTTP_ADAPTER_CLASS = LowSecHTTPAdapter
 
         permissive_browser = PermissiveBrowser()
-        # r = permissive_browser.open("https://dh1024.badssl.com/")
-        # self.assertEqual(r.status_code, 200)
+        r = permissive_browser.open("https://dh1024.badssl.com/")
+        self.assertEqual(r.status_code, 200)
 
         # No side effects.
         r = permissive_browser.open("http://example.org")
