@@ -754,9 +754,13 @@ class AccountsPage(LoggedPage, HTMLPage):
 
         class item_account(item_account_generic):
             def condition(self):
-                _type = Field("type")(self)
-                if "Valorisation Totale De Vos Portefeuilles Titres" in Field("label")(self):
+                _label = Field("label")(self)
+                if "Valorisation Totale De Vos Portefeuilles Titres" in _label:
                     return False
+                if "Gestion De Mes Dépenses" in _label:
+                    return False
+
+                _type = Field("type")(self)
                 return _type not in (
                     Account.TYPE_LOAN,
                     Account.TYPE_MORTGAGE,
