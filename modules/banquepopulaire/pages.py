@@ -184,9 +184,7 @@ class JsFilePageEspaceClientChunk(_JsFilePage):
 
 class KeysPage(JsonPage):
     def get_client_id(self):
-        data = json.loads(self.text)
-
-        return data["#CLIENT_ID_PAS#"]
+        return Dict("#CLIENT_ID_PAS#")(self.doc)
 
 
 class SynthesePage(JsonPage):
