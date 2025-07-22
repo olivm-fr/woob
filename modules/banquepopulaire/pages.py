@@ -17,7 +17,6 @@
 
 # flake8: compatible
 
-import json
 import re
 from io import BytesIO
 
