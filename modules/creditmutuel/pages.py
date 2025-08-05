@@ -487,6 +487,13 @@ class item_account_generic(ItemElement):
         re.compile(r"Etalis"),
     ]
 
+    # Dummy lines in the list of accounts.
+    # The casing assumes the label field has been cleaned up.
+    DUMMY_ACCOUNT_ENTRY = [
+        "Valorisation Totale De Vos Portefeuilles Titres",
+        "Gestion De Mes Dépenses",
+    ]
+
     def condition(self):
         if len(self.el.xpath("./td")) < 2:
             return False
@@ -511,7 +518,14 @@ class item_account_generic(ItemElement):
 
     def loan_condition(self, check_no_details=False):
         _type = Field("type")(self)
+
         label = Field("label")(self)
+
+        # Filter out dummy account lines.
+        for dummy in item_account_generic.DUMMY_ACCOUNT_ENTRY:
+            if dummy in label:
+                return False
+
         # The 'lien_inter_sites' link leads to a 404 and is not a link to loans details.
         # The link name on the website is : Vos encours mobilisation de créances
         details_link = Link('.//a[not(contains(@href, "lien_inter_sites"))]', default=None)(self)
@@ -755,10 +769,9 @@ class AccountsPage(LoggedPage, HTMLPage):
         class item_account(item_account_generic):
             def condition(self):
                 _label = Field("label")(self)
-                if "Valorisation Totale De Vos Portefeuilles Titres" in _label:
-                    return False
-                if "Gestion De Mes Dépenses" in _label:
-                    return False
+                for dummy in item_account_generic.DUMMY_ACCOUNT_ENTRY:
+                    if dummy in _label:
+                        return False
 
                 _type = Field("type")(self)
                 return _type not in (
