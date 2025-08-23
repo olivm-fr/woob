@@ -156,7 +156,7 @@ class CCFBrowser(CmsoParBrowser):
             balance = list(self.page.iter_balances())[0 if account.type == Account.TYPE_CHECKING else 1]  # valorisation
             account.balance = balance.amount
             account.iban = ibans.get(account.id)
-            if account.iban:
+            if account.iban and hasattr(account.iban, "account_code"):
                 account.number = account.iban.account_code
             date_to = (date.today() + relativedelta(days=5)).strftime("%Y-%m-%dT11:00:00.000Z")
             self.balances_comings.go(account_id=account.id, params={"dateTo": date_to})
