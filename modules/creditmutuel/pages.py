@@ -1211,7 +1211,7 @@ class Transaction(FrenchTransaction):
         (re.compile(r"^(F )?(?P<text>COMMISSION D'INTERVENTION)"), FrenchTransaction.TYPE_BANK),
         (re.compile(r"^EXT.AGIOS"), FrenchTransaction.TYPE_BANK),
         (re.compile(r"^(?P<text>(?P<category>INTERETS).*)"), FrenchTransaction.TYPE_BANK),
-        (re.compile(r"(?P<text>PREL\.(SOC|OBL).*)"), FrenchTransaction.TYPE_BANK),
+        (re.compile(r"(?P<text>PREL\.( )?(SOC|OBL).*)"), FrenchTransaction.TYPE_BANK),
         (re.compile(r"^(REMISE|REM CHQ) (?P<text>.*)"), FrenchTransaction.TYPE_DEPOSIT),
         (re.compile(r"^VRST (?P<text>.*)"), FrenchTransaction.TYPE_CASH_DEPOSIT),
         (re.compile(r"^VERSEMT PERIOD"), FrenchTransaction.TYPE_DEPOSIT),
