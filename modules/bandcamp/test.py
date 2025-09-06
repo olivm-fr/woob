@@ -23,7 +23,7 @@ class BandcampTest(BackendTest):
 
     def test_search_audio(self):
         file = next(self.backend.search_audio("la nuit des sales bêtes"))
-        self.assertEqual("audio.degelite.la-nuit-des-sales-b-tes", file.id)
+        self.assertEqual("audio.casiojudiciaire.la-nuit-des-sales-b-tes", file.id)
         assert file.duration
         self.assertEqual("la nuit des sales bêtes", file.title.lower())
         self.assertEqual("casio judiciaire", file.author.lower())
@@ -33,7 +33,7 @@ class BandcampTest(BackendTest):
     def test_search_album(self):
         album = next(self.backend.search_album("disco quake"))
         assert album.id.startswith("album.")
-        self.assertEqual("202project", album.author.lower())
+        self.assertEqual("Jean-Pierre Marsal", album.author)
         self.assertEqual("disco quake", album.title.lower())
         self.assertEqual(12, len(album.tracks_list))
         self.assertEqual("https://202project.bandcamp.com/album/disco-quake", album.url)

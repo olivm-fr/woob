@@ -20,6 +20,7 @@ import re
 
 from woob.browser.elements import ItemElement, ListElement, method
 from woob.browser.filters.html import AbsoluteLink, Attr
+from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Date, Env, Field, Format, Regexp
 from woob.browser.pages import HTMLPage, pagination
 from woob.capabilities.audio import Album, BaseAudio
@@ -99,13 +100,18 @@ class AlbumPage(HTMLPage):
     class get_album(ItemElement):
         klass = Album
 
+        def parse(self, el: ItemElement) -> None:
+            """Extract embedded data sources in HTML content."""
+            info = json.loads(CleanText('//script[@type="application/ld+json"]')(self))
+            self.env["datePublished"] = Dict("datePublished")(info)
+            self.env["author"] = Dict("byArtist/name")(info)
+
         obj_id = Format("album.%s.%s", Env("band"), Env("album"))
         obj_title = CleanText('//h2[@class="trackTitle"]')
-        obj_author = CleanText('//span[@itemprop="byArtist"]')
-        _date = Date(Attr('//meta[@itemprop="datePublished"]', "content"))
+        obj_author = Env("author")
 
         def obj_year(self):
-            return self._date(self).year
+            return Date().filter(Env("datePublished")(self)).year
 
         def obj_url(self):
             return self.page.url
@@ -114,8 +120,20 @@ class AlbumPage(HTMLPage):
     class iter_tracks(ListElement):
         item_xpath = '//table[@id="track_table"]/tr[has-class("track_row_view")]'
 
+        def parse(self, el: ItemElement) -> None:
+            """Extract embedded data sources in HTML content."""
+            self.env["trackinfo"] = json.loads(
+                CleanText().clean(Attr("//script[@data-tralbum]", "data-tralbum")(self))
+            )["trackinfo"]
+
         class item(ItemElement):
             klass = BaseAudio
+
+            def parse(self, el: ItemElement) -> None:
+                track_num = int(el.get("rel").split("=")[1])
+                track = Env("trackinfo")(self)[track_num - 1]
+                self.env["url"] = track["file"]["mp3-128"]
+                self.env["duration"] = int(track["duration"])
 
             obj_title = CleanText('./td[@class="title-col"]//a')
             obj_ext = "mp3"
@@ -124,15 +142,8 @@ class AlbumPage(HTMLPage):
             obj__page_url = AbsoluteLink('./td[@class="title-col"]//a')
             obj_id = Format("audio.%s.%s", Env("band"), Regexp(Field("_page_url"), r"/track/([-\w]+)"))
 
-    def get_tracks_extra(self):
-        info = json.loads(re.search(r"trackinfo: (\[.+?\]),\n", self.text).group(1))
-        return [
-            {
-                "url": d["file"]["mp3-128"],
-                "duration": int(d["duration"]),
-            }
-            for d in info
-        ]
+            obj_duration = Env("duration")
+            obj_url = Env("url")
 
 
 class TrackPage(HTMLPage):
@@ -140,19 +151,27 @@ class TrackPage(HTMLPage):
     class get_track(ItemElement):
         klass = BaseAudio
 
+        def parse(self, el: ItemElement) -> None:
+            """Extract embedded data sources in HTML content."""
+            info = json.loads(CleanText('//script[@type="application/ld+json"]')(self))
+            self.logger.info("%s", info)
+            self.env["author"] = Dict("byArtist/name")(info)
+            trackinfo = json.loads(CleanText().clean(Attr("//script[@data-tralbum]", "data-tralbum")(self)))[
+                "trackinfo"
+            ]
+            track = trackinfo[0]
+            self.env["url"] = track["file"]["mp3-128"]
+            self.env["duration"] = int(track["duration"])
+
         obj_id = Format("audio.%s.%s", Env("band"), Env("track"))
         obj_title = CleanText('//h2[@class="trackTitle"]')
-        obj_author = CleanText('//span[@itemprop="byArtist"]')
+        obj_author = Env("author")
         obj_ext = "mp3"
         obj_format = "mp3"
         obj_bitrate = 128
 
-        def obj_duration(self):
-            return int(float(Attr('//meta[@itemprop="duration"]', "content")(self)))
-
-        def obj_url(self):
-            info = json.loads(re.search(r"trackinfo: (\[.+?\]),\n", self.page.text).group(1))
-            return info[0]["file"]["mp3-128"]
+        obj_duration = Env("duration")
+        obj_url = Env("url")
 
         def obj__page_url(self):
             return self.page.url
