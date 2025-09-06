@@ -124,12 +124,22 @@ doc:
   extends: .tox
   script:
     - tox run -e docs
+  artifacts:
+    name: "Documentation from $CI_COMMIT_REF_SLUG"
+    paths:
+      - docs/build/html
+    expire_in: 7 days
 
 build:
   stage: build
   extends: .tox
   script:
     - tox run -e build
+  artifacts:
+    name: "Python sdist and wheel from $CI_COMMIT_REF_SLUG"
+    paths:
+      - dist
+    expire_in: 7 days
 
 local install:
   stage: build
