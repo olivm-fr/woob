@@ -22,8 +22,6 @@ import re
 from decimal import Decimal
 from urllib.parse import urljoin
 
-import dateutil
-
 from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import Attr, Link
 from woob.browser.filters.javascript import JSVar
@@ -748,12 +746,8 @@ class CardHistoryPage(LoggedPage, JsonPage):
             obj_amount = Eval(float_to_decimal, Dict("montant"))
             obj_type = Transaction.TYPE_DEFERRED_CARD
             obj_bdate = Field("rdate")
-
-            def obj_date(self):
-                return dateutil.parser.parse(Dict("datePrelevement")(self)).date()
-
-            def obj_rdate(self):
-                return dateutil.parser.parse(Dict("dateOperation")(self)).date()
+            obj_date = Date(Dict("datePrelevement"))
+            obj_rdate = Date(Dict("dateOperation"))
 
 
 class NetfincaRedirectionPage(LoggedPage, HTMLPage):
