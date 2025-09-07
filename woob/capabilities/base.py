@@ -581,7 +581,7 @@ class BaseObject(metaclass=_BaseObjectMeta):
         The default behavior is to iter on fields (with iter_fields) and if
         a field is NotLoaded, return False.
         """
-        for key, value in self.iter_fields():
+        for _key, value in self.iter_fields():
             if value is NotLoaded:
                 return False
         return True

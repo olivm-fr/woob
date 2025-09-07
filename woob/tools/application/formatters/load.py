@@ -33,10 +33,9 @@ class FormattersLoader:
         self.formatters[name] = klass
 
     def get_available_formatters(self):
-        l = set(self.formatters)
-        l = l.union(self.BUILTINS)
-        l = sorted(l)
-        return l
+        formatters = set(self.formatters)
+        formatters = formatters.union(self.BUILTINS)
+        return sorted(formatters)
 
     def build_formatter(self, name):
         if name not in self.formatters:

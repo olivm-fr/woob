@@ -694,14 +694,14 @@ class Repositories:
                 fp.write(icon.content)
 
     def _parse_source_list(self):
-        l = []
+        sources = []
         with open(self.sources_list, encoding="utf-8") as f:
             for line in f:
                 line = line.strip() % {"version": packaging.version.Version(self.version).major}
                 m = re.match("(file|https?)://.*", line)
                 if m:
-                    l.append(line)
-        return l
+                    sources.append(line)
+        return sources
 
     def update_repositories(self, progress=PrintProgress()):
         """
@@ -749,15 +749,15 @@ class Repositories:
         """
         Check if sources.list is consistent with repositories
         """
-        l = []
+        repositories = []
         for line in self._parse_source_list():
             repository = Repository(line)
             filename = self.url2filename(repository.url)
-            prio_filename = "%02d-%s" % (len(l), filename)
+            prio_filename = "%02d-%s" % (len(repositories), filename)
             repo_path = os.path.join(self.repos_dir, prio_filename)
             if not os.path.isfile(repo_path):
                 return False
-            l.append(repository)
+            repositories.append(repository)
         return True
 
     def _is_module_updatable(self, info):
@@ -920,7 +920,7 @@ class Repositories:
 
         All non-alphanumeric characters are replaced by _.
         """
-        return "".join([l if l.isalnum() else "_" for l in url])
+        return "".join([char if char.isalnum() else "_" for char in url])
 
     def __iter__(self):
         yield from self.repositories

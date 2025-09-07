@@ -605,13 +605,13 @@ class ReplApplication(ConsoleApplication, Cmd):
             children = os.listdir(dirname or ".")
         except OSError:
             return ()
-        l = []
+        paths = []
         for child in children:
             path = os.path.join(dirname, child)
             if os.path.isdir(path):
                 child += "/"
-            l.append(child)
-        return l
+            paths.append(child)
+        return paths
 
     def complete(self, text, state):
         """
@@ -770,7 +770,7 @@ class ReplApplication(ConsoleApplication, Cmd):
             elif args[1] == "disable":
                 choices = sorted(enabled_backends_names)
             elif args[1] in ("add", "register") and len(args) == 3:
-                for name, module in sorted(self.woob.repositories.get_all_modules_info(self.CAPS).items()):
+                for name, _module in sorted(self.woob.repositories.get_all_modules_info(self.CAPS).items()):
                     choices.append(name)
             elif args[1] == "edit":
                 choices = sorted(available_backends_names)

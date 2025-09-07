@@ -208,8 +208,8 @@ def build_rows(lines):
         if not (plines[ANGLE_HORIZONTAL] and plines[ANGLE_VERTICAL]):
             continue
 
-        plines[ANGLE_HORIZONTAL].sort(key=lambda l: (l.y0, l.x1))
-        plines[ANGLE_VERTICAL].sort(key=lambda l: (l.x0, l.y1))
+        plines[ANGLE_HORIZONTAL].sort(key=lambda pline: (pline.y0, pline.x1))
+        plines[ANGLE_VERTICAL].sort(key=lambda pline: (pline.x0, pline.y1))
 
         for hline in plines[ANGLE_HORIZONTAL]:
             try:
@@ -387,9 +387,9 @@ def get_pdf_rows(data, miner_layout=True):
         if LOGGER.isEnabledFor(DEBUGFILES):
             img = Image.new("RGB", (int(page.mediabox[2]), int(page.mediabox[3])), (255, 255, 255))
             draw = ImageDraw.Draw(img)
-            for l in lines:
+            for line in lines:
                 color = (random.randint(127, 255), random.randint(127, 255), random.randint(127, 255))
-                draw.rectangle((l.x0, l.y0, l.x1, l.y1), outline=color)
+                draw.rectangle((line.x0, line.y0, line.x1, line.y1), outline=color)
             fpath = "%s/2lines-%03d.png" % (path, npage)
             img.save(fpath)
             LOGGER.log(DEBUGFILES, "saved %r", fpath)

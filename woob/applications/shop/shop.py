@@ -132,12 +132,12 @@ class AppShop(ReplApplication):
             backend_name = None
 
         self.do_count(str(self.options.count))  # Avoid raise of MoreResultsAvailable
-        l = []
+        orders = []
         for order in self.do("iter_orders", backends=backend_name):
-            l.append(order)
+            orders.append(order)
 
         self.start_format()
-        for order in sorted(l, self.comp_object):
+        for order in sorted(orders, self.comp_object):
             self.format(order)
 
     # Order by date DESC
@@ -155,16 +155,16 @@ class AppShop(ReplApplication):
 
         Get items of orders.
         """
-        l = []
+        orders = []
         id, backend_name = self.parse_id(id, unique_backend=True)
 
         if not id:
             print("Error: please give a order ID (hint: use orders command)", file=self.stderr)
             return 2
         else:
-            l.append((id, backend_name))
+            orders.append((id, backend_name))
 
-        for id, backend in l:
+        for id, backend in orders:
             names = (backend,) if backend is not None else None
             # TODO: Use specific formatter
             mysum = Item()

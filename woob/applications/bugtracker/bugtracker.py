@@ -295,7 +295,7 @@ class AppBugTracker(ReplApplication):
         else:
             sender = os.environ.get("USERNAME", "bugtracker")
         output = "From: %s\n" % sender
-        for key, (list_name, is_list_object) in self.ISSUE_FIELDS:
+        for key, (list_name, _is_list_object) in self.ISSUE_FIELDS:
             value = None
             if not self.interactive:
                 value = getattr(self.options, key)

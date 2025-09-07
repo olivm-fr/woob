@@ -186,7 +186,7 @@ class ConsoleApplication(Application):
                 self.edit_backend(err.backend_name)
                 self.load_backends(names=[err.backend_name])
 
-        for name, backend in ret.items():
+        for _name, backend in ret.items():
             self.enabled_backends.add(backend)
 
         self.check_loaded_backends()

@@ -91,7 +91,7 @@ def retry_on_logout(exc_check=LoggedOut, tries=4):
 
 @contextmanager
 def retry_on_logout_context(tries=4, logger=None):
-    for i in range(tries, 0, -1):
+    for _i in range(tries, 0, -1):
         try:
             yield
         except LoggedOut as exc:
@@ -146,9 +146,8 @@ class iter_retry:
             self.it = iter(self.cb())
 
             # recreated iterator, consume previous items
-            try:
-                nb = -1
-                for nb, sent in enumerate(self.items):
+            for nb, sent in enumerate(self.items):
+                try:
                     new = next(self.it)
                     if hasattr(new, "iter_fields"):
                         equal = dict(sent.iter_fields()) == dict(new.iter_fields())
@@ -157,16 +156,16 @@ class iter_retry:
                     if not equal:
                         # safety is not guaranteed
                         raise BrowserUnavailable("Site replied inconsistently between retries, %r vs %r", sent, new)
-            except StopIteration:
-                raise BrowserUnavailable(
-                    "Site replied fewer elements (%d) than last iteration (%d)", nb + 1, len(self.items)
-                )
-            except self.exc_check as exc:
-                if self.logger:
-                    self.logger.info("%r raised, retrying", exc)
-                self.it = None
-                self.remaining -= 1
-                return next(self)
+                except StopIteration:
+                    raise BrowserUnavailable(
+                        "Site replied fewer elements (%d) than last iteration (%d)", nb + 1, len(self.items)
+                    )
+                except self.exc_check as exc:
+                    if self.logger:
+                        self.logger.info("%r raised, retrying", exc)
+                    self.it = None
+                    self.remaining -= 1
+                    return next(self)
 
         # return one item
         try:
