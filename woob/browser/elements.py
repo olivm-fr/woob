@@ -289,13 +289,9 @@ class ListElement(AbstractElement):
         yield from self.objects.values()
 
     def check_next_page(self):
-        if not hasattr(self, "next_page"):
-            return
-
-        next_page = getattr(self, "next_page")
         try:
-            value = self.use_selector(next_page)
-        except (AttributeNotFound, XPathNotFound):
+            value = self.use_selector(self.next_page)
+        except (AttributeError, AttributeNotFound, XPathNotFound):
             return
 
         if value is None:
