@@ -345,7 +345,7 @@ class AppMoney(Appbank):
         self.logger.error("Cannot convert '%s' to boolean." % str)
         raise ValueError
 
-    def print(self, *args, **kwargs):
+    def print(self, *args, **kwargs):  # noqa: T202
         with printMutex:
             print(*args, **kwargs)
 

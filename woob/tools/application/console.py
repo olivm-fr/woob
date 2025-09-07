@@ -611,7 +611,7 @@ class ConsoleApplication(Application):
         v.noprompt = True
         return v.get()
 
-    def print(self, txt):
+    def print(self, txt):  # noqa: T202
         print(txt)
 
     def acquire_input(
