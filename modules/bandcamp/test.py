@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
+from woob.capabilities.base import NotAvailable
 from woob.tools.test import BackendTest
 
 
@@ -37,6 +38,15 @@ class BandcampTest(BackendTest):
         self.assertEqual("disco quake", album.title.lower())
         self.assertEqual(12, len(album.tracks_list))
         self.assertEqual("https://202project.bandcamp.com/album/disco-quake", album.url)
+
+    def test_search_album_with_non_playable_tracks(self):
+        """Some albums have non-playable tracks."""
+        search = self.backend.search_album("kiasmos")
+        _, album = next(search), next(search)
+        self.assertEqual("Kiasmos", album.author)
+        self.assertEqual("blurred ep", album.title.lower())
+        self.assertEqual(6, len(album.tracks_list))
+        self.assertEqual(album.tracks_list[2], NotAvailable)
 
     def test_get(self):
         album = self.backend.get_album("album.casiojudiciaire.d-mo")

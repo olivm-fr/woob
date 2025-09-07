@@ -24,6 +24,7 @@ from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Date, Env, Field, Format, Regexp
 from woob.browser.pages import HTMLPage, pagination
 from woob.capabilities.audio import Album, BaseAudio
+from woob.capabilities.base import NotAvailable
 from woob.capabilities.collection import Collection
 
 
@@ -132,7 +133,7 @@ class AlbumPage(HTMLPage):
             def parse(self, el: ItemElement) -> None:
                 track_num = int(el.get("rel").split("=")[1])
                 track = Env("trackinfo")(self)[track_num - 1]
-                self.env["url"] = track["file"]["mp3-128"]
+                self.env["url"] = Dict("file/mp3-128", default=NotAvailable)(track)
                 self.env["duration"] = int(track["duration"])
 
             obj_title = CleanText('./td[@class="title-col"]//a')
@@ -160,7 +161,7 @@ class TrackPage(HTMLPage):
                 "trackinfo"
             ]
             track = trackinfo[0]
-            self.env["url"] = track["file"]["mp3-128"]
+            self.env["url"] = Dict("file/mp3-128", default=NotAvailable)(track)
             self.env["duration"] = int(track["duration"])
 
         obj_id = Format("audio.%s.%s", Env("band"), Env("track"))
