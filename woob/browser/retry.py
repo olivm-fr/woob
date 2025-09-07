@@ -69,7 +69,8 @@ def retry_on_logout(exc_check=LoggedOut, tries=4):
     def decorator(func):
         @wraps(func)
         def wrapper(browser, *args, **kwargs):
-            cb = lambda: func(browser, *args, **kwargs)
+            def cb():
+                return func(browser, *args, **kwargs)
 
             for i in range(tries, 0, -1):
                 try:
