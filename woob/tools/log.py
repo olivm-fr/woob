@@ -88,4 +88,4 @@ def createColoredFormatter(stream, format):
 
 if __name__ == "__main__":
     for levelname, cs in COLORS.items():
-        print(cs % levelname, end=" ")
+        print(cs % levelname, end=" ")  # noqa: T201
