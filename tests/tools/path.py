@@ -42,3 +42,14 @@ def test():
     assert str(wp) == r"/aa \/ aa"
     wp.cd1("héhé/hé")
     assert str(wp) == r"/aa \/ aa/héhé\/hé"
+
+
+def test_mutable():
+    """WorkingPath is not altered due to mutable arguments."""
+    wp = WorkingPath()
+    path_items = ["folder", "app", "config"]
+    wp.location(path_items)
+    assert str(wp) == "/folder/app/config"
+    path_items.pop()
+    assert len(path_items) == 2
+    assert str(wp) == "/folder/app/config"
