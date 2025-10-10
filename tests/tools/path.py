@@ -53,3 +53,13 @@ def test_mutable():
     path_items.pop()
     assert len(path_items) == 2
     assert str(wp) == "/folder/app/config"
+
+
+def test_wp_get():
+    """:meth:`get` cannot alter instance path."""
+    wp = WorkingPath()
+    wp.location(["folder", "app", "config"])
+    assert str(wp) == "/folder/app/config"
+    path_items = wp.get()
+    path_items.pop()
+    assert str(wp) == "/folder/app/config"
