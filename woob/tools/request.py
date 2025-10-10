@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import shlex
+from typing import TypedDict
 
 import requests
+from typing_extensions import NotRequired
 
 from woob.tools.json import json
 
@@ -12,7 +14,14 @@ from woob.tools.json import json
 __all__ = ["to_curl"]
 
 
-def to_curl(request: requests.PreparedRequest | dict) -> str:
+class RequestDict(TypedDict):
+    method: str
+    url: str
+    headers: str  # JSON formatted HTTP headers mapping
+    body: NotRequired[str | bytes]
+
+
+def to_curl(request: requests.PreparedRequest | RequestDict) -> str:
     """Return a generated functional curl command based on a request.
 
     :param request: The prepared request, or property dictionary, to
@@ -21,10 +30,11 @@ def to_curl(request: requests.PreparedRequest | dict) -> str:
     """
 
     if isinstance(request, requests.PreparedRequest):
-        method: str = request.method
-        url: str = request.url
-        headers: dict[str, str] = request.headers
-        body: bytes | None = request.body
+        assert request.method and request.url
+        method = request.method
+        url = request.url
+        headers: dict[str, str] = dict(request.headers)
+        body: str | bytes | None = request.body
     else:
         method = request["method"]
         url = request["url"]
@@ -37,7 +47,7 @@ def to_curl(request: requests.PreparedRequest | dict) -> str:
     ]
 
     if method not in ("GET", "POST"):
-        parts += ("-X", method)
+        parts += ["-X", method]
 
     for header, value in headers.items():
         parts += ["-H", f"{header}:{value}"]
