@@ -38,8 +38,7 @@ class WorkingPath:
         """
         Go to a new path, and store the previous path.
         """
-        self.previous = self.get()
-        self.split_path = split_path
+        self.split_path, self.previous = list(split_path), self.split_path
 
     def restore(self) -> None:
         """
