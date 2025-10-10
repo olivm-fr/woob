@@ -16,31 +16,35 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 from collections import OrderedDict
+from typing import TypeVar
 
 
 __all__ = ["LimitedLRUDict", "LRUDict"]
 
+KT = TypeVar("KT")
+VT = TypeVar("VT")
 
-class LRUDict(OrderedDict):
+
+class LRUDict(OrderedDict[KT, VT]):
     """dict to store items in the order the keys were last added/fetched."""
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: KT, value: VT) -> None:
         if key in self:
             del self[key]
         super().__setitem__(key, value)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: KT) -> VT:
         value = super().__getitem__(key)
         self[key] = value
         return value
 
 
-class LimitedLRUDict(LRUDict):
+class LimitedLRUDict(LRUDict[KT, VT]):
     """dict to store only the N most recent items."""
 
     max_entries = 100
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: KT, value: VT) -> None:
         super().__setitem__(key, value)
         if len(self) > self.max_entries:
             self.popitem(last=False)
