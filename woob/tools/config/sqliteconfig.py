@@ -15,15 +15,20 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
 
 import os
 import sqlite3
 import tempfile
-from collections.abc import Mapping, MutableMapping
+import types
+from collections.abc import ItemsView, Iterator, Mapping, MutableMapping
+from logging import Logger
+from typing import Any, cast
 
 import yaml
+from typing_extensions import Unpack
 
-from .iconfig import ConfigError, IConfig
+from .iconfig import ConfigError, ConfigKeyPath, GetArgs, IConfig, IConfigGet
 from .util import replace, time_buffer
 from .yamlconfig import WoobDumper
 
@@ -36,8 +41,12 @@ except ImportError:
 
 __all__ = ["SQLiteConfig"]
 
+# SQLite requires table name before key path.
+# get/delete functions handle it themselves.
+SetArgs = tuple[str, str, Unpack[ConfigKeyPath], Any]
 
-def quote(s, errors="strict"):
+
+def quote(s: str, errors: str = "strict") -> str:
     encodable = s.encode("utf-8", errors).decode("utf-8")
     nul_index = encodable.find("\x00")
     if nul_index >= 0:
@@ -46,52 +55,54 @@ def quote(s, errors="strict"):
     return '"' + encodable.replace('"', '""') + '"'
 
 
-class VirtualRootDict(Mapping):
-    def __init__(self, config):
+class VirtualRootDict(Mapping[str, "VirtualDict"]):
+    def __init__(self, config: SQLiteConfig) -> None:
         self.config = config
 
-    def __getitem__(self, base):
+    def __getitem__(self, base: str) -> VirtualDict:
         if base in self.config._tables:
             return VirtualDict(self.config, base)
         raise KeyError("%s table not found" % base)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         yield from self.config._tables
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.config._tables)
 
 
-class VirtualDict(MutableMapping):
-    def __init__(self, config, base):
+class VirtualDict(MutableMapping[str, Any]):
+    def __init__(self, config: SQLiteConfig, base: str) -> None:
         self.config = config
         self.base = base
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> Any:
         try:
             return self.config.get(self.base, key)
         except ConfigError:
             raise KeyError(f"{key} key in {self.base} table not found")
 
-    def __contains__(self, key):
-        return self.config.has(self.base, key)
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, str):
+            return self.config.has(self.base, key)
+        return False
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         yield from self.config.keys(self.base)
 
-    def items(self):
+    def items(self) -> ItemsView[str, Any]:
         return self.config.items(self.base)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.config.count(self.base)
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: str) -> None:
         try:
             self.config.delete(self.base, key)
         except ConfigError:
             raise KeyError(f"{key} key in {self.base} table not found")
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: Any) -> None:
         self.config.set(self.base, key, value)
 
 
@@ -99,7 +110,14 @@ class SQLiteConfig(IConfig):
     commit_since_seconds = 3600
     dump_since_seconds = 600
 
-    def __init__(self, path, commit_since_seconds=None, dump_since_seconds=None, last_run=True, logger=None):
+    def __init__(
+        self,
+        path: str,
+        commit_since_seconds: int | None = None,
+        dump_since_seconds: int | None = None,
+        last_run: bool = True,
+        logger: Logger | None = None,
+    ):
         self.path = path
         if commit_since_seconds:
             self.commit_since_seconds = commit_since_seconds
@@ -112,7 +130,7 @@ class SQLiteConfig(IConfig):
         if self.dump_since_seconds:
             self.dump = time_buffer(since_seconds=self.dump_since_seconds, last_run=last_run, logger=logger)(self.dump)
 
-    def load(self, default={}, optimize=True):
+    def load(self, default: Mapping[str, Any] = {}, optimize: bool = True) -> None:
         self.storage = sqlite3.connect(self.path)
         self.storage.execute("PRAGMA page_size = 4096")
         if optimize:
@@ -121,24 +139,24 @@ class SQLiteConfig(IConfig):
         self._tables = set(self.tables())
         self.values = VirtualRootDict(self)
 
-    def save(self, commit_since_seconds=None, dump_since_seconds=None):
+    def save(self, commit_since_seconds: int | None = None, dump_since_seconds: int | None = None) -> None:
         self.commit(since_seconds=commit_since_seconds)
         # No one would want immediate dumps, assume it means no dumps
         if self.dump_since_seconds:
             self.dump(since_seconds=dump_since_seconds)
 
-    def force_save(self):
+    def force_save(self) -> None:
         self.save(commit_since_seconds=False, dump_since_seconds=False)
 
-    def __exit__(self, t, v, tb):
+    def __exit__(self, t: type[BaseException], v: BaseException, tb: types.TracebackType) -> None:
         self.force_save()
         super().__exit__(t, v, tb)
 
-    def commit(self, **kwargs):
+    def commit(self, **kwargs: Any) -> None:
         kwargs.pop("since_seconds", None)
         self.storage.commit()
 
-    def dump(self, **kwargs):
+    def dump(self, **kwargs: Any) -> None:
         kwargs.pop("since_seconds", None)
         target = os.path.splitext(self.path)[0] + ".sql"
         with tempfile.NamedTemporaryFile(dir=os.path.dirname(self.path), delete=False) as f:
@@ -147,7 +165,7 @@ class SQLiteConfig(IConfig):
                 f.write(b"\n")
         replace(f.name, target)
 
-    def ensure_table(self, name):
+    def ensure_table(self, name: str) -> None:
         if name not in self._tables:
             self.storage.execute(
                 """CREATE TABLE IF NOT EXISTS %s (
@@ -158,7 +176,7 @@ class SQLiteConfig(IConfig):
             )  # nosec
             self._tables.add(name)
 
-    def tables(self):
+    def tables(self) -> list[str]:
         cur = self.storage.cursor()
         cur.execute(
             """SELECT name FROM sqlite_master
@@ -166,7 +184,7 @@ class SQLiteConfig(IConfig):
         )
         return [k[0] for k in cur.fetchall()]
 
-    def items(self, table, size=100):
+    def items(self, table: str, size: int = 100) -> Iterator[tuple[str, Any]]:
         """
         Low memory way of listing all items.
         The size parameters alters how many items are fetched at a time.
@@ -179,7 +197,7 @@ class SQLiteConfig(IConfig):
                 yield key, yaml.load(strvalue, Loader=SafeLoader)
             items = cur.fetchmany(size)
 
-    def keys(self, table, size=200):
+    def keys(self, table: str, size: int = 200) -> Iterator[str]:
         """
         Low memory way of listing all keys.
         The size parameters alters how many items are fetched at a time.
@@ -192,12 +210,12 @@ class SQLiteConfig(IConfig):
                 yield item[0]
             items = cur.fetchmany(size)
 
-    def count(self, table):
+    def count(self, table: str) -> int:
         cur = self.storage.cursor()
         cur.execute("SELECT count(*) FROM %s;" % quote(table))  # nosec
-        return cur.fetchone()[0]
+        return cast(int, cur.fetchone()[0])
 
-    def get(self, *args, **kwargs):
+    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         table = args[0]
         key = ".".join(args[1:])
         self.ensure_table(table)
@@ -219,7 +237,7 @@ class SQLiteConfig(IConfig):
             raise ConfigError()
         return value
 
-    def set(self, *args):
+    def set(self, *args: Unpack[SetArgs]) -> None:  # type: ignore[override]
         table = args[0]
         key = ".".join(args[1:-1])
         if not key:
@@ -235,7 +253,7 @@ class SQLiteConfig(IConfig):
         except TypeError:
             raise ConfigError()
 
-    def delete(self, *args):
+    def delete(self, *args: Unpack[GetArgs]) -> None:
         table = args[0]
         key = ".".join(args[1:])
         if not key:
@@ -251,11 +269,11 @@ class SQLiteConfig(IConfig):
             if not cur.rowcount:
                 raise ConfigError()
 
-    def has(self, *args):
+    def has(self, *args: Unpack[GetArgs]) -> bool:
         table = args[0]
         key = ".".join(args[1:])
         if not key:
             return table in self._tables
         cur = self.storage.cursor()
         cur.execute("SELECT count(*) FROM %s WHERE key=?;" % quote(table), (key,))  # nosec
-        return cur.fetchone()[0] > 0
+        return bool(cur.fetchone()[0] > 0)

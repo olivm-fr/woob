@@ -17,10 +17,14 @@
 
 import os
 from collections import OrderedDict
+from collections.abc import Mapping
 from configparser import DEFAULTSECT, RawConfigParser
 from decimal import Decimal
+from typing import Any
 
-from .iconfig import IConfig
+from typing_extensions import Unpack
+
+from .iconfig import GetArgs, IConfig, IConfigGet, SetArgs
 from .util import LOGGER
 
 
@@ -30,12 +34,12 @@ __all__ = ["INIConfig"]
 class INIConfig(IConfig):
     ROOTSECT = "ROOT"
 
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self.path = path
-        self.values = OrderedDict()
+        self.values: dict[str, Any] = OrderedDict()
         self.config = RawConfigParser()
 
-    def load(self, default={}):
+    def load(self, default: Mapping[str, Any] = {}) -> None:
         self.values = OrderedDict(default)
 
         if os.path.exists(self.path):
@@ -62,10 +66,9 @@ class INIConfig(IConfig):
             LOGGER.debug(
                 "Application configuration file created with default values: %s. " "Please customize it.", self.path
             )
-        return self.values
 
-    def save(self):
-        def save_section(values, root_section=self.ROOTSECT):
+    def save(self) -> None:
+        def save_section(values: Mapping[str, Any], root_section: str = self.ROOTSECT) -> None:
             for k, v in values.items():
                 if isinstance(v, (int, Decimal, float, str)):
                     if not self.config.has_section(root_section):
@@ -83,13 +86,14 @@ class INIConfig(IConfig):
         with open(self.path, "w", encoding="utf-8") as f:
             self.config.write(f)
 
-    def get(self, *args, **kwargs):
+    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         default = None
         if "default" in kwargs:
             default = kwargs["default"]
 
         v = self.values
-        for k in args[:-1]:
+        # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
+        for k in args[:-1]:  # type: ignore[misc]
             if k in v:
                 v = v[k]
             else:
@@ -99,17 +103,19 @@ class INIConfig(IConfig):
         except KeyError:
             return default
 
-    def set(self, *args):
+    def set(self, *args: Unpack[SetArgs]) -> None:
         v = self.values
-        for k in args[:-2]:
+        # mypy complains that args[:-2] might be [] and is ambiguous. It is expected.
+        for k in args[:-2]:  # type: ignore[misc]
             if k not in v:
                 v[k] = OrderedDict()
             v = v[k]
         v[args[-2]] = args[-1]
 
-    def delete(self, *args):
+    def delete(self, *args: Unpack[GetArgs]) -> None:
         v = self.values
-        for k in args[:-1]:
+        # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
+        for k in args[:-1]:  # type: ignore[misc]
             if k not in v:
                 return
             v = v[k]

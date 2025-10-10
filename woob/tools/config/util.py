@@ -15,9 +15,12 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
 
 import os
 from datetime import datetime
+from logging import Logger
+from typing import Any, Callable
 
 from woob.tools.log import getLogger
 
@@ -32,7 +35,7 @@ try:
     from os import replace
 except ImportError:
 
-    def replace(src, dst, *args, **kwargs):
+    def replace(src, dst, *args, **kwargs):  # type: ignore
         if os.name != "posix":
             try:
                 os.remove(dst)
@@ -41,9 +44,11 @@ except ImportError:
         return os.rename(src, dst, *args, **kwargs)
 
 
-def time_buffer(since_seconds=None, last_run=True, logger=False):
-    def decorator_time_buffer(func):
-        def wrapper_time_buffer(*args, **kwargs):
+def time_buffer(
+    since_seconds: int | None = None, last_run: bool | datetime = True, logger: Logger | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator_time_buffer(func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper_time_buffer(*args: Any, **kwargs: Any) -> Any:
             since_seconds = kwargs.pop("since_seconds", None)
             if since_seconds is None:
                 since_seconds = decorator_time_buffer.since_seconds

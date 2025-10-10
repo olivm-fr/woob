@@ -18,12 +18,15 @@
 
 import os
 import tempfile
+from collections.abc import Mapping
+from typing import Any
 
 import yaml
+from typing_extensions import Unpack
 
 import woob.tools.date
 
-from .iconfig import ConfigError, IConfig
+from .iconfig import ConfigError, GetArgs, IConfig, IConfigGet, SetArgs
 from .util import LOGGER, replace
 
 
@@ -45,7 +48,7 @@ WeboobDumper = WoobDumper
 
 
 class WoobNoAliasDumper(WoobDumper):
-    def ignore_aliases(self, data):
+    def ignore_aliases(self, data: Any) -> bool:
         return True
 
 
@@ -61,12 +64,12 @@ class YamlConfig(IConfig):
     DUMPER = WoobDumper
     LOADER = SafeLoader
 
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self.path = path
-        self.values = {}
+        self.values: dict[str, Any] = {}
 
-    def load(self, default={}):
-        self.values = default.copy()
+    def load(self, default: Mapping[str, Any] = {}) -> None:
+        self.values = dict(default)
 
         LOGGER.debug("Loading configuration file: %s." % self.path)
         try:
@@ -80,7 +83,7 @@ class YamlConfig(IConfig):
         if self.values is None:
             self.values = {}
 
-    def save(self):
+    def save(self) -> None:
         # write in a temporary file to avoid corruption problems
         f = tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(self.path), delete=False, encoding="utf-8")
         with f:
@@ -88,9 +91,10 @@ class YamlConfig(IConfig):
         replace(f.name, self.path)
         LOGGER.debug("Configuration file saved: %s." % self.path)
 
-    def get(self, *args, **kwargs):
+    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         v = self.values
-        for a in args[:-1]:
+        # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
+        for a in args[:-1]:  # type: ignore[misc]
             try:
                 v = v[a]
             except KeyError:
@@ -102,15 +106,16 @@ class YamlConfig(IConfig):
                 raise ConfigError()
 
         try:
-            v = v[args[-1]]
+            ret = v[args[-1]]
         except KeyError:
-            v = kwargs.get("default")
+            ret = kwargs.get("default")
 
-        return v
+        return ret
 
-    def set(self, *args):
+    def set(self, *args: Unpack[SetArgs]) -> None:
         v = self.values
-        for a in args[:-2]:
+        # mypy complains that args[:-2] might be [] and is ambiguous. It is expected.
+        for a in args[:-2]:  # type: ignore[misc]
             try:
                 v = v[a]
             except KeyError:
@@ -121,9 +126,10 @@ class YamlConfig(IConfig):
 
         v[args[-2]] = args[-1]
 
-    def delete(self, *args):
+    def delete(self, *args: Unpack[GetArgs]) -> None:
         v = self.values
-        for a in args[:-1]:
+        # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
+        for a in args[:-1]:  # type: ignore[misc]
             try:
                 v = v[a]
             except KeyError:

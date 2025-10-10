@@ -15,9 +15,26 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
+import types
+from collections.abc import Mapping
+from typing import Any, TypedDict
+
+from typing_extensions import Unpack
+
 
 class ConfigError(Exception):
     pass
+
+
+class IConfigGet(TypedDict, total=False):
+    default: Any
+
+
+ConfigKeyPath = tuple[str, ...]
+GetArgs = tuple[str, Unpack[ConfigKeyPath]]
+SetArgs = tuple[str, Unpack[ConfigKeyPath], Any]
 
 
 class IConfig:
@@ -28,38 +45,19 @@ class IConfig:
     to group multiple options.
     """
 
-    def load(self, default={}):
+    def load(self, default: Mapping[str, Any] = {}) -> None:
         """
         Load config.
 
         :param default: default values for the config
-        :type default: dict[:class:`str`]
         """
         raise NotImplementedError()
 
-    def save(self):
+    def save(self) -> None:
         """Save config."""
         raise NotImplementedError()
 
-    def set(self, *args):
-        """
-        Set a config value.
-
-        :param args: all args except the last arg are the path of the option key.
-        :type args: str or object
-        """
-        raise NotImplementedError()
-
-    def delete(self, *args):
-        """
-        Delete an option from config.
-
-        :param args: path to the option key.
-        :type args: str
-        """
-        raise NotImplementedError()
-
-    def get(self, *args, **kwargs):
+    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         """
         Get the value of an option.
 
@@ -68,8 +66,24 @@ class IConfig:
         """
         raise NotImplementedError()
 
-    def __enter__(self):
+    def set(self, *args: Unpack[SetArgs]) -> None:
+        """
+        Set a config value.
+
+        :param args: all args except the last arg are the path of the option key.
+        """
+        raise NotImplementedError()
+
+    def delete(self, *args: Unpack[GetArgs]) -> None:
+        """
+        Delete an option from config.
+
+        :param args: path to the option key.
+        """
+        raise NotImplementedError()
+
+    def __enter__(self) -> None:
         self.load()
 
-    def __exit__(self, t, v, tb):
+    def __exit__(self, t: type[BaseException], v: BaseException, tb: types.TracebackType) -> None:
         self.save()

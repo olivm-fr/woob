@@ -15,9 +15,12 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
-
 import multiprocessing
 import os
+import types
+from collections.abc import Mapping
+from logging import Logger
+from typing import Any
 
 from .util import time_buffer
 
@@ -42,7 +45,10 @@ class AutoCleanConfig:
     Removes config file if it has no values.
     """
 
-    def save(self):
+    path: str
+    values: dict[str, Any]
+
+    def save(self) -> None:
         if self.values:
             super().save()
         else:
@@ -60,19 +66,20 @@ class ForkingConfig:
     It is also possible to call join() to wait for the save to complete.
     """
 
-    process = None
+    path: str
+    process: multiprocessing.Process | None = None
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.lock = multiprocessing.RLock()
         super().__init__(*args, **kwargs)
 
-    def join(self):
+    def join(self) -> None:
         with self.lock:
             if self.process:
                 self.process.join()
             self.process = None
 
-    def save(self):
+    def save(self) -> None:
         # if a save is already in progress, wait for it to finish
         self.join()
 
@@ -81,16 +88,16 @@ class ForkingConfig:
             self.process = multiprocessing.Process(target=parent_save, name="save %s" % self.path)
             self.process.start()
 
-    def __exit__(self, t, v, tb):
+    def __exit__(self, t: type[BaseException], v: BaseException, tb: types.TracebackType) -> None:
         self.join()
         super().__exit__(t, v, tb)
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         d = self.__dict__.copy()
         d.pop("lock", None)
         return d
 
-    def __setstate__(self, d):
+    def __setstate__(self, d: Mapping[str, Any]) -> None:
         self.__init__(path=d["path"])
         for k, v in d.items():
             setattr(self, k, v)
@@ -104,27 +111,35 @@ class TimeBufferConfig:
 
     saved_since_seconds = None
 
-    def __init__(self, path, saved_since_seconds=None, last_run=True, logger=None, *args, **kwargs):
+    def __init__(
+        self,
+        path: str,
+        saved_since_seconds: int | None = None,
+        last_run: bool = True,
+        logger: Logger | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(path, *args, **kwargs)
         if saved_since_seconds:
             self.saved_since_seconds = saved_since_seconds
         if self.saved_since_seconds:
             self.save = time_buffer(since_seconds=self.saved_since_seconds, last_run=last_run, logger=logger)(self.save)
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         kwargs.pop("since_seconds", None)
         super().save(*args, **kwargs)
 
-    def force_save(self):
+    def force_save(self) -> None:
         self.save(since_seconds=False)
 
     def __exit__(self, t, v, tb):
         self.force_save()
         super().__exit__(t, v, tb)
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         try:
-            d = super().__getstate__()
+            d: dict[str, Any] = super().__getstate__()
         except AttributeError:
             d = self.__dict__.copy()
         # When decorated, it is not serializable.
@@ -132,7 +147,7 @@ class TimeBufferConfig:
         d.pop("save", None)
         return d
 
-    def __setstate__(self, d):
+    def __setstate__(self, d: Mapping[str, Any]) -> None:
         # Add the decorator if needed
         self.__init__(path=d["path"], saved_since_seconds=d.get("saved_since_seconds"))
         for k, v in d.items():
