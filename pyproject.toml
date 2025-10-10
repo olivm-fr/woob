@@ -173,6 +173,13 @@ py_version = "39"
 [tool.mypy]
 show_error_codes = true
 
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = [
+    "pdfkit.*",
+    "pdfminer.*",
+]
+
 [tool.pytest.ini_options]
 python_files = "tests/*.py test.py"
 testpaths = [
