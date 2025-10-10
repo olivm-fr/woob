@@ -15,7 +15,11 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import datetime
+from collections.abc import Generator
+from typing import Callable
 
 
 try:
@@ -28,7 +32,7 @@ __all__ = ["Entry", "Newsfeed"]
 
 
 class Entry:
-    def __init__(self, entry, rssid_func=None):
+    def __init__(self, entry: feedparser.FeedParserDict, rssid_func: Callable[[Entry], str] | None = None) -> None:
         if hasattr(entry, "id"):
             self.id = entry.id
         else:
@@ -51,12 +55,11 @@ class Entry:
         else:
             self.author = None
 
+        self.datetime: datetime.datetime | None = None
         if "updated_parsed" in entry:
             self.datetime = datetime.datetime(*entry["updated_parsed"][:7])
         elif "published_parsed" in entry:
             self.datetime = datetime.datetime(*entry["published_parsed"][:7])
-        else:
-            self.datetime = None
 
         if "summary" in entry:
             self.summary = entry["summary"]
@@ -80,15 +83,16 @@ class Entry:
 
 
 class Newsfeed:
-    def __init__(self, url, rssid_func=None):
+    def __init__(self, url: str, rssid_func: Callable[[Entry], str] | None = None) -> None:
         self.feed = feedparser.parse(url)
         self.rssid_func = rssid_func
 
-    def iter_entries(self):
+    def iter_entries(self) -> Generator[Entry]:
         for entry in self.feed["entries"]:
             yield Entry(entry, self.rssid_func)
 
-    def get_entry(self, id):
+    def get_entry(self, id: str) -> Entry | None:
         for entry in self.iter_entries():
             if entry.id == id:
                 return entry
+        return None
