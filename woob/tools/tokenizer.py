@@ -15,10 +15,17 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import re
+from collections.abc import Iterable
+from typing import Callable
 
 
 __all__ = ["ReTokenizer"]
+
+
+LexTable = Iterable[tuple[str, str]]
 
 
 class ReTokenizer:
@@ -34,24 +41,26 @@ class ReTokenizer:
     Check out test() function below for examples.
     """
 
-    def __init__(self, text, sep, lex):
+    def __init__(self, text: str, sep: str, lex: LexTable) -> None:
         self._lex = lex
         self._tok = [ReToken(lex, chunk) for chunk in text.split(sep)]
 
-    def tok(self, index):
+    def tok(self, index: int) -> ReToken:
         if 0 <= index < len(self._tok):
             return self._tok[index]
         else:
             return ReToken(self._lex, eof=True)
 
-    def simple_read(self, token_type, pos, transform=lambda v: v):
+    def simple_read(
+        self, token_type: str, pos: int, transform: Callable[[str | None], str | None] = lambda v: v
+    ) -> tuple[int, str | None]:
         t = self.tok(pos)
         is_type = getattr(t, "is_%s" % token_type)()
         return (pos + 1, transform(t.value())) if is_type else (pos, None)
 
 
 class ReToken:
-    def __init__(self, lex, chunk=None, eof=False):
+    def __init__(self, lex: LexTable, chunk: str | None = None, eof: bool = False) -> None:
         self._lex = lex
         self._eof = eof
         self._value = None
@@ -69,13 +78,13 @@ class ReToken:
                         self._value = m.group(0)
                     break
 
-    def is_eof(self):
+    def is_eof(self) -> bool:
         return self._eof
 
-    def value(self):
+    def value(self) -> str | None:
         return self._value
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Callable[[], bool]:
         if name.startswith("is_"):
             return lambda: self._type == name[3:]
         raise AttributeError()
