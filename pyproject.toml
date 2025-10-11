@@ -96,6 +96,10 @@ tests = [
 ]
 typing = [
     "mypy",
+    "lxml-stubs",
+    "types-Deprecated",
+    "types-colorama",
+    "types-python-dateutil",
     "types-pyyaml",
     "types-requests",
     "types-setuptools",

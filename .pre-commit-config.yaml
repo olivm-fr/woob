@@ -76,10 +76,14 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies:
+          - lxml-stubs
           - types-Deprecated
+          - types-colorama
           - types-python-dateutil
           - types-pyyaml
           - types-requests
+          - types-setuptools
           - types-simplejson
+          - types-termcolor
         files: ^woob/
         log_file: .mypy.out
