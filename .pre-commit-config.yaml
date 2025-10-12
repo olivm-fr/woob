@@ -10,7 +10,7 @@ repos:
         stages: [commit-msg]
 
   - repo: https://github.com/pycqa/isort.git
-    rev: 7.0.0
+    rev: 6.1.0
     hooks:
       - id: isort
 
