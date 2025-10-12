@@ -259,7 +259,7 @@ def test_error_CleanDecimal_scientific_notation(decimal_filter, input_value):
 
 
 def test_Currency():
-    assert Currency().filter("\u20AC") == "EUR"
+    assert Currency().filter("\u20ac") == "EUR"
     assert Currency(default=NotAvailable).filter(None) == NotAvailable
     assert_raises(FilterError, Currency().filter, None)
 
