@@ -265,7 +265,7 @@ class ValueBackendPassword(Value[str]):
     def check_valid(self, passwd: str | None) -> None:
         if passwd == "":
             # always allow empty passwords
-            return True
+            return
         return super().check_valid(passwd)
 
     def set(self, passwd: str | None) -> None:
