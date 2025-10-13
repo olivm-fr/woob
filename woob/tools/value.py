@@ -424,7 +424,7 @@ class ValueDate(Value[datetime.date]):
                 continue
             return dateval
 
-        raise ValueError("Value does not match format in %s" % self.accepted_formats)
+        raise ValueError(f"Value does not match format in {self.accepted_formats}")
 
     def check_valid(self, v: str | datetime.date | None) -> None:
         if self.required and not v:
