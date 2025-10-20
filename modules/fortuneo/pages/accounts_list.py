@@ -603,7 +603,7 @@ class AccountHistoryPage(ActionNeededPage):
                 )(self)
 
             def obj_amount(self):
-                return CleanDecimal.US(TableCell("credit"), default=0)(self) + CleanDecimal.US(
+                return CleanDecimal.French(TableCell("credit"), default=0)(self) + CleanDecimal.French(
                     TableCell("debit"), default=0
                 )(self)
 
