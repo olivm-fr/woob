@@ -97,18 +97,17 @@ class AmeliConnectOpenIdPage(LoginPage):
         """
         Submits the form to login with username / password.
         """
-        form = self.get_form(id="connexioncompte_2connexionCompteForm")
+        form = self.get_form(id="lformLogin")
         form["user"] = username
         form["password"] = password
+        form["timezone"] = 2
         form.submit()
 
     def request_otp(self):
         """
         Submits the form to request an OTP.
         """
-        form = self.get_form(
-            id="connexioncompte_2connexionCompteForm", submit='//input[@type="submit" and @name="envoiOTP"]'
-        )
+        form = self.get_form(id="lformLogin", submit='//input[@type="submit" and @name="envoiOTP"]')
         form["authStep"] = "ENVOI_OTP"
         form.submit()
 
@@ -118,9 +117,7 @@ class AmeliConnectOpenIdPage(LoginPage):
 
         :rtype: str
         """
-        form = self.get_form(
-            id="connexioncompte_2connexionCompteForm", submit='//input[@type="submit" and @id="id_r_cnx_btn_submit"]'
-        )
+        form = self.get_form(id="lformLogin", submit=False)
         return form["authStep"]
 
 
@@ -157,8 +154,8 @@ class SubscriptionPage(AmeliPortalManagerLoggedPage, HTMLPage):
     def get_subscription(self):
         sub = Subscription()
         # DON'T TAKE social security number for id because it's a very confidential data, take birth date instead
-        sub.id = CleanText('//button[@id="idAssure"]//td[@class="dateNaissance"]')(self.doc).replace("/", "")
-        sub.label = sub.subscriber = CleanText('//div[@id="pageAssure"]//span[@class="NomEtPrenomLabel"]')(self.doc)
+        sub.id = CleanText('//button[@id="idAssure"]//div[@class="dateNaissance"]', replace=[("/", "")])(self.doc)
+        sub.label = sub.subscriber = CleanText('//ul[@id="pageAssure"]//span[@class="NomEtPrenomLabel"]')(self.doc)
 
         return sub
 
@@ -168,12 +165,13 @@ class SubscriptionPage(AmeliPortalManagerLoggedPage, HTMLPage):
 
         # Other recipients can also be on this page.
         # The first one corresponds to the logged user.
+        obj_id = CleanText('//button[@id="idAssure"]//div[@class="dateNaissance"]', replace=[("/", "")])
         obj_name = CleanText('(//span[@class="NomEtPrenomLabel"])[1]')
-        obj_birth_date = Date(CleanText('(//td[@class="dateNaissance"]/span)[1]'), parse_func=parse_french_date)
+        obj_birth_date = Date(CleanText('(//div[@class="dateNaissance"])[1]'), parse_func=parse_french_date)
         obj_phone = CleanText(
             Coalesce(
-                '//div[@class="infoGauche"][normalize-space()="Téléphone portable"]/following-sibling::div/span',
-                '//div[@class="infoGauche"][normalize-space()="Téléphone fixe"]/following-sibling::div/span',
+                '//span[@id="phone-portable"]',
+                '//div[@class="infoGauche"][normalize-space()="Téléphone fixe"]/following-sibling::a/span',
                 default=NotAvailable,
             )
         )
@@ -183,7 +181,7 @@ class SubscriptionPage(AmeliPortalManagerLoggedPage, HTMLPage):
 
             def parse(self, obj):
                 full_address = CleanText(
-                    '//div[@class="infoGauche"][normalize-space()="Adresse postale"]/following-sibling::div/span'
+                    '//span[@class="infoGauche"][normalize-space()="Adresse postale"]/following-sibling::span/span'
                 )(self)
                 self.env["full_address"] = full_address
                 m = re.search(r"(\d{1,4}.*) (\d{5}) (.*)", full_address)
@@ -243,6 +241,9 @@ class DocumentsFirstSummaryPage(AmeliPortalManagerLoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Document
 
+            def condition(self):
+                return len(self.el.xpath('.//div[has-class("boutonTelechargement")]')) > 0
+
             obj_type = DocumentTypes.BILL
             obj_label = Format(
                 "%s %s",
@@ -285,7 +286,7 @@ class DocumentsLastSummaryPage(LoggedPage, JsonPage):
             klass = Document
 
             obj_type = DocumentTypes.BILL
-            obj_url = Dict("urlPDF")
+            obj_url = Dict("urlPdf")
             obj_format = "pdf"
             obj__nature = CleanText(Dict("libelleNaturePrestation"))
             obj_label = Format(

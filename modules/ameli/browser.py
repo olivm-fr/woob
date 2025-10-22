@@ -59,6 +59,7 @@ class AmeliBrowser(TwoFactorBrowser):
 
     error_page = URL(r"/vu/INDISPO_COMPTE_ASSURES.html", ErrorPage)
     login_page = URL(
+        r"/PortailAS/appmanager/PortailAS/assure\?_nfpb=true&_pageLabel=as_login_page&connexioncompte_2actionEvt=afficher.*",
         r"/PortailAS/appmanager/PortailAS/assure\?_nfpb=true&connexioncompte_2actionEvt=afficher.*",
         r"/PortailAS/appmanager/PortailAS/assure\?_nfpb=true&.*validationconnexioncompte.*",
         LoginPage,
