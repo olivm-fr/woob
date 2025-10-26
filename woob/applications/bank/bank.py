@@ -804,7 +804,7 @@ class Appbank(CaptchaMixin, ReplApplication):
 
         if end_date is not None:
             try:
-                end_date = parse_date(end_date)
+                end_date = parse_date(end_date).date()
             except ValueError:
                 print(
                     '"%s" is an incorrect date format (for example "%s")'
