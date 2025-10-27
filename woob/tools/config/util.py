@@ -47,27 +47,33 @@ except ImportError:
 def time_buffer(
     since_seconds: int | None = None, last_run: bool | datetime = True, logger: Logger | None = None
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    def decorator_time_buffer(func: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapper_time_buffer(*args: Any, **kwargs: Any) -> Any:
-            since_seconds = kwargs.pop("since_seconds", None)
-            if since_seconds is None:
-                since_seconds = decorator_time_buffer.since_seconds
-            if logger:
-                logger.debug(f"Time buffer for {func!r} of {since_seconds}. Last run {decorator_time_buffer.last_run}.")
-            if since_seconds and decorator_time_buffer.last_run:
-                if (datetime.now() - decorator_time_buffer.last_run).seconds < since_seconds:
-                    if logger:
-                        logger.debug("Too soon to run %r, ignore." % func)
-                    return
-            if logger:
-                logger.debug("Run %r and record" % func)
-            res = func(*args, **kwargs)
-            decorator_time_buffer.last_run = datetime.now()
-            return res
 
-        decorator_time_buffer.since_seconds = since_seconds
-        decorator_time_buffer.last_run = datetime.now() if last_run is True else last_run
+    class DecoratorTimeBuffer:
+        since_seconds: int | None
+        last_run: datetime
 
-        return wrapper_time_buffer
+        def __init__(self, since_seconds: int | None, last_run: bool | datetime) -> None:
+            self.since_seconds = since_seconds
+            self.last_run = last_run if isinstance(last_run, datetime) else datetime.now()
 
-    return decorator_time_buffer
+        def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
+            def wrapper_time_buffer(*args: Any, **kwargs: Any) -> Any:
+                since_seconds = kwargs.pop("since_seconds", None)
+                if since_seconds is None:
+                    since_seconds = self.since_seconds
+                if logger:
+                    logger.debug(f"Time buffer for {func!r} of {since_seconds}. Last run {self.last_run}.")
+                if since_seconds and self.last_run:
+                    if (datetime.now() - self.last_run).seconds < since_seconds:
+                        if logger:
+                            logger.debug("Too soon to run %r, ignore." % func)
+                        return
+                if logger:
+                    logger.debug("Run %r and record" % func)
+                res = func(*args, **kwargs)
+                self.last_run = datetime.now()
+                return res
+
+            return wrapper_time_buffer
+
+    return DecoratorTimeBuffer(since_seconds, last_run)
