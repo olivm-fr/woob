@@ -356,7 +356,7 @@ def flatten_result(source):
             result = new_result
             result_args = new_args
     if pos >= last:
-        piece = "".join(source[last:])
+        piece = "".join(cast(str, source[last:]))
         for i in range(len(result)):
             result[i] += piece
     return result, result_args
