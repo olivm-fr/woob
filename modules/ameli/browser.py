@@ -105,7 +105,7 @@ class AmeliBrowser(TwoFactorBrowser):
     STATE_DURATION = 15
     __states__ = ("otp_form_data", "otp_form_url", "trust_connect")
 
-    VERIFY = "certigna.pem"
+    VERIFY = "ameli.pem"
 
     def __init__(self, config, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
