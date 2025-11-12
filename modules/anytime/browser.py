@@ -134,29 +134,31 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
     @need_login
     def get_accounts(self):
-        yield self.get_main_account()
+        for a in self.get_main_accounts():
+            yield a
         response = self.request(self.BASEURL + '/api/v1/customer/cards', method='GET').json() #?filter=plastic ou filter=all , status=activated
         for card in response['cards']:
             yield self._parse_card(card)
         # single card detail available here : https://secure.anyti.me/api/v1/customer/card/ANYxxxxxxxxx
 
     @need_login
-    def get_main_account(self):
+    def get_main_accounts(self):
         try:
             response = self.request(self.BASEURL + '/api/v1/customer/accounts', method='GET').json()
         except ClientError:
             self.csrf_token = None
             raise
 
-        a = Account()
-        a.type = Account.TYPE_CHECKING
-        a.label = u'Checking-account-' + response[0]["name"]
-        a.id = response[0]["id"]
-        a.number = NotAvailable
-        a.balance = Decimal(str(response[0]["amount"]))
-        a.iban = response[0]["iban"]
-        a.currency = response[0]["currency"]
-        return a
+        for r in response:
+            a = Account()
+            a.type = Account.TYPE_CHECKING
+            a.label = u'Checking-account-' + r["name"]
+            a.id = r["id"]
+            a.number = NotAvailable
+            a.balance = Decimal(str(r["amount"]))
+            a.iban = r["iban"]
+            a.currency = r["currency"]
+            yield a
 
     @staticmethod
     def _parse_card(card):
