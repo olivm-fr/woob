@@ -28,7 +28,7 @@ from woob.tools.date import parse_french_date
 
 
 class BankTransaction(FrenchTransaction):
-    '''PATTERNS = [
+    PATTERNS = [
         (re.compile(r'^RET(RAIT) DAB (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_WITHDRAWAL),
         (re.compile(r'^(CARTE|CB ETRANGER|CB) (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>.*)'), FrenchTransaction.TYPE_CARD),
         (re.compile(r'^(?P<category>VIR(EMEN)?T? (SEPA)?(RECU|FAVEUR)?)( /FRM)?(?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
@@ -41,8 +41,10 @@ class BankTransaction(FrenchTransaction):
         (re.compile(r'^(?P<text>.*)( \d+)? QUITTANCE .*'), FrenchTransaction.TYPE_ORDER),
         (re.compile(r'^.* LE (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2})$'), FrenchTransaction.TYPE_UNKNOWN),
         (re.compile(r'^ACHATS (CARTE|CB)'), FrenchTransaction.TYPE_CARD_SUMMARY),
-        (re.compile(r'^ANNUL (?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK)
-    ]'''
+        (re.compile(r'^ANNUL (?P<text>.*)'), FrenchTransaction.TYPE_PAYBACK),
+        (re.compile(r'^(CT|DD|BK Load) (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER),
+        (re.compile(r'^Virement instantané (?P<text>.*)'), FrenchTransaction.TYPE_TRANSFER)
+    ]
 
 class TransactionsPage(PartialHTMLPage):
     def get_transactions(self):
