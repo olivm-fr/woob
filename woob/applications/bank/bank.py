@@ -262,7 +262,7 @@ class OfxFormatter(IFormatter):
         return
 
     def flush(self):
-        if self.document:
+        if self.document is not None:
             self.output(ET.tostring(self.document, encoding="UTF-8", pretty_print=True).decode("utf-8"))
 
 
