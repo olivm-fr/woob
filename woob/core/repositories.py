@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
 
 import hashlib
 import importlib
@@ -25,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from compileall import compile_dir
 from configparser import DEFAULTSECT, RawConfigParser
 from contextlib import closing, contextmanager
@@ -32,6 +34,7 @@ from datetime import datetime
 from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
+from typing import IO, Any, TextIO, TypeVar
 from urllib.request import getproxies
 
 import packaging.version
@@ -39,6 +42,7 @@ from packaging.specifiers import SpecifierSet
 
 from woob.browser.browsers import Browser
 from woob.browser.profiles import Woob as WoobProfile
+from woob.capabilities.base import Capability
 from woob.exceptions import BrowserHTTPError, BrowserHTTPNotFound, ModuleInstallError
 from woob.tools.log import getLogger
 from woob.tools.misc import find_exe, get_backtrace, to_unicode
@@ -47,8 +51,11 @@ from woob.tools.packaging import parse_requirements
 from .modules import LoadedModule, _add_in_modules_path
 
 
+T = TypeVar("T")
+
+
 @contextmanager
-def open_for_config(filename):
+def open_for_config(filename: str) -> Generator[IO[str]]:
     f = NamedTemporaryFile(mode="w", encoding="utf-8", dir=os.path.dirname(filename), delete=False)
     with f:
         yield f
@@ -60,52 +67,55 @@ class ModuleInfo:
     Information about a module available on a repository.
     """
 
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         self.name = name
 
         # path to the local directory containing this module.
-        self.path = None
-        self.url = None
-        self.repo_url = None
+        self.path: str | None = None
+        self.url: str | None = None
+        self.repo_url: str | None = None
         self.signed = False
 
         self.version = 0
-        self.capabilities = ()
-        self.dependencies = ()
+        self.capabilities: Sequence[str] = ()
+        self.dependencies: Iterable[str] = ()
         self.description = ""
         self.maintainer = ""
         self.license = ""
         self.icon = ""
-        self.woob_spec = None
+        self.woob_spec: SpecifierSet = SpecifierSet()
 
-    def load(self, items):
+    def load(self, items: Mapping[str, str]) -> None:
         self.version = int(items["version"])
         self.capabilities = items["capabilities"].split()
         self.dependencies = items.get("dependencies", "").split()
         self.description = to_unicode(items["description"])
         self.maintainer = to_unicode(items["maintainer"])
         self.license = to_unicode(items["license"])
-        self.icon = items["icon"].strip() or None
+        self.icon = items["icon"].strip() or ""
         self.woob_spec = SpecifierSet(items.get("woob_spec", ""))
 
-    def has_caps(self, *caps):
+    def has_caps(self, *caps: str | type[Capability]) -> bool:
         """Return True if module implements at least one of the caps."""
         if len(caps) == 1 and isinstance(caps[0], (list, tuple)):
-            caps = caps[0]
+            # Faulty callers will get the message from type checker
+            caps = caps[0]  # type: ignore[assignment]
         for c in caps:
-            if type(c) == type:
-                c = c.__name__
-            if c in self.capabilities:
+            if isinstance(c, type) and issubclass(c, Capability):
+                cap = c.__name__
+            else:
+                cap = c
+            if cap in self.capabilities:
                 return True
         return False
 
-    def is_installed(self):
+    def is_installed(self) -> bool:
         return self.path is not None
 
-    def is_local(self):
+    def is_local(self) -> bool:
         return self.url is None
 
-    def dump(self):
+    def dump(self) -> tuple[tuple[str, Any], ...]:
         return (
             ("version", self.version),
             ("capabilities", " ".join(self.capabilities)),
@@ -133,7 +143,7 @@ class Repository:
     KEYDIR = ".keys"
     KEYRING = "trusted.gpg"
 
-    def __init__(self, url):
+    def __init__(self, url: str) -> None:
         self.url = url
         self.name = ""
         self.update = 0
@@ -143,9 +153,9 @@ class Repository:
         self.key_update = 0
         self.obsolete = False
         self.logger = getLogger(f"{__name__}.repository")
-        self.errors = {}
+        self.errors: dict[str, str] = {}
 
-        self.modules = {}
+        self.modules: dict[str, ModuleInfo] = {}
 
         if self.url.startswith("file://"):
             self.local = True
@@ -157,10 +167,10 @@ class Repository:
             with open(self.url, encoding="utf-8") as fp:
                 self.parse_index(fp)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Repository {self.name}>"
 
-    def localurl2path(self):
+    def localurl2path(self) -> str:
         """
         Get a local path of a file:// URL.
         """
@@ -170,15 +180,15 @@ class Repository:
             return self.url[len("file://") :]
         return self.url
 
-    def retrieve_index(self, browser, repo_path):
+    def retrieve_index(self, browser: Browser, repo_path: str | None) -> None:
         """
         Retrieve the index file of this repository. It can use network
         if this is a remote repository.
 
         :param repo_path: path to save the downloaded index file (if any).
-        :type repo_path: str or None
         """
         built = False
+        fp: TextIO
         if self.local:
             # Repository is local, open the file.
             filename = os.path.join(self.localurl2path(), self.INDEX)
@@ -209,7 +219,7 @@ class Repository:
         if repo_path:
             self.save(repo_path, private=True)
 
-    def retrieve_keyring(self, browser, keyring_path, progress):
+    def retrieve_keyring(self, browser: Browser, keyring_path: str, progress: IProgress) -> None:
         # ignore local
         if self.local:
             return
@@ -241,12 +251,11 @@ class Repository:
             keyring.save(keyring_data, self.key_update)
             progress.progress(0.0, str(keyring))
 
-    def parse_index(self, fp):
+    def parse_index(self, fp: TextIO) -> None:
         """
         Parse index of a repository
 
         :param fp: file descriptor to read
-        :type fp: buffer
         """
         config = RawConfigParser()
         config.read_file(fp)
@@ -280,19 +289,18 @@ class Repository:
             module = ModuleInfo(section)
             module.load(dict(config.items(section)))
             if not self.local:
+                assert self.url is not None  # by definition of self.local
                 module.url = posixpath.join(self.url, f"{module.name}.tar.gz")
                 module.repo_url = self.url
                 module.signed = self.signed
             self.modules[section] = module
 
-    def build_index(self, path, filename):
+    def build_index(self, path: str, filename: str) -> None:
         """
         Rebuild index of modules of repository.
 
         :param path: path of the repository
-        :type path: str
         :param filename: file to save index
-        :type filename: str
         """
         self.logger.debug("Rebuild index")
         self.modules.clear()
@@ -308,7 +316,7 @@ class Repository:
             self.key_update = 0
 
         for name in sorted(os.listdir(path)):
-            module_path = os.path.join(path, name)
+            module_path = Path(path) / name
 
             # Check for special cases.
             if (
@@ -321,7 +329,7 @@ class Repository:
 
             # Check if the module is indeed a module.
             if os.path.isdir(module_path):
-                if not os.path.exists(os.path.join(module_path, "__init__.py")):
+                if not os.path.exists(module_path / "__init__.py"):
                     continue
             else:
                 basename = os.path.basename(module_path).casefold()
@@ -335,12 +343,12 @@ class Repository:
                 module = LoadedModule(pymodule)
             except Exception as e:  # noqa
                 self.logger.warning("Unable to build module %s: [%s] %s", name, type(e).__name__, e)
-                bt = get_backtrace(e)
+                bt = get_backtrace(str(e))
                 self.logger.debug(bt)
                 self.errors[name] = bt
             else:
                 m = ModuleInfo(module.name)
-                m.version = self.get_tree_mtime(module_path)
+                m.version = self.get_tree_mtime(str(module_path))
                 m.capabilities = list({c.__name__ for c in module.iter_caps()})
                 m.dependencies = module.dependencies
                 m.description = module.description
@@ -348,12 +356,13 @@ class Repository:
                 m.license = module.license
                 m.icon = module.icon or ""
 
+                assert module.path is not None
                 module_path = Path(module.path)
-                if not os.path.isdir(module_path):
+                if not os.path.isdir(str(module_path)):
                     module_path = module_path.parent
 
                 requirements = parse_requirements(module_path / "requirements.txt")
-                m.woob_spec = requirements.get("woob", "")
+                m.woob_spec = requirements.get("woob", SpecifierSet())
 
                 self.modules[module.name] = m
 
@@ -361,7 +370,7 @@ class Repository:
         self.save(filename)
 
     @staticmethod
-    def get_tree_mtime(path, include_root=False):
+    def get_tree_mtime(path: str, include_root: bool = False) -> int:
         mtime = 0
         if include_root or not os.path.isdir(path):
             mtime = int(datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y%m%d%H%M"))
@@ -374,21 +383,19 @@ class Repository:
 
         return mtime
 
-    def save(self, filename, private=False):
+    def save(self, filename: str, private: bool = False) -> None:
         """
         Save repository into a file (modules.list for example).
 
         :param filename: path to file to save repository.
-        :type filename: str
         :param private: if enabled, save URL of repository.
-        :type private: bool
         """
         config = RawConfigParser()
         config.set(DEFAULTSECT, "name", self.name)
-        config.set(DEFAULTSECT, "update", self.update)
+        config.set(DEFAULTSECT, "update", str(self.update))
         config.set(DEFAULTSECT, "maintainer", self.maintainer)
-        config.set(DEFAULTSECT, "signed", int(self.signed))
-        config.set(DEFAULTSECT, "key_update", self.key_update)
+        config.set(DEFAULTSECT, "signed", str(int(self.signed)))
+        config.set(DEFAULTSECT, "key_update", str(self.key_update))
         if private:
             config.set(DEFAULTSECT, "url", self.url)
 
@@ -404,7 +411,7 @@ class Repository:
 class Versions:
     VERSIONS_LIST = "versions.list"
 
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self.path = path
         self.versions = {}
 
@@ -420,62 +427,62 @@ class Versions:
         except OSError:
             pass
 
-    def get(self, name):
+    def get(self, name: str) -> Any:
         return self.versions.get(name, None)
 
-    def set(self, name, version):
+    def set(self, name: str, version: int | str) -> None:
         self.versions[name] = int(version)
         self.save()
 
-    def save(self):
+    def save(self) -> None:
         config = RawConfigParser()
         for name, version in self.versions.items():
-            config.set(DEFAULTSECT, name, version)
+            config.set(DEFAULTSECT, name, str(version))
 
         with open_for_config(os.path.join(self.path, self.VERSIONS_LIST)) as fp:
             config.write(fp)
 
 
 class IProgress:
-    def progress(self, percent, message):
+    def progress(self, percent: float, message: str) -> None:
         raise NotImplementedError()
 
-    def error(self, message):
+    def error(self, message: str) -> None:
         raise NotImplementedError()
 
-    def prompt(self, message):
+    def prompt(self, message: str) -> bool:
         raise NotImplementedError()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<{self.__class__.__name__}>"
 
 
 class PrintProgress(IProgress):
-    def progress(self, percent, message):
+    def progress(self, percent: float, message: str) -> None:
         print(f"=== [{percent * 100:3.0f}%] {message}", file=sys.stderr)
 
-    def error(self, message):
+    def error(self, message: str) -> None:
         print(f"ERROR: {message}", file=sys.stderr)
 
-    def prompt(self, message):
+    def prompt(self, message: str) -> bool:
         print(f"{message} (Y/n): *** ASSUMING YES ***", file=sys.stderr)
         return True
 
 
 class SubProgress(IProgress):
-    def __init__(self, target, steps):
+    def __init__(self, target: IProgress, steps: int) -> None:
         self.target = target
         self.steps = steps
         self.current = 0
 
-    def progress(self, percent, message):
-        return self.target.progress((self.current + percent) / self.steps, message)
+    def progress(self, percent: float, message: str) -> None:
+        self.target.progress((self.current + percent) / self.steps, message)
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> Any:
         return getattr(self.target, attr)
 
 
-def recursive_deps(direct_deps, key, result=None):
+def recursive_deps(direct_deps: Mapping[T, set[T]], key: T, result: set[T] | None = None) -> set[T]:
     """
     take a dict of direct dependencies and get all dependencies of an element
 
@@ -493,8 +500,8 @@ def recursive_deps(direct_deps, key, result=None):
     return result
 
 
-class DepList(list):
-    def move_value_after(self, val, afters):
+class DepList(list[T]):
+    def move_value_after(self, val: T, afters: set[T]) -> None:
         # push an element after all its dependencies
 
         for pos in range(len(self) - 1, -1, -1):
@@ -512,7 +519,7 @@ class DepList(list):
         del self[current]
 
 
-def dependency_sort(deps_rules):
+def dependency_sort(deps_rules: Mapping[T, set[T]]) -> DepList[T]:
     """
     >>> dependency_sort({1: {2}, 2: {4}, 3: set(), 4: {3}})
     [3, 4, 2, 1]
@@ -553,11 +560,11 @@ class Repositories:
 
     SHARE_DIRS = [MODULES_DIR, REPOS_DIR, KEYRINGS_DIR, ICONS_DIR]
 
-    def __init__(self, workdir, datadir, version):
+    def __init__(self, workdir: str, datadir: str, version: str) -> None:
         self.logger = getLogger(f"{__name__}.repositories")
         self.version = version
 
-        self.browser = None
+        self.browser: Browser | None = None
 
         self.workdir = workdir
         self.datadir = datadir
@@ -576,7 +583,7 @@ class Repositories:
 
         self.versions = Versions(self.modules_dir)
 
-        self.repositories = []
+        self.repositories: list[Repository] = []
 
         if not os.path.exists(self.sources_list):
             with open_for_config(self.sources_list) as f:
@@ -585,14 +592,14 @@ class Repositories:
         else:
             self.load()
 
-    def load_browser(self):
+    def load_browser(self) -> None:
         class WoobBrowser(Browser):
             PROFILE = WoobProfile(self.version)
 
         if self.browser is None:
             self.browser = WoobBrowser(logger=getLogger("browser", parent=self.logger), proxy=getproxies())
 
-    def create_dir(self, name):
+    def create_dir(self, name: str) -> None:
         if not os.path.exists(name):
             os.makedirs(name)
         elif not os.path.isdir(name):
@@ -600,7 +607,7 @@ class Repositories:
 
     namespace_package_content = "from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n"
 
-    def create_namespace_package(self, path):
+    def create_namespace_package(self, path: str) -> None:
         pypath = os.path.join(path, "__init__.py")
         if os.path.exists(pypath):
             with open(pypath, encoding="utf-8") as fd:
@@ -612,7 +619,7 @@ class Repositories:
             with open(pypath, "w", encoding="utf-8") as fd:
                 fd.write(self.namespace_package_content)
 
-    def _extend_module_info(self, repo, info):
+    def _extend_module_info(self, repo: Repository, info: ModuleInfo) -> ModuleInfo:
         if repo.local:
             info.path = repo.localurl2path()
         elif self.versions.get(info.name) is not None:
@@ -620,13 +627,11 @@ class Repositories:
 
         return info
 
-    def get_all_modules_info(self, caps=None):
+    def get_all_modules_info(self, caps: list[str] | None = None) -> dict[str, ModuleInfo]:
         """
         Get all ModuleInfo instances available.
 
         :param caps: filter on capabilities:
-        :type caps: list[str]
-        :rtype: dict[:class:`ModuleInfo`]
         """
         modules = {}
         for repos in reversed(self.repositories):
@@ -635,7 +640,7 @@ class Repositories:
                     modules[name] = self._extend_module_info(repos, info)
         return modules
 
-    def get_module_info(self, name):
+    def get_module_info(self, name: str) -> ModuleInfo | None:
         """
         Get ModuleInfo object of a module.
 
@@ -649,7 +654,7 @@ class Repositories:
                 return m
         return None
 
-    def load(self):
+    def load(self) -> None:
         """
         Load repositories from ~/.local/share/woob/repositories/.
         """
@@ -662,27 +667,33 @@ class Repositories:
             except RepositoryUnavailable as e:
                 print(f"Unable to load repository {name} ({e}), try to update repositories.", file=sys.stderr)
 
-    def get_module_icon_path(self, module):
+    def get_module_icon_path(self, module: ModuleInfo) -> str:
         return os.path.join(self.icons_dir, f"{module.name}.png")
 
-    def retrieve_icon(self, module):
+    def retrieve_icon(self, module: str | ModuleInfo | None) -> None:
         """
         Retrieve the icon of a module and save it in ~/.local/share/woob/icons/.
         """
         self.load_browser()
-        if not isinstance(module, ModuleInfo):
+        assert self.browser is not None
+
+        if isinstance(module, str):
             module = self.get_module_info(module)
+        if module is None:
+            return
 
         dest_path = self.get_module_icon_path(module)
 
         icon_url = module.icon
         if not icon_url:
             if module.is_local():
+                assert module.path is not None
                 icon_path = os.path.join(module.path, module.name, "favicon.png")
                 if module.path and os.path.exists(icon_path):
                     shutil.copy(icon_path, dest_path)
                 return
 
+            assert module.url is not None
             icon_url = module.url.replace(".tar.gz", ".png")
 
         try:
@@ -693,7 +704,7 @@ class Repositories:
             with open(dest_path, "wb") as fp:
                 fp.write(icon.content)
 
-    def _parse_source_list(self):
+    def _parse_source_list(self) -> list[str]:
         sources = []
         with open(self.sources_list, encoding="utf-8") as f:
             for line in f:
@@ -703,15 +714,15 @@ class Repositories:
                     sources.append(line)
         return sources
 
-    def update_repositories(self, progress=PrintProgress()):
+    def update_repositories(self, progress: IProgress = PrintProgress()) -> None:
         """
         Update list of repositories by downloading them
         and put them in ~/.local/share/woob/repositories/.
 
         :param progress: observer object.
-        :type progress: :class:`IProgress`
         """
         self.load_browser()
+        assert self.browser is not None
 
         self.repositories = []
         for name in os.listdir(self.repos_dir):
@@ -745,11 +756,11 @@ class Repositories:
                         "Your woob version is probably obsolete and should be upgraded."
                     )
 
-    def check_repositories(self):
+    def check_repositories(self) -> bool:
         """
         Check if sources.list is consistent with repositories
         """
-        repositories = []
+        repositories: list[Repository] = []
         for line in self._parse_source_list():
             repository = Repository(line)
             filename = self.url2filename(repository.url)
@@ -760,13 +771,13 @@ class Repositories:
             repositories.append(repository)
         return True
 
-    def _is_module_updatable(self, info):
+    def _is_module_updatable(self, info: ModuleInfo) -> bool:
         return not info.is_local() and info.is_installed() and self.versions.get(info.name) != info.version
 
-    def _is_module_installable(self, info):
+    def _is_module_installable(self, info: ModuleInfo) -> bool:
         return not info.is_local() and not info.is_installed()
 
-    def _get_all_dependencies(self, modules):
+    def _get_all_dependencies(self, modules: Iterable[ModuleInfo]) -> list[Any]:
         modules = list(modules)
         direct_deps = {}
 
@@ -792,12 +803,11 @@ class Repositories:
         sorted_names = dependency_sort(direct_deps)
         return [self.get_module_info(name) for name in sorted_names]
 
-    def update(self, progress=PrintProgress()):
+    def update(self, progress: IProgress = PrintProgress()) -> None:
         """
         Update repositories and install new packages versions.
 
         :param progress: observer object.
-        :type progress: :class:`IProgress`
         """
         self.update_repositories(progress)
 
@@ -822,7 +832,8 @@ class Repositories:
             except ModuleInstallError as e:
                 proxy_progress.progress(1.0, str(e))
 
-    def install(self, module, progress=PrintProgress()):
+    def install(self, module: str | ModuleInfo, progress: IProgress = PrintProgress()) -> None:
+        info: ModuleInfo | None
         if isinstance(module, ModuleInfo):
             info = module
         elif isinstance(module, str):
@@ -846,14 +857,12 @@ class Repositories:
             proxy_progress.current = n
             self._install_one_module(info, proxy_progress)
 
-    def _install_one_module(self, module, progress):
+    def _install_one_module(self, module: ModuleInfo, progress: IProgress) -> None:
         """
         Install a module.
 
         :param module: module to install
-        :type module: :class:`str` or :class:`ModuleInfo`
         :param progress: observer object
-        :type progress: :class:`IProgress`
         """
         if self.version not in module.woob_spec:
             raise ModuleInstallError(
@@ -862,6 +871,7 @@ class Repositories:
             )
 
         self.load_browser()
+        assert self.browser is not None
 
         if module.is_local():
             raise ModuleInstallError("%s is available on local." % module.name)
@@ -877,12 +887,14 @@ class Repositories:
 
         progress.progress(0.3, "Downloading module...")
         try:
+            assert module.url is not None
             tardata = self.browser.open(module.url).content
         except BrowserHTTPError as e:
             raise ModuleInstallError("Unable to fetch module: %s" % e)
 
         # Check signature
         if module.signed and (Keyring.find_gpg() or Keyring.find_gpgv()):
+            assert module.repo_url is not None  # refs: Repository.parse_index
             progress.progress(0.5, "Checking module authenticity...")
             sig_data = self.browser.open(posixpath.join(module.url + ".sig")).content
             keyring_path = os.path.join(self.keyrings_dir, self.url2filename(module.repo_url))
@@ -914,7 +926,7 @@ class Repositories:
         progress.progress(1.0, f"Module {module.name} has been installed!")
 
     @staticmethod
-    def url2filename(url):
+    def url2filename(url: str) -> str:
         """
         Get a safe file name for an URL.
 
@@ -922,11 +934,11 @@ class Repositories:
         """
         return "".join([char if char.isalnum() else "_" for char in url])
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Repository]:
         yield from self.repositories
 
     @property
-    def errors(self):
+    def errors(self) -> dict[str, str]:
         errors = {}
         for repository in self:
             errors.update(repository.errors)
@@ -934,7 +946,7 @@ class Repositories:
 
 
 class InvalidSignature(Exception):
-    def __init__(self, filename):
+    def __init__(self, filename: str) -> None:
         self.filename = filename
         super().__init__(f"Invalid signature for {filename}")
 
@@ -942,7 +954,7 @@ class InvalidSignature(Exception):
 class Keyring:
     EXTENSION = ".gpg"
 
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self.path = path + self.EXTENSION
         self.vpath = path + ".version"
         self.version = 0
@@ -956,7 +968,7 @@ class Keyring:
             if os.path.exists(self.vpath):
                 os.remove(self.vpath)
 
-    def exists(self):
+    def exists(self) -> bool:
         if not os.path.exists(self.vpath):
             return False
         if os.path.exists(self.path):
@@ -967,7 +979,7 @@ class Keyring:
                     return True
         return False
 
-    def save(self, keyring_data, version):
+    def save(self, keyring_data: bytes, version: int) -> None:
         with open(self.path, "wb") as fp:
             fp.write(keyring_data)
         self.version = version
@@ -975,14 +987,14 @@ class Keyring:
             fp.write(str(version))
 
     @staticmethod
-    def find_gpgv():
+    def find_gpgv() -> str | None:
         return find_exe("gpgv2") or find_exe("gpgv")
 
     @staticmethod
-    def find_gpg():
+    def find_gpg() -> str | None:
         return find_exe("gpg2") or find_exe("gpg")
 
-    def is_valid(self, data, sigdata):
+    def is_valid(self, data: bytes, sigdata: bytes) -> bool:
         """
         Check if the data is signed by an accepted key.
         data and sigdata should be strings.
@@ -1007,8 +1019,8 @@ class Keyring:
         with NamedTemporaryFile(suffix=".sig", delete=False) as sigfile:
             temp_filename = sigfile.name
             return_code = None
-            out = ""
-            err = ""
+            out = b""
+            err = b""
             try:
                 sigfile.write(sigdata)
                 sigfile.flush()  # very important
@@ -1041,7 +1053,7 @@ class Keyring:
                 return False
         return True
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.exists():
             with open(self.path, "rb") as f:
                 h = hashlib.sha1(f.read()).hexdigest()
