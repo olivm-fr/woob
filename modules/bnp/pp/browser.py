@@ -382,6 +382,9 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
             except HTTPNotFound:
                 self.logger.warn('Could not retrieve "Comptes Titres" accounts')
                 market_accounts = []
+            except ServerError:
+                self.logger.warning("An Internal Server Error occurred")
+                market_accounts = []
 
             checked_accounts = set()
             for account in accounts:
