@@ -37,7 +37,7 @@ from .misc import to_unicode
 if TYPE_CHECKING:
     from woob.core.requests import RequestsManager
 
-__all__ = ["ValuesDict", "Value", "ValueBackendPassword", "ValueInt", "ValueFloat", "ValueBool"]
+__all__ = ["ValuesDict", "Value", "ValueBackendPassword", "ValueInt", "ValueFloat", "ValueBool", "ValueDate"]
 
 ValuesDictType = TypeVar("ValuesDictType", bound="ValuesDict")
 T = TypeVar("T")
