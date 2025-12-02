@@ -372,7 +372,7 @@ class ItalianParser(dateutil.parser.parserinfo):
         ("giugno",),
         ("luglio",),
         ("agosto", "ago"),
-        ("settembre"),
+        ("settembre",),
         ("ottobre",),
         ("novembre",),
         ("dicembre",),
