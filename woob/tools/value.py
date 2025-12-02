@@ -46,7 +46,10 @@ T = TypeVar("T")
 class ValuesDict(OrderedDict[str, "Value[Any]"]):
     """Ordered dictionary which can take values in constructor.
 
-    >>> ValuesDict(Value('a', label='Test'), ValueInt('b', label='Test2'))
+    Example:
+        >>> ValuesDict(Value('a', label='Test'), ValueInt('b', label='Test2'))  # doctest: +SKIP
+        ValuesDict({'a': <woob.tools.value.Value object at 0x...>,
+                    'b': <woob.tools.value.ValueInt object at 0x...>})
     """
 
     def __init__(self, *values: Value[Any]) -> None:

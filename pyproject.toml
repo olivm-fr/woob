@@ -185,12 +185,13 @@ python_files = "tests/*.py test.py"
 testpaths = [
     "tests",
     "woob/browser/browsers.py",
-    "woob/browser/pages.py",
-    "woob/browser/filters/standard.py",
+    "woob/browser/filters/file.py",
     "woob/browser/filters/json.py",
+    "woob/browser/filters/standard.py",
+    "woob/browser/pages.py",
     "woob/tools/json.py",
     "woob/tools/misc.py",
-    "woob/browser/filters/file.py",
+    "woob/tools/value.py",
 ]
 
 [tool.setuptools.packages.find]
