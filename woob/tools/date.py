@@ -85,8 +85,18 @@ class datetime(real_datetime):
     def strftime(self, fmt: str) -> str:
         return strftime(self, fmt)
 
-    def combine(self, date, time):
-        return datetime(date.year, date.month, date.day, time.hour, time.minute, time.microsecond, time.tzinfo)
+    @classmethod
+    def combine(cls, date: dtmod.date, time: dtmod.time, tzinfo: dtmod.tzinfo | None = None) -> Self:
+        return cls(
+            date.year,
+            date.month,
+            date.day,
+            time.hour,
+            time.minute,
+            time.second,
+            time.microsecond,
+            time.tzinfo if tzinfo is None else tzinfo,
+        )
 
     def date(self) -> date:
         return date(self.year, self.month, self.day)
