@@ -181,8 +181,8 @@ def ratelimit(group: str, delay: int) -> None:
     This function is not thread-safe. For reasonably non-critical rate
     limiting (like accessing a website), it should be sufficient nevertheless.
 
-    @param group [string]  rate limiting group name, alphanumeric
-    @param delay [int]  delay in seconds between each call
+    :param group: rate limiting group name, alphanumeric
+    :param delay: delay in seconds between each call
     """
 
     from tempfile import gettempdir
