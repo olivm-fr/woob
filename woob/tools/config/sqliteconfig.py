@@ -87,7 +87,7 @@ class VirtualDict(MutableMapping):
 
     def __delitem__(self, key):
         try:
-            self.config.delete(self, self.base, key)
+            self.config.delete(self.base, key)
         except ConfigError:
             raise KeyError(f"{key} key in {self.base} table not found")
 
