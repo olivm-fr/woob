@@ -62,7 +62,7 @@ from woob.capabilities.base import NotAvailable, empty
 from woob.capabilities.bill import Subscription
 from woob.capabilities.contact import Advisor
 from woob.capabilities.profile import Person, ProfileMissing
-from woob.exceptions import BrowserUnavailable, BrowserUserBanned
+from woob.exceptions import ActionNeeded, BrowserUnavailable, BrowserUserBanned
 from woob.tools.capabilities.bank.investments import IsinCode, IsinType, create_french_liquidity
 from woob.tools.capabilities.bank.transactions import FrenchTransaction
 from woob.tools.log import getLogger
@@ -92,6 +92,9 @@ class JsonBasePage(LoggedPage, JsonPage):
         if Dict("commun/statut")(self.doc).upper() == "NOK":
             reason = Dict("commun/raison")(self.doc)
             action = Dict("commun/action")(self.doc)
+
+            if reason and (reason == "MAIL_HARDBOUNCE"):
+                raise ActionNeeded("Veuillez vous connecter sur votre espace et vérifier votre adresse email")
 
             if action and "BLOCAGE" in action:
                 raise BrowserUserBanned()
