@@ -90,16 +90,16 @@ class JsonBasePage(LoggedPage, JsonPage):
 
     def on_load(self):
         if Dict("commun/statut")(self.doc).upper() == "NOK":
-            reason = Dict("commun/raison")(self.doc)
-            action = Dict("commun/action")(self.doc)
+            reason = Dict("commun/raison", default="")(self.doc)
+            action = Dict("commun/action", default="")(self.doc)
 
-            if reason and (reason == "MAIL_HARDBOUNCE"):
+            if reason == "MAIL_HARDBOUNCE":
                 raise ActionNeeded("Veuillez vous connecter sur votre espace et vérifier votre adresse email")
 
-            if action and "BLOCAGE" in action:
+            if "BLOCAGE" in action:
                 raise BrowserUserBanned()
 
-            if reason and "err_tech" in reason:
+            if "err_tech" in reason:
                 # This error is temporary and usually do not happens on the next try
                 raise TemporaryBrowserUnavailable()
 
