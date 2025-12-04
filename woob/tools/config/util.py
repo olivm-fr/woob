@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from datetime import datetime
 from logging import Logger
@@ -57,6 +58,7 @@ def time_buffer(
             self.last_run = last_run if isinstance(last_run, datetime) else datetime.now()
 
         def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
+            @functools.wraps(func)
             def wrapper_time_buffer(*args: Any, **kwargs: Any) -> Any:
                 since_seconds = kwargs.pop("since_seconds", None)
                 if since_seconds is None:
