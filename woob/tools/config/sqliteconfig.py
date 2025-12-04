@@ -191,11 +191,9 @@ class SQLiteConfig(IConfig):
         """
         cur = self.storage.cursor()
         cur.execute("SELECT key, value FROM %s;" % quote(table))  # nosec
-        items = cur.fetchmany(size)
-        while items:
+        while items := cur.fetchmany(size):
             for key, strvalue in items:
                 yield key, yaml.load(strvalue, Loader=SafeLoader)
-            items = cur.fetchmany(size)
 
     def keys(self, table: str, size: int = 200) -> Iterator[str]:
         """
@@ -204,11 +202,9 @@ class SQLiteConfig(IConfig):
         """
         cur = self.storage.cursor()
         cur.execute("SELECT key FROM %s;" % quote(table))  # nosec
-        items = cur.fetchmany(size)
-        while items:
+        while items := cur.fetchmany(size):
             for item in items:
                 yield item[0]
-            items = cur.fetchmany(size)
 
     def count(self, table: str) -> int:
         cur = self.storage.cursor()
