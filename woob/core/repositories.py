@@ -1015,6 +1015,9 @@ class Keyring:
             ]
         elif gpgv:
             verify_command = [gpgv]
+        else:
+            # Cannot assert validity
+            return False
 
         with NamedTemporaryFile(suffix=".sig", delete=False) as sigfile:
             temp_filename = sigfile.name
