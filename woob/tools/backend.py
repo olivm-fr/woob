@@ -149,7 +149,7 @@ class BackendConfig(ValuesDict):
     woob: Woob
 
     def load(
-        self, woob: Woob, modname: str, instname: str, config: dict[str, Any], nofail: bool = False
+        self, woob: Woob, modname: str, instname: str, config: Mapping[str, Any], nofail: bool = False
     ) -> BackendConfig:
         """
         Load configuration from dict to create an instance.
@@ -199,7 +199,7 @@ class BackendConfig(ValuesDict):
                 settings[name] = value.dump()
         return settings
 
-    def save(self, edit: bool = True, params: dict[str, Any] | None = None) -> None:
+    def save(self, edit: bool = True, params: Mapping[str, Any] | None = None) -> None:
         """
         Save backend config.
 
@@ -318,7 +318,7 @@ class Module:
         self,
         woob: Woob,
         name: str,
-        config: dict[str, Any] | None = None,
+        config: Mapping[str, Any] | None = None,
         storage: IStorage | None = None,
         logger: logging.Logger | None = None,
         nofail: bool = False,
