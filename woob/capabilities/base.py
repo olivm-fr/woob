@@ -280,7 +280,7 @@ class FieldNotFound(Exception):
     :type field: :class:`Field`
     """
 
-    def __init__(self, obj: BaseObject, field: str):
+    def __init__(self, obj: object, field: str):
         super().__init__(f'Field "{field}" not found for object {obj}')
 
 
