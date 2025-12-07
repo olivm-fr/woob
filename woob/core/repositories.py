@@ -95,16 +95,15 @@ class ModuleInfo:
         self.icon = items["icon"].strip() or ""
         self.woob_spec = SpecifierSet(items.get("woob_spec", ""))
 
-    def has_caps(self, *caps: str | type[Capability]) -> bool:
+    def has_caps(self, *caps: str | type[Capability] | Iterable[str | type[Capability]]) -> bool:
         """Return True if module implements at least one of the caps."""
-        if len(caps) == 1 and isinstance(caps[0], (list, tuple)):
-            # Faulty callers will get the message from type checker
-            caps = caps[0]  # type: ignore[assignment]
-        for c in caps:
-            if isinstance(c, type) and issubclass(c, Capability):
-                cap = c.__name__
-            else:
-                cap = c
+        caps_: Iterable[str | type[Capability]]
+        if isinstance(caps[0], (str, type)):
+            caps_ = caps  # type: ignore[assignment]
+        else:
+            caps_ = caps[0]
+        for c in caps_:
+            cap = c if isinstance(c, str) else c.__name__
             if cap in self.capabilities:
                 return True
         return False
@@ -627,7 +626,9 @@ class Repositories:
 
         return info
 
-    def get_all_modules_info(self, caps: list[str] | None = None) -> dict[str, ModuleInfo]:
+    def get_all_modules_info(
+        self, caps: str | type[Capability] | Iterable[str | type[Capability]] | None = None
+    ) -> dict[str, ModuleInfo]:
         """
         Get all ModuleInfo instances available.
 

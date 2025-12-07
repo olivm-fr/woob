@@ -473,7 +473,7 @@ class Woob(WoobBase):
 
     def load_backends(
         self,
-        caps: Iterable[type[Capability] | str] | None = None,
+        caps: str | type[Capability] | Iterable[str | type[Capability]] | None = None,
         names: Iterable[str] | None = None,
         modules: Iterable[str] | None = None,
         exclude: Iterable[str] | None = None,
