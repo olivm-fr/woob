@@ -176,12 +176,15 @@ class ApproxVecDict(dict[Point2D, VT]):
         raise KeyError()
 
     @overload
-    def get(self, k: Point2D) -> VT | None: ...
+    def get(self, k: Point2D, default: None = ..., /) -> VT | None: ...
 
     @overload
-    def get(self, k: Point2D, default: T) -> T | VT: ...
+    def get(self, k: Point2D, default: VT = ..., /) -> VT: ...
 
-    def get(self, k: Point2D, default: T | None = None) -> T | VT | None:
+    @overload
+    def get(self, k: Point2D, default: T = ..., /) -> T | VT: ...
+
+    def get(self, k: Point2D, default: T | VT | None = None, /) -> T | VT | None:
         try:
             return self[k]
         except KeyError:
