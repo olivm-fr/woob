@@ -144,6 +144,7 @@ class BanquePopulaire(TwoFactorBrowser):
     # Base URLs names from :class:`ConstPage` content
     URL_ICG = "https://www.icgauth.banquepopulaire.fr"
     URL_RS_AUTH = "https://www.rs-ext-bad-ib.banquepopulaire.fr"
+    GW_AS_ENDPOINT_PAS = "https://www.as-ext-bad-ib.banquepopulaire.fr"
 
     TWOFA_DURATION = 90 * 24 * 60
 
@@ -158,10 +159,12 @@ class BanquePopulaire(TwoFactorBrowser):
     const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
     keys_pages = URL(r"/espace-client/assets/xld-keys.json", KeysPage)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
-    authorize = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/authorize", AuthorizePage)
-    login_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/consume", LoginTokensPage)
+
+    authorize = URL(r"/api/oauth/v2/authorize", AuthorizePage, base="GW_AS_ENDPOINT_PAS")
+    login_tokens = URL(r"/api/oauth/v2/consume", LoginTokensPage, base="GW_AS_ENDPOINT_PAS")
+    account_pass_tokens = URL(r"/api/oauth/v2/token", InfoTokensPage, base="GW_AS_ENDPOINT_PAS")
+
     info_tokens = URL(r"https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token", InfoTokensPage)
-    account_pass_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/token", InfoTokensPage)
 
     authentication_step = URL(
         r"/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step", AuthenticationStepPage, base="URL_ICG"
