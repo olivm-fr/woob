@@ -143,6 +143,7 @@ class BanquePopulaire(TwoFactorBrowser):
     BASEURL = "https://www.banquepopulaire.fr"
     # Base URLs names from :class:`ConstPage` content
     URL_ICG = "https://www.icgauth.banquepopulaire.fr"
+    URL_RS_AUTH = "https://www.rs-ext-bad-ib.banquepopulaire.fr"
 
     TWOFA_DURATION = 90 * 24 * 60
 
@@ -171,11 +172,9 @@ class BanquePopulaire(TwoFactorBrowser):
     vk_image = URL(r"/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images", VkImagePage, base="URL_ICG")
     app_validation = URL(r"/dacsrest/WaitingCallbackHandler", AppValidationPage, base="URL_ICG")
 
-    synthesis_views = URL(
-        r"https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/contract/v2/augmentedSynthesisViews", SynthesePage
-    )
+    synthesis_views = URL(r"/bapi/contract/v2/augmentedSynthesisViews", SynthesePage, base="URL_RS_AUTH")
 
-    transactions = URL(r"https://www.rs-ext-bad-ib.banquepopulaire.fr/pfm/user/v1.1/transactions", TransactionPage)
+    transactions = URL(r"/pfm/user/v1.1/transactions", TransactionPage, base="URL_RS_AUTH")
 
     error_page = URL(
         r"https://[^/]+/cyber/internet/ContinueTask.do",
@@ -197,7 +196,7 @@ class BanquePopulaire(TwoFactorBrowser):
 
     home_page = URL(r"https://[^/]+/.*espace-client", HomePage)
 
-    last_connect = URL(r"https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/user/v1/user/lastConnect", LastConnectPage)
+    last_connect = URL(r"/bapi/user/v1/user/lastConnect", LastConnectPage, base="URL_RS_AUTH")
 
     redirect_uri = URL(r"https://www.ibps.bpgo.banquepopulaire.fr/callbackleg")
 
