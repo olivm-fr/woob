@@ -186,6 +186,11 @@ class KeysPage(JsonPage):
         return Dict("#CLIENT_ID_PAS#")(self.doc)
 
 
+class ConstPage(JsonPage):
+    def get_client_id(self):
+        return Dict("#CLIENT_PAS#")(self.doc)
+
+
 class SynthesePage(JsonPage):
     def get_raw_json(self):
         return self.text

@@ -51,6 +51,7 @@ from .pages import (
     AuthorizeErrorPage,
     AuthorizePage,
     BPOVirtKeyboard,
+    ConstPage,
     ErrorPage,
     HomePage,
     InfoTokensPage,
@@ -151,6 +152,7 @@ class BanquePopulaire(TwoFactorBrowser):
     )
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
+    const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
     keys_pages = URL(r"https://www.banquepopulaire.fr/espace-client/assets/xld-keys.json", KeysPage)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
     authorize = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/authorize", AuthorizePage)
@@ -786,7 +788,9 @@ class BanquePopulaire(TwoFactorBrowser):
             "Accept": "*/*",
             "Referer": "https://www.banquepopulaire.fr/espace-client/",
         }
-        self.keys_pages.go(headers=headers)
+        self.const_page.go(headers=headers)
+        if not self.const_page.is_here():
+            self.keys_pages.go(headers=headers)
         client_id = self.page.get_client_id()
 
         bpcesta = self.get_bpcesta_SSO()
