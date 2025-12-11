@@ -71,10 +71,7 @@ class BanquePopulaireModule(Module, CapBankWealth):
     BROWSER = BanquePopulaire
 
     def create_default_browser(self):
-        return self.create_browser(
-            "www.banquepopulaire.fr",
-            self.config,
-        )
+        return self.create_browser(self.config)
 
     def iter_accounts(self):
         return self.browser.iter_accounts()

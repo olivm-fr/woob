@@ -140,6 +140,8 @@ class BanquePopulaireAccount(Account):
 
 
 class BanquePopulaire(TwoFactorBrowser):
+    BASEURL = "https://www.banquepopulaire.fr"
+
     TWOFA_DURATION = 90 * 24 * 60
 
     first_login_page = URL(r"/$")
@@ -153,7 +155,7 @@ class BanquePopulaire(TwoFactorBrowser):
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
     const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
-    keys_pages = URL(r"https://www.banquepopulaire.fr/espace-client/assets/xld-keys.json", KeysPage)
+    keys_pages = URL(r"/espace-client/assets/xld-keys.json", KeysPage)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
     authorize = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/authorize", AuthorizePage)
     login_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/consume", LoginTokensPage)
@@ -206,10 +208,9 @@ class BanquePopulaire(TwoFactorBrowser):
 
     HAS_CREDENTIALS_ONLY = True
 
-    def __init__(self, website, config, *args, **kwargs):
+    def __init__(self, config, *args, **kwargs):
         self.config = config
         super().__init__(self.config, self.config["login"].get(), self.config["password"].get(), *args, **kwargs)
-        self.BASEURL = "https://%s" % website
         self.validation_id = None
         self.mfa_validation_data = None
         self.user_type = None
