@@ -149,10 +149,10 @@ class BanquePopulaire(TwoFactorBrowser):
     TWOFA_DURATION = 90 * 24 * 60
 
     first_login_page = URL(r"/$")
-    new_first_login_page = URL(r"/se-connecter/sso")
-    login_page = URL(r"https://[^/]+/auth/UI/Login.*", LoginPage)
+    new_first_login_page = URL(r"/se-connecter/sso", base="URL_ICG")
+    login_page = URL(r"/auth/UI/Login.*", LoginPage, base="URL_ICG")
     new_login = URL(r"/se-connecter/sso", NewLoginPage, base="URL_ICG")
-    js_file = URL(r"https://[^/]+/.*se-connecter/main-.*.js$", JsFilePage)
+    js_file = URL(r"/.*se-connecter/main-.*.js$", JsFilePage, base="URL_ICG")
     js_seconnecter_chunk = URL(r"/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk, base="URL_ICG")
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
@@ -193,11 +193,11 @@ class BanquePopulaire(TwoFactorBrowser):
         UnavailablePage,
     )
 
-    authorize_error = URL(r"https://[^/]+/dacswebssoissuer/AuthnRequestServlet", AuthorizeErrorPage)
+    authorize_error = URL(r"/dacswebssoissuer/AuthnRequestServlet", AuthorizeErrorPage, base="URL_ICG")
 
     redirect_error_page = URL(r"https://[^/]+/portailinternet/?$", RedirectErrorPage)
 
-    home_page = URL(r"https://[^/]+/.*espace-client", HomePage)
+    home_page = URL(r"/.*espace-client", HomePage)
 
     last_connect = URL(r"/bapi/user/v1/user/lastConnect", LastConnectPage, base="URL_RS_AUTH")
 
