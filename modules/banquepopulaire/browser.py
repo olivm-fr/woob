@@ -141,17 +141,17 @@ class BanquePopulaireAccount(Account):
 
 class BanquePopulaire(TwoFactorBrowser):
     BASEURL = "https://www.banquepopulaire.fr"
+    # Base URLs names from :class:`ConstPage` content
+    URL_ICG = "https://www.icgauth.banquepopulaire.fr"
 
     TWOFA_DURATION = 90 * 24 * 60
 
     first_login_page = URL(r"/$")
     new_first_login_page = URL(r"/se-connecter/sso")
     login_page = URL(r"https://[^/]+/auth/UI/Login.*", LoginPage)
-    new_login = URL(r"https://www.icgauth.banquepopulaire.fr/se-connecter/sso", NewLoginPage)
+    new_login = URL(r"/se-connecter/sso", NewLoginPage, base="URL_ICG")
     js_file = URL(r"https://[^/]+/.*se-connecter/main-.*.js$", JsFilePage)
-    js_seconnecter_chunk = URL(
-        r"https://www.icgauth.banquepopulaire.fr/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk
-    )
+    js_seconnecter_chunk = URL(r"/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk, base="URL_ICG")
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
     const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
@@ -163,18 +163,13 @@ class BanquePopulaire(TwoFactorBrowser):
     account_pass_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/token", InfoTokensPage)
 
     authentication_step = URL(
-        r"https://www.icgauth.banquepopulaire.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step",
-        AuthenticationStepPage,
+        r"/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step", AuthenticationStepPage, base="URL_ICG"
     )
     authentication_method_page = URL(
-        r"https://www.icgauth.banquepopulaire.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>)",
-        AuthenticationMethodPage,
+        r"/dacsrest/api/v1u0/transaction/(?P<validation_id>)", AuthenticationMethodPage, base="URL_ICG"
     )
-    vk_image = URL(
-        r"https://www.icgauth.banquepopulaire.fr/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images",
-        VkImagePage,
-    )
-    app_validation = URL(r"https://www.icgauth.banquepopulaire.fr/dacsrest/WaitingCallbackHandler", AppValidationPage)
+    vk_image = URL(r"/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images", VkImagePage, base="URL_ICG")
+    app_validation = URL(r"/dacsrest/WaitingCallbackHandler", AppValidationPage, base="URL_ICG")
 
     synthesis_views = URL(
         r"https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/contract/v2/augmentedSynthesisViews", SynthesePage
