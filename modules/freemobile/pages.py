@@ -343,5 +343,5 @@ class OtpPage(RSCPage):
         result = None
         our_row = Dict("1")(self.doc)
         if our_row:
-            result = our_row
+            result = our_row.get("id")
         return result
