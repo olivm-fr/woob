@@ -804,7 +804,7 @@ class Appbank(CaptchaMixin, ReplApplication):
 
         if end_date is not None:
             try:
-                end_date = parse_date(end_date).date()
+                end_date = parse_date(end_date)
             except ValueError:
                 print(
                     '"%s" is an incorrect date format (for example "%s")'
@@ -817,7 +817,12 @@ class Appbank(CaptchaMixin, ReplApplication):
 
         transactions = []
         for transaction in self.do(command, account, backends=account.backend):
-            if end_date is not None and transaction.date < end_date:
+            # field can hold date and datetime but comparison need to use the same type
+            # cast all to date to keep true to field definition
+            if hasattr(transaction.date, "date"):
+                transaction.date = transaction.date.date()
+
+            if end_date is not None and transaction.date < end_date.date():
                 break
             transactions.append(transaction)
 
