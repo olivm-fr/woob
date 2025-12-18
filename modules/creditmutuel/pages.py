@@ -503,7 +503,7 @@ class item_account_generic(ItemElement):
 
         return (
             # First TD has to have a i class
-            ("i" in first_td_classes or "p" in first_td_classes)
+            ("i" in first_td_classes or "p" in first_td_classes or "decal1" in first_td_classes)
             and (
                 first_td.find("a") is not None
                 or (
