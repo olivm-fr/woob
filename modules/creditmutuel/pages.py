@@ -1519,9 +1519,15 @@ class OperationsPage(LoggedPage, HTMLPage):
                     # Clear their content in place.
                     for elem in el.xpath('.//node()[contains(@class, "eir_showxs")]'):
                         elem.drop_tree()
+                    for elem in el.xpath('.//node()[contains(@class, "eir_showsm")]'):
+                        elem.drop_tree()
 
                     # Ditto for the ei_sronly (screen reader only) class.
                     for elem in el.xpath('.//node()[contains(@class, "ei_sronly")]'):
+                        elem.drop_tree()
+
+                    # Remove the category span.
+                    for elem in el.xpath('.//node()[contains(@class, "doux")]'):
                         elem.drop_tree()
 
                     # Remove hidden parts of labels:
