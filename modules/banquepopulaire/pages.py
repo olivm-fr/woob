@@ -28,6 +28,7 @@ from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Coalesce, Regexp
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage, XMLPage
 from woob.capabilities import NotAvailable
+from woob.capabilities.base import NotLoaded
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from woob.tools.captcha.virtkeyboard import SplitKeyboard
 from woob_modules.caissedepargne.pages import AuthenticationMethodPage as _AuthenticationMethodPage
@@ -182,6 +183,7 @@ class JsFilePageEspaceClientChunk(_JsFilePage):
         return client_id
 
 
+<<<<<<< HEAD
 class KeysPage(JsonPage):
     def get_client_id(self):
         return Dict("#CLIENT_ID_PAS#")(self.doc)
@@ -192,6 +194,8 @@ class ConstPage(JsonPage):
         return Dict("#CLIENT_PAS#")(self.doc)
 
 
+=======
+>>>>>>> a10f4a005 (Take remarks in account, especially using a lookuptable instead of a dynamic search)
 class SynthesePage(JsonPage):
     def get_raw_json(self):
         return self.text
@@ -393,23 +397,26 @@ class CategoryPage(LoggedPage, RawPage):
 
 
 class CategoryLoader:
-    def __init__(self):
-        self.data = None
+    data = NotLoaded
+    lookup = NotLoaded
 
     def load(self, json_content):
         self.data = json.loads(json_content)
+        lt = {}
+
+        def visit(categories):
+            for cat in categories:
+                cid = cat.get("id")
+                name = cat.get("name")
+                if cid is not None and name is not None:
+                    lt[cid] = name
+                if "children" in cat and cat["children"]:
+                    visit(cat["children"])
+
+        visit(self.data.get("data", []))
+        self.lookup = lt
 
     def get_name_by_id(self, target_id):
-        def search(categories):
-            for cat in categories:
-                if cat["id"] == target_id:
-                    return cat["name"]
-                if "children" in cat and cat["children"]:
-                    result = search(cat["children"])
-                    if result:
-                        return result
-            return None
-
-        if not self.data:
+        if self.lookup == NotLoaded:
             raise ValueError("Data not loaded. Call load() first.")
-        return search(self.data.get("data", []))
+        return self.lookup.get(target_id)

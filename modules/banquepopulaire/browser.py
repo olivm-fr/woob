@@ -51,12 +51,7 @@ from .pages import (
     AuthorizeErrorPage,
     AuthorizePage,
     BPOVirtKeyboard,
-<<<<<<< HEAD
     ConstPage,
-=======
-    CategoryLoader,
-    CategoryPage,
->>>>>>> d330feae8 (Implement category support on Banque Populaire)
     ErrorPage,
     HomePage,
     InfoTokensPage,
@@ -1075,8 +1070,10 @@ class BanquePopulaire(TwoFactorBrowser):
                 transaction.amount = element["amount"]
                 try:
                     transaction.category = categories.get_name_by_id(element["categoryId"])
-                except Exception:
+                except (KeyError, TypeError):
                     self.logger.debug("Fail to retrieve category for %s", transaction.label)
+                except Exception as e:
+                    self.logger.error("Skip retrieving category for %s due to exception: %s", transaction.label, e)
 
                 yield transaction
 
