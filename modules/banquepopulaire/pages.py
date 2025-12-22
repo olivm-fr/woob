@@ -179,8 +179,6 @@ class JsFilePageEspaceClientChunk(_JsFilePage):
     def get_client_id(self):
         match_e = re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text).group(0)
         client_id = re.search(r"[a-z0-9-]{36}", match_e).group(0)
-
-
         return client_id
 
 
