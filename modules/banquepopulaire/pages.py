@@ -180,10 +180,10 @@ class JsFilePageEspaceClientChunk(_JsFilePage):
         match_e = re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text).group(0)
         client_id = re.search(r"[a-z0-9-]{36}", match_e).group(0)
 
+
         return client_id
 
 
-<<<<<<< HEAD
 class KeysPage(JsonPage):
     def get_client_id(self):
         return Dict("#CLIENT_ID_PAS#")(self.doc)
@@ -194,8 +194,6 @@ class ConstPage(JsonPage):
         return Dict("#CLIENT_PAS#")(self.doc)
 
 
-=======
->>>>>>> a10f4a005 (Take remarks in account, especially using a lookuptable instead of a dynamic search)
 class SynthesePage(JsonPage):
     def get_raw_json(self):
         return self.text
