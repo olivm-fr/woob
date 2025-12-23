@@ -52,6 +52,8 @@ from .pages import (
     AuthorizePage,
     BPOVirtKeyboard,
     ConstPage,
+    CategoryPage,
+    CategoryLoader,
     ErrorPage,
     HomePage,
     InfoTokensPage,
