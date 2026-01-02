@@ -5,6 +5,7 @@
 /.tox
 /localconfig
 /localenv
+.venv
 all-requirements.txt
 build
 dist

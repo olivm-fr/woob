@@ -147,6 +147,10 @@ class BanquePopulaire(TwoFactorBrowser):
     URL_ICG = "https://www.icgauth.banquepopulaire.fr"
     URL_RS_AUTH = "https://www.rs-ext-bad-ib.banquepopulaire.fr"
     GW_AS_ENDPOINT_PAS = "https://www.as-ext-bad-ib.banquepopulaire.fr"
+    INFO_TOKEN_ENDPOINT = "https://www.as-ano-bad-ib.banquepopulaire.fr"
+
+    ENSEIGNE = "bp"
+    SNID = "678256"
 
     TWOFA_DURATION = 90 * 24 * 60
 
@@ -166,7 +170,7 @@ class BanquePopulaire(TwoFactorBrowser):
     login_tokens = URL(r"/api/oauth/v2/consume", LoginTokensPage, base="GW_AS_ENDPOINT_PAS")
     account_pass_tokens = URL(r"/api/oauth/v2/token", InfoTokensPage, base="GW_AS_ENDPOINT_PAS")
 
-    info_tokens = URL(r"https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token", InfoTokensPage)
+    info_tokens = URL(r"/api/oauth/v2/token", InfoTokensPage, base="INFO_TOKEN_ENDPOINT")
 
     authentication_step = URL(
         r"/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step", AuthenticationStepPage, base="URL_ICG"
@@ -209,13 +213,31 @@ class BanquePopulaire(TwoFactorBrowser):
 
     HAS_CREDENTIALS_ONLY = True
 
+    @property
+    def cdetab(self):
+        if not hasattr(self, "_cdetab"):
+            self._cdetab = self.config["cdetab"].get()
+        return self._cdetab
+
+    @cdetab.setter
+    def cdetab(self, value):
+        self._cdetab = value
+
+    @property
+    def info_token_headers(self):
+        return {
+            "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": "https://www.icgauth.banquepopulaire.fr/se-connecter/sso?service=cyber",
+            "Origin": "https://www.icgauth.banquepopulaire.fr",
+        }
+
     def __init__(self, config, *args, **kwargs):
         self.config = config
         super().__init__(self.config, self.config["login"].get(), self.config["password"].get(), *args, **kwargs)
         self.validation_id = None
         self.mfa_validation_data = None
         self.user_type = None
-        self.cdetab = self.config["cdetab"].get()
         self.continue_url = None
         self.term_id = None
         self.access_token = None
@@ -445,10 +467,10 @@ class BanquePopulaire(TwoFactorBrowser):
         return {
             "csid": str(uuid4()),
             "typ_app": "rest",
-            "enseigne": "bp",
+            "enseigne": self.ENSEIGNE,
             "typ_sp": "out-band",
             "typ_act": "auth",
-            "snid": "678256",
+            "snid": self.SNID,
             "cdetab": self.cdetab,
             "typ_srv": "part",
             "phase": "",
@@ -458,12 +480,39 @@ class BanquePopulaire(TwoFactorBrowser):
     def get_bpcesta_SSO(self):
         return {
             "cdetab": self.cdetab,
-            "enseigne": "bp",
+            "enseigne": self.ENSEIGNE,
             "login_hint": self.user_code,
             "typ_srv": "part",
             "typ_sp": "out-band",
             "typ_app": "rest",
             "typ_act": "sso",
+        }
+
+    def get_claims(self):
+        return {
+            "userinfo": {
+                "cdetab": None,
+                "authMethod": None,
+                "authLevel": None,
+                "dacsId": None,
+                "last_login": None,
+                "auth_time": None,
+                "opsId": None,
+                "appid": None,
+                "pro": None,
+                "userRef": None,
+                "apidp": None,
+                "bpAttributeId": None,
+                "env": None,
+            },
+            "id_token": {
+                "auth_time": {
+                    "essential": True,
+                },
+                "last_login": None,
+                "cdetab": None,
+                "pro": None,
+            },
         }
 
     def _set_mfa_validation_data(self):
@@ -499,13 +548,6 @@ class BanquePopulaire(TwoFactorBrowser):
 
         nonce = str(uuid4())  # Not found anymore
 
-        headers = {
-            "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.icgauth.banquepopulaire.fr/se-connecter/sso?service=cyber",
-            "Origin": "https://www.icgauth.banquepopulaire.fr",
-        }
-
         data = {
             "grant_type": "client_credentials",
             "client_id": oauth_token_client_id,
@@ -513,37 +555,11 @@ class BanquePopulaire(TwoFactorBrowser):
             "cdetab": self.cdetab,
         }
 
-        self.info_tokens.go(headers=headers, data=data)
+        self.info_tokens.go(headers=self.info_token_headers, data=data)
 
         self.user_code = self.config["login"].get()
 
         bpcesta = self.get_bpcesta_Auth()
-
-        claims = {
-            "userinfo": {
-                "cdetab": None,
-                "authMethod": None,
-                "authLevel": None,
-                "dacsId": None,
-                "last_login": None,
-                "auth_time": None,
-                "opsId": None,
-                "appid": None,
-                "pro": None,
-                "userRef": None,
-                "apidp": None,
-                "bpAttributeId": None,
-                "env": None,
-            },
-            "id_token": {
-                "auth_time": {
-                    "essential": True,
-                },
-                "last_login": None,
-                "cdetab": None,
-                "pro": None,
-            },
-        }
 
         params = {
             "cdetab": self.cdetab,
@@ -552,7 +568,7 @@ class BanquePopulaire(TwoFactorBrowser):
             "nonce": nonce,
             "response_mode": "form_post",
             "redirect_uri": self.redirect_uri.build(),
-            "claims": json.dumps(claims),
+            "claims": json.dumps(self.get_claims()),
             "bpcesta": json.dumps(bpcesta),
             "login_hint": self.user_code,
             "display": "page",
@@ -836,8 +852,8 @@ class BanquePopulaire(TwoFactorBrowser):
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Content-Type": "application/x-www-form-urlencoded",
             "Content-Length": "0",  # Mandatory, otherwhise enjoy the 415 error
-            "Origin": "https://www.banquepopulaire.fr",
-            "Referer": "https://www.banquepopulaire.fr/",
+            "Origin": self.BASEURL,
+            "Referer": f"{self.BASEURL}/",
         }
         self.authorize.go(params=params, method="POST", headers=headers)
 
@@ -858,7 +874,9 @@ class BanquePopulaire(TwoFactorBrowser):
         headers = {
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.banquepopulaire.fr/se-connecter/identifier(redirect:authentifier)",  # Mandatory, otherwise you get a 430 error
+            "Referer": "{}/se-connecter/identifier(redirect:authentifier)".format(
+                self.BASEURL
+            ),  # Mandatory, otherwise you get a 430 error
         }
         self.do_redirect("SAMLRequest", headers=headers)
 
@@ -876,7 +894,7 @@ class BanquePopulaire(TwoFactorBrowser):
         headers = {
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.banquepopulaire.fr/",  # Mandatory, otherwise you get a 430 error
+            "Referer": f"{self.BASEURL}/",  # Mandatory, otherwise you get a 430 error
         }
 
         data = {
@@ -899,8 +917,8 @@ class BanquePopulaire(TwoFactorBrowser):
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Authorization": "Bearer %s" % self.access_token,
-            "Origin": "https://www.banquepopulaire.fr",
-            "Referer": "https://www.banquepopulaire.fr/",
+            "Origin": self.BASEURL,
+            "Referer": f"{self.BASEURL}/",
             "Connection": "keep-alive",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
@@ -909,7 +927,9 @@ class BanquePopulaire(TwoFactorBrowser):
         # This is a new API. I still don't know how is built the field productFamilyPFM=1,2,3,4,6,7,17,18.
         # Let see with other users if they have the same IDs and, if necessary, how to dynamically retrieve it...
         self.location(
-            "https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/contract/v2/augmentedSynthesisViews?productFamilyPFM=1,2,3,4,6,7,17,18&pfmCharacteristicsIndicator=true",
+            self.synthesis_views.build(
+                params={"productFamilyPFM": "1,2,3,4,6,7,17,18,20", "pfmCharacteristicsIndicator": "true"}
+            ),
             headers=headers,
         )
         raw_json_data = self.page.get_raw_json()

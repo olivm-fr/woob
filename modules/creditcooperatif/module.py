@@ -15,31 +15,31 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-from woob.capabilities.bank import CapBankTransferAddRecipient
-from woob.capabilities.bill import CapDocument
-from woob.capabilities.profile import CapProfile
-from woob_modules.caissedepargne.module import CaisseEpargneModule
+from woob.tools.backend import BackendConfig
+from woob.tools.value import ValueBackendPassword, ValueTransient
+from woob_modules.banquepopulaire import BanquePopulaireModule
 
-from .proxy_browser import ProxyBrowser
+from .browser import CreditCooperatif
 
 
 __all__ = ["CreditCooperatifModule"]
 
 
-class CreditCooperatifModule(CaisseEpargneModule, CapBankTransferAddRecipient, CapDocument, CapProfile):
+class CreditCooperatifModule(BanquePopulaireModule):
     NAME = "creditcooperatif"
     MAINTAINER = "Kevin Pouget"
     EMAIL = "weboob@kevin.pouget.me"
     DESCRIPTION = "Crédit Coopératif"
     LICENSE = "LGPLv3+"
-    DEPENDENCIES = ("caissedepargne", "linebourse")
+    DEPENDENCIES = ("bandpopulaire",)
 
-    BROWSER = ProxyBrowser
+    CONFIG = BackendConfig(
+        ValueBackendPassword("login", label="Identifiant", masked=False, regexp=r"[a-zA-Z0-9]+"),
+        ValueBackendPassword("password", label="Mot de passe"),
+        ValueTransient("code_sms", regexp=r"\d{8}"),
+        ValueTransient("code_emv", regexp=r"\d{8}"),
+        ValueTransient("resume"),
+        ValueTransient("request_information"),
+    )
 
-    def create_default_browser(self):
-        return self.create_browser(
-            nuser=self.config["nuser"].get(),
-            config=self.config,
-            username=self.config["login"].get(),
-            password=self.config["password"].get(),
-        )
+    BROWSER = CreditCooperatif
