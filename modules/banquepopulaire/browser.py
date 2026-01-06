@@ -1003,7 +1003,6 @@ class BanquePopulaire(TwoFactorBrowser):
             "Authorization": "Bearer %s" % self.access_token,
             "Origin": "https://www.banquepopulaire.fr",
             "Referer": "https://www.banquepopulaire.fr/",
-            "Host": "www.rs-ext-bad-ib.banquepopulaire.fr",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
