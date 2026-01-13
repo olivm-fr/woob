@@ -21,6 +21,8 @@ from __future__ import unicode_literals
 
 import base64, re
 from decimal import Decimal
+import curl_cffi
+from schwifty.iban import IBAN
 
 from woob.browser import URL, need_login, StatesMixin
 from woob.browser.browsers import APIBrowser, PagesBrowser
@@ -59,8 +61,6 @@ class AnytimeBrowser(PagesBrowser):
         return self.page.get_transactions()
 
 
-
-
 class AnytimeApiBrowser(APIBrowser, StatesMixin):
     BASEURL = 'https://secure.anyti.me'
     TIMEOUT = 30
@@ -71,6 +71,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
     tokenid = None
 
+    cffi = curl_cffi.Session()
 
     def __init__(self, config, *args, **kwargs):
         self.config = config
@@ -78,16 +79,25 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
         #TwoFactorBrowser.__init__(self, config, username='', password='')
         StatesMixin.__init__(self)
 
-    def request(self, *args, **kwargs):
-        #print(self.session.cookies)
+    def request(self, url, method="GET", data=None, headers={}, params=None):
         if not self.logged:
             if self.session.cookies.get('dsp2_auth_token') is not None:
                 auth = ':'.join((self.config['username'].get(), self.config['password'].get())).strip()
                 #self.session.cookies.update({'dsp2_auth_token':self.dsp2})
-                kwargs.setdefault('headers', {})['Authorization'] = 'Basic ' + base64.b64encode(auth.encode('utf-8')).decode('utf-8')
+                headers['Authorization'] = 'Basic ' + base64.b64encode(auth.encode('utf-8')).decode('utf-8')  # with standard requests : kwargs.setdefault('headers', {})['Authorization'] = 'Basic ' + base64.b64encode(auth.encode('utf-8')).decode('utf-8')
         else:
-            kwargs.setdefault('headers', {})['X-CSRF-Token'] = self.csrf_token
-        return self.open(*args, **kwargs)
+            headers['X-CSRF-Token'] = self.csrf_token  # with standard requests : kwargs.setdefault('headers', {})['X-CSRF-Token'] = self.csrf_token
+
+        #print(method, url, str(headers), str(params), data)
+        savedCookies: WoobCookieJar = self.session.cookies
+        resp = self.cffi.request(url=url, method=method, json=data, headers=headers, params=params, cookies=savedCookies, impersonate="chrome")
+        savedCookies.update(resp.cookies)  # for cffi
+        try:
+            self.raise_for_status(resp)
+        except Exception as e:
+            self.csrf_token = None
+            raise e
+        return resp  # with standard requests : self.open(*args, **kwargs)
 
     def _get_dsp2(self):
         if self.config['request_information'].get() is None:
@@ -99,7 +109,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             self.session.cookies.clear()
             response = self.request(self.BASEURL + '/api/v1/customer/auth-sms', method='POST', data=data)
             self.tokenid = response.json()['tokenId']
-            self.logger.warn('Vous allez recevoir un SMS sur le numéro enregistré dans le compte Anytime.')
+            self.logger.warning('Vous allez recevoir un SMS sur le numéro enregistré dans le compte Anytime.')
             raise BrowserQuestion(Value('smscode', label='Veuillez entrer le code reçu par SMS'))
         else:
             data = {"email": self.config['username'].get(), "password": self.config['password'].get(), "tokenValue":self.config['smscode'].get(), "tokenId": self.tokenid}
@@ -120,7 +130,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             if ex.response.status_code == 401:
                 json_response = ex.response.json()
                 if '[Unknown token]' in json_response.get('message'):
-                    self.logger.warn('DSP2 token invalid, refreshing')
+                    self.logger.warning('DSP2 token invalid, refreshing')
                     self._get_dsp2() # raises an Exception
                 elif 'Authentication failed' in json_response.get('message'):
                     raise BrowserIncorrectPassword(json_response.get('message'))
@@ -143,11 +153,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
 
     @need_login
     def get_main_accounts(self):
-        try:
-            response = self.request(self.BASEURL + '/api/v1/customer/accounts', method='GET').json()
-        except ClientError:
-            self.csrf_token = None
-            raise
+        response = self.request(self.BASEURL + '/api/v1/customer/accounts', method='GET').json()
 
         for r in response:
             a = Account()
@@ -156,7 +162,7 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
             a.id = r["id"]
             a.number = NotAvailable
             a.balance = Decimal(str(r["amount"]))
-            a.iban = r["iban"]
+            a.iban = IBAN(r["iban"])
             a.currency = r["currency"]
             yield a
 
@@ -208,10 +214,10 @@ class AnytimeApiBrowser(APIBrowser, StatesMixin):
         # id, icon, canAddFiles, nbFiles, files, isCashTx, currency : ignored
         t = BankTransaction()
         if trans['isFailed']:
-            self.logger.info("Transaction failed, ignored : %s", str(trans))
+            self.logger.debug("Transaction failed, ignored : %s", str(trans))
             return None
         if trans['isExpired']:
-            self.logger.warn("Transaction expired, ignored : %s", str(trans))
+            self.logger.debug("Transaction expired, ignored : %s", str(trans))
             return None
         if 'card' in trans:
             if acc_id.replace('@anytime', '') != trans['card']['ref']:

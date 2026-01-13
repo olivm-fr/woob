@@ -39,7 +39,6 @@ class AnytimeModule(Module, CapBank, CapDocument):
     MAINTAINER = u'olivm38'
     EMAIL = 'olivier@zron.fr'
     LICENSE = 'AGPLv3+'
-    VERSION = '2.1'
     CONFIG = BackendConfig(
         Value('username', label='Username', regexp='.+'),
         ValueBackendPassword('password', label='Password'),
