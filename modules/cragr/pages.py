@@ -391,17 +391,13 @@ class AccountsPage(LoggedPage, JsonPage):
         obj__index = Dict("comptePrincipal/index")
         obj__category = Dict("comptePrincipal/grandeFamilleProduitCode", default=None)
         obj__id_element_contrat = CleanText(Dict("comptePrincipal/idElementContrat"))
-        obj__fam_product_code = CleanText(Dict("comptePrincipal/codeFamilleProduitBam"))
-        obj__fam_contract_code = CleanText(Dict("comptePrincipal/codeFamilleContratBam"))
 
         def obj_type(self):
-            _type = Map(CleanText(Dict("comptePrincipal/libelleUsuelProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(
-                self
-            )
+            _type = Map(CleanText(Dict("comptePrincipal/libelleProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
             if _type == Account.TYPE_UNKNOWN:
                 self.logger.warning(
                     'We got an untyped account: please add "%s" to ACCOUNT_TYPES.',
-                    CleanText(Dict("comptePrincipal/libelleUsuelProduit"))(self),
+                    CleanText(Dict("comptePrincipal/libelleProduit"))(self),
                 )
             return _type
 
@@ -474,8 +470,6 @@ class AccountsPage(LoggedPage, JsonPage):
                 default=None,
             )
             obj__id_element_contrat = CleanText(Dict("idElementContrat"))
-            obj__fam_product_code = CleanText(Dict("codeFamilleProduitBam"))
-            obj__fam_contract_code = CleanText(Dict("codeFamilleContratBam"))
 
             def obj_owner_type(self):
                 return self.page.get_owner_type()
@@ -492,10 +486,10 @@ class AccountsPage(LoggedPage, JsonPage):
                 )(self)
 
             def obj_type(self):
-                if CleanText(Dict("libelleUsuelProduit"))(self) in ("HABITATION",):
+                if CleanText(Dict("libelleProduit"))(self) in ("HABITATION",):
                     # No need to log warning for "assurance" accounts
                     return NotAvailable
-                _type = Map(CleanText(Dict("libelleUsuelProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
+                _type = Map(CleanText(Dict("libelleProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
 
                 # MANDAT CTO Vendôme matches TYPE_LIFE_INSURANCE, although it's a TYPE_MARKET
                 if _type == Account.TYPE_LIFE_INSURANCE and "MANDAT CTO" in CleanText(Dict("libelleProduit"))(self):
@@ -504,7 +498,7 @@ class AccountsPage(LoggedPage, JsonPage):
                 if _type == Account.TYPE_UNKNOWN:
                     self.logger.warning(
                         'There is an untyped account: please add "%s" to ACCOUNT_TYPES.',
-                        CleanText(Dict("libelleUsuelProduit"))(self),
+                        CleanText(Dict("libelleProduit"))(self),
                     )
                 return _type
 
