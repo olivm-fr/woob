@@ -186,7 +186,7 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
         r"/dashboard/comptes\?_hinclude=300000", r"/dashboard/comptes-professionnels\?_hinclude=1", NoAccountPage
     )
 
-    history = URL(r"/compte/(cav|epargne)/(?P<webid>.*)/mouvements.*", HistoryPage)
+    history = URL(r"/compte/(cav|epargne)/(?P<webid>.*)/.*", HistoryPage)
     card_transactions = URL(r"/compte/cav/(?P<webid>.*)/carte/.*", HistoryPage)
     deffered_card_history = URL(r"https://api.boursobank.com/services/api/files/download.phtml.*", CardHistoryPage)
     budget_transactions = URL(r"/budget/compte/(?P<webid>.*)/mouvements.*", HistoryPage)
