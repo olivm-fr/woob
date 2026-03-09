@@ -2,6 +2,7 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   PRE_COMMIT_HOME: ${CI_PROJECT_DIR}/.cache/pre-commit
   GIT_STRATEGY: clone
+  REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
 
 cache:
   paths:
@@ -46,6 +47,7 @@ stages:
   <<: [*except-default, *python-base-env]
   before_script:
     - python -m pip install --upgrade tox
+    - update-ca-certificates
 
 .tox_py_matrix:
   extends: .tox

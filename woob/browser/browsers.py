@@ -194,6 +194,13 @@ class Browser:
 
         if isinstance(self.verify, str):
             self.verify = self.asset(self.verify)
+        elif self.verify is True:
+            # Respect REQUESTS_CA_BUNDLE environment variable
+            # when verify is True, as requests ignores it when verify is explicitly set
+            ca_bundle = os.environ.get('REQUESTS_CA_BUNDLE')
+            if ca_bundle:
+                self.verify = ca_bundle
+
 
         self.PROXIES = proxy or {}
         self.proxy_headers = proxy_headers or {}
