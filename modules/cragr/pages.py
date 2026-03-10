@@ -386,7 +386,7 @@ class AccountsPage(LoggedPage, JsonPage):
             return Format(
                 "%s %s",
                 CleanText(Dict("comptePrincipal/libelleProduit")),
-                CleanText(Dict("comptePrincipal/libellePartenaireBam")),
+                CleanText(Dict("comptePrincipal/libelleCompte")),
             )(self)
 
         def obj_balance(self):
@@ -493,7 +493,7 @@ class AccountsPage(LoggedPage, JsonPage):
                 return Format(
                     "%s %s",
                     CleanText(Dict("libelleProduit")),
-                    CleanText(Dict("libellePartenaireBam")),
+                    CleanText(Dict("libelleCompte")),
                 )(self)
 
             def obj_type(self):
