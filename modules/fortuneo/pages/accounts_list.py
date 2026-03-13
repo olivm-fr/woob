@@ -483,7 +483,7 @@ class TransactionApiPage(LoggedPage, JsonPage):
             obj_vdate = Date(CleanText(Dict("valueDate")), default=NotAvailable)
             obj_rdate = Date(CleanText(Dict("transactionDate")), default=NotAvailable)
             obj_raw = Transaction.Raw(Dict("label/originalLabel"))
-            obj_label = CleanText(Dict("label/originalLabel"))
+            obj_label = CleanText(Dict("label/simplifiedLabel"))
             obj_amount = CleanDecimal.SI(Dict("amount/value"))
             obj__details_link = None
 
