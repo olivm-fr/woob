@@ -302,6 +302,9 @@ ACCOUNT_TYPES = {
     "DAVPERBANC": Account.TYPE_PER,
     "PERBANCGL": Account.TYPE_PER,
     "ESPSELEC 2": Account.TYPE_LIFE_INSURANCE,
+    "Carré jaune ( CEL )": Account.TYPE_SAVINGS,
+    "Codebis": Account.TYPE_SAVINGS,
+    "Compte dédié parts sociales": Account.TYPE_SAVINGS,
 }
 
 ACCOUNT_IS_LIQUIDITY = re.compile("compte especes? pea" + "|compte especes? titres")
