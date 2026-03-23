@@ -459,7 +459,7 @@ class Transaction(FrenchTransaction):
         ),
         (
             re.compile(
-                r"VIR INST RE (?P<_ref>\d+) DE: (?P<text>.*?) DATE: (?P<dd>\d{2})\/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<HH>\d{2}):(?P<MM>\d{2})"
+                r"VIR INST RE (?P<_ref>\d+) (WERO )?DE: (?P<text>.*?) DATE: (?P<dd>\d{2})\/(?P<mm>\d{2})/(?P<yy>\d{4}) (?P<HH>\d{2}):(?P<MM>\d{2})"
             ),
             FrenchTransaction.TYPE_DEPOSIT,
         ),
