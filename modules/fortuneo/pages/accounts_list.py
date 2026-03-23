@@ -64,15 +64,11 @@ class Transaction(FrenchTransaction):
             FrenchTransaction.TYPE_CARD,
         ),
         (
-            re.compile(
-                r'^(?P<category>CARTE)( DU)? (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>[^|]*)'
-            ),
+            re.compile(r'^(?P<category>CARTE)( DU)? (?P<dd>\d{2})/(?P<mm>\d{2}) (?P<text>[^|]*)'),
             FrenchTransaction.TYPE_CARD,
         ),
         (
-            re.compile(
-                r'^(?P<category>ANN CARTE)( DU)? ((?P<dd>\d{2})/(?P<mm>\d{2}) )?(?P<text>[^|]*)'
-            ),
+            re.compile(r'^(?P<category>ANN CARTE)( DU)? ((?P<dd>\d{2})/(?P<mm>\d{2}) )?(?P<text>[^|]*)'),
             FrenchTransaction.TYPE_CARD,
         ),
         (re.compile(r'^(?P<category>(PRELEVEMENT|TELEREGLEMENT|TIP|PRLV)) (?P<text>[^|]*)'), FrenchTransaction.TYPE_ORDER),
@@ -84,9 +80,7 @@ class Transaction(FrenchTransaction):
             FrenchTransaction.TYPE_WITHDRAWAL,
         ),
         (
-            re.compile(
-                r'^(?P<category>VIR(EMEN)?T?( INST)? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>[^|]*)'
-            ),
+            re.compile(r'^(?P<category>VIR(EMEN)?T?( INST)? ((RECU|FAVEUR) TIERS|SEPA RECU)?)( /FRM)?(?P<text>[^|]*)'),
             FrenchTransaction.TYPE_TRANSFER,
         ),
         (re.compile(r'^(?P<category>REMBOURST)(?P<text>[^|]*)'), FrenchTransaction.TYPE_PAYBACK),
@@ -234,7 +228,6 @@ class PeaHistoryPage(ActionNeededPage):
                 if Field("original_currency")(self):
                     return Base(TableCell("diff"), CleanDecimal.French("./text()", default=NotAvailable))(self)
                 return NotAvailable
-
 
             def obj_diff_ratio(self):
                 diff_ratio_percent = Base(TableCell("diff"), CleanDecimal.French("./span", default=None))(self)
@@ -486,11 +479,16 @@ class TransactionApiPage(LoggedPage, JsonPage):
             def condition(self):
                 return CleanDecimal.SI(Dict("amount/value"))(self) != 0
 
-            obj_date = Date(CleanText(Dict("bookingDate")), default=NotAvailable)
+            obj_date = Date(CleanText(Dict("transactionDate")), default=NotAvailable)  # bookingDate not available
             obj_vdate = Date(CleanText(Dict("valueDate")), default=NotAvailable)
             obj_rdate = Date(CleanText(Dict("transactionDate")), default=NotAvailable)
-            obj_raw = Transaction.Raw(Dict("label/originalLabel"))
-            obj_label = CleanText(Dict("label/simplifiedLabel"))
+
+            # Transaction.Raw calls parse_with_patterns, which sets the label and categories, depending on what is given. But returns unparsed input.
+            obj_raw = CleanText(Dict("label/originalLabel"))
+            def obj_label(self):
+                Transaction.Raw(Dict("label/simplifiedLabel"))(self)  # sets label and category
+                return self.obj.label
+            
             obj_amount = CleanDecimal.SI(Dict("amount/value"))
             obj__details_link = None
 
