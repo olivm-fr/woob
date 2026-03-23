@@ -180,7 +180,7 @@ class Contact(BaseContact):
         result += f"Status: {s} ({self.status_msg})\n"
         result += "URL: %s\n" % self.url
         result += "Photos:\n"
-        for name, photo in self.photos.items():
+        for _name, photo in self.photos.items():
             result += "\t{}{}\n".format(photo, " (hidden)" if photo.hidden else "")
         result += "\nProfile:\n"
         for head in self.profile.values():
@@ -235,9 +235,9 @@ class CapContact(Capability):
         :rtype: :class:`Contact` or None if not found
         """
 
-        l = self.iter_contacts(ids=[id])
+        contacts = self.iter_contacts(ids=[id])
         try:
-            return l[0]
+            return contacts[0]
         except IndexError:
             return None
 

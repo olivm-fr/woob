@@ -544,8 +544,8 @@ class XLSPage(Page):
                 rows.append(row)
                 if header:
                     drow = {}
-                    for i, cell in enumerate(sh.row_values(i)):
-                        drow[header[i]] = cell
+                    for value_idx, cell in enumerate(sh.row_values(i)):
+                        drow[header[value_idx]] = cell
                     drows.append(drow)
         return drows if header is not None else rows
 

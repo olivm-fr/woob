@@ -186,7 +186,7 @@ class ConsoleApplication(Application):
                 self.edit_backend(err.backend_name)
                 self.load_backends(names=[err.backend_name])
 
-        for name, backend in ret.items():
+        for _name, backend in ret.items():
             self.enabled_backends.add(backend)
 
         self.check_loaded_backends()
@@ -611,7 +611,7 @@ class ConsoleApplication(Application):
         v.noprompt = True
         return v.get()
 
-    def print(self, txt):
+    def print(self, txt):  # noqa: T202
         print(txt)
 
     def acquire_input(

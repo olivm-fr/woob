@@ -56,6 +56,7 @@ def get_url_param(
                 f"URL {url!r} has no query parameter named {name!r}.",
             )
 
+        assert default is None or isinstance(default, str)
         return default
 
     return params[name]
@@ -87,6 +88,7 @@ def get_url_fragment_param(
                 f"URL {url!r} has no fragment parameter named {name!r}.",
             )
 
+        assert default is None or isinstance(default, str)
         return default
 
     return params[name]

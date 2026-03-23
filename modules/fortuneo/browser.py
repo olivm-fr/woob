@@ -54,6 +54,7 @@ from woob.tools.decorators import retry
 from woob.tools.value import Value
 
 from .pages.accounts_list import (
+    AccountApiPage,
     AccountHistoryPage,
     AccountsList,
     ActionNeededPage,
@@ -67,6 +68,7 @@ from .pages.accounts_list import (
     ProfilePage,
     ProfilePageCSV,
     SecurityPage,
+    TransactionApiPage,
 )
 from .pages.login import AuthorizePage, EnvPage, LoginLandingPage, LoginPage, TwoFaPage, UnavailablePage
 from .pages.transfer import (
@@ -169,8 +171,18 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
 
     # Fortuneo's API routes
     set_cookies_api = URL(r"/valorisation-assurance-vie/api/security/oauth/sso-module\?response_type=token")
+    # Calling this URL sets a session cookie required by the account and transaction APIs.
+    portal_sso = URL(r"/oauth/portal-sso")
     api_investments_life_insurance = URL(
         r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>.+)", InvestmentApiPage
+    )
+    api_account = URL(
+        r"https://api.fortuneo.fr/account-api/v2/accounts/(?P<id>.+)",
+        AccountApiPage,
+    )
+    api_transactions = URL(
+        r"https://api.fortuneo.fr/fto-transaction-api/v1/accounts/(?P<id>.+)/transactions",
+        TransactionApiPage,
     )
 
     need_reload_state = None
@@ -449,11 +461,15 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                     account = loan
                     self.page.fill_account(obj=account)
                 else:
-                    self.page.fill_account(obj=account)
+                    account_api_id = self.page.get_account_api_id()
+                    if account_api_id:
+                        self.portal_sso.go(headers={"apikey": self.client_id})
+                        self.api_account.go(id=account_api_id, headers={"apikey": self.client_id})
+                        self.page.fill_account(obj=account)
 
                     if account.type == account.TYPE_CHECKING:
                         for _ in range(3):
-                            self.location("/fr/prive/mes-comptes/synthese-mes-comptes.jsp")
+                            self.location(self.BASEURL + "/fr/prive/mes-comptes/synthese-mes-comptes.jsp")
                             if not self.page.is_loading():
                                 break
                             time.sleep(1)
@@ -464,7 +480,10 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                             self.page.fill_tpp_account_id(obj=account)
 
                             if not account._tpp_id:
-                                self.logger.warning("Could not find the tpp_id of account %s", account.id)
+                                self.logger.warning(
+                                    "Could not find the tpp_id of account %s",
+                                    account.id,
+                                )
 
             yield account
 
@@ -530,6 +549,20 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
 
         self.location(account._history_link)
 
+        if self.account_history.is_here():
+            # Checking account: use REST API
+            account_api_id = self.page.get_account_api_id()
+            if account_api_id:
+                self.portal_sso.go(headers={"apikey": self.client_id})
+                self.api_transactions.go(
+                    id=account_api_id,
+                    params={"transactionType": "CAV,PENDING", "metadata": "true"},
+                    headers={"apikey": self.client_id},
+                )
+                return sorted_transactions(list(self.page.iter_history()))
+            return []
+
+        # Other page types (PEA, investment): use HTML scraping path
         if self.page.select_period():
             raw_transactions = list(self.page.iter_history())
 

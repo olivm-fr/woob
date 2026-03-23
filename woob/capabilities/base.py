@@ -280,7 +280,7 @@ class FieldNotFound(Exception):
     :type field: :class:`Field`
     """
 
-    def __init__(self, obj: BaseObject, field: str):
+    def __init__(self, obj: object, field: str):
         super().__init__(f'Field "{field}" not found for object {obj}')
 
 
@@ -581,7 +581,7 @@ class BaseObject(metaclass=_BaseObjectMeta):
         The default behavior is to iter on fields (with iter_fields) and if
         a field is NotLoaded, return False.
         """
-        for key, value in self.iter_fields():
+        for _key, value in self.iter_fields():
             if value is NotLoaded:
                 return False
         return True

@@ -134,6 +134,8 @@ class Freemobile(TwoFactorBrowser):
                 error_message = None
             if error == "INVALID_OTP":
                 raise BrowserIncorrectPassword(error_message)
+            if error == "ACCOUNT_BLOCKED":
+                raise BrowserUserBanned(error_message or "Trop de tentatives erronées, compte utilisateur bloqué")
             raise BrowserUnavailable(error_message)
 
     def init_login(self):

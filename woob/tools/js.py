@@ -15,11 +15,15 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
 
-__all__ = ["Javascript"]
-
+import logging
+from typing import Any
 
 from woob.tools.log import getLogger
+
+
+__all__ = ["Javascript"]
 
 
 class Javascript:
@@ -84,7 +88,7 @@ class Javascript:
     };
     """
 
-    def __init__(self, script, logger=None, domain=""):
+    def __init__(self, script: str, logger: logging.Logger | None = None, domain: str = "") -> None:
         try:
             import execjs
         except ImportError:
@@ -107,7 +111,7 @@ class Javascript:
 
         self.ctx = self.runner.compile(window_emulator + script)
 
-    def call(self, *args, **kwargs):
+    def call(self, *args: Any, **kwargs: Any) -> Any:
         retval = self.ctx.call(*args, **kwargs)
 
         self.logger.debug("Calling %s%s = %s", args[0], args[1:], retval)

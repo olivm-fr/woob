@@ -21,7 +21,7 @@ import codecs
 import os
 import stat
 import sys
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterable, Iterator, MutableMapping
 from configparser import DuplicateSectionError, RawConfigParser
 from logging import warning
 from subprocess import CalledProcessError, check_output
@@ -36,33 +36,33 @@ class BackendAlreadyExists(Exception):
     """
 
 
-class DictWithCommands(MutableMapping):
-    def __init__(self, *args, **kwargs):
+class DictWithCommands(MutableMapping[str, str]):
+    def __init__(self, *args: Iterable[tuple[str, str]], **kwargs: str) -> None:
         super().__init__()
         self._raw = dict(*args, **kwargs)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> str:
         value = self._raw[key]
         if value.startswith("`") and value.endswith("`"):
             try:
-                value = check_output(value[1:-1], shell=True)  # nosec: this is intended
+                value_ = check_output(value[1:-1], shell=True)  # nosec: this is intended
             except CalledProcessError as e:
                 raise ValueError(f"The call to the external tool failed: {e}") from e
 
-            value = value.decode("utf-8").partition("\n")[0].strip("\r\n\t")
+            value = value_.decode("utf-8").partition("\n")[0].strip("\r\n\t")
 
         return value
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: str) -> None:
         self._raw[key] = value
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: str) -> None:
         del self._raw[key]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._raw)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._raw)
 
 
@@ -74,7 +74,6 @@ class BackendsConfig:
     A module can therefore have multiple backend instances.
 
     :param confpath: path to the backends config file
-    :type confpath: str
     """
 
     class WrongPermissions(Exception):
@@ -82,7 +81,7 @@ class BackendsConfig:
         Unable to write in the backends config file.
         """
 
-    def __init__(self, confpath: str):
+    def __init__(self, confpath: str) -> None:
         self.confpath = confpath
         try:
             mode = os.stat(confpath).st_mode
@@ -107,13 +106,13 @@ class BackendsConfig:
                         f"Woob will not start as long as config file {confpath} is readable by group or other users."
                     )
 
-    def _read_config(self):
+    def _read_config(self) -> RawConfigParser:
         config = RawConfigParser()
         with codecs.open(self.confpath, "r", encoding="utf-8") as fd:
             config.read_file(fd, self.confpath)
         return config
 
-    def _write_config(self, config):
+    def _write_config(self, config: RawConfigParser) -> None:
         f = codecs.open(self.confpath, "wb", encoding="utf-8")
         with f:
             config.write(f)
@@ -145,16 +144,13 @@ class BackendsConfig:
         config = self._read_config()
         return name in config.sections()
 
-    def add_backend(self, backend_name: str, module_name: str, params: dict):
+    def add_backend(self, backend_name: str, module_name: str, params: dict[str, str]) -> None:
         """
         Add a backend to config.
 
         :param backend_name: name of the backend in config
-        :type backend_name: str
         :param module_name: name of woob module
-        :type module_name: str
         :param params: params of the backend
-        :type params: dict
         """
         if not backend_name:
             raise ValueError("Please give a name to the configured backend.")
@@ -170,13 +166,12 @@ class BackendsConfig:
 
         self._write_config(config)
 
-    def edit_backend(self, backend_name: str, params: dict):
+    def edit_backend(self, backend_name: str, params: dict[str, str]) -> None:
         """
         Edit a backend in config.
 
         :param backend_name: name of the backend in config
         :param params: params to change
-        :type params: :class:`dict`
         """
         config = self._read_config()
         if not config.has_section(backend_name):
@@ -187,12 +182,11 @@ class BackendsConfig:
 
         self._write_config(config)
 
-    def get_backend(self, backend_name: str) -> tuple[str, dict]:
+    def get_backend(self, backend_name: str) -> tuple[str, dict[str, str]]:
         """
         Get options of backend.
 
         :returns: a tuple with the module name and the backends params
-        :rtype: tuple[str, dict]
         """
 
         config = self._read_config()

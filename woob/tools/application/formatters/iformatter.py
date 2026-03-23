@@ -180,7 +180,7 @@ class IFormatter:
         if isinstance(obj, BaseObject):
             if selected_fields:  # can be an empty list (nothing to do), or None (return all fields)
                 obj = obj.copy()
-                for name, value in list(obj.iter_fields()):
+                for name, _value in list(obj.iter_fields()):
                     if name not in selected_fields:
                         delattr(obj, name)
 
@@ -198,7 +198,7 @@ class IFormatter:
 
             if selected_fields:
                 obj = obj.copy()
-                for name, value in list(obj.items()):
+                for name, _value in list(obj.items()):
                     if name not in selected_fields:
                         obj.pop(name)
 

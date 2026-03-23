@@ -21,7 +21,6 @@ import re
 from datetime import date
 
 from dateutil.relativedelta import relativedelta
-from unidecode import unidecode
 
 from woob.browser.elements import DictElement, ItemElement, ListElement, TableElement, method
 from woob.browser.filters.html import AbsoluteLink, Attr, Link, TableCell
@@ -469,6 +468,33 @@ class InvestmentApiPage(LoggedPage, JsonPage):
                 return NotAvailable
 
 
+class AccountApiPage(LoggedPage, JsonPage):
+    @method
+    class fill_account(ItemElement):
+        obj_balance = CleanDecimal.SI(Dict("balances/0/amount/value"))
+        obj_currency = Dict("currency")
+
+
+class TransactionApiPage(LoggedPage, JsonPage):
+    """The API response is a top-level JSON array of transaction objects."""
+
+    @method
+    class iter_history(DictElement):
+        class item(ItemElement):
+            klass = Transaction
+
+            def condition(self):
+                return CleanDecimal.SI(Dict("amount/value"))(self) != 0
+
+            obj_date = Date(CleanText(Dict("bookingDate")), default=NotAvailable)
+            obj_vdate = Date(CleanText(Dict("valueDate")), default=NotAvailable)
+            obj_rdate = Date(CleanText(Dict("transactionDate")), default=NotAvailable)
+            obj_raw = Transaction.Raw(Dict("label/originalLabel"))
+            obj_label = CleanText(Dict("label/simplifiedLabel"))
+            obj_amount = CleanDecimal.SI(Dict("amount/value"))
+            obj__details_link = None
+
+
 class InvestmentHistoryPage(ActionNeededPage):
     def get_account_api_id(self):
         return Regexp(Attr('//iframe[@id="valuationIframe"]', "src"), r"accountId=(.+)")(self.doc)
@@ -542,86 +568,23 @@ class AccountHistoryPage(ActionNeededPage):
         content = re.sub(rb"\*<E\w+", b"*", content)
         return super().build_doc(content)
 
-    @method
-    class fill_account(ItemElement):
-        def obj_coming(self):
-            for tr in self.xpath('//table[@id="tableauConsultationHisto"]/tbody/tr'):
-                if "Encours" in CleanText("./td")(tr):
-                    return CleanDecimal("./td//strong", replace_dots=True, sign=lambda x: -1, default=NotAvailable)(tr)
-
-        def obj_balance(self):
-            for tr in self.xpath('//table[@id="tableauConsultationHisto"]/tbody/tr'):
-                if "Solde" in CleanText("./td")(tr):
-                    return CleanDecimal.French("./td/strong")(tr)
-
-        def obj_currency(self):
-            for tr in self.xpath('//table[@id="tableauConsultationHisto"]/tbody/tr'):
-                if "Solde" in CleanText("./td")(tr):
-                    return Currency("./td/strong")(tr)
+    def get_account_api_id(self):
+        return Regexp(
+            CleanText('//script[contains(text(), "accountId")]'),
+            r"accountId:\s*'([^']+)'",
+            default=None,
+        )(self.doc)
 
     def iter_investments(self):
         return []
 
-    def select_period(self):
-        try:
-            form = self.get_form(
-                xpath='//form[@name="ConsultationHistoriqueOperationsForm" '
-                + ' or @name="form_historique_titres" '
-                + ' or @name="OperationsForm"]'
-            )
-        except FormNotFound:
-            return False
-
-        form["dateRechercheDebut"] = (date.today() - relativedelta(years=2)).strftime("%d/%m/%Y")
-        form["nbrEltsParPage"] = "100"
-
-        # '�' char may be in here instead of a space char (eg: '5\xa0733,29')
-        form["montantSoldeDebut"] = unidecode(form["montantSoldeDebut"])
-        form["montantSoldeFin"] = unidecode(form["montantSoldeFin"])
-
-        form.submit()
-
-        return True
-
-    @method
-    class iter_history(TableElement):
-        item_xpath = '//table[@id="tabHistoriqueOperations"]/tbody/tr'
-        head_xpath = '(//table[@id="tabHistoriqueOperations"]/thead)[1]//th'
-
-        col_date = "Date d'opération"
-        col_vdate = "Date de valeur"
-        col_label = "Libellé"
-        col_debit = "Débit"
-        col_credit = "Crédit"
-
-        class item(ItemElement):
-            klass = Transaction
-
-            def condition(self):
-                return Field("amount")(self) != 0
-
-            obj_date = Date(CleanText(TableCell("date")), dayfirst=True)
-            obj_vdate = Date(CleanText(TableCell("vdate")), dayfirst=True, default=NotAvailable)
-            obj_raw = Transaction.Raw(Base(TableCell("label"), CleanText("./text()")))
-            def obj_raw(self):
-                raw = Transaction.Raw(Base(TableCell('label'), CleanText('./text()')))(self)
-                subraw = Base(TableCell('label'), CleanText('div/text()'))(self)
-                if (subraw is not None) and (len(subraw) > 0):
-                    raw += " | " + subraw
-                return raw
-
-            def obj_label(self):
-                #label = Base(TableCell('label'), CleanText('./div'))(self)
-                #    or Base(TableCell('label'), CleanText('./text()'))(self)
-                return self.obj.label
-
-            def obj_amount(self):
-                return CleanDecimal.US(TableCell("credit"), default=0)(self) + CleanDecimal.US(
-                    TableCell("debit"), default=0
-                )(self)
-
-            obj__details_link = None
-
+#            obj_raw = Transaction.Raw(Base(TableCell("label"), CleanText("./text()")))
+#            def obj_raw(self):
+#                raw = Transaction.Raw(Base(TableCell('label'), CleanText('./text()')))(self)
+#                subraw = Base(TableCell('label'), CleanText('div/text()'))(self)
+#                if (subraw is not None) and (len(subraw) > 0):
+#                    raw += " | " + subraw
+#                return raw
 
 class CardHistoryPage(ActionNeededPage):
     def iter_investments(self):

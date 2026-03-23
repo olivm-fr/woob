@@ -17,6 +17,7 @@
 
 # flake8: compatible
 
+import json
 import re
 from io import BytesIO
 
@@ -27,6 +28,7 @@ from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import CleanText, Coalesce, Regexp
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage, XMLPage
 from woob.capabilities import NotAvailable
+from woob.capabilities.base import NotLoaded
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from woob.tools.captcha.virtkeyboard import SplitKeyboard
 from woob_modules.caissedepargne.pages import AuthenticationMethodPage as _AuthenticationMethodPage
@@ -124,17 +126,39 @@ class UnavailablePage(LoggedPage, MyHTMLPage):
 
 class NewLoginPage(HTMLPage):
     def get_main_js_file_url(self):
-        return Attr('//script[contains(@src, "main.")]', "src")(self.doc)
+        return Attr('//script[contains(@src, "main-")]', "src")(self.doc)
 
 
-class JsFilePage(_JsFilePage):
-    def get_client_id(self):
-        return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
+class BaseJsFilePage(_JsFilePage):
+    BPCE_RESOURCE_PATTERN = (
+        r"https://www\.(?:rs|as)\-(?:ano|ext)\-bad\-(?:ib|ce)\.(?:banquepopulaire\.fr|caisse-epargne\.fr)"
+    )
+
+    def get_client_id_regexp(self):
+        result = r'{url}/api/oauth/v2/token",resourceServerUrl:"{url}(?:[^"]*)",clientId:"([^"]+)"'.format(
+            url=self.BPCE_RESOURCE_PATTERN
+        )
+        self.logger.debug("get_client_id_regexp(): %s", result)
+        return result
+
+
+class JsFilePage(BaseJsFilePage):
+    def getChunkList(self):
+        return re.findall(r"chunk-[A-Z0-9]{8}.js", self.text)
 
     def get_user_info_client_id(self):
-        return Regexp(
-            pattern=r'https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token",resourceServerUrl:"https://www.rs-ano-bad-ib.banquepopulaire.fr",clientId:"([^"]+)"'
-        ).filter(self.text)
+        return Regexp(pattern=self.get_client_id_regexp()).filter(self.text)
+
+
+class JsFilePageSeConnecterChunk(BaseJsFilePage):
+    def contains_oauth_token_client_id(self):
+        return bool(re.search(self.get_client_id_regexp(), self.text))
+
+    def get_oauth_token_client_id(self):
+        return Regexp(pattern=self.get_client_id_regexp()).filter(self.text)
+
+    def get_oauth_autorize_client_id(self):
+        return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
 
 
 class RootDashBoardPage(HTMLPage):
@@ -158,8 +182,17 @@ class JsFilePageEspaceClientChunk(_JsFilePage):
     def get_client_id(self):
         match_e = re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text).group(0)
         client_id = re.search(r"[a-z0-9-]{36}", match_e).group(0)
-
         return client_id
+
+
+class KeysPage(JsonPage):
+    def get_client_id(self):
+        return Dict("#CLIENT_ID_PAS#")(self.doc)
+
+
+class ConstPage(JsonPage):
+    def get_client_id(self):
+        return Dict("#CLIENT_PAS#")(self.doc)
 
 
 class SynthesePage(JsonPage):
@@ -298,21 +331,34 @@ class LoginPage(MyHTMLPage):
 
 class BPOVirtKeyboard(SplitKeyboard):
     char_to_hash = {
-        "0": "66ec79b200706e7f9c14f2b6d35dbb05",
-        "1": ("529819241cce382b429b4624cb019b56", "0ea8c08e52d992a28aa26043ffc7c044"),
-        "2": "fab68678204198b794ce580015c8637f",
-        "3": "3fc5280d17cf057d1c4b58e4f442ceb8",
+        "0": ("66ec79b200706e7f9c14f2b6d35dbb05", "d51fdd5713b0f2dade1d7f47c1e83c2e"),
+        "1": (
+            "529819241cce382b429b4624cb019b56",
+            "0ea8c08e52d992a28aa26043ffc7c044",
+            "c09ae26e43c5dba0e1042f8efc1f4f88",
+            "a9200afc08da452287959a33cf41f0fb",
+        ),
+        "2": ("fab68678204198b794ce580015c8637f", "f063193e0f66ee23257da2843b3e0635"),
+        "3": ("3fc5280d17cf057d1c4b58e4f442ceb8", "605a766394d073c92bd1b1b7ab2cd944"),
         "4": (
             "dea8800bdd5fcaee1903a2b097fbdef0",
             "e413098a4d69a92d08ccae226cea9267",
             "61f720966ccac6c0f4035fec55f61fe6",
             "2cbd19a4b01c54b82483f0a7a61c88a1",
+            "def22e3774fe4aa28f2403c56b590ebd",
+            "0a1f79482febfa3ae4ef512729431ca3",
+            "47ea40e14196e28dbeb43754a7d1a9b8",
         ),
-        "5": "ff1909c3b256e7ab9ed0d4805bdbc450",
-        "6": "7b014507ffb92a80f7f0534a3af39eaa",
+        "5": ("ff1909c3b256e7ab9ed0d4805bdbc450", "24b71d7649ea2d71e35738dbadce8268"),
+        "6": ("7b014507ffb92a80f7f0534a3af39eaa", "9402677ae3173e8443652633d8f985d1"),
         "7": "7d598ff47a5607022cab932c6ad7bc5b",
-        "8": ("4ed28045e63fa30550f7889a18cdbd81", "88944bdbef2e0a49be9e0c918dd4be64"),
-        "9": "dd6317eadb5a0c68f1938cec21b05ebe",
+        "8": (
+            "4ed28045e63fa30550f7889a18cdbd81",
+            "88944bdbef2e0a49be9e0c918dd4be64",
+            "49da909b4353b2538fa644a516d0b745",
+            "6bf6e12636c68035e083a19de4982c63",
+        ),
+        "9": ("dd6317eadb5a0c68f1938cec21b05ebe", "c23e8a111b3b9524341d97657a770735"),
     }
     codesep = " "
 
@@ -356,3 +402,33 @@ class AccountsPage(LoggedPage, MyHTMLPage):
 
 class LastConnectPage(LoggedPage, RawPage):
     pass
+
+
+class CategoryPage(LoggedPage, RawPage):
+    pass
+
+
+class CategoryLoader:
+    data = NotLoaded
+    lookup = NotLoaded
+
+    def load(self, json_content):
+        self.data = json.loads(json_content)
+        lt = {}
+
+        def visit(categories):
+            for cat in categories:
+                cid = cat.get("id")
+                name = cat.get("name")
+                if cid is not None and name is not None:
+                    lt[cid] = name
+                if "children" in cat and cat["children"]:
+                    visit(cat["children"])
+
+        visit(self.data.get("data", []))
+        self.lookup = lt
+
+    def get_name_by_id(self, target_id):
+        if self.lookup == NotLoaded:
+            raise ValueError("Data not loaded. Call load() first.")
+        return self.lookup.get(target_id)

@@ -128,13 +128,13 @@ class SocieteGeneraleModule(
     def new_recipient(self, recipient, **params):
         if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
-        recipient.label = " ".join(w for w in re.sub(r"[^0-9a-zA-Z:\/\-\?\(\)\.,\'\+ ]+", "", recipient.label).split())
+        recipient.label = " ".join(w for w in re.sub(r"[^0-9a-zA-Z \-/?:().,'+]+", "", recipient.label).split())
         return self.browser.new_recipient(recipient, **params)
 
     def init_transfer(self, transfer, **params):
         if self.config["website"].get() not in ("par", "pro"):
             raise NotImplementedError()
-        transfer.label = " ".join(w for w in re.sub(r"[^0-9a-zA-Z ]+", "", transfer.label).split())
+        transfer.label = " ".join(w for w in re.sub(r"[^0-9a-zA-Z \-/?:().,'+]+", "", transfer.label).split())
         self.logger.info("Going to do a new transfer")
 
         account = strict_find_object(self.iter_accounts(), iban=transfer.account_iban)

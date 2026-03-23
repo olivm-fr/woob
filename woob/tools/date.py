@@ -15,11 +15,18 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
+import datetime as dtmod
 import re
 import time
+from collections.abc import Iterable
 from datetime import date as real_date
 from datetime import datetime as real_datetime
 from datetime import timedelta
+from typing import Any, Union
+
+from typing_extensions import Self
 
 
 try:
@@ -43,62 +50,72 @@ __all__ = [
 ]
 
 
-def local2utc(dateobj):
+def local2utc(dateobj: real_datetime) -> real_datetime:
     dateobj = dateobj.replace(tzinfo=tz.tzlocal())
     dateobj = dateobj.astimezone(tz.tzutc())
     return dateobj
 
 
-def utc2local(dateobj):
+def utc2local(dateobj: real_datetime) -> real_datetime:
     dateobj = dateobj.replace(tzinfo=tz.tzutc())
     dateobj = dateobj.astimezone(tz.tzlocal())
     return dateobj
 
 
-def now_as_utc():
+def now_as_utc() -> datetime:
     return datetime.now(tz.tzutc())
 
 
-def now_as_tz(tzinfo):
+def now_as_tz(tzinfo: dtmod.tzinfo | str | None) -> datetime:
     if isinstance(tzinfo, str):
         tzinfo = tz.gettz(tzinfo)
     return datetime.now(tzinfo)
 
 
 class date(real_date):
-    def strftime(self, fmt):
+    def strftime(self, fmt: str) -> str:
         return strftime(self, fmt)
 
     @classmethod
-    def from_date(cls, d):
+    def from_date(cls, d: real_date) -> Self:
         return cls(d.year, d.month, d.day)
 
 
 class datetime(real_datetime):
-    def strftime(self, fmt):
+    def strftime(self, fmt: str) -> str:
         return strftime(self, fmt)
 
-    def combine(self, date, time):
-        return datetime(date.year, date.month, date.day, time.hour, time.minute, time.microsecond, time.tzinfo)
+    @classmethod
+    def combine(cls, date: dtmod.date, time: dtmod.time, tzinfo: dtmod.tzinfo | None = None) -> Self:
+        return cls(
+            date.year,
+            date.month,
+            date.day,
+            time.hour,
+            time.minute,
+            time.second,
+            time.microsecond,
+            time.tzinfo if tzinfo is None else tzinfo,
+        )
 
-    def date(self):
+    def date(self) -> date:
         return date(self.year, self.month, self.day)
 
     @classmethod
-    def from_datetime(cls, dt):
+    def from_datetime(cls, dt: dtmod.datetime) -> Self:
         return cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond, dt.tzinfo)
 
 
-def new_date(d):
+def new_date(d: dtmod.date) -> date:
     """Generate a safe date from a datetime.date object"""
     return date(d.year, d.month, d.day)
 
 
-def new_datetime(d):
+def new_datetime(d: dtmod.date | dtmod.datetime) -> datetime:
     """
     Generate a safe datetime from a datetime.date or datetime.datetime object
     """
-    kw = [d.year, d.month, d.day]
+    kw: list[Any] = [d.year, d.month, d.day]
     if isinstance(d, real_datetime):
         kw.extend([d.hour, d.minute, d.second, d.microsecond, d.tzinfo])
     return datetime(*kw)
@@ -109,7 +126,7 @@ def new_datetime(d):
 _illegal_formatting = re.compile(r"((^|[^%])(%%)*%[sy])")
 
 
-def _findall(text, substr):
+def _findall(text: str, substr: str) -> list[int]:
     # Also finds overlaps
     sites = []
     i = 0
@@ -122,9 +139,10 @@ def _findall(text, substr):
     return sites
 
 
-def strftime(dt, fmt):
+def strftime(dt: date | datetime, fmt: str) -> str:
     if dt.year >= 1900:
-        return super(type(dt), dt).strftime(fmt)
+        # mypy gets confused by this syntax although it is valid
+        return super(type(dt), dt).strftime(fmt)  # type: ignore[arg-type,no-any-return]
     illegal_formatting = _illegal_formatting.search(fmt)
     if illegal_formatting:
         raise TypeError("strftime of dates before 1900 does not handle" + illegal_formatting.group(0))
@@ -157,8 +175,8 @@ def strftime(dt, fmt):
     return s
 
 
-def cmp(a, b):
-    return (a > b) - (a < b)
+def cmp(a: int, b: int) -> int:
+    return bool(a > b) - bool(a < b)
 
 
 class LinearDateGuesser:
@@ -170,13 +188,13 @@ class LinearDateGuesser:
     sorted from recent to older.
     """
 
-    def __init__(self, current_date=None, date_max_bump=timedelta(31)):
+    def __init__(self, current_date: real_date | None = None, date_max_bump: dtmod.timedelta = timedelta(31)) -> None:
         self.date_max_bump = date_max_bump
         if current_date is None:
             current_date = date.today()
         self.current_date = current_date
 
-    def try_assigning_year(self, day, month, start_year, max_year):
+    def try_assigning_year(self, day: int, month: int, start_year: int, max_year: int) -> date:
         """
         Tries to create a date object with day, month and start_year and returns
         it.
@@ -195,10 +213,10 @@ class LinearDateGuesser:
                     raise e
                 start_year += cmp(max_year, start_year)
 
-    def set_current_date(self, current_date):
+    def set_current_date(self, current_date: real_date) -> None:
         self.current_date = current_date
 
-    def guess_date(self, day, month, change_current_date=True):
+    def guess_date(self, day: int, month: int, change_current_date: bool = True) -> date:
         """Returns a date object built from a given day/month pair."""
 
         today = self.current_date
@@ -242,13 +260,18 @@ class ChaoticDateGuesser(LinearDateGuesser):
     day and month and the minimum year
     """
 
-    def __init__(self, min_date, current_date=None, date_max_bump=timedelta(31)):
+    def __init__(
+        self,
+        min_date: date | None,
+        current_date: date | None = None,
+        date_max_bump: dtmod.timedelta = timedelta(31),
+    ) -> None:
         if min_date is None:
             raise ValueError("min_date is not set")
         self.min_date = min_date
         super().__init__(current_date, date_max_bump)
 
-    def guess_date(self, day, month):
+    def guess_date(self, day: int, month: int) -> date:  # type: ignore[override]
         """Returns a possible date between min_date and current_date"""
         parsed_date = super().guess_date(day, month, False)
         if parsed_date >= self.min_date:
@@ -300,9 +323,12 @@ DATE_TRANSLATE_FR = [
     (re.compile(r"dimanche", re.I), "sunday"),
 ]
 
+# Some annotations from types-python-dateutil do not check with source code
+_convert = Iterable[Union[str, tuple[str, ...]]]
+
 
 class FrenchParser(dateutil.parser.parserinfo):
-    MONTHS = [
+    MONTHS: _convert = [  # type: ignore[assignment]
         ("janvier", "janv", "jan"),
         ("février", "fevrier", "fevr", "fev", "févr", "fév"),
         ("mars",),
@@ -317,7 +343,7 @@ class FrenchParser(dateutil.parser.parserinfo):
         ("décembre", "decembre", "déc", "dec"),
     ]
 
-    WEEKDAYS = [
+    WEEKDAYS: _convert = [  # type: ignore[assignment]
         ("lundi",),
         ("mardi",),
         ("mercredi",),
@@ -327,7 +353,7 @@ class FrenchParser(dateutil.parser.parserinfo):
         ("dimanche",),
     ]
 
-    JUMP = [
+    JUMP: _convert = [  # type: ignore[assignment]
         " ",
         ".",
         ",",
@@ -340,14 +366,14 @@ class FrenchParser(dateutil.parser.parserinfo):
         "er",
     ]
 
-    def __init__(self, dayfirst=None, yearfirst=False):
+    def __init__(self, dayfirst: bool | None = None, yearfirst: bool = False) -> None:
         if dayfirst is None:
             dayfirst = True
         super().__init__(dayfirst, yearfirst)
 
 
 class ItalianParser(dateutil.parser.parserinfo):
-    MONTHS = [
+    MONTHS: _convert = [  # type: ignore[assignment]
         ("gennaio",),
         ("febbraio",),
         ("marzo",),
@@ -356,13 +382,13 @@ class ItalianParser(dateutil.parser.parserinfo):
         ("giugno",),
         ("luglio",),
         ("agosto", "ago"),
-        ("settembre"),
+        ("settembre",),
         ("ottobre",),
         ("novembre",),
         ("dicembre",),
     ]
 
-    WEEKDAYS = [
+    WEEKDAYS: _convert = [  # type: ignore[assignment]
         ("lunedì", "lunedi"),
         ("martedì", "martedi"),
         ("mercoledì", "mercoledi"),
@@ -374,7 +400,7 @@ class ItalianParser(dateutil.parser.parserinfo):
 
 
 class SpanishParser(dateutil.parser.parserinfo):
-    MONTHS = [
+    MONTHS: _convert = [  # type: ignore[assignment]
         ("enero", "ene"),
         ("febrero", "feb"),
         ("marzo", "mar"),
@@ -389,7 +415,7 @@ class SpanishParser(dateutil.parser.parserinfo):
         ("diciembre", "dec"),
     ]
 
-    WEEKDAYS = [
+    WEEKDAYS: _convert = [  # type: ignore[assignment]
         ("lunes",),
         ("martes",),
         ("miércoles", "miercoles"),
@@ -400,7 +426,7 @@ class SpanishParser(dateutil.parser.parserinfo):
     ]
 
 
-def parse_french_date(date, **kwargs):
+def parse_french_date(date: str, **kwargs: Any) -> real_datetime:
     return dateutil.parser.parse(date, parserinfo=FrenchParser(), **kwargs)
 
 
@@ -422,7 +448,7 @@ WEEK = {
 }
 
 
-def get_date_from_day(day):
+def get_date_from_day(day: str) -> date:
     today = date.today()
     today_day_number = today.weekday()
 
@@ -437,7 +463,7 @@ def get_date_from_day(day):
     return date(requested_date.year, requested_date.month, requested_date.day)
 
 
-def parse_date(string):
+def parse_date(string: str) -> date | None:
     matches = re.search(r"\s*([012]?[0-9]|3[01])\s*/\s*(0?[1-9]|1[012])\s*/?(\d{2}|\d{4})?$", string)
     if matches:
         year = matches.group(3)
@@ -447,14 +473,16 @@ def parse_date(string):
             year = 2000 + int(year)
         return date(int(year), int(matches.group(2)), int(matches.group(1)))
 
-    elif string.upper() in list(WEEK.keys()):
+    if string.upper() in list(WEEK.keys()):
         return get_date_from_day(string)
 
-    elif string.upper() == "TODAY":
+    if string.upper() == "TODAY":
         return date.today()
 
+    return None
 
-def closest_date(date, date_from, date_to):
+
+def closest_date(date: dtmod.datetime, date_from: dtmod.datetime, date_to: dtmod.datetime) -> dtmod.datetime:
     """
     Adjusts year so that the date is closest to the given range.
     Transactions dates in a statement usually contain only day and month.

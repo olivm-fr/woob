@@ -17,7 +17,7 @@
 
 from woob.browser.switch import SwitchingBrowserWithState
 
-from .caisseepargne_browser import CaisseEpargneBrowser
+from .browser import CreditCooperatifBrowser
 from .cenet_browser import CenetBrowser
 
 
@@ -34,6 +34,6 @@ class ProxyBrowser(SwitchingBrowserWithState):
         "second_client_id",
     )
     BROWSERS = {
-        "main": CaisseEpargneBrowser,
+        "main": CreditCooperatifBrowser,
         "cenet": CenetBrowser,
     }

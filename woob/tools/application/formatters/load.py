@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
+from .iformatter import IFormatter
+
 
 __all__ = ["FormattersLoader", "FormatterLoadError"]
 
@@ -26,30 +30,29 @@ class FormatterLoadError(Exception):
 class FormattersLoader:
     BUILTINS = ["htmltable", "multiline", "simple", "table", "csv", "json", "json_line"]
 
-    def __init__(self):
-        self.formatters = {}
+    def __init__(self) -> None:
+        self.formatters: dict[str, type[IFormatter]] = {}
 
-    def register_formatter(self, name, klass):
+    def register_formatter(self, name: str, klass: type[IFormatter]) -> None:
         self.formatters[name] = klass
 
-    def get_available_formatters(self):
-        l = set(self.formatters)
-        l = l.union(self.BUILTINS)
-        l = sorted(l)
-        return l
+    def get_available_formatters(self) -> list[str]:
+        formatters = set(self.formatters)
+        formatters = formatters.union(self.BUILTINS)
+        return sorted(formatters)
 
-    def build_formatter(self, name):
+    def build_formatter(self, name: str) -> IFormatter:
         if name not in self.formatters:
             try:
                 self.formatters[name] = self.load_builtin_formatter(name)
             except ImportError as e:
                 FormattersLoader.BUILTINS.remove(name)
-                raise FormatterLoadError(f'Unable to load formatter "{name}": {e}')
+                raise FormatterLoadError(f'Unable to load formatter "{name}": {e}') from e
         return self.formatters[name]()
 
-    def load_builtin_formatter(self, name):
+    def load_builtin_formatter(self, name: str) -> type[IFormatter]:
         if name not in self.BUILTINS:
-            raise FormatterLoadError('Formatter "%s" does not exist' % name)
+            raise FormatterLoadError(f'Formatter "{name}" does not exist')
 
         if name == "htmltable":
             from .table import HTMLTableFormatter
@@ -79,3 +82,6 @@ class FormattersLoader:
             from .json import JsonLineFormatter
 
             return JsonLineFormatter
+
+        # Should never happen
+        raise ValueError(f'Formatter "{name}" is not handled properly.')

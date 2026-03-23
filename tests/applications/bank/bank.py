@@ -28,6 +28,14 @@ from woob.capabilities.bank import Account, Recipient, Transaction
 from woob.capabilities.base import NotAvailable
 
 
+def test_ofx_empty_document_flush():
+    """OFX formatter does not crash or output on empty document."""
+    buffer = io.StringIO()
+    formatter = OfxFormatter(outfile=buffer)
+    formatter.flush()
+    assert buffer.getvalue() == ""
+
+
 def test_ofx_header():
     """OFX 2.2 header compliance."""
     account = Account()

@@ -62,7 +62,7 @@ from woob.capabilities.base import NotAvailable, empty
 from woob.capabilities.bill import Subscription
 from woob.capabilities.contact import Advisor
 from woob.capabilities.profile import Person, ProfileMissing
-from woob.exceptions import BrowserUnavailable, BrowserUserBanned
+from woob.exceptions import ActionNeeded, BrowserUnavailable, BrowserUserBanned
 from woob.tools.capabilities.bank.investments import IsinCode, IsinType, create_french_liquidity
 from woob.tools.capabilities.bank.transactions import FrenchTransaction
 from woob.tools.log import getLogger
@@ -90,13 +90,16 @@ class JsonBasePage(LoggedPage, JsonPage):
 
     def on_load(self):
         if Dict("commun/statut")(self.doc).upper() == "NOK":
-            reason = Dict("commun/raison")(self.doc)
-            action = Dict("commun/action")(self.doc)
+            reason = Dict("commun/raison", default="")(self.doc)
+            action = Dict("commun/action", default="")(self.doc)
 
-            if action and "BLOCAGE" in action:
+            if reason == "MAIL_HARDBOUNCE":
+                raise ActionNeeded("Veuillez vous connecter sur votre espace et vérifier votre adresse email")
+
+            if "BLOCAGE" in action:
                 raise BrowserUserBanned()
 
-            if reason and "err_tech" in reason:
+            if "err_tech" in reason:
                 # This error is temporary and usually do not happens on the next try
                 raise TemporaryBrowserUnavailable()
 
@@ -148,6 +151,7 @@ class AccountsMainPage(HTMLLoggedPage):
                 "LIVRET": Account.TYPE_SAVINGS,
             }
 
+            obj_bank_name = "SG"
             obj_id = obj_number = CleanText(TableCell("id"), replace=[(" ", "")])
             obj_label = CleanText('.//span[@class="TypeCompte"]')
             obj_balance = MyDecimal(TableCell("balance"))
@@ -236,6 +240,7 @@ class AccountsPage(JsonBasePage):
                 "TITULAIRE": AccountOwnership.OWNER,
             }
 
+            obj_bank_name = "SG"
             obj_id = obj_number = CleanText(Dict("numeroCompteFormate"), replace=[(" ", "")])
             obj_label = Dict("labelToDisplay")
             obj_iban = Dict("iban")
@@ -270,6 +275,7 @@ class AccountsPage(JsonBasePage):
             # Useful for navigation
             obj__internal_id = Dict("idTechnique")
             obj__prestation_id = Dict("id")
+            obj__internal_id_mobile = Dict("idTechniquePourMobile")
 
             def obj__loan_type(self):
                 if Field("type")(self) in (
@@ -529,7 +535,7 @@ def parse_outgoing_transfer_transaction(line: str | None) -> dict[str, str | BIC
 
     Maps transaction fields to respective dictionary keys.
     The returned dictionary contains a BIC and IBAN entry with respective
-    bjects from schwifty package. They are provided on a best effort basis and
+    objects from schwifty package. They are provided on a best effort basis and
     depend on the quality of data in schwifty.
 
     Examples:
@@ -689,7 +695,7 @@ class TransactionItemElement(ItemElement):
             loan.last_payment_amount = Field("amount")(self)
             loan.last_payment_date = Field("date")(self)
             loan.insurance_amount = loan_data["insurance_amount"]
-            loan.maturity_date = Date().filter(m["maturity_date"])
+            loan.maturity_date = Date(default=NotAvailable).filter(loan_data["maturity_date"])
 
             self.env["loan"] = loan
             self.env["loan_payment"] = loan_data
@@ -782,7 +788,8 @@ class TransactionItemElement(ItemElement):
                 # On societe generale recipients are immediatly available.
                 recipient.enabled_at = datetime.datetime.now().replace(microsecond=0)
                 recipient.currency = "EUR"
-                recipient.bank_name = recipient.iban.bank_name if recipient.iban else ''
+                if recipient.iban:
+                    recipient.bank_name = recipient.iban.bank_name
                 self.env["recipient"] = recipient
 
         return
@@ -1296,6 +1303,9 @@ class MarketPage(HTMLLoggedPage):
     def get_market_order_link(self):
         return Link('//a[contains(text(), "Suivi des ordres")]', default=None)(self.doc)
 
+    def get_code_type_gestion(self):
+        return CleanText(Attr('//input[@id="codeTypeGestion"]', "value", default=""))(self.doc)
+
     def market_pagination(self):
         # Next page is handled by js. Need to build the right url by changing params in current url
         several_pages = self.get_pages()
@@ -1556,30 +1566,32 @@ class ContactDetailsPage(JsonBasePage):
                     elif typ == "PROFESSIONNEL":
                         obj.professional_phone = numero
 
-        location = PostalAddress()
+        if Dict("donnees/adresse", default=False)(self.doc):
 
-        ad1 = CleanText(Dict("donnees/adresse/complementAdresse1"), default=None)(self.doc)
-        ad2 = CleanText(Dict("donnees/adresse/complementAdresse2"), default=None)(self.doc)
-        num = CleanText(Dict("donnees/adresse/numeroEtVoie"), default=None)(self.doc)
+            location = PostalAddress()
 
-        adrs = []
-        if ad1:
-            adrs.append(ad1)
-        if ad2:
-            adrs.append(ad2)
-        if num:
-            adrs.append(num)
+            ad1 = CleanText(Dict("donnees/adresse/complementAdresse1"), default=None)(self.doc)
+            ad2 = CleanText(Dict("donnees/adresse/complementAdresse2"), default=None)(self.doc)
+            num = CleanText(Dict("donnees/adresse/numeroEtVoie"), default=None)(self.doc)
 
-        location.street = ", ".join(adrs)
-        location.postal_code = CleanText(Dict("donnees/adresse/codePostal", default=NotAvailable))(self.doc)
-        location.city = MultiJoin(
-            CleanText(Dict("donnees/adresse/serviceDistribution"), default=NotAvailable),
-            CleanText(Dict("donnees/adresse/ville"), default=NotAvailable),
-        )(self.doc)
-        location.country = CleanText(Dict("donnees/adresse/pays", default=NotAvailable))(self.doc)
-        location.country_code = CountryCode().filter(location.country)
+            adrs = []
+            if ad1:
+                adrs.append(ad1)
+            if ad2:
+                adrs.append(ad2)
+            if num:
+                adrs.append(num)
 
-        obj.postal_address = location
+            location.street = ", ".join(adrs)
+            location.postal_code = CleanText(Dict("donnees/adresse/codePostal", default=NotAvailable))(self.doc)
+            location.city = MultiJoin(
+                CleanText(Dict("donnees/adresse/serviceDistribution"), default=NotAvailable),
+                CleanText(Dict("donnees/adresse/ville"), default=NotAvailable),
+            )(self.doc)
+            location.country = CleanText(Dict("donnees/adresse/pays", default=NotAvailable))(self.doc)
+            location.country_code = CountryCode().filter(location.country)
+
+            obj.postal_address = location
 
         obj.email = CleanText(Dict("donnees/email", default=NotAvailable))(self.doc)
 

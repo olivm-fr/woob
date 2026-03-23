@@ -34,6 +34,12 @@ This is not, and is not intended to be, a complete reg-exp decompiler. It
 should be good enough for a large class of URLS, however.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Iterator, Sequence
+from typing import Any, cast
+
+
 # Mapping of an escape character to a representative of that class. So, e.g.,
 # "\w" is replaced by "x" in a reverse URL. A value of None means to ignore
 # this sequence. Any missing key is mapped to itself.
@@ -51,19 +57,19 @@ ESCAPE_MAPPINGS = {
 }
 
 
-class Choice(list):
+class Choice(list["str | Choice | Group | NonCapture | None"]):
     """Represent multiple possibilities at this point in a pattern string."""
 
 
-class Group(list):
+class Group(tuple[str, str]):
     """Represent a capturing group in the pattern string."""
 
 
-class NonCapture(list):
+class NonCapture(list["str | Choice | Group | NonCapture"]):
     """Represent a non-capturing group in the pattern string."""
 
 
-def normalize(pattern):
+def normalize(pattern: str) -> list[tuple[str, list[str]]]:
     r"""
     Given a reg-exp pattern, normalize it to an iterable of forms that
     suffice for reverse matching. This does the following:
@@ -86,8 +92,8 @@ def normalize(pattern):
     # Do a linear scan to work out the special features of this pattern. The
     # idea is that we scan once here and collect all the information we need to
     # make future decisions.
-    result = []
-    non_capturing_groups = []
+    result: list[str | Choice | Group | NonCapture] = []
+    non_capturing_groups: list[int] = []
     consume_next = True
     pattern_iter = next_char(iter(pattern))
     num_args = 0
@@ -136,9 +142,9 @@ def normalize(pattern):
                 ch, escaped = next(pattern_iter)
                 if ch != "?" or escaped:
                     # A positional group
-                    name = "_%d" % num_args
+                    param = "_%d" % num_args
                     num_args += 1
-                    result.append(Group((("%%(%s)s" % name), name)))
+                    result.append(Group(("%%(%s)s" % param, param)))
                     walk_to_end(ch, pattern_iter)
                 else:
                     ch, escaped = next(pattern_iter)
@@ -164,7 +170,7 @@ def normalize(pattern):
                         # We are in a named backreference.
                         else:
                             terminal_char = ")"
-                        name = []
+                        name: list[str] = []
                         ch, escaped = next(pattern_iter)
                         while ch != terminal_char:
                             name.append(ch)
@@ -173,10 +179,10 @@ def normalize(pattern):
                         # Named backreferences have already consumed the
                         # parenthesis.
                         if terminal_char != ")":
-                            result.append(Group((("%%(%s)s" % param), param)))
+                            result.append(Group(("%%(%s)s" % param, param)))
                             walk_to_end(ch, pattern_iter)
                         else:
-                            result.append(Group((("%%(%s)s" % param), None)))
+                            result.append(Group(("%%(%s)s" % param, "")))
             elif ch in "*?+{":
                 # Quantifiers affect the previous item in the result list.
                 count, ch = get_quantifier(ch, pattern_iter)
@@ -215,7 +221,7 @@ def normalize(pattern):
     return list(zip(*flatten_result(result)))
 
 
-def next_char(input_iter):
+def next_char(input_iter: Iterator[str]) -> Iterator[tuple[str, bool]]:
     r"""
     An iterator that yields the next character from "pattern_iter", respecting
     escape sequences. An escaped character is replaced by a representative of
@@ -236,7 +242,7 @@ def next_char(input_iter):
         yield representative, True
 
 
-def walk_to_end(ch, input_iter):
+def walk_to_end(ch: str, input_iter: Iterator[tuple[str, bool]]) -> None:
     """
     The iterator is currently inside a capturing group. Walk to the close of
     this group, skipping over any nested groups and handling escaped
@@ -257,22 +263,22 @@ def walk_to_end(ch, input_iter):
             nesting -= 1
 
 
-def get_quantifier(ch, input_iter):
+def get_quantifier(ch: str, input_iter: Iterator[tuple[str, bool]]) -> tuple[int, str]:
     """
     Parse a quantifier from the input, where "ch" is the first character in the
     quantifier.
 
     Return the minimum number of occurrences permitted by the quantifier and
-    either None or the next character from the input_iter if the next character
+    either empty string or the next character from the input_iter if the next character
     is not part of the quantifier.
     """
     if ch in "*?+":
         try:
             ch2, escaped = next(input_iter)
         except StopIteration:
-            ch2 = None
+            ch2 = ""
         if ch2 == "?":
-            ch2 = None
+            ch2 = ""
         if ch == "+":
             return 1, ch2
         return 0, ch2
@@ -288,13 +294,13 @@ def get_quantifier(ch, input_iter):
     try:
         ch, escaped = next(input_iter)
     except StopIteration:
-        ch = None
+        ch = ""
     if ch == "?":
-        ch = None
+        ch = ""
     return int(values[0]), ch
 
 
-def contains(source, inst):
+def contains(source: Any, inst: type) -> bool:
     """
     Return True if the "source" contains an instance of "inst". False,
     otherwise.
@@ -308,7 +314,9 @@ def contains(source, inst):
     return False
 
 
-def flatten_result(source):
+def flatten_result(
+    source: Sequence[str | Choice | Group | NonCapture | None] | None,
+) -> tuple[list[str], list[Any]]:
     """
     Turn the given source sequence into a list of reg-exp possibilities and
     their arguments. Return a list of strings and a list of argument lists.
@@ -316,47 +324,55 @@ def flatten_result(source):
     """
     if source is None:
         return [""], [[]]
+
     if isinstance(source, Group):
         if source[1] is None:
             params = []
         else:
             params = [source[1]]
         return [source[0]], [params]
+
     result = [""]
-    result_args = [[]]
+    result_args: list[list[Any]] = [[]]
     pos = last = 0
     for pos, elt in enumerate(source):
         if isinstance(elt, str):
             continue
-        piece = "".join(source[last:pos])
+
+        piece = "".join(cast(Iterable[str], source[last:pos]))
         if isinstance(elt, Group):
             piece += elt[0]
             param = elt[1]
         else:
             param = None
+
         last = pos + 1
         for i in range(len(result)):
             result[i] += piece
             if param:
                 result_args[i].append(param)
+
         if isinstance(elt, (Choice, NonCapture)):
-            if isinstance(elt, NonCapture):
-                elt = [elt]
+            elt_ = [elt] if isinstance(elt, NonCapture) else elt
             inner_result, inner_args = [], []
-            for item in elt:
+            for item in elt_:
                 res, args = flatten_result(item)
                 inner_result.extend(res)
                 inner_args.extend(args)
+
             new_result = []
             new_args = []
             for item, args in zip(result, result_args):
                 for i_item, i_args in zip(inner_result, inner_args):
                     new_result.append(item + i_item)
                     new_args.append(args[:] + i_args)
+
             result = new_result
             result_args = new_args
+
     if pos >= last:
-        piece = "".join(source[last:])
+        piece = "".join(cast(str, source[last:]))
         for i in range(len(result)):
             result[i] += piece
+
     return result, result_args

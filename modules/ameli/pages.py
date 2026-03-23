@@ -17,14 +17,30 @@
 
 # flake8: compatible
 
+import calendar
 import re
 from hashlib import sha1
 from html import unescape
 
+from babel.dates import format_date
+
 from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import Attr, Link
+from woob.browser.filters.javascript import JSValue
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Currency, Date, Env, Field, Format, Regexp
+from woob.browser.filters.standard import (
+    CleanDecimal,
+    CleanText,
+    Coalesce,
+    Currency,
+    Date,
+    Env,
+    Eval,
+    Field,
+    Format,
+    Map,
+    Regexp,
+)
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, PartialHTMLPage, RawPage
 from woob.capabilities.address import PostalAddress
 from woob.capabilities.base import NotAvailable
@@ -81,18 +97,17 @@ class AmeliConnectOpenIdPage(LoginPage):
         """
         Submits the form to login with username / password.
         """
-        form = self.get_form(id="connexioncompte_2connexionCompteForm")
+        form = self.get_form(id="lformLogin")
         form["user"] = username
         form["password"] = password
+        form["timezone"] = 2
         form.submit()
 
     def request_otp(self):
         """
         Submits the form to request an OTP.
         """
-        form = self.get_form(
-            id="connexioncompte_2connexionCompteForm", submit='//input[@type="submit" and @name="envoiOTP"]'
-        )
+        form = self.get_form(id="lformLogin", submit='//input[@type="submit" and @name="envoiOTP"]')
         form["authStep"] = "ENVOI_OTP"
         form.submit()
 
@@ -102,9 +117,7 @@ class AmeliConnectOpenIdPage(LoginPage):
 
         :rtype: str
         """
-        form = self.get_form(
-            id="connexioncompte_2connexionCompteForm", submit='//input[@type="submit" and @id="id_r_cnx_btn_submit"]'
-        )
+        form = self.get_form(id="lformLogin", submit=False)
         return form["authStep"]
 
 
@@ -114,12 +127,18 @@ class CtPage(RawPage):
         return re.search(r"_ct:(.*)", self.text).group(1)
 
 
-class RedirectPage(LoggedPage, HTMLPage):
+class AmeliPortalManagerLoggedPage:
+    @property
+    def logged(self):
+        return not bool(self.doc.xpath('//div[has-class("tetiere-connexion")]'))
+
+
+class RedirectPage(AmeliPortalManagerLoggedPage, HTMLPage):
     REFRESH_MAX = 0
     REFRESH_XPATH = '//meta[@http-equiv="refresh"]'
 
 
-class CguPage(LoggedPage, HTMLPage):
+class CguPage(AmeliPortalManagerLoggedPage, HTMLPage):
     def get_cgu_message(self):
         return CleanText('//div[@class="page_nouvelles_cgus"]/p')(self.doc)
 
@@ -131,12 +150,12 @@ class ErrorPage(HTMLPage):
         raise BrowserUnavailable(unescape(CleanText('//div[@class="mobile"]/p')(self.doc)))
 
 
-class SubscriptionPage(LoggedPage, HTMLPage):
+class SubscriptionPage(AmeliPortalManagerLoggedPage, HTMLPage):
     def get_subscription(self):
         sub = Subscription()
         # DON'T TAKE social security number for id because it's a very confidential data, take birth date instead
-        sub.id = CleanText('//button[@id="idAssure"]//td[@class="dateNaissance"]')(self.doc).replace("/", "")
-        sub.label = sub.subscriber = CleanText('//div[@id="pageAssure"]//span[@class="NomEtPrenomLabel"]')(self.doc)
+        sub.id = CleanText('//button[@id="idAssure"]//div[@class="dateNaissance"]', replace=[("/", "")])(self.doc)
+        sub.label = sub.subscriber = CleanText('//ul[@id="pageAssure"]//span[@class="NomEtPrenomLabel"]')(self.doc)
 
         return sub
 
@@ -146,12 +165,13 @@ class SubscriptionPage(LoggedPage, HTMLPage):
 
         # Other recipients can also be on this page.
         # The first one corresponds to the logged user.
+        obj_id = CleanText('//button[@id="idAssure"]//div[@class="dateNaissance"]', replace=[("/", "")])
         obj_name = CleanText('(//span[@class="NomEtPrenomLabel"])[1]')
-        obj_birth_date = Date(CleanText('(//td[@class="dateNaissance"]/span)[1]'), parse_func=parse_french_date)
+        obj_birth_date = Date(CleanText('(//div[@class="dateNaissance"])[1]'), parse_func=parse_french_date)
         obj_phone = CleanText(
             Coalesce(
-                '//div[@class="infoGauche"][normalize-space()="Téléphone portable"]/following-sibling::div/span',
-                '//div[@class="infoGauche"][normalize-space()="Téléphone fixe"]/following-sibling::div/span',
+                '//span[@id="phone-portable"]',
+                '//div[@class="infoGauche"][normalize-space()="Téléphone fixe"]/following-sibling::a/span',
                 default=NotAvailable,
             )
         )
@@ -161,7 +181,7 @@ class SubscriptionPage(LoggedPage, HTMLPage):
 
             def parse(self, obj):
                 full_address = CleanText(
-                    '//div[@class="infoGauche"][normalize-space()="Adresse postale"]/following-sibling::div/span'
+                    '//span[@class="infoGauche"][normalize-space()="Adresse postale"]/following-sibling::span/span'
                 )(self)
                 self.env["full_address"] = full_address
                 m = re.search(r"(\d{1,4}.*) (\d{5}) (.*)", full_address)
@@ -212,31 +232,45 @@ class DocumentsDetailsPage(LoggedPage, PartialHTMLPage):
                 return parse_french_date(day_month + " " + year)
 
 
-class DocumentsFirstSummaryPage(LoggedPage, HTMLPage):
+class DocumentsFirstSummaryPage(AmeliPortalManagerLoggedPage, HTMLPage):
 
     @method
     class iter_documents(ListElement):
-        item_xpath = '//ul[@id="unordered_list"]//li[@class="rowdate" and .//span[@class="blocTelecharger"]]'
+        item_xpath = '//ul[@id="unordered_list"]//div[@class="blocParMois"]'
 
         class item(ItemElement):
             klass = Document
 
+            def condition(self):
+                return len(self.el.xpath('.//div[has-class("boutonTelechargement")]')) > 0
+
             obj_type = DocumentTypes.BILL
-            obj_label = Format("%s %s", CleanText('.//span[@class="libelle"]'), CleanText('.//span[@class="mois"]'))
-            obj_url = Link('.//div[@class="col-telechargement"]//a')
+            obj_label = Format(
+                "%s %s",
+                CleanText('.//div[@class="ReleveMensuelElementFlexSpaceBetween"]//p'),
+                CleanText('.//p[@class="moisDecompte"]'),
+            )
             obj_format = "pdf"
+            obj_url = JSValue(Attr('.//div[has-class("boutonTelechargement")]', "onclick"))
 
             def obj_date(self):
-                year = Regexp(CleanText('.//span[@class="mois"]'), r"(\d+)")(self)
-                month = Regexp(CleanText('.//span[@class="mois"]'), r"(\D+)")(self)
+                year = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\d+)")(self)
+                month = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\D+)")(self)
 
-                return parse_french_date(month + " " + year)
+                dt = parse_french_date(month + " " + year)
+                last_day_of_month = calendar.monthrange(dt.year, dt.month)[1]
+                return dt.replace(day=last_day_of_month)
 
             def obj_id(self):
-                year = Regexp(CleanText('.//span[@class="mois"]'), r"(\d+)")(self)
-                month = Regexp(CleanText('.//span[@class="mois"]'), r"(\D+)")(self)
+                year = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\d+)")(self)
+                month = Regexp(CleanText('.//p[@class="moisDecompte"]'), r"(\D+)")(self)
 
                 return "{}_{}".format(Env("subid")(self), parse_french_date(month + " " + year).strftime("%Y%m"))
+
+
+LIBELLE_NATURE_PRESTATION = {
+    "Releve Mensuel": "Relevé mensuel",
+}
 
 
 class DocumentsLastSummaryPage(LoggedPage, JsonPage):
@@ -245,26 +279,26 @@ class DocumentsLastSummaryPage(LoggedPage, JsonPage):
     class iter_documents(DictElement):
 
         def find_elements(self):
-            for doc in self.el["listeDecomptes"]:
-                if doc["montant"]:
-                    yield doc
+            for paiement in self.el.get("listePaiements", []):
+                yield from paiement.get("listeLignesPaiements", [])
 
         class item(ItemElement):
             klass = Document
 
             obj_type = DocumentTypes.BILL
-            obj_url = Dict("urlPDF")
+            obj_url = Dict("urlPdf")
             obj_format = "pdf"
-            obj_label = Format("Relevé mensuel %s", CleanText(Dict("mois")))
+            obj__nature = CleanText(Dict("libelleNaturePrestation"))
+            obj_label = Format(
+                "%s %s",
+                Map(Field("_nature"), LIBELLE_NATURE_PRESTATION, Field("_nature")),
+                Eval(lambda x: format_date(x, "MMMM yyyy", locale="fr"), Field("date")),
+            )
 
             def obj_date(self):
-                year = Regexp(CleanText(Dict("mois")), r"(\d+)")(self)
-                month = Regexp(CleanText(Dict("mois")), r"(\D+)")(self)
-
-                return parse_french_date(month + " " + year)
+                dt = parse_french_date(CleanText(Dict("datePaiement"))(self))
+                last_day_of_month = calendar.monthrange(dt.year, dt.month)[1]
+                return dt.replace(day=last_day_of_month)
 
             def obj_id(self):
-                year = Regexp(CleanText(Dict("mois")), r"(\d+)")(self)
-                month = Regexp(CleanText(Dict("mois")), r"(\D+)")(self)
-
-                return "{}_{}".format(Env("subid")(self), parse_french_date(month + " " + year).strftime("%Y%m"))
+                return "{}_{}".format(Env("subid")(self), (Field("date")(self)).strftime("%Y%m"))

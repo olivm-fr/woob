@@ -487,6 +487,13 @@ class item_account_generic(ItemElement):
         re.compile(r"Etalis"),
     ]
 
+    # Dummy lines in the list of accounts.
+    # The casing assumes the label field has been cleaned up.
+    DUMMY_ACCOUNT_ENTRY = [
+        "Valorisation Totale De Vos Portefeuilles Titres",
+        "Gestion De Mes Dépenses",
+    ]
+
     def condition(self):
         if len(self.el.xpath("./td")) < 2:
             return False
@@ -496,7 +503,7 @@ class item_account_generic(ItemElement):
 
         return (
             # First TD has to have a i class
-            ("i" in first_td_classes or "p" in first_td_classes)
+            ("i" in first_td_classes or "p" in first_td_classes or "decal1" in first_td_classes)
             and (
                 first_td.find("a") is not None
                 or (
@@ -511,7 +518,14 @@ class item_account_generic(ItemElement):
 
     def loan_condition(self, check_no_details=False):
         _type = Field("type")(self)
+
         label = Field("label")(self)
+
+        # Filter out dummy account lines.
+        for dummy in item_account_generic.DUMMY_ACCOUNT_ENTRY:
+            if dummy in label:
+                return False
+
         # The 'lien_inter_sites' link leads to a 404 and is not a link to loans details.
         # The link name on the website is : Vos encours mobilisation de créances
         details_link = Link('.//a[not(contains(@href, "lien_inter_sites"))]', default=None)(self)
@@ -754,9 +768,12 @@ class AccountsPage(LoggedPage, HTMLPage):
 
         class item_account(item_account_generic):
             def condition(self):
+                _label = Field("label")(self)
+                for dummy in item_account_generic.DUMMY_ACCOUNT_ENTRY:
+                    if dummy in _label:
+                        return False
+
                 _type = Field("type")(self)
-                if "Valorisation Totale De Vos Portefeuilles Titres" in Field("label")(self):
-                    return False
                 return _type not in (
                     Account.TYPE_LOAN,
                     Account.TYPE_MORTGAGE,
@@ -1207,7 +1224,7 @@ class Transaction(FrenchTransaction):
         (re.compile(r"^(F )?(?P<text>COMMISSION D'INTERVENTION)"), FrenchTransaction.TYPE_BANK),
         (re.compile(r"^EXT.AGIOS"), FrenchTransaction.TYPE_BANK),
         (re.compile(r"^(?P<text>(?P<category>INTERETS).*)"), FrenchTransaction.TYPE_BANK),
-        (re.compile(r"(?P<text>PREL\.(SOC|OBL).*)"), FrenchTransaction.TYPE_BANK),
+        (re.compile(r"(?P<text>PREL\.( )?(SOC|OBL).*)"), FrenchTransaction.TYPE_BANK),
         (re.compile(r"^(REMISE|REM CHQ) (?P<text>.*)"), FrenchTransaction.TYPE_DEPOSIT),
         (re.compile(r"^VRST (?P<text>.*)"), FrenchTransaction.TYPE_CASH_DEPOSIT),
         (re.compile(r"^VERSEMT PERIOD"), FrenchTransaction.TYPE_DEPOSIT),
@@ -1501,6 +1518,16 @@ class OperationsPage(LoggedPage, HTMLPage):
                     # display:none on desktop.
                     # Clear their content in place.
                     for elem in el.xpath('.//node()[contains(@class, "eir_showxs")]'):
+                        elem.drop_tree()
+                    for elem in el.xpath('.//node()[contains(@class, "eir_showsm")]'):
+                        elem.drop_tree()
+
+                    # Ditto for the ei_sronly (screen reader only) class.
+                    for elem in el.xpath('.//node()[contains(@class, "ei_sronly")]'):
+                        elem.drop_tree()
+
+                    # Remove the category span.
+                    for elem in el.xpath('.//node()[contains(@class, "doux")]'):
                         elem.drop_tree()
 
                     # Remove hidden parts of labels:
@@ -2115,7 +2142,7 @@ class LIAccountsPage(LoggedPage, HTMLPage):
 
     def go_accounts_list(self):
         form = self.get_form(
-            xpath="//form[@id='C:P14:F' or @id='C:P4:F' or @id='C:P5:F'or @id='C:P6:F']",
+            xpath="//form[@id='C:P1:F' or @id='C:P14:F' or @id='C:P4:F' or @id='C:P5:F'or @id='C:P6:F']",
             submit='//input[@name="_FID_GoBusinessSpaceLife"]',
         )
         form.submit()

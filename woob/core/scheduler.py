@@ -15,8 +15,11 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
 
+from collections.abc import Iterable
 from threading import Event, RLock, Timer
+from typing import Any, Callable
 
 from woob.tools.log import getLogger
 from woob.tools.misc import get_backtrace
@@ -28,33 +31,29 @@ __all__ = ["Scheduler"]
 class IScheduler:
     """Interface of a scheduler."""
 
-    def schedule(self, interval, function, *args):
+    def schedule(self, interval: int, function: Callable[..., Any], *args: Any) -> int | None:
         """
         Schedule an event.
 
         :param interval: delay before calling the function
-        :type interval: int
         :param function: function to call
-        :type function: callabale
         :param args: arguments to give to function
         :returns: an event identificator
         """
         raise NotImplementedError()
 
-    def repeat(self, interval, function, *args):
+    def repeat(self, interval: int, function: Callable[..., Any], *args: Any) -> int | None:
         """
         Repeat a call to a function
 
         :param interval: interval between two calls
-        :type interval: int
         :param function: function to call
-        :type function: callable
         :param args: arguments to give to function
         :returns: an event identificator
         """
         raise NotImplementedError()
 
-    def cancel(self, ev):
+    def cancel(self, ev: int) -> bool:
         """
         Cancel an event
 
@@ -63,13 +62,13 @@ class IScheduler:
 
         raise NotImplementedError()
 
-    def run(self):
+    def run(self) -> None:
         """
         Run the scheduler loop
         """
         raise NotImplementedError()
 
-    def want_stop(self):
+    def want_stop(self) -> None:
         """
         Plan to stop the scheduler.
         """
@@ -77,7 +76,7 @@ class IScheduler:
 
 
 class RepeatedTimer(Timer):
-    def run(self):
+    def run(self) -> None:
         while not self.finished.is_set():
             try:
                 self.function(*self.args, **self.kwargs)
@@ -91,22 +90,24 @@ class RepeatedTimer(Timer):
 class Scheduler(IScheduler):
     """Scheduler using Python's :mod:`threading`."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = getLogger("%s.scheduler" % __name__)
         self.mutex = RLock()
         self.stop_event = Event()
         self.count = 0
-        self.queue = {}
+        self.queue: dict[int, Timer] = {}
 
-    def schedule(self, interval, function, *args):
+    def schedule(self, interval: int, function: Callable[..., Any], *args: Any) -> int | None:
         return self._schedule(Timer, interval, self._schedule_callback, function, *args)
 
-    def repeat(self, interval, function, *args):
+    def repeat(self, interval: int, function: Callable[..., Any], *args: Any) -> int | None:
         return self._schedule(RepeatedTimer, interval, self._repeat_callback, function, *args)
 
-    def _schedule(self, klass, interval, meta_func, function, *args):
+    def _schedule(
+        self, klass: type[Timer], interval: int, meta_func: Callable[..., Any], function: Callable[..., Any], *args: Any
+    ) -> int | None:
         if self.stop_event.is_set():
-            return
+            return None
 
         with self.mutex:
             self.count += 1
@@ -116,12 +117,12 @@ class Scheduler(IScheduler):
             timer.start()
             return self.count
 
-    def _schedule_callback(self, count, interval, function, args):
+    def _schedule_callback(self, count: int, interval: int, function: Callable[..., Any], args: Iterable[Any]) -> Any:
         with self.mutex:
             self.queue.pop(count)
         return function(*args)
 
-    def _repeat_callback(self, count, interval, function, args):
+    def _repeat_callback(self, count: int, interval: int, function: Callable[..., Any], args: Iterable[Any]) -> None:
         function(*args)
         with self.mutex:
             try:
@@ -131,7 +132,7 @@ class Scheduler(IScheduler):
             else:
                 self.logger.debug(f'function "{function.__name__}" will be called in {e.interval} seconds')
 
-    def cancel(self, ev):
+    def cancel(self, ev: int) -> bool:
         with self.mutex:
             try:
                 e = self.queue.pop(ev)
@@ -141,7 +142,7 @@ class Scheduler(IScheduler):
             self.logger.debug('scheduled function "%s" is canceled' % e.function.__name__)
             return True
 
-    def _wait_to_stop(self):
+    def _wait_to_stop(self) -> None:
         self.want_stop()
         with self.mutex:
             for e in self.queue.values():
@@ -149,7 +150,7 @@ class Scheduler(IScheduler):
                 e.join()
             self.queue = {}
 
-    def run(self):
+    def run(self) -> None:
         try:
             while True:
                 self.stop_event.wait(0.1)
@@ -158,9 +159,9 @@ class Scheduler(IScheduler):
             raise
         else:
             self._wait_to_stop()
-        return True
+        return None
 
-    def want_stop(self):
+    def want_stop(self) -> None:
         self.stop_event.set()
         with self.mutex:
             for t in self.queue.values():

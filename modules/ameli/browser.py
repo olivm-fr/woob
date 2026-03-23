@@ -35,7 +35,7 @@ from woob.exceptions import (
     OTPSentType,
     SentOTPQuestion,
 )
-from woob.tools.capabilities.bill.documents import merge_iterators
+from woob.tools.capabilities.bill.documents import merge_iterators, sorted_documents
 
 from .pages import (
     AmeliConnectOpenIdPage,
@@ -59,6 +59,7 @@ class AmeliBrowser(TwoFactorBrowser):
 
     error_page = URL(r"/vu/INDISPO_COMPTE_ASSURES.html", ErrorPage)
     login_page = URL(
+        r"/PortailAS/appmanager/PortailAS/assure\?_nfpb=true&_pageLabel=as_login_page&connexioncompte_2actionEvt=afficher.*",
         r"/PortailAS/appmanager/PortailAS/assure\?_nfpb=true&connexioncompte_2actionEvt=afficher.*",
         r"/PortailAS/appmanager/PortailAS/assure\?_nfpb=true&.*validationconnexioncompte.*",
         LoginPage,
@@ -104,6 +105,8 @@ class AmeliBrowser(TwoFactorBrowser):
     STATE_DURATION = 15
     __states__ = ("otp_form_data", "otp_form_url", "trust_connect")
 
+    VERIFY = "ameli.pem"
+
     def __init__(self, config, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         self.login_source = config["login_source"].get()
@@ -115,6 +118,20 @@ class AmeliBrowser(TwoFactorBrowser):
         self.AUTHENTICATION_METHODS = {
             "otp_email": self.handle_otp,
         }
+
+    def locate_browser(self, state):
+        # If already on error page, we try a new login.
+        if "url" in state and self.error_page.match(state["url"]):
+            return
+        try:
+            super().locate_browser(state)
+        # BrowserUnavailable - especially with `Oups... votre compte ameli est momentanément
+        #  indisponible. Il sera de retour en pleine forme très bientôt.`
+        # can be seen when reaching a detail page AND login session is expired.
+        # Thus we try a new login.
+        except BrowserUnavailable as exc:
+            self.logger.debug("We hit a BrowserUnavailable during locate_browser -> we try a new login: %s", exc)
+            return
 
     def init_login(self):
         """
@@ -313,7 +330,8 @@ class AmeliBrowser(TwoFactorBrowser):
     @need_login
     def iter_documents(self, subscription):
         yield from merge_iterators(
-            self._iter_details_documents(subscription), self._iter_summary_documents(subscription)
+            sorted_documents(self._iter_details_documents(subscription)),
+            sorted_documents(self._iter_summary_documents(subscription)),
         )
 
     @need_login

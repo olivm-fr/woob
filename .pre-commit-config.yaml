@@ -1,18 +1,21 @@
+default_install_hook_types:
+  - commit-msg
+  - pre-commit
 exclude: ^tools/(boilerplate/.*\.pyt|cookiecutter/)
 repos:
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.0.0
+    rev: v4.9.1
     hooks:
       - id: commitizen
         stages: [commit-msg]
 
   - repo: https://github.com/pycqa/isort.git
-    rev: 5.13.2
+    rev: 6.1.0
     hooks:
       - id: isort
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: check-merge-conflict
@@ -24,7 +27,7 @@ repos:
       - id: end-of-file-fixer
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.14.0
+    rev: v2.15.0
     hooks:
       - id: pretty-format-toml
         args:
@@ -34,12 +37,12 @@ repos:
           - --trailing-commas
 
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 25.9.0
     hooks:
       - id: black
 
   - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+    rev: 7.1.2
     hooks:
       - id: flake8
         additional_dependencies:
@@ -52,31 +55,35 @@ repos:
         files: ^woob/
 
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.19.0
+    rev: v3.21.0
     hooks:
       - id: pyupgrade
         args: [--py39-plus]
 
   - repo: https://github.com/google/yamlfmt.git
-    rev: v0.14.0
+    rev: v0.17.2
     hooks:
       - id: yamlfmt
 
   - repo: https://github.com/adrienverge/yamllint.git
-    rev: v1.35.1
+    rev: v1.37.1
     hooks:
       - id: yamllint
         args: [-c=.yamllint]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+    rev: v1.18.2
     hooks:
       - id: mypy
         additional_dependencies:
+          - lxml-stubs
           - types-Deprecated
+          - types-colorama
           - types-python-dateutil
           - types-pyyaml
           - types-requests
+          - types-setuptools
           - types-simplejson
+          - types-termcolor
         files: ^woob/
         log_file: .mypy.out

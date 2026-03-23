@@ -85,6 +85,7 @@ class OfxFormatter(IFormatter):
     coming = Decimal(0)
     account_type = 0
     seen = set()
+    document = None
 
     def start_format(
         self,
@@ -261,7 +262,8 @@ class OfxFormatter(IFormatter):
         return
 
     def flush(self):
-        self.output(ET.tostring(self.document, encoding="UTF-8", pretty_print=True).decode("utf-8"))
+        if self.document is not None:
+            self.output(ET.tostring(self.document, encoding="UTF-8", pretty_print=True).decode("utf-8"))
 
 
 class QifFormatter(IFormatter):
@@ -815,13 +817,18 @@ class Appbank(CaptchaMixin, ReplApplication):
 
         transactions = []
         for transaction in self.do(command, account, backends=account.backend):
-            if end_date is not None and transaction.date < end_date:
+            # field can hold date and datetime but comparison need to use the same type
+            # cast all to date to keep true to field definition
+            if hasattr(transaction.date, "date"):
+                transaction.date = transaction.date.date()
+
+            if end_date is not None and transaction.date < end_date.date():
                 break
             transactions.append(transaction)
 
         self.start_format(
             account=account,
-            start_date=transactions[-1].date,
+            start_date=transactions[-1].date if transactions else end_date,
             end_date=datetime.date.today(),
         )
 

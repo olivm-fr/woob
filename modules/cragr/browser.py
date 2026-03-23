@@ -1329,8 +1329,6 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
         data = {
             "situation_travail": "BANCAIRE",
             "num_compte": account.id,
-            "code_fam_produit": account._fam_product_code,
-            "code_fam_contrat_compte": account._fam_contract_code,
             ":cq_csrf_token": token,
         }
 

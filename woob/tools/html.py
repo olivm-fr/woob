@@ -18,13 +18,15 @@
 
 __all__ = ["html2text"]
 
+from collections.abc import Mapping
+from typing import Any
 
 from html2text import HTML2Text
 
 
-def html2text(html, **options):
+def html2text(html: str, **options: Mapping[str, Any]) -> str:
     h = HTML2Text()
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         unicode_snob=True,
         skip_internal_links=True,
         inline_links=False,

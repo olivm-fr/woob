@@ -28,6 +28,7 @@ from woob.capabilities import NotAvailable
 from woob.capabilities.bill import Subscription
 from woob.exceptions import (
     ActionNeeded,
+    AuthMethodNotImplemented,
     BrowserIncorrectPassword,
     BrowserPasswordExpired,
     BrowserUnavailable,
@@ -156,6 +157,12 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
                 # If captcha still here after retrying, we need to solve it
                 self._handle_captcha()
 
+            headers = {
+                "content-type": "application/json",
+                "accept": "application/json",
+            }
+            self.location("https://login.orange.fr/api/access", json={}, headers=headers)
+
             json_data = {
                 "login": self.username,
                 "params": {
@@ -172,6 +179,10 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
             error_message = self.page.get_change_password_message()
             if error_message:
                 raise BrowserPasswordExpired(error_message)
+
+            error_message = self.page.get_idme_error_message()
+            if error_message:
+                raise AuthMethodNotImplemented(error_message)
 
             self.portal_page.go()
 
@@ -274,7 +285,7 @@ class OrangeBillBrowser(LoginBrowser, StatesMixin):
                 subscriptions[sub.id] = sub
                 subscription_id_list.append(sub.id)
             nb_sub = self.page.doc["totalContracts"]
-        except (ServerError, HTTPNotFound):
+        except (ClientError, ServerError, HTTPNotFound):
             pass
 
         try:

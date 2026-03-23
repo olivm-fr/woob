@@ -16,37 +16,42 @@
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
 
+from collections.abc import Mapping
 from copy import deepcopy
+from typing import Any
 
+from typing_extensions import Unpack
+
+from .config.iconfig import GetArgs, IConfigGet, SetArgs
 from .config.yamlconfig import YamlConfig
 
 
 class IStorage:
-    def load(self, what, name, default={}):
+    def load(self, what: str, name: str, default: Mapping[str, Any] = {}) -> None:
         """
         Load data from storage.
         """
         raise NotImplementedError()
 
-    def save(self, what, name):
+    def save(self, what: str, name: str) -> None:
         """
         Write changes in storage on the disk.
         """
         raise NotImplementedError()
 
-    def set(self, what, name, *args):
+    def set(self, what: str, name: str, *args: Unpack[SetArgs]) -> None:
         """
         Set data in a path.
         """
         raise NotImplementedError()
 
-    def delete(self, what, name, *args):
+    def delete(self, what: str, name: str, *args: Unpack[GetArgs]) -> None:
         """
         Delete a value or a path.
         """
         raise NotImplementedError()
 
-    def get(self, what, name, *args, **kwargs):
+    def get(self, what: str, name: str, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         """
         Get a value or a path.
         """
@@ -54,11 +59,11 @@ class IStorage:
 
 
 class StandardStorage(IStorage):
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self.config = YamlConfig(path)
         self.config.load()
 
-    def load(self, what, name, default={}):
+    def load(self, what: str, name: str, default: Mapping[str, Any] = {}) -> None:
         d = {}
         if what not in self.config.values:
             self.config.values[what] = {}
@@ -68,14 +73,14 @@ class StandardStorage(IStorage):
         self.config.values[what][name] = deepcopy(default)
         self.config.values[what][name].update(d)
 
-    def save(self, what, name):
+    def save(self, what: str, name: str) -> None:
         self.config.save()
 
-    def set(self, what, name, *args):
+    def set(self, what: str, name: str, *args: Unpack[SetArgs]) -> None:
         self.config.set(what, name, *args)
 
-    def delete(self, what, name, *args):
+    def delete(self, what: str, name: str, *args: Unpack[GetArgs]) -> None:
         self.config.delete(what, name, *args)
 
-    def get(self, what, name, *args, **kwargs):
+    def get(self, what: str, name: str, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         return self.config.get(what, name, *args, **kwargs)

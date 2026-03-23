@@ -15,16 +15,17 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from collections.abc import Sequence
 from copy import copy
 from posixpath import join, sep
 
 
 class WorkingPath:
-    def __init__(self):
-        self.split_path = []
+    def __init__(self) -> None:
+        self.split_path: list[str] = []
         self.previous = copy(self.split_path)
 
-    def cd1(self, user_input):
+    def cd1(self, user_input: str) -> None:
         """
         Append *one* level to the current path.
         This means that separators (/) will get escaped.
@@ -33,36 +34,35 @@ class WorkingPath:
         split_path.append(user_input)
         self.location(split_path)
 
-    def location(self, split_path):
+    def location(self, split_path: Sequence[str]) -> None:
         """
         Go to a new path, and store the previous path.
         """
-        self.previous = self.get()
-        self.split_path = split_path
+        self.split_path, self.previous = list(split_path), self.split_path
 
-    def restore(self):
+    def restore(self) -> None:
         """
         Go to the previous path
         """
         self.split_path, self.previous = self.previous, self.split_path
 
-    def home(self):
+    def home(self) -> None:
         """
         Go to the root
         """
         self.location([])
 
-    def up(self):
+    def up(self) -> None:
         """
         Go up one directory
         """
         self.location(self.split_path[:-1])
 
-    def get(self):
+    def get(self) -> list[str]:
         """
         Get the current working path
         """
         return copy(self.split_path)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return join(sep, *[s.replace("/", r"\/") for s in self.split_path])

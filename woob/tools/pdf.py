@@ -15,12 +15,23 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import logging
 import os
 import subprocess
-from collections import namedtuple
+from collections.abc import Iterable, Iterator, Mapping
+from http.cookiejar import Cookie
 from io import BytesIO, StringIO
 from tempfile import mkstemp
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Optional, Protocol, TypeVar, cast, overload
+
+
+if TYPE_CHECKING:
+    from pdfkit import Configuration
+    from pdfminer.layout import LTChar, LTCurve, LTLine, LTPage, LTRect, LTTextBox, LTTextLine
+
+    from woob.browser.browsers import Browser  # Avoid circular import at runtime
 
 
 __all__ = ["decompress_pdf", "get_pdf_rows"]
@@ -50,15 +61,30 @@ def decompress_pdf(inpdf: bytes) -> bytes:
     return outpdf
 
 
-Rect = namedtuple("Rect", ("x0", "y0", "x1", "y1"))
-TextRect = namedtuple("TextRect", ("x0", "y0", "x1", "y1", "text"))
+Point2D = tuple[float, float]
+T = TypeVar("T")
 
 
-def almost_eq(a, b):
+class Rect(NamedTuple):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class TextRect(NamedTuple):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    text: str
+
+
+def almost_eq(a: float, b: float) -> bool:
     return abs(a - b) < 2
 
 
-def lt_to_coords(obj, ltpage):
+def lt_to_coords(obj: LTCurve, ltpage: LTPage) -> Rect:
     # in a pdf, 'y' coords are bottom-to-top
     # in a pdf, coordinates are very often almost equal but not strictly equal
 
@@ -81,7 +107,7 @@ def lt_to_coords(obj, ltpage):
     return Rect(x0, y0, x1, y1)
 
 
-def lttext_to_multilines(obj, ltpage):
+def lttext_to_multilines(obj: LTTextBox | LTTextLine | LTChar, ltpage: LTPage) -> Iterator[TextRect]:
     # text lines within 'obj' are probably the same height
     x0 = min(obj.x0, obj.x1)
     y0 = min(ltpage.y1 - obj.y0, ltpage.y1 - obj.y1)
@@ -98,22 +124,24 @@ def lttext_to_multilines(obj, ltpage):
 # fuzzy floats to smooth comparisons because lines are actually rects
 # and seemingly-contiguous lines are actually not contiguous
 class ApproxFloat(float):
-    def __eq__(self, other):
-        return almost_eq(self, other)
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, float):
+            return almost_eq(self, float(other))
+        return NotImplemented
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> bool:
         return not self == other
 
-    def __lt__(self, other):
+    def __lt__(self, other: float) -> bool:
         return self - other < 0 and self != other
 
-    def __le__(self, other):
+    def __le__(self, other: float) -> bool:
         return self - other <= 0 or self == other
 
-    def __gt__(self, other):
+    def __gt__(self, other: float) -> bool:
         return not self <= other
 
-    def __ge__(self, other):
+    def __ge__(self, other: float) -> bool:
         return not self < other
 
 
@@ -122,7 +150,7 @@ ANGLE_HORIZONTAL = 1
 ANGLE_OTHER = 2
 
 
-def angle(r):
+def angle(r: LTLine) -> int:
     if r.x0 == r.x1:
         return ANGLE_VERTICAL
     elif r.y0 == r.y1:
@@ -130,11 +158,14 @@ def angle(r):
     return ANGLE_OTHER
 
 
-class ApproxVecDict(dict):
+VT = TypeVar("VT")
+
+
+class ApproxVecDict(dict[Point2D, VT]):
     # since coords are never strictly equal, search coords around
     # store vectors and points
 
-    def __getitem__(self, coords):
+    def __getitem__(self, coords: Point2D) -> VT:
         x, y = coords
         for i in (0, -1, 1):
             for j in (0, -1, 1):
@@ -144,16 +175,25 @@ class ApproxVecDict(dict):
                     pass
         raise KeyError()
 
-    def get(self, k, v=None):
+    @overload
+    def get(self, k: Point2D, default: None = ..., /) -> VT | None: ...
+
+    @overload
+    def get(self, k: Point2D, default: VT = ..., /) -> VT: ...
+
+    @overload
+    def get(self, k: Point2D, default: T = ..., /) -> T | VT: ...
+
+    def get(self, k: Point2D, default: T | VT | None = None, /) -> T | VT | None:
         try:
             return self[k]
         except KeyError:
-            return v
+            return default
 
 
-class ApproxRectDict(dict):
+class ApproxRectDict(dict[Rect, Optional[Rect]]):
     # like ApproxVecDict, but store rects
-    def __getitem__(self, coords):
+    def __getitem__(self, coords: Rect) -> Rect | None:
         x0, y0, x1, y1 = coords
 
         for i in (0, -1, 1):
@@ -161,25 +201,25 @@ class ApproxRectDict(dict):
                 if x0 == x1:
                     for j2 in (0, -1, 1):
                         try:
-                            return super().__getitem__((x0 + i, y0 + j, x0 + i, y1 + j2))
+                            return super().__getitem__(Rect(x0 + i, y0 + j, x0 + i, y1 + j2))
                         except KeyError:
                             pass
                 elif y0 == y1:
                     for i2 in (0, -1, 1):
                         try:
-                            return super().__getitem__((x0 + i, y0 + j, x1 + i2, y0 + j))
+                            return super().__getitem__(Rect(x0 + i, y0 + j, x1 + i2, y0 + j))
                         except KeyError:
                             pass
                 else:
-                    return super().__getitem__((x0, y0, x1, y1))
+                    return super().__getitem__(Rect(x0, y0, x1, y1))
 
         raise KeyError()
 
 
-def uniq_lines(lines):
+def uniq_lines(lines: Iterable[LTCurve]) -> list[Rect]:
     new = ApproxRectDict()
     for line in lines:
-        line = tuple(line)
+        line = Rect(*line)
         try:
             new[line]
         except KeyError:
@@ -187,8 +227,8 @@ def uniq_lines(lines):
     return [Rect(*k) for k in new.keys()]
 
 
-def build_rows(lines):
-    points = ApproxVecDict()
+def build_rows(lines: Iterable[LTCurve]) -> list[list[Rect]]:
+    points: ApproxVecDict[tuple[list[LTCurve], list[LTCurve]]] = ApproxVecDict()
 
     # for each top-left point, build tuple with lines going down and lines going right
     for line in lines:
@@ -199,17 +239,17 @@ def build_rows(lines):
         coord = (line.x0, line.y0)
         plines = points.get(coord)
         if plines is None:
-            plines = points[coord] = tuple([] for _ in range(2))
+            plines = points[coord] = ([], [])
 
         plines[a].append(line)
 
-    boxes = ApproxVecDict()
+    boxes: ApproxVecDict[list[Rect]] = ApproxVecDict()
     for plines in points.values():
         if not (plines[ANGLE_HORIZONTAL] and plines[ANGLE_VERTICAL]):
             continue
 
-        plines[ANGLE_HORIZONTAL].sort(key=lambda l: (l.y0, l.x1))
-        plines[ANGLE_VERTICAL].sort(key=lambda l: (l.x0, l.y1))
+        plines[ANGLE_HORIZONTAL].sort(key=lambda pline: (pline.y0, pline.x1))
+        plines[ANGLE_VERTICAL].sort(key=lambda pline: (pline.x0, pline.y1))
 
         for hline in plines[ANGLE_HORIZONTAL]:
             try:
@@ -255,7 +295,7 @@ def build_rows(lines):
     return rows
 
 
-def find_in_table(rows, rect):
+def find_in_table(rows: Iterable[LTCurve], rect: LTRect) -> tuple[int, int] | None:
     for j, row in enumerate(rows):
         if ApproxFloat(row[0].y0) > rect.y1:
             break
@@ -267,9 +307,11 @@ def find_in_table(rows, rect):
             if ApproxFloat(box.x0) <= rect.x0 and ApproxFloat(box.x1) >= rect.x1:
                 return i, j
 
+    return None
 
-def arrange_texts_in_rows(rows, trects):
-    table = [[[] for _ in row] for row in rows]
+
+def arrange_texts_in_rows(rows: Iterable[LTCurve], trects: Iterable[LTRect]) -> list[list[list[str]]]:
+    table: list[list[list[str]]] = [[[] for _ in row] for row in rows]
 
     for trect in trects:
         pos = find_in_table(rows, trect)
@@ -283,7 +325,7 @@ LOGGER = logging.getLogger(__name__)
 DEBUGFILES = logging.DEBUG - 1
 
 
-def get_pdf_rows(data, miner_layout=True):
+def get_pdf_rows(data: bytes, miner_layout: bool = True) -> Iterator[list[list[list[str]]]]:
     """
     Takes PDF file content as string and yield table row data for each page.
 
@@ -387,9 +429,9 @@ def get_pdf_rows(data, miner_layout=True):
         if LOGGER.isEnabledFor(DEBUGFILES):
             img = Image.new("RGB", (int(page.mediabox[2]), int(page.mediabox[3])), (255, 255, 255))
             draw = ImageDraw.Draw(img)
-            for l in lines:
+            for line in lines:
                 color = (random.randint(127, 255), random.randint(127, 255), random.randint(127, 255))
-                draw.rectangle((l.x0, l.y0, l.x1, l.y1), outline=color)
+                draw.rectangle((line.x0, line.y0, line.x1, line.y1), outline=color)
             fpath = "%s/2lines-%03d.png" % (path, npage)
             img.save(fpath)
             LOGGER.log(DEBUGFILES, "saved %r", fpath)
@@ -431,7 +473,28 @@ def get_pdf_rows(data, miner_layout=True):
 # Export part #
 
 
-def html_to_pdf(browser, url=None, data=None, extra_options=None):
+class PdfkitProtocol(Protocol):
+    """Backward compatible type annotation for pdfkit.api.from_*."""
+
+    def __call__(
+        self,
+        input: str,
+        output_path: str | bool | None = None,
+        options: Mapping[str, Any] | None = None,
+        toc: Mapping[str, Any] | None = None,
+        cover: str | None = None,
+        configuration: Configuration | None = None,
+        cover_first: bool = False,
+        verbose: bool = False,
+    ) -> bool: ...
+
+
+def html_to_pdf(
+    browser: Browser,
+    url: str | None = None,
+    data: str | None = None,
+    extra_options: Mapping[str, Any] | None = None,
+) -> bool:
     """
     Convert html to PDF.
 
@@ -448,7 +511,7 @@ def html_to_pdf(browser, url=None, data=None, extra_options=None):
 
     assert (url or data) and not (url and data), "Please give only url or data parameter"
 
-    callback = pdfkit.from_url if url else pdfkit.from_string
+    callback: PdfkitProtocol = pdfkit.from_url if url else pdfkit.from_string
     options = {}
 
     try:
@@ -465,14 +528,21 @@ def html_to_pdf(browser, url=None, data=None, extra_options=None):
     if extra_options:
         options.update(extra_options)
 
-    return callback(url or data, False, options=options)
+    return callback(cast(str, url or data), False, options=options)
 
 
 class BlinkPdfError(Exception):
     pass
 
 
-def blinkpdf(browser, url, extra_options=None, filter_cookie=None, start_xvfb=True, timeout=120):
+def blinkpdf(
+    browser: Browser,
+    url: str,
+    extra_options: Mapping[str, Any] | None = None,
+    filter_cookie: Callable[[Cookie], bool] | None = None,
+    start_xvfb: bool = True,
+    timeout: int = 120,
+) -> bytes:
     # - xvfb is required for blinkpdf 1.0, but not for 1.1
     # - xvfb is not necessary for QtWebEngine 5.14, but it is for 5.11, which is the version
     #   available on the ppa for debian/buster stable
@@ -537,7 +607,7 @@ def blinkpdf(browser, url, extra_options=None, filter_cookie=None, start_xvfb=Tr
 
 
 # extract all text from PDF
-def extract_text(data):
+def extract_text(data: bytes) -> str | None:
     try:
         try:
             from pdfminer.pdfdocument import PDFDocument
@@ -563,7 +633,7 @@ def extract_text(data):
                 parser.set_document(doc)
                 doc.set_parser(parser)
         except PDFSyntaxError:
-            return
+            return None
 
         rsrcmgr = PDFResourceManager()
         out = StringIO()

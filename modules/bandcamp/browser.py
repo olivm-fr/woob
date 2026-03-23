@@ -47,9 +47,6 @@ class BandcampBrowser(PagesBrowser):
     def _fetch_album(self):
         album = self.page.get_album()
         album.tracks_list = list(self.page.iter_tracks())
-        for tr, extra in zip(album.tracks_list, self.page.get_tracks_extra()):
-            tr.url = extra["url"]
-            tr.duration = extra["duration"]
         return album
 
     def fetch_track(self, track):

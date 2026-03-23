@@ -57,7 +57,10 @@ from .pages.login import (
     LoginPage,
     PredisconnectedPage,
 )
-from .pages.wealth import AccessBoursePage, AccountDetailsPage
+from .pages.wealth import (
+    AccessBoursePage,
+    AccountDetailsPage,
+)
 from .pages.wealth import AccountsPage as WealthAccountsPage
 from .pages.wealth import (
     BourseAccountsPage,

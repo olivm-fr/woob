@@ -19,23 +19,24 @@
 import warnings
 from collections import defaultdict
 from threading import RLock
+from typing import Any, Callable
 
 
 __all__ = ["RequestsManager"]
 
 
 class RequestsManager:
-    def __init__(self):
-        self.callbacks = defaultdict(lambda: lambda *args, **kwargs: None)
+    def __init__(self) -> None:
+        self.callbacks: dict[str, Callable[..., Any]] = defaultdict(lambda: lambda *args, **kwargs: None)
         self.lock = RLock()
 
-    def request(self, name, *args, **kwargs):
+    def request(self, name: str, *args: Any, **kwargs: Any) -> Any:
         warnings.warn("RequestManager will be removed in woob4", DeprecationWarning, stacklevel=2)
 
         with self.lock:
             return self.callbacks[name](*args, **kwargs)
 
-    def register(self, name, callback):
+    def register(self, name: str, callback: Callable[..., Any]) -> None:
         warnings.warn("RequestManager will be removed in woob4", DeprecationWarning, stacklevel=2)
 
         self.callbacks[name] = callback

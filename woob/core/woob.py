@@ -20,15 +20,15 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from woob import __version__
 from woob.capabilities.base import Capability
 from woob.core.backendscfg import BackendsConfig
 from woob.core.bcall import BackendsCall
-from woob.core.modules import ModulesLoader, RepositoryModulesLoader
+from woob.core.modules import LoadedModule, ModulesLoader, RepositoryModulesLoader
 from woob.core.repositories import IProgress, PrintProgress, Repositories
 from woob.core.requests import RequestsManager
 from woob.core.scheduler import IScheduler, Scheduler
@@ -62,21 +62,18 @@ class WoobBase:
     yourself with backend configuration.
 
     :param modules_path: path to directory containing modules.
-    :type modules_path: :class:`str`
     :param storage: provide a storage where backends can save data
-    :type storage: :class:`woob.tools.storage.IStorage`
     :param scheduler: what scheduler to use; default is :class:`woob.core.scheduler.Scheduler`
-    :type scheduler: :class:`woob.core.scheduler.IScheduler`
     """
 
     @classproperty
-    def VERSION(self):
+    def VERSION(self) -> str:
         warnings.warn("Use woob.__version__ instead.", DeprecationWarning, stacklevel=2)
         return __version__
 
     def __init__(
         self, modules_path: str | None = None, storage: IStorage | None = None, scheduler: IScheduler | None = None
-    ):
+    ) -> None:
         self.logger = getLogger("woob")
         self.backend_instances: dict[str, Module] = {}
         self.requests = RequestsManager()
@@ -90,10 +87,10 @@ class WoobBase:
 
         self.storage = storage
 
-    def __deinit__(self):
+    def __deinit__(self) -> None:
         self.deinit()
 
-    def deinit(self):
+    def deinit(self) -> None:
         """
         Call this method when you stop using Woob, to
         properly unload all correctly.
@@ -114,7 +111,7 @@ class WoobBase:
     def build_backend(
         self,
         module_name: str,
-        params: dict[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
         storage: IStorage | None = None,
         name: str | None = None,
         nofail: bool = False,
@@ -128,16 +125,10 @@ class WoobBase:
 
         :param module_name: name of module
         :param params: parameters to give to backend
-        :type params: :class:`dict`
         :param storage: storage to use
-        :type storage: :class:`woob.tools.storage.IStorage`
         :param name: name of backend
-        :type name: :class:`str`
         :param nofail: if true, this call can't fail
-        :type nofail: :class:`bool`
         :param logger: logger to use
-        :type logger: :class:`logging.Logger`
-        :rtype: :class:`woob.tools.backend.Module`
         """
         module = self.modules_loader.get_or_load_module(module_name)
 
@@ -154,7 +145,7 @@ class WoobBase:
         :param exception: exception object
         """
 
-        def __init__(self, backend_name: str, message: str):
+        def __init__(self, backend_name: str, message: str) -> None:
             super().__init__(message)
             self.backend_name = backend_name
 
@@ -162,24 +153,18 @@ class WoobBase:
         self,
         module_name: str,
         name: str,
-        params: dict | None = None,
+        params: Mapping[str, str] | None = None,
         storage: IStorage | None = None,
         nofail: bool = False,
-    ):
+    ) -> Module:
         """
         Load a backend.
 
         :param module_name: name of module to load
-        :type module_name: :class:`str`:
         :param name: name of instance
-        :type name: :class:`str`
         :param params: parameters to give to backend
-        :type params: :class:`dict`
         :param storage: storage to use
-        :type storage: :class:`woob.tools.storage.IStorage`
         :param nofail: if true, this call can't fail
-        :type nofail: :class:`bool`
-        :rtype: :class:`woob.tools.backend.Module`
         """
         if name is None:
             name = module_name
@@ -196,7 +181,6 @@ class WoobBase:
         Unload backends.
 
         :param names: if specified, only unload that backends
-        :type names: :class:`list`
         """
         unloaded = {}
         if isinstance(names, str):
@@ -218,14 +202,12 @@ class WoobBase:
         """
         return self.get_backend(name)
 
-    def get_backend(self, name: str, **kwargs) -> Module:
+    def get_backend(self, name: str, **kwargs: Any) -> Module | Any:
         """
         Get a backend from its name.
 
         :param name: name of backend to get
-        :type name: str
         :param default: if specified, get this value when the backend is not found
-        :type default: whatever you want
         :raises: :class:`KeyError` if not found.
         """
         try:
@@ -242,30 +224,29 @@ class WoobBase:
         """
         return len(self.backend_instances)
 
-    def iter_backends(self, caps: list[Capability] | None = None, module: str | None = None) -> Iterator[Module]:
+    def iter_backends(
+        self, caps: Iterable[type[Capability]] | None = None, module: str | None = None
+    ) -> Iterator[Module]:
         """
         Iter on each backends.
 
         Note: each backend is locked when it is returned.
 
         :param caps: optional list of capabilities to select backends
-        :type caps: tuple[:class:`woob.capabilities.base.Capability`]
         :param module: optional name of module
-        :type module: :class:`str`
-        :rtype: iter[:class:`woob.tools.backend.Module`]
         """
         for _, backend in sorted(self.backend_instances.items()):
-            if (caps is None or backend.has_caps(caps)) and (module is None or backend.NAME == module):
+            if (caps is None or backend.has_caps(*caps)) and (module is None or backend.NAME == module):
                 with backend:
                     yield backend
 
     def __getattr__(self, name: str) -> Callable[..., BackendsCall]:
-        def caller(*args, **kwargs):
+        def caller(*args: Any, **kwargs: Any) -> BackendsCall:
             return self.do(name, *args, **kwargs)
 
         return caller
 
-    def do(self, function: Callable | str, *args, **kwargs) -> BackendsCall:
+    def do(self, function: Callable[..., Any] | str, *args: Any, **kwargs: Any) -> BackendsCall:
         r"""
         Do calls on loaded backends with specified arguments, in separated
         threads.
@@ -279,12 +260,10 @@ class WoobBase:
           \*\*kwargs.
 
         :param function: backend's method name, or a callable object
-        :type function: :class:`str`
         :param backends: list of backends to iterate on
         :type backends: list[:class:`str`]
         :param caps: iterate on backends which implement this caps
         :type caps: list[:class:`woob.capabilities.base.Capability`]
-        :rtype: A :class:`woob.core.bcall.BackendsCall` object (iterable)
         """
         backends = list(self.backend_instances.values())
         _backends = kwargs.pop("backends", None)
@@ -320,27 +299,23 @@ class WoobBase:
         # Thanks a lot.
         return BackendsCall(backends, function, *args, **kwargs)
 
-    def schedule(self, interval: int, function: Callable, *args) -> int | None:
+    def schedule(self, interval: int, function: Callable[..., Any], *args: Any) -> int | None:
         """
         Schedule an event.
 
         :param interval: delay before calling the function
-        :type interval: int
         :param function: function to call
-        :type function: callabale
         :param args: arguments to give to function
         :returns: an event identificator
         """
         return self.scheduler.schedule(interval, function, *args)
 
-    def repeat(self, interval: int, function: Callable, *args) -> int | None:
+    def repeat(self, interval: int, function: Callable[..., Any], *args: Any) -> int | None:
         """
         Repeat a call to a function
 
         :param interval: interval between two calls
-        :type interval: int
         :param function: function to call
-        :type function: callable
         :param args: arguments to give to function
         :returns: an event identificator
         """
@@ -360,13 +335,13 @@ class WoobBase:
         """
         return self.scheduler.want_stop()
 
-    def loop(self):
+    def loop(self) -> None:
         """
         Run the scheduler loop
         """
         return self.scheduler.run()
 
-    def load_or_install_module(self, module_name: str) -> Module:
+    def load_or_install_module(self, module_name: str) -> LoadedModule:
         """Load a backend, but can't install it"""
         return self.modules_loader.get_or_load_module(module_name)
 
@@ -377,14 +352,10 @@ class Woob(WoobBase):
     call methods on all loaded backends.
 
     :param workdir: optional parameter to set path of the working directory
-    :type workdir: str
     :param datadir: optional parameter to set path of the data directory
-    :type datadir: str
     :param backends_filename: name of the *backends* file, where configuration of
                               backends is stored
-    :type backends_filename: str
     :param storage: provide a storage where backends can save data
-    :type storage: :class:`woob.tools.storage.IStorage`
     """
 
     BACKENDS_FILENAME = "backends"
@@ -396,7 +367,7 @@ class Woob(WoobBase):
         backends_filename: str | None = None,
         scheduler: IScheduler | None = None,
         storage: IStorage | None = None,
-    ):
+    ) -> None:
         # Create WORKDIR
         xdg_config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 
@@ -453,18 +424,17 @@ class Woob(WoobBase):
 
         return str(user_dir)
 
-    def _create_dir(self, name: str):
+    def _create_dir(self, name: str) -> None:
         if not os.path.exists(name):
             os.makedirs(name)
         elif not os.path.isdir(name):
             self.logger.error('"%s" is not a directory', name)
 
-    def update(self, progress: IProgress = PrintProgress()):
+    def update(self, progress: IProgress = PrintProgress()) -> None:
         """
         Update modules from repositories.
 
         :param progress: object notified when there is a progress
-        :type progress: IProgress
         """
         self.repositories.update(progress)
 
@@ -477,7 +447,7 @@ class Woob(WoobBase):
     def build_backend(
         self,
         module_name: str,
-        params: dict[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
         storage: IStorage | None = None,
         name: str | None = None,
         nofail: bool = False,
@@ -487,16 +457,10 @@ class Woob(WoobBase):
         Create a single backend which is not listed in configuration.
 
         :param module_name: name of module
-        :type module_name: str
         :param params: parameters to give to backend
-        :type params: :class:`dict`
         :param storage: storage to use
-        :type storage: :class:`woob.tools.storage.IStorage`
         :param name: name of backend
-        :type name: :class:`str`
-        :rtype: :class:`woob.tools.backend.Module`
         :param nofail: if true, this call can't fail
-        :type nofail: :class:`bool`
         """
         minfo = self.repositories.get_module_info(module_name)
         if minfo is None:
@@ -509,10 +473,10 @@ class Woob(WoobBase):
 
     def load_backends(
         self,
-        caps: list[Capability | str] | None = None,
-        names: list[str] | None = None,
-        modules: list[str] | None = None,
-        exclude: list[str] | None = None,
+        caps: str | type[Capability] | Iterable[str | type[Capability]] | None = None,
+        names: Iterable[str] | None = None,
+        modules: Iterable[str] | None = None,
+        exclude: Iterable[str] | None = None,
         storage: IStorage | None = None,
         errors: list[Woob.LoadError] | None = None,
     ) -> dict[str, Module]:
@@ -520,19 +484,12 @@ class Woob(WoobBase):
         Load backends listed in config file.
 
         :param caps: load backends which implement all of specified caps
-        :type caps: tuple[:class:`woob.capabilities.base.Capability`]
         :param names: load backends in list
-        :type names: tuple[:class:`str`]
         :param modules: load backends which module is in list
-        :type modules: tuple[:class:`str`]
         :param exclude: do not load backends in list
-        :type exclude: tuple[:class:`str`]
         :param storage: use this storage if specified
-        :type storage: :class:`woob.tools.storage.IStorage`
         :param errors: if specified, store every errors in this list
-        :type errors: list[:class:`LoadError`]
         :returns: loaded backends
-        :rtype: dict[:class:`str`, :class:`woob.tools.backend.Module`]
         """
         loaded = {}
         if storage is None:
@@ -593,7 +550,7 @@ class Woob(WoobBase):
                 self.backend_instances[backend_name] = loaded[backend_name] = backend_instance
         return loaded
 
-    def load_or_install_module(self, module_name: str) -> Module:
+    def load_or_install_module(self, module_name: str) -> LoadedModule:
         """Load a backend, and install it if not done before"""
         try:
             return self.modules_loader.get_or_load_module(module_name)

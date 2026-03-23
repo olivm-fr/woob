@@ -376,8 +376,8 @@ class AppCalendar(ReplApplication):
 
         _file, args = self.parse_command_args(line, 2, req_n=1)
 
-        l = self.retrieve_events(args)
-        if l == 3:
+        events = self.retrieve_events(args)
+        if events == 3:
             return 3
 
         if not _file == "-":
@@ -385,11 +385,11 @@ class AppCalendar(ReplApplication):
             self.formatter.outfile = dest
 
         self.formatter.start_format()
-        for item in l:
+        for item in events:
             self.format(item)
 
     def retrieve_events(self, args):
-        l = []
+        events = []
 
         if not args:
             _ids = []
@@ -405,9 +405,9 @@ class AppCalendar(ReplApplication):
                 print("Upcoming event not found: %s" % _id, file=self.stderr)
                 return 3
 
-            l.append(event)
+            events.append(event)
 
-        return l
+        return events
 
     def check_file_ext(self, _file):
         splitted_file = _file.split(".")
@@ -429,8 +429,8 @@ class AppCalendar(ReplApplication):
 
         args = self.parse_command_args(line, 1, req_n=1)
 
-        l = self.retrieve_events(args[0])
-        for event in l:
+        events = self.retrieve_events(args[0])
+        for event in events:
             # we wait till the work be done, else the errors are not handled
             self.do("attends_event", event, True).wait()
 
@@ -448,6 +448,6 @@ class AppCalendar(ReplApplication):
 
         args = self.parse_command_args(line, 1, req_n=1)
 
-        l = self.retrieve_events(args[0])
-        for event in l:
+        events = self.retrieve_events(args[0])
+        for event in events:
             self.do("attends_event", event, False)

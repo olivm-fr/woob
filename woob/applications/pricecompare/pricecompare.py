@@ -135,7 +135,7 @@ class AppPriceCompare(ReplApplication):
                 self.cached_format(price)
 
     def bcall_errors_handler(self, errors, debugmsg="Use --debug option to print backtraces", ignore=()):
-        for backend, error, backtrace in errors.errors:
+        for _backend, error, _backtrace in errors.errors:
             if isinstance(error, MoreResultsAvailable):
                 products = self.get_object_list()
                 self._sort_display_products(products)

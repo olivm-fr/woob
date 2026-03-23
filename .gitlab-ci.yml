@@ -2,6 +2,7 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   PRE_COMMIT_HOME: ${CI_PROJECT_DIR}/.cache/pre-commit
   GIT_STRATEGY: clone
+  REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
 
 cache:
   paths:
@@ -18,19 +19,41 @@ stages:
   except:
     - tags
 
-.python_version:
+.python_version: &python-base-env
   <<: *except-default
   image: python:3.9
   before_script:
     - python -m pip install --upgrade pip setuptools
-    - python -m pip install --upgrade -r requirements-dev.txt
-    - python -m pip install -e .
+    - python -m pip install --upgrade -e . --group dev
+
+.python_matrix:
+  <<: [*except-default, *python-base-env]
+  parallel:
+    matrix: &python-support-matrix
+      - PYTHON_VERSION:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+  image: python:$PYTHON_VERSION
 
 .pre-commit:
-  <<: *except-default
-  image: python:3.9
+  <<: [*except-default, *python-base-env]
   before_script:
     - python -m pip install pre-commit
+
+.tox:
+  <<: [*except-default, *python-base-env]
+  before_script:
+    - python -m pip install --upgrade tox
+    - update-ca-certificates
+
+.tox_py_matrix:
+  extends: .tox
+  parallel:
+    matrix: *python-support-matrix
+  image: python:$PYTHON_VERSION
 
 pre-commit mypy:
   stage: lint
@@ -76,48 +99,60 @@ lint strict:
       codequality: gl-qa-report-flake8-strict.json
 
 bandit:
-  extends: .python_version
   stage: lint
+  extends: .tox
   script:
-    - pip install bandit>=1.8.1
-    - bandit -r woob
-    - bandit -r modules
-    - bandit -r contrib
+    - tox run -e bandit
 
 check modules:
   stage: test
-  extends: .python_version
+  extends: .python_matrix
   script:
     - .ci/check_modules.sh
 
 test:
   stage: test
-  extends: .python_version
+  extends: .tox_py_matrix
   script:
-    - ./tools/run_tests.sh --no-modules
-    - coverage xml -o coverage.xml -i
+    - >-
+      tox run -e py${PYTHON_VERSION//.} --
+      --capture=no
+      --verbose
+      --cov-report=term
+      --cov-report=xml:coverage-py${PYTHON_VERSION//.}.xml
+      --junit-xml=junit-py${PYTHON_VERSION//.}.xml
   artifacts:
     reports:
       coverage_report:
         coverage_format: cobertura
-        path: coverage.xml
+        path: coverage-py${PYTHON_VERSION//.}.xml
+      junit: junit-py${PYTHON_VERSION//.}.xml
+  coverage: /TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/
 
 doc:
   stage: doc
-  extends: .python_version
+  extends: .tox
   script:
-    - make docs
+    - tox run -e docs
+  artifacts:
+    name: "Documentation from $CI_COMMIT_REF_SLUG"
+    paths:
+      - docs/build/html
+    expire_in: 7 days
 
 build:
   stage: build
-  extends: .python_version
+  extends: .tox
   script:
-    - pip install build twine
-    - python -m build
-    - twine check dist/*.whl
+    - tox run -e build
+  artifacts:
+    name: "Python sdist and wheel from $CI_COMMIT_REF_SLUG"
+    paths:
+      - dist
+    expire_in: 7 days
 
 local install:
   stage: build
-  extends: .python_version
+  extends: .python_matrix
   script:
     - ./tools/local_install.sh --local-modules ~/bin

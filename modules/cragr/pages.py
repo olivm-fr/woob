@@ -22,8 +22,6 @@ import re
 from decimal import Decimal
 from urllib.parse import urljoin
 
-import dateutil
-
 from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import Attr, Link
 from woob.browser.filters.javascript import JSVar
@@ -172,7 +170,10 @@ ACCOUNT_TYPES = {
     "DAV NANTI": Account.TYPE_SAVINGS,
     "LIV A": Account.TYPE_SAVINGS,
     "LIV A ASS": Account.TYPE_SAVINGS,
+    "Livret A": Account.TYPE_SAVINGS,
     "LDD": Account.TYPE_SAVINGS,
+    "LDD Solidaire": Account.TYPE_SAVINGS,
+    "Livret Engagé Sociétaire": Account.TYPE_SAVINGS,
     "PEL": Account.TYPE_SAVINGS,
     "CEL": Account.TYPE_SAVINGS,
     "CEL2": Account.TYPE_SAVINGS,
@@ -206,7 +207,9 @@ ACCOUNT_TYPES = {
     "DATX": Account.TYPE_DEPOSIT,
     "CEA": Account.TYPE_DEPOSIT,  # Dépôt à terme
     "VAR": Account.TYPE_DEPOSIT,  # Dépôt à terme
+    "Dépôt à Terme": Account.TYPE_DEPOSIT,  # Dépôt à terme
     "épargne à terme": Account.TYPE_DEPOSIT,
+    "Compte de Dépôt": Account.TYPE_DEPOSIT,
     "PRET PERSO": Account.TYPE_LOAN,
     "P. ENTREPR": Account.TYPE_LOAN,
     "P. HABITAT": Account.TYPE_MORTGAGE,
@@ -232,6 +235,7 @@ ACCOUNT_TYPES = {
     "réserves de crédit": Account.TYPE_CHECKING,
     "prêts personnels": Account.TYPE_LOAN,
     "crédits immobiliers": Account.TYPE_MORTGAGE,
+    "Prêt Tout Habitat": Account.TYPE_MORTGAGE,
     "ESC COM.": Account.TYPE_LOAN,
     "LIM TRESO": Account.TYPE_LOAN,
     "P.ETUDIANT": Account.TYPE_LOAN,
@@ -242,6 +246,7 @@ ACCOUNT_TYPES = {
     "MT AUTRE": Account.TYPE_LOAN,  # Prêt d'investissement professionnel
     "PRET REAM.": Account.TYPE_LOAN,
     "épargne boursière": Account.TYPE_MARKET,
+    "Compte Parts Sociales": Account.TYPE_MARKET,
     "assurance vie et capitalisation": Account.TYPE_LIFE_INSURANCE,
     "PRED": Account.TYPE_LIFE_INSURANCE,
     "PREDI9 S2": Account.TYPE_LIFE_INSURANCE,
@@ -280,6 +285,7 @@ ACCOUNT_TYPES = {
     "AST EXCAP": Account.TYPE_CAPITALISATION,  # Excellence 2 Capitalisation
     "AST EXC2": Account.TYPE_LIFE_INSURANCE,  # bgpi Aster excellence 2
     "ACOR": Account.TYPE_LIFE_INSURANCE,  # Predica ACOR
+    "Prédissime 9 série 2": Account.TYPE_LIFE_INSURANCE,
     "PACA": Account.TYPE_CONSUMER_CREDIT,  # 'PAC' = 'Prêt à consommer'
     "PACC": Account.TYPE_CONSUMER_CREDIT,
     "PACP": Account.TYPE_CONSUMER_CREDIT,
@@ -296,6 +302,9 @@ ACCOUNT_TYPES = {
     "DAVPERBANC": Account.TYPE_PER,
     "PERBANCGL": Account.TYPE_PER,
     "ESPSELEC 2": Account.TYPE_LIFE_INSURANCE,
+    "Carré jaune ( CEL )": Account.TYPE_SAVINGS,
+    "Codebis": Account.TYPE_SAVINGS,
+    "Compte dédié parts sociales": Account.TYPE_SAVINGS,
 }
 
 ACCOUNT_IS_LIQUIDITY = re.compile("compte especes? pea" + "|compte especes? titres")
@@ -377,7 +386,7 @@ class AccountsPage(LoggedPage, JsonPage):
             return Format(
                 "%s %s",
                 CleanText(Dict("comptePrincipal/libelleProduit")),
-                CleanText(Dict("comptePrincipal/libellePartenaireBam")),
+                CleanText(Dict("comptePrincipal/libelleCompte")),
             )(self)
 
         def obj_balance(self):
@@ -393,17 +402,13 @@ class AccountsPage(LoggedPage, JsonPage):
         obj__index = Dict("comptePrincipal/index")
         obj__category = Dict("comptePrincipal/grandeFamilleProduitCode", default=None)
         obj__id_element_contrat = CleanText(Dict("comptePrincipal/idElementContrat"))
-        obj__fam_product_code = CleanText(Dict("comptePrincipal/codeFamilleProduitBam"))
-        obj__fam_contract_code = CleanText(Dict("comptePrincipal/codeFamilleContratBam"))
 
         def obj_type(self):
-            _type = Map(CleanText(Dict("comptePrincipal/libelleUsuelProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(
-                self
-            )
+            _type = Map(CleanText(Dict("comptePrincipal/libelleProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
             if _type == Account.TYPE_UNKNOWN:
                 self.logger.warning(
                     'We got an untyped account: please add "%s" to ACCOUNT_TYPES.',
-                    CleanText(Dict("comptePrincipal/libelleUsuelProduit"))(self),
+                    CleanText(Dict("comptePrincipal/libelleProduit"))(self),
                 )
             return _type
 
@@ -476,8 +481,6 @@ class AccountsPage(LoggedPage, JsonPage):
                 default=None,
             )
             obj__id_element_contrat = CleanText(Dict("idElementContrat"))
-            obj__fam_product_code = CleanText(Dict("codeFamilleProduitBam"))
-            obj__fam_contract_code = CleanText(Dict("codeFamilleContratBam"))
 
             def obj_owner_type(self):
                 return self.page.get_owner_type()
@@ -490,14 +493,14 @@ class AccountsPage(LoggedPage, JsonPage):
                 return Format(
                     "%s %s",
                     CleanText(Dict("libelleProduit")),
-                    CleanText(Dict("libellePartenaireBam")),
+                    CleanText(Dict("libelleCompte")),
                 )(self)
 
             def obj_type(self):
-                if CleanText(Dict("libelleUsuelProduit"))(self) in ("HABITATION",):
+                if CleanText(Dict("libelleProduit"))(self) in ("HABITATION",):
                     # No need to log warning for "assurance" accounts
                     return NotAvailable
-                _type = Map(CleanText(Dict("libelleUsuelProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
+                _type = Map(CleanText(Dict("libelleProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
 
                 # MANDAT CTO Vendôme matches TYPE_LIFE_INSURANCE, although it's a TYPE_MARKET
                 if _type == Account.TYPE_LIFE_INSURANCE and "MANDAT CTO" in CleanText(Dict("libelleProduit"))(self):
@@ -506,7 +509,7 @@ class AccountsPage(LoggedPage, JsonPage):
                 if _type == Account.TYPE_UNKNOWN:
                     self.logger.warning(
                         'There is an untyped account: please add "%s" to ACCOUNT_TYPES.',
-                        CleanText(Dict("libelleUsuelProduit"))(self),
+                        CleanText(Dict("libelleProduit"))(self),
                     )
                 return _type
 
@@ -557,10 +560,14 @@ class AccountDetailsPage(LoggedPage, JsonPage):
             for bal_key in balance_keys:
                 if bal_key in el:
                     value = el[bal_key]
+
+                    if value is not None and bal_key == "montantRestantDu":
+                        value = -value
                     break
 
             if value is None:
                 continue
+
             account_balances[Dict("idElementContrat")(el)] = float_to_decimal(value)
 
         return account_balances
@@ -748,12 +755,8 @@ class CardHistoryPage(LoggedPage, JsonPage):
             obj_amount = Eval(float_to_decimal, Dict("montant"))
             obj_type = Transaction.TYPE_DEFERRED_CARD
             obj_bdate = Field("rdate")
-
-            def obj_date(self):
-                return dateutil.parser.parse(Dict("datePrelevement")(self)).date()
-
-            def obj_rdate(self):
-                return dateutil.parser.parse(Dict("dateOperation")(self)).date()
+            obj_date = Date(Dict("datePrelevement"))
+            obj_rdate = Date(Dict("dateOperation"))
 
 
 class NetfincaRedirectionPage(LoggedPage, HTMLPage):

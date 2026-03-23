@@ -51,12 +51,17 @@ from .pages import (
     AuthorizeErrorPage,
     AuthorizePage,
     BPOVirtKeyboard,
+    CategoryLoader,
+    CategoryPage,
+    ConstPage,
     ErrorPage,
     HomePage,
     InfoTokensPage,
     JsFilePage,
     JsFilePageEspaceClient,
     JsFilePageEspaceClientChunk,
+    JsFilePageSeConnecterChunk,
+    KeysPage,
     LastConnectPage,
     LoggedOut,
     LoginPage,
@@ -137,40 +142,48 @@ class BanquePopulaireAccount(Account):
 
 
 class BanquePopulaire(TwoFactorBrowser):
+    BASEURL = "https://www.banquepopulaire.fr"
+    # Base URLs names from :class:`ConstPage` content
+    URL_ICG = "https://www.icgauth.banquepopulaire.fr"
+    URL_RS_AUTH = "https://www.rs-ext-bad-ib.banquepopulaire.fr"
+    GW_AS_ENDPOINT_PAS = "https://www.as-ext-bad-ib.banquepopulaire.fr"
+    INFO_TOKEN_ENDPOINT = "https://www.as-ano-bad-ib.banquepopulaire.fr"
+
+    ENSEIGNE = "bp"
+    SNID = "678256"
+
     TWOFA_DURATION = 90 * 24 * 60
 
     first_login_page = URL(r"/$")
-    new_first_login_page = URL(r"/se-connecter/sso")
-    login_page = URL(r"https://[^/]+/auth/UI/Login.*", LoginPage)
-    new_login = URL(r"https://www.icgauth.banquepopulaire.fr/se-connecter/sso", NewLoginPage)
-    js_file = URL(r"https://[^/]+/.*se-connecter/main\..*.js$", JsFilePage)
+    new_first_login_page = URL(r"/se-connecter/sso", base="URL_ICG")
+    login_page = URL(r"/auth/UI/Login.*", LoginPage, base="URL_ICG")
+    new_login = URL(r"/se-connecter/sso", NewLoginPage, base="URL_ICG")
+    js_file = URL(r"/.*se-connecter/main-.*.js$", JsFilePage, base="URL_ICG")
+    js_seconnecter_chunk = URL(r"/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk, base="URL_ICG")
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
+    const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
+    keys_pages = URL(r"/espace-client/assets/xld-keys.json", KeysPage)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
-    authorize = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/authorize", AuthorizePage)
-    login_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/consume", LoginTokensPage)
-    info_tokens = URL(r"https://www.as-ano-bad-ib.banquepopulaire.fr/api/oauth/v2/token", InfoTokensPage)
-    account_pass_tokens = URL(r"https://www.as-ext-bad-ib.banquepopulaire.fr/api/oauth/v2/token", InfoTokensPage)
+
+    authorize = URL(r"/api/oauth/v2/authorize", AuthorizePage, base="GW_AS_ENDPOINT_PAS")
+    login_tokens = URL(r"/api/oauth/v2/consume", LoginTokensPage, base="GW_AS_ENDPOINT_PAS")
+    account_pass_tokens = URL(r"/api/oauth/v2/token", InfoTokensPage, base="GW_AS_ENDPOINT_PAS")
+
+    info_tokens = URL(r"/api/oauth/v2/token", InfoTokensPage, base="INFO_TOKEN_ENDPOINT")
 
     authentication_step = URL(
-        r"https://www.icgauth.banquepopulaire.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step",
-        AuthenticationStepPage,
+        r"/dacsrest/api/v1u0/transaction/(?P<validation_id>[^/]+)/step", AuthenticationStepPage, base="URL_ICG"
     )
     authentication_method_page = URL(
-        r"https://www.icgauth.banquepopulaire.fr/dacsrest/api/v1u0/transaction/(?P<validation_id>)",
-        AuthenticationMethodPage,
+        r"/dacsrest/api/v1u0/transaction/(?P<validation_id>)", AuthenticationMethodPage, base="URL_ICG"
     )
-    vk_image = URL(
-        r"https://www.icgauth.banquepopulaire.fr/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images",
-        VkImagePage,
-    )
-    app_validation = URL(r"https://www.icgauth.banquepopulaire.fr/dacsrest/WaitingCallbackHandler", AppValidationPage)
+    vk_image = URL(r"/dacs-rest-media/api/v1u0/medias/mappings/[a-z0-9-]+/images", VkImagePage, base="URL_ICG")
+    app_validation = URL(r"/dacsrest/WaitingCallbackHandler", AppValidationPage, base="URL_ICG")
 
-    synthesis_views = URL(
-        r"https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/contract/v2/augmentedSynthesisViews", SynthesePage
-    )
+    synthesis_views = URL(r"/bapi/contract/v2/augmentedSynthesisViews", SynthesePage, base="URL_RS_AUTH")
 
-    transactions = URL(r"https://www.rs-ext-bad-ib.banquepopulaire.fr/pfm/user/v1.1/transactions", TransactionPage)
+    transactions = URL(r"/pfm/user/v1.1/transactions", TransactionPage, base="URL_RS_AUTH")
 
     error_page = URL(
         r"https://[^/]+/cyber/internet/ContinueTask.do",
@@ -186,26 +199,45 @@ class BanquePopulaire(TwoFactorBrowser):
         UnavailablePage,
     )
 
-    authorize_error = URL(r"https://[^/]+/dacswebssoissuer/AuthnRequestServlet", AuthorizeErrorPage)
+    authorize_error = URL(r"/dacswebssoissuer/AuthnRequestServlet", AuthorizeErrorPage, base="URL_ICG")
+
+    category_page = URL(r"/pfm/user/v1.1/categories", CategoryPage, base="URL_RS_AUTH")
 
     redirect_error_page = URL(r"https://[^/]+/portailinternet/?$", RedirectErrorPage)
 
-    home_page = URL(r"https://[^/]+/.*espace-client", HomePage)
+    home_page = URL(r"/.*espace-client", HomePage)
 
-    last_connect = URL(r"https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/user/v1/user/lastConnect", LastConnectPage)
+    last_connect = URL(r"/bapi/user/v1/user/lastConnect", LastConnectPage, base="URL_RS_AUTH")
 
     redirect_uri = URL(r"https://www.ibps.bpgo.banquepopulaire.fr/callbackleg")
 
     HAS_CREDENTIALS_ONLY = True
 
-    def __init__(self, website, config, *args, **kwargs):
+    @property
+    def cdetab(self):
+        if not hasattr(self, "_cdetab"):
+            self._cdetab = self.config["cdetab"].get()
+        return self._cdetab
+
+    @cdetab.setter
+    def cdetab(self, value):
+        self._cdetab = value
+
+    @property
+    def info_token_headers(self):
+        return {
+            "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": "https://www.icgauth.banquepopulaire.fr/se-connecter/sso?service=cyber",
+            "Origin": "https://www.icgauth.banquepopulaire.fr",
+        }
+
+    def __init__(self, config, *args, **kwargs):
         self.config = config
         super().__init__(self.config, self.config["login"].get(), self.config["password"].get(), *args, **kwargs)
-        self.BASEURL = "https://%s" % website
         self.validation_id = None
         self.mfa_validation_data = None
         self.user_type = None
-        self.cdetab = self.config["cdetab"].get()
         self.continue_url = None
         self.term_id = None
         self.access_token = None
@@ -269,7 +301,11 @@ class BanquePopulaire(TwoFactorBrowser):
             self.term_id = str(uuid4())
 
         try:
-            self.new_first_login_page.go(params={"service": "cyber"})
+            headers = {
+                "Accept": "text/html,application/signed-exchange;v=b3;q=0.7",
+                "Referer": "https://www.banquepopulaire.fr/",
+            }
+            self.new_first_login_page.go(headers=headers, params={"service": "cyber"})
         except (ClientError, HTTPNotFound) as e:
             if e.response.status_code in (403, 404):
                 # Sometimes the website makes some redirections that leads
@@ -431,10 +467,10 @@ class BanquePopulaire(TwoFactorBrowser):
         return {
             "csid": str(uuid4()),
             "typ_app": "rest",
-            "enseigne": "bp",
+            "enseigne": self.ENSEIGNE,
             "typ_sp": "out-band",
             "typ_act": "auth",
-            "snid": "678256",
+            "snid": self.SNID,
             "cdetab": self.cdetab,
             "typ_srv": "part",
             "phase": "",
@@ -444,7 +480,7 @@ class BanquePopulaire(TwoFactorBrowser):
     def get_bpcesta_SSO(self):
         return {
             "cdetab": self.cdetab,
-            "enseigne": "bp",
+            "enseigne": self.ENSEIGNE,
             "login_hint": self.user_code,
             "typ_srv": "part",
             "typ_sp": "out-band",
@@ -452,41 +488,8 @@ class BanquePopulaire(TwoFactorBrowser):
             "typ_act": "sso",
         }
 
-    def _set_mfa_validation_data(self):
-        """Same as in caissedepargne."""
-        self.mfa_validation_data = self.page.get_authentication_method_info()
-        self.mfa_validation_data["validation_unit_id"] = self.page.validation_unit_id
-
-    # need to try from the top in that case because this login is a long chain of redirections
-    @retry(TemporaryBrowserUnavailable)
-    def do_new_login(self):
-        main_js_file = self.page.get_main_js_file_url()
-        self.location(main_js_file)
-
-        client_id = self.page.get_client_id()
-        nonce = str(uuid4())  # Not found anymore
-
-        headers = {
-            "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.icgauth.banquepopulaire.fr/se-connecter/sso?service=cyber",
-            "Origin": "https://www.icgauth.banquepopulaire.fr",
-        }
-
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": self.page.get_user_info_client_id(),
-            "scope": " ",
-            "cdetab": self.cdetab,
-        }
-
-        self.info_tokens.go(headers=headers, data=data)
-
-        self.user_code = self.config["login"].get()
-
-        bpcesta = self.get_bpcesta_Auth()
-
-        claims = {
+    def get_claims(self):
+        return {
             "userinfo": {
                 "cdetab": None,
                 "authMethod": None,
@@ -512,14 +515,60 @@ class BanquePopulaire(TwoFactorBrowser):
             },
         }
 
+    def _set_mfa_validation_data(self):
+        """Same as in caissedepargne."""
+        self.mfa_validation_data = self.page.get_authentication_method_info()
+        self.mfa_validation_data["validation_unit_id"] = self.page.validation_unit_id
+
+    # need to try from the top in that case because this login is a long chain of redirections
+    @retry(TemporaryBrowserUnavailable)
+    def do_new_login(self):
+        main_js_file = self.page.get_main_js_file_url()
+        self.location(main_js_file)
+
+        oauth_token_client_id: str = ""
+        oauth_autorize_client_id: str = ""
+        chunk_list_urls = self.page.getChunkList()
+
+        # Retrieve the ids hidden in JS chunks
+        for chunk_url in chunk_list_urls:
+            self.location(chunk_url)
+            if self.page.contains_oauth_token_client_id():
+                oauth_token_client_id = self.page.get_oauth_token_client_id()
+                oauth_autorize_client_id = self.page.get_oauth_autorize_client_id()
+                break
+
+        if oauth_token_client_id == "":
+            self.logger.debug("No oauth_token_client_id found in chunks")
+            raise BrowserUnavailable("No oauth_token_client_id found in chunks")
+
+        if oauth_autorize_client_id == "":
+            self.logger.debug("No oauth_autorize_client_id found in chunks")
+            raise BrowserUnavailable("No oauth_autorize_client_id found in chunks")
+
+        nonce = str(uuid4())  # Not found anymore
+
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": oauth_token_client_id,
+            "scope": " ",
+            "cdetab": self.cdetab,
+        }
+
+        self.info_tokens.go(headers=self.info_token_headers, data=data)
+
+        self.user_code = self.config["login"].get()
+
+        bpcesta = self.get_bpcesta_Auth()
+
         params = {
             "cdetab": self.cdetab,
-            "client_id": client_id,
+            "client_id": oauth_autorize_client_id,
             "response_type": "id_token token",
             "nonce": nonce,
             "response_mode": "form_post",
             "redirect_uri": self.redirect_uri.build(),
-            "claims": json.dumps(claims),
+            "claims": json.dumps(self.get_claims()),
             "bpcesta": json.dumps(bpcesta),
             "login_hint": self.user_code,
             "display": "page",
@@ -753,25 +802,14 @@ class BanquePopulaire(TwoFactorBrowser):
 
         self.login_verifier, self.login_challenge = self.get_pkce_codes()
 
-        self.root_clientdashboard_page.go()
-
-        main_js_file, chunk_version = self.page.get_main_js_file_url_and_version()
-
-        self.location(main_js_file, params={"v": chunk_version})
-
-        client_id: str = ""
-        chunk_list_urls = self.page.getChunkList()
-
-        # Retrieve the ids hidden in JS chunks
-        for chunk_url in chunk_list_urls:
-            self.location(chunk_url, params={"v": chunk_version})
-            if self.page.contains_client_id():
-                client_id = self.page.get_client_id()
-                break
-
-        if client_id == "":
-            self.logger.debug("No client_id found in chunks")
-            raise BrowserUnavailable("No client_id found in chunks")
+        headers = {
+            "Accept": "*/*",
+            "Referer": "https://www.banquepopulaire.fr/espace-client/",
+        }
+        self.const_page.go(headers=headers)
+        if not self.const_page.is_here():
+            self.keys_pages.go(headers=headers)
+        client_id = self.page.get_client_id()
 
         bpcesta = self.get_bpcesta_SSO()
         claims = {
@@ -814,8 +852,8 @@ class BanquePopulaire(TwoFactorBrowser):
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Content-Type": "application/x-www-form-urlencoded",
             "Content-Length": "0",  # Mandatory, otherwhise enjoy the 415 error
-            "Origin": "https://www.banquepopulaire.fr",
-            "Referer": "https://www.banquepopulaire.fr/",
+            "Origin": self.BASEURL,
+            "Referer": f"{self.BASEURL}/",
         }
         self.authorize.go(params=params, method="POST", headers=headers)
 
@@ -836,7 +874,9 @@ class BanquePopulaire(TwoFactorBrowser):
         headers = {
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.banquepopulaire.fr/se-connecter/identifier(redirect:authentifier)",  # Mandatory, otherwise you get a 430 error
+            "Referer": "{}/se-connecter/identifier(redirect:authentifier)".format(
+                self.BASEURL
+            ),  # Mandatory, otherwise you get a 430 error
         }
         self.do_redirect("SAMLRequest", headers=headers)
 
@@ -854,7 +894,7 @@ class BanquePopulaire(TwoFactorBrowser):
         headers = {
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.banquepopulaire.fr/",  # Mandatory, otherwise you get a 430 error
+            "Referer": f"{self.BASEURL}/",  # Mandatory, otherwise you get a 430 error
         }
 
         data = {
@@ -877,8 +917,8 @@ class BanquePopulaire(TwoFactorBrowser):
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Authorization": "Bearer %s" % self.access_token,
-            "Origin": "https://www.banquepopulaire.fr",
-            "Referer": "https://www.banquepopulaire.fr/",
+            "Origin": self.BASEURL,
+            "Referer": f"{self.BASEURL}/",
             "Connection": "keep-alive",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
@@ -887,7 +927,9 @@ class BanquePopulaire(TwoFactorBrowser):
         # This is a new API. I still don't know how is built the field productFamilyPFM=1,2,3,4,6,7,17,18.
         # Let see with other users if they have the same IDs and, if necessary, how to dynamically retrieve it...
         self.location(
-            "https://www.rs-ext-bad-ib.banquepopulaire.fr/bapi/contract/v2/augmentedSynthesisViews?productFamilyPFM=1,2,3,4,6,7,17,18&pfmCharacteristicsIndicator=true",
+            self.synthesis_views.build(
+                params={"productFamilyPFM": "1,2,3,4,6,7,17,18,20", "pfmCharacteristicsIndicator": "true"}
+            ),
             headers=headers,
         )
         raw_json_data = self.page.get_raw_json()
@@ -975,6 +1017,24 @@ class BanquePopulaire(TwoFactorBrowser):
     @need_login
     def iter_history(self, account: BanquePopulaireAccount, coming=False):
         self.updateBearerForDataConsumptionIfNeeded()
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
+            "Authorization": "Bearer %s" % self.access_token,
+            "Origin": "https://www.banquepopulaire.fr",
+            "Referer": "https://www.banquepopulaire.fr/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+        }
+
+        params = {"businessType": "UserProfile", "subcategoryStructure": "Tree", "culture": "fr-FR"}
+
+        self.category_page.go(headers=headers, params=params)
+
+        categories = CategoryLoader()
+        categories.load(self.page.doc)
+
         pagination_start = 0
         pagination_count = 25
         current_skip_value = pagination_start
@@ -1029,7 +1089,12 @@ class BanquePopulaire(TwoFactorBrowser):
                         transaction.label += parsedData["label3"]
 
                 transaction.amount = element["amount"]
-                # transaction.category  ####Must be done with a correlation with json content of www.rs-ex-ath-groupe.banquepopulaire.fr/pfm/user/v1.1/categories
+                try:
+                    transaction.category = categories.get_name_by_id(element["categoryId"])
+                except (KeyError, TypeError):
+                    self.logger.debug("Fail to retrieve category for %s", transaction.label)
+                except Exception as e:
+                    self.logger.error("Skip retrieving category for %s due to exception: %s", transaction.label, e)
 
                 yield transaction
 

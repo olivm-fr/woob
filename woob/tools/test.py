@@ -15,26 +15,33 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 from functools import wraps
-from unittest import TestCase
+from typing import TYPE_CHECKING, Any, Callable, NoReturn
+from unittest import TestCase, TestResult
 from unittest.case import SkipTest
 
 from woob.capabilities.base import empty
 from woob.core import Woob
 
 
+if TYPE_CHECKING:
+    from woob.capabilities.base import BaseObject
+    from woob.tools.backend import Module
+
 __all__ = ["BackendTest", "SkipTest", "skip_without_config"]
 
 
 class BackendTest(TestCase):
-    MODULE = None
+    MODULE: str
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         self.backends = {}
         self.backend_instance = None
-        self.backend = None
+        self.backend: Module | None = None
         self.woob = Woob()
 
         # Skip tests when passwords are missing
@@ -44,10 +51,10 @@ class BackendTest(TestCase):
             # provide the tests with all available backends
             self.backends = self.woob.backend_instances
 
-    def login_cb(self, backend_name, value):
+    def login_cb(self, backend_name: str, value: Any) -> NoReturn:
         raise SkipTest("missing config '%s' is required for this test" % value.label)
 
-    def run(self, result):
+    def run(self, result: TestResult | None = None) -> TestResult | None:
         """
         Call the parent run() for each backend instance.
         Skip the test if we have no backends.
@@ -55,30 +62,33 @@ class BackendTest(TestCase):
         try:
             if not len(self.backends):
                 self.backend = self.woob.build_backend(self.MODULE, nofail=True)
-                super().run(result)
+                return super().run(result)
             else:
                 # Run for all backend
                 for backend_instance in self.backends.keys():
                     print(backend_instance)
                     self.backend = self.backends[backend_instance]
-                    super().run(result)
+                    return super().run(result)
         finally:
             self.woob.deinit()
+        return None  # should be unreachable
 
-    def shortDescription(self):
+    def shortDescription(self) -> str:
         """
         Generate a description with the backend instance name.
         """
         # do not use TestCase.shortDescription as it returns None
         return f"{str(self)} [{self.backend_instance}]"
 
-    def is_backend_configured(self):
+    def is_backend_configured(self) -> bool:
         """
         Check if the backend is in the user configuration file
         """
-        return self.woob.backends_config.backend_exists(self.backend.config.instname)
+        if self.backend:
+            return self.woob.backends_config.backend_exists(self.backend.config.instname)
+        return False
 
-    def assertNotEmpty(self, obj, *args):
+    def assertNotEmpty(self, obj: BaseObject, *args: Any) -> None:
         """
         Assert an object is neither `empty` in the BaseObject parlance.
 
@@ -87,7 +97,7 @@ class BackendTest(TestCase):
         self.assertFalse(empty(obj), *args)
 
 
-def skip_without_config(*keys):
+def skip_without_config(*keys: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to skip a test if backend config is missing
 
     :param keys: if any of these keys is missing in backend config, skip test. Can be empty.
@@ -97,9 +107,10 @@ def skip_without_config(*keys):
         if callable(key):
             raise TypeError("skip_without_config() must be called with arguments")
 
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self: BackendTest, *args: Any, **kwargs: Any) -> Any:
+            assert self.backend is not None, f"{self!r} must have valid backends defined"
             config = self.backend.config
             if not self.is_backend_configured():
                 raise SkipTest("a backend must be declared in configuration for this test")

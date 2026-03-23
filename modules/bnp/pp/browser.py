@@ -380,7 +380,10 @@ class BNPParibasBrowser(LoginBrowser, StatesMixin):
                 self.market_syn.go(json={})
                 market_accounts = self.page.get_list()  # get the list of 'Comptes Titres'
             except HTTPNotFound:
-                self.logger.warn('Could not retrieve "Comptes Titres" accounts')
+                self.logger.warning('Could not retrieve "Comptes Titres" accounts')
+                market_accounts = []
+            except ServerError:
+                self.logger.warning("An Internal Server Error occurred")
                 market_accounts = []
 
             checked_accounts = set()

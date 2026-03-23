@@ -20,6 +20,7 @@
 import time
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import quote_plus
 
 from dateutil import tz
 from dateutil.relativedelta import relativedelta
@@ -45,6 +46,7 @@ from woob.exceptions import (
     OTPSentType,
     SentOTPQuestion,
 )
+from woob.tools.capabilities.bill.documents import merge_iterators
 from woob.tools.decorators import retry
 from woob.tools.value import Value, ValueBool
 
@@ -87,7 +89,8 @@ from .pages.login import (
     SkippableActionNeededPage,
     VkImage,
 )
-from .pages.subscription import DocumentsPage, RibPdfPage
+from .pages.managed import ManagedAvailableDates, ManagedDocTypes, ManagedDocument, ManagedIndex, ManagedVerify
+from .pages.subscription import DocumentsPage, PdfPage, SubscriptionsPage
 from .pages.transfer import AddRecipientPage, SignRecipientPage, SignTransferPage, TransferHistoryPage, TransferJson
 
 
@@ -157,9 +160,9 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
             elif reason in ("err_is", "err_tech"):
                 # there is message "Service momentanément indisponible. Veuillez réessayer."
                 # in SG website in that case ...
-                raise BrowserUnavailable()
+                raise BrowserUnavailable(f"Website is unavailable ({reason})")
 
-            raise AssertionError("Unhandled error reason: %s" % reason)
+            raise AssertionError(f"Unhandled error reason: {reason}")
 
     def check_auth_method(self):
         auth_method = self.page.get_auth_method()
@@ -321,6 +324,7 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
         data = {
             "code": self.code,
             "csa_op": "auth",
+            "cible": 300,
         }
         self.location("/sec/csa/check.json", data=data)
 
@@ -338,9 +342,22 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
     # documents
     documents = URL(r"/icd/epe/data/get-all-releves-authsec.json", DocumentsPage)
     pdf_page = URL(
-        r"/icd/epe/pdf/edocument-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)"
+        r"/icd/epe/pdf/edocument-authsec.pdf\?b64e200_prestationIdTechnique=(?P<id_tech>.*)&b64e200_refTechnique=(?P<ref_tech>.*)",
+        PdfPage,
     )
-    rib_pdf_page = URL(r"/com/icd-web/cbo/pdf/rib-authsec.pdf", RibPdfPage)
+    rib_pdf_page = URL(r"/com/icd-web/cbo/pdf/rib-authsec.pdf", PdfPage)
+    subscriptions = URL(r"/icd/epe/data/get-all-abonnements-authsec.json", SubscriptionsPage)
+    managed_index = URL(r"/com/icd-web/tor/tor-gsm-index.html", ManagedIndex)
+    managed_verify = URL(
+        r"/icd/tor/data/tor-verifHashIdPrestation-authsec.json\?b64e200_hashIdPrestation=(?P<id_tech>.*)",
+        ManagedVerify,
+    )
+    managed_doc_types = URL(r"/icd/tor/data/tor-defineNavDocTypes-authsec.json", ManagedDocTypes)
+    managed_available_dates = URL(r"/icd/tor/data/tor-buildListeDate-authsec.json", ManagedAvailableDates)
+    managed_documents = URL(
+        r"/icd/tor/data/tor-getListDocByTypeDocAndYear-authsec.json\?cl200_typeDoc=(?P<type_doc>.*)&cl200_year=(?P<date_year>.*)",
+        ManagedDocument,
+    )
 
     # Bank
     accounts_main_page = URL(
@@ -350,7 +367,9 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         AccountsMainPage,
     )
     account_details_page = URL(r"/restitution/cns_detailPrestation.html", AccountDetailsPage)
-    accounts = URL(r"/icd/cbo/data/liste-prestations-authsec.json\?n10_avecMontant=1", AccountsPage)
+    accounts = URL(
+        r"/icd/cbo/data/liste-prestation-v2-authsec.json\?an200_typePrestations=PRESTATIONS_AVEC_MONTANT", AccountsPage
+    )
     history = URL(r"/icd/cbo/data/liste-operations-authsec.json", HistoryPage)
     loans = URL(r"/icd/espaces-thematiques/data/getLoansRecovery.json", LoansPage)
     revolving_rate = URL(r"icd/cbo/data/recapitulatif-prestation-authsec.json", RevolvingDetailsPage)
@@ -983,7 +1002,17 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
             subscriber = NotAvailable
 
         self.accounts.go()
-        return self.page.iter_subscription(subscriber=subscriber)
+        accounts = self.page.iter_accounts()
+        account_by_idT = {act._internal_id: act for act in accounts}
+
+        self.subscriptions.go()
+
+        for sub in self.page.iter_subscription(subscriber=subscriber):
+            if sub._id_technique in account_by_idT:
+                account = account_by_idT[sub._id_technique]
+                sub._prestation_id = account._prestation_id
+                sub._internal_id_mobile = account._internal_id_mobile
+            yield sub
 
     def _fetch_rib_document(self, subscription):
         d = Document()
@@ -992,6 +1021,7 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
         d.type = DocumentTypes.RIB
         d.format = "pdf"
         d.label = "RIB"
+        d.date = datetime.today()
         return d
 
     def _iter_statements(self, subscription):
@@ -1010,7 +1040,12 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
                 "dt10_dateFin": end_date.strftime("%d/%m/%Y"),
             }
             self.documents.go(params=params)
-            for d in self.page.iter_documents(subid=subscription.id):
+            for d in self.page.iter_documents(subid=subscription.id, tech_id=subscription._internal_id):
+                is_empty = False
+                yield d
+
+            self.documents.go(params=params)
+            for d in self.page.iter_yearly_documents(subid=subscription.id):
                 is_empty = False
                 yield d
 
@@ -1025,15 +1060,43 @@ class SocieteGenerale(SocieteGeneraleTwoFactorBrowser):
             end_date = begin_date - relativedelta(day=1)
             begin_date = end_date - relativedelta(months=3)
 
+    def _iter_managed_accounts(self, subscription):
+        if subscription._is_investment:
+            self.market.go(params={"action": 9, "idPrest": subscription._prestation_id})
+            code_type_gestion = self.page.get_code_type_gestion()
+            if code_type_gestion and code_type_gestion == "Gestion sous mandat":
+                self.managed_verify.go(id_tech=quote_plus(subscription._internal_id_mobile))
+                self.location(
+                    "https://particuliers.sg.fr/icd/tor/data/tor-listeMandat-authsec.json?cl200_filtreTypeGestion=gsm"
+                )
+                self.managed_doc_types.go()
+                doctypes = list(self.page.iter_document_types())
+
+                self.managed_available_dates.go()
+                dates = self.page.dates()
+
+                for date in sorted(dates, reverse=True):
+                    for doctype in doctypes:
+                        self.managed_documents.go(type_doc=doctype, date_year=date)
+                        yield from self.page.iter_documents(subid=subscription.id, type_doc=doctype)
+        return []
+
     @need_login
     def iter_documents(self, subscription):
-        yield self._fetch_rib_document(subscription)
-        yield from self._iter_statements(subscription)
+        iterables = ()
+        if subscription._has_rib:
+            iterables += ([self._fetch_rib_document(subscription)],)
+        iterables += (self._iter_statements(subscription),)
+
+        iterables += (self._iter_managed_accounts(subscription),)
+
+        yield from merge_iterators(*iterables)
 
     @need_login
     def iter_documents_by_types(self, subscription, accepted_types):
-        if DocumentTypes.RIB in accepted_types:
-            yield self._fetch_rib_document(subscription)
+        if subscription._has_rib:
+            if DocumentTypes.RIB in accepted_types:
+                yield self._fetch_rib_document(subscription)
 
         if DocumentTypes.STATEMENT not in accepted_types:
             return

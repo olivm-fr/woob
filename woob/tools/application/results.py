@@ -57,7 +57,11 @@ def is_in(left, right):
     return left in right
 
 
-functions = {"!=": is_notegal, "=": is_egal, ">": is_sup, "<": is_inf, "|": is_in}
+def is_notin(left, right):
+    return left not in right
+
+
+functions = {"!=": is_notegal, "=": is_egal, ">": is_sup, "<": is_inf, "|": is_in, "!|": is_notin}
 
 
 class ResultsCondition(IResultsCondition):
@@ -81,7 +85,7 @@ class ResultsCondition(IResultsCondition):
             and_list = []
             for _and in _or.split(" AND "):
                 operator = None
-                for op in ["!=", "=", ">", "<", "|"]:
+                for op in ["!=", "!|", "=", ">", "<", "|"]:
                     if op in _and:
                         operator = op
                         break
@@ -116,7 +120,10 @@ class ResultsCondition(IResultsCondition):
                         tocompare = condition.right
                         evalfullid = functions[condition.op](tocompare, d["id"])
                         evalid = functions[condition.op](tocompare, obj.id)
-                        myeval = evalfullid or evalid
+                        if condition.op in ("!=", "!|"):
+                            myeval = evalfullid and evalid
+                        else:
+                            myeval = evalfullid or evalid
                     else:
                         # We have to change the type of v, always gived as string by application
                         typed = type(d[condition.left])

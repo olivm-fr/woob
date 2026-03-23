@@ -271,7 +271,7 @@ class URL:
         """
         Build an url with the given arguments from URL's regexps.
 
-        :param param: Query string parameters
+        :param params: Query string parameters
 
         :rtype: :class:`str`
         :raises: :class:`UrlNotResolvable` if unable to resolve a correct url with the given arguments.

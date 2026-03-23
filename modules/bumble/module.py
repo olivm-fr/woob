@@ -63,12 +63,12 @@ class ProfilesWalker(Optimization):
         next_try = 30
         try:
             for user in self._browser.iter_encounters():
-                if not self._city or self._city in user["distance_long"]:
+                if not self._city or self._city in user.get("distance_long", ""):
                     like = True
                     self._logger.info("Like %s" % user["name"])
                 else:
                     like = False
-                    self._logger.info("Unlike {} ({})".format(user["name"], user["distance_long"]))
+                    self._logger.info("Unlike {} ({})".format(user["name"], user.get("distance_long")))
 
                 if self._browser.like_user(user, like):
                     self._logger.info("Match with %s" % user["name"])

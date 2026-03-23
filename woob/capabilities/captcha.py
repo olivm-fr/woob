@@ -333,7 +333,7 @@ class CapCaptchaSolver(Capability):
         """Typoed method that will disappear in an upcoming version"""
 
         self.create_job(job)
-        for i in range(self.RETRIES):
+        for _i in range(self.RETRIES):
             sleep(self.WAIT_TIME)
             if self.poll_job(job):
                 return job

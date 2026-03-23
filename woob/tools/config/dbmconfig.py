@@ -15,34 +15,49 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
 
 import dbm.ndbm
+from collections.abc import Mapping, MutableMapping
+from typing import Any, cast
 
 import yaml
+from typing_extensions import Unpack
 
-from .iconfig import ConfigError, IConfig
+from .iconfig import ConfigError, GetArgs, IConfig, IConfigGet, SetArgs
 from .yamlconfig import WoobDumper
 
 
 __all__ = ["DBMConfig"]
 
 
+class NDBMProtocol(MutableMapping[str, str | object]):
+    def close(self) -> None: ...
+
+
 class DBMConfig(IConfig):
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self.path = path
-        self.storage = None
+        self._storage: NDBMProtocol | None = None
 
-    def load(self, default=None):
-        self.storage = dbm.ndbm.open(self.path, "c")
+    @property
+    def storage(self) -> NDBMProtocol:
+        if self._storage is None:
+            raise RuntimeError("DBMConfig is not loaded.")
+        return self._storage
 
-    def save(self):
-        if hasattr(self.storage, "sync"):
+    def load(self, default: Mapping[str, Any] = {}) -> None:
+        self._storage = cast(NDBMProtocol, dbm.ndbm.open(self.path, "c"))
+
+    def save(self) -> None:
+        if self.storage and hasattr(self.storage, "sync"):
             self.storage.sync()
 
-    def get(self, *args, **kwargs):
+    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
         key = ".".join(args)
         try:
             value = self.storage[key]
+            assert isinstance(value, (str, bytes))
             value = yaml.load(value, Loader=yaml.SafeLoader)
         except KeyError as exc:
             if "default" in kwargs:
@@ -53,7 +68,7 @@ class DBMConfig(IConfig):
             raise ConfigError() from exc
         return value
 
-    def set(self, *args):
+    def set(self, *args: Unpack[SetArgs]) -> None:
         key = ".".join(args[:-1])
         value = args[-1]
         try:
@@ -63,7 +78,7 @@ class DBMConfig(IConfig):
         except TypeError as exc:
             raise ConfigError() from exc
 
-    def delete(self, *args):
+    def delete(self, *args: Unpack[GetArgs]) -> None:
         key = ".".join(args)
         try:
             del self.storage[key]

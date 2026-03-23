@@ -15,10 +15,17 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with woob. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
+import io
 import sys
 from collections import defaultdict
-from logging import Formatter, LoggerAdapter, addLevelName
+from collections.abc import MutableMapping
+from logging import Formatter, Logger, LoggerAdapter, LogRecord, addLevelName
 from logging import getLogger as _getLogger
+from typing import Any, cast, overload
+
+from typing_extensions import Protocol
 
 
 __all__ = ["getLogger", "createColoredFormatter", "settings"]
@@ -41,10 +48,34 @@ addLevelName(DEBUG_FILTERS, "DEBUG_FILTERS")
 
 
 # Global settings f logger.
-settings = defaultdict(lambda: None)
+settings: MutableMapping[str, Any] = defaultdict(lambda: None)
 
 
-def getLogger(name, parent=None):
+class LoggerSettings(Protocol):
+    settings: MutableMapping[str, Any]
+
+
+class WoobLogger(LoggerSettings, Logger): ...
+
+
+try:
+
+    class WoobLoggerAdapter(LoggerSettings, LoggerAdapter[WoobLogger]): ...
+
+except TypeError:  # py39
+
+    class WoobLoggerAdapter(LoggerSettings, LoggerAdapter): ...
+
+
+@overload
+def getLogger(name: str, parent: Logger | None = None) -> WoobLogger: ...
+
+
+@overload
+def getLogger(name: str, parent: LoggerAdapter[Logger]) -> WoobLoggerAdapter: ...
+
+
+def getLogger(name: str, parent: Logger | LoggerAdapter[Logger] | None = None) -> WoobLogger | WoobLoggerAdapter:
     if isinstance(parent, LoggerAdapter):
         klass = type(parent)
         extra = parent.extra
@@ -55,11 +86,14 @@ def getLogger(name, parent=None):
 
     if parent:
         name = parent.name + "." + name
-    logger = _getLogger(name)
+
+    logger: WoobLogger | WoobLoggerAdapter
+    logger = cast(WoobLogger, _getLogger(name))
     logger.settings = settings
 
     if extra:
-        logger = klass(logger, extra)
+        assert klass is not None
+        logger = cast(WoobLoggerAdapter, klass(logger, extra))
         logger.settings = settings
     return logger
 
@@ -70,7 +104,7 @@ class ColoredFormatter(Formatter):
     https://stackoverflow.com/questions/384076/how-can-i-make-the-python-logging-output-to-be-colored
     """
 
-    def format(self, record):
+    def format(self, record: LogRecord) -> str:
         levelname = record.levelname
 
         msg = super().format(record)
@@ -79,7 +113,7 @@ class ColoredFormatter(Formatter):
         return msg
 
 
-def createColoredFormatter(stream, format):
+def createColoredFormatter(stream: io.TextIOWrapper, format: str) -> Formatter:
     if (sys.platform != "win32") and stream.isatty():
         return ColoredFormatter(format)
     else:
@@ -88,4 +122,4 @@ def createColoredFormatter(stream, format):
 
 if __name__ == "__main__":
     for levelname, cs in COLORS.items():
-        print(cs % levelname, end=" ")
+        print(cs % levelname, end=" ")  # noqa: T201
