@@ -35,6 +35,9 @@ class LoginPage(JsonPage):
     def password_expired(self):
         return "changebankpassword" in self.get_url()
 
+    def on_load(self):
+        access_token = self.response.headers.get("new-authorization")
+        self.browser.session.headers["Authorization"] = "Bearer %s" % access_token
 
 class ChangepasswordPage(HTMLPage):
     def on_load(self):

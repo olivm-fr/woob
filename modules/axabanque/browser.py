@@ -214,6 +214,7 @@ class AXAOldLoginBrowser(OAuth2PKCEMixin, LoginBrowser):
 class AXANewLoginBrowser(AllianzbanqueBrowser):
     BASEURL = "https://api-banque.axa.fr"
     redirect_uri = "https://banque.axa.fr/auth/checkuser"
+    login = URL(r"https://api-banque.axa.fr/securityapi/checkuser", LoginPage)
     error_uri = "https://banque.axa.fr/auth/errorauthn"
     arkea = "AB"  # Needed for the X-ARKEA-EFS header
     arkea_si = "0AB"
