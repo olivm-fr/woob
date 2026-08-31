@@ -38,7 +38,7 @@ __all__ = ['IndyApiBrowser']
 
 class IndyApiBrowser(APIBrowser, StatesMixin):
     BASEURL = 'https://app.indy.fr'
-    TURNSTILE_SITE_KEY = '0x4AAAAAAASufhULx9jgmdAJ'
+    TURNSTILE_SITE_KEY = None
     TIMEOUT = 30
 
     def __init__(self, config, *args, **kwargs):
@@ -50,6 +50,12 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
         kwargs.setdefault('headers', {})['Authentication'] = 'Bearer ' + self.session.cookies.get('bearer_token')
         return self.open(*args, **kwargs)
 
+    def get_turnstile_sitekey(self):
+        if self.TURNSTILE_SITE_KEY is None:
+            js = self.open('/api/config/public')
+            self.TURNSTILE_SITE_KEY = re.search(r'"siteKey" *: *"(0x[0-9a-zA-Z]+)"', js.text).group(1)
+            self.logger.debug('Turnstile Site key %s', self.TURNSTILE_SITE_KEY)
+        return self.TURNSTILE_SITE_KEY
 
     def get_turnstile_token(self):
         try:
@@ -57,10 +63,10 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
                     'task': {
                         'type': 'TurnstileTaskProxyless',
                         'websiteURL': self.BASEURL + '/connexion',
-                        'websiteKey': self.TURNSTILE_SITE_KEY
+                        'websiteKey': self.get_turnstile_sitekey()
                     }}
             self.logger.debug(data)
-            response = self.request(f'https://{self.config['captchaservice'].get()}/createTask', method='POST', data=data).json()
+            response = self.open(f'https://{self.config['captchaservice'].get()}/createTask', method='POST', data=data).json()
             self.logger.debug(response)
             if response['errorId'] != 0:
                 raise BrowserIncorrectPassword(response)
@@ -68,7 +74,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
             while True:
                 data = {'clientKey': self.config['captchakey'].get(), "taskId": task}
                 self.logger.debug(data)
-                response = self.request(f'https://{self.config['captchaservice'].get()}/getTaskResult', method='POST', data=data).json()
+                response = self.open(f'https://{self.config['captchaservice'].get()}/getTaskResult', method='POST', data=data).json()
                 self.logger.debug(response)
                 if response['status'] == 'ready':
                     return response['solution']['token']
@@ -87,7 +93,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
             if self.config['mfacode'].get():
                 data['mfaVerifyPayload'] = {'type': 'email', 'emailCode': self.config['mfacode'].get()}
             self.logger.debug(data)
-            response = self.request('/api/auth/login', method='POST', data=data).json()
+            response = self.open('/api/auth/login', method='POST', data=data).json()
             self.logger.debug(response)
             if not response['ok']:
                 raise BrowserIncorrectPassword(response)
@@ -131,7 +137,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
     def get_account(self, _id):
         return find_object(self.get_accounts(), id=_id, error=AccountNotFound)
 
-    def _get_paginated(self, *args, **kwargs):
+    def _get_paginated(self, *args, **kwargs):  # Warning : untested !
         kwargs.setdefault('params', {})['page'] = 1
 
         nbTransactions = 0
@@ -143,6 +149,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
             if nbTransactions >= response['nbTransactions']:
                 break
             kwargs['params']['page'] += 1
+
 
     @need_login
     def get_transactions(self, account):
@@ -166,50 +173,35 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
         t.set_amount(re.sub(r'[.]', ',', str(trans['totalAmountInCents'] / 100)))
         return t
 
+
     @need_login
     def iter_subscription(self):
-        for a in self.get_accounts():
+        response = self.request(f'/api/documents?periodId={datetime.today().year}', method='GET').json()
+        for a in [t for r in response['documents'] if r['key'] == 'compteProAccountStatements' for t in r['tags']]:
             sub = Subscription()
-            sub.id = '_anytime_%s' % a.id
-            sub.label = 'Anytime %s' % a.id
-            sub._account = a
-            if a.type == Account.TYPE_CARD:
-                sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=card"
-            elif a.type == Account.TYPE_CHECKING:
-                sub.url = self.BASEURL + "/ajax-customer-pdfTransactions?what=corp"
+            sub.id = '_indy_%s' % a
+            sub.label = 'Indy %s' % a
+            # sub._account = a
+            sub.url = f'/api/{a}/account-statements'
+            self.logger.debug(sub.url)
             yield sub
 
     @need_login
     def iter_documents(self, subscription):
-        if subscription._account.type == Account.TYPE_CHECKING:
-            response = self.request(self.BASEURL + '/api/v1/customer/corp-accounts/%s/statements' % subscription._account.id.replace('corp-', ''), method='GET').json()
-            #self.logger.debug('%s', response);
-            for s in response['statements']:
-                doc = Document()
-                doc.date = datetime.strptime(s, '%Y-%m')
-                doc.id = subscription.id + '/' + s  # s['id']
-                doc.url = '%s&cid=%s&month=%s' % (subscription.url, subscription._account.id.replace('corp-', ''), s)
-                doc.label = "Download the document to get the label"
-                doc.format = 'pdf'
-                yield doc
-        elif subscription._account.type == Account.TYPE_CARD:
-            response = self.request(self.BASEURL + '/api/v1/customer/card/%s/transactions' % subscription._account.id, method='GET').json()
-            cid = response['cid']
-            done = []
-            #self.logger.debug('%s', response);
-            for s in response['statements']:
-                doc = Document()
-                doc.date = datetime.strptime(s, '%Y-%m')
-                doc.id = subscription.id + '/' + s
-                doc.label = "Download the document to get the label"
-                doc.format = 'pdf'
-                if doc.id not in done:
-                    done.append(doc.id)
-                    doc.url = '%s&cid=%s&month=%s' % (subscription.url, cid, s)
-                    yield doc
+        response = self.request(subscription.url, method='GET').json()
+        self.logger.debug(response)
+        for s in response:
+            doc = Document()
+            doc.date = datetime.strptime(s['closingDate'], '%Y-%m-%d')
+            doc.id = subscription.id + '/' + s['closingDate']
+            doc.url = s['url']
+            doc.label = f'Account statements for {subscription.label} closing on {s['closingDate']}'
+            doc.format = 'pdf'
+            self.logger.debug(doc)
+            yield doc
 
     @need_login
     def download_document(self, document):
         response = self.request(document.url, method='GET')
-        document.label = re.sub(r'.*filename="([^"]*)"', '\\1', response.headers['content-disposition'])
+        self.logger.debug('%s : %s, %dB', document.url, response.headers['content-type'], len(response.content))
         return response.content
