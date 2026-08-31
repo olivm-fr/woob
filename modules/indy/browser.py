@@ -164,7 +164,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
         if trans['isDeleted']:
             self.logger.debug("Transaction deleted, ignored : %s", str(trans))
             return None
-        date = datetime.fromisoformat(trans['date'])
+        date = datetime.fromisoformat(trans['created_at'])  # see also date field, without timezone though
         t.parse(
             date,
             trans['rawDescription'],  # re.sub(r'[ ]+', ' ', ' '.join([s for s in [trans['description'], trans['rawDescription']] if s is not None and len(s) > 0]))
@@ -203,5 +203,6 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
     @need_login
     def download_document(self, document):
         response = self.request(document.url, method='GET')
-        self.logger.debug('%s : %s, %dB', document.url, response.headers['content-type'], len(response.content))
+        document.label += "." + document.format
+        self.logger.debug('%s : %s, %s, %dB', document.url, document.label, response.headers['content-type'], len(response.content))
         return response.content
