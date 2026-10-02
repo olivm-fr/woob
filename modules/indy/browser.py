@@ -147,7 +147,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
             for t in response['transactions']:
                 yield t
             if nbTransactions >= response['nbTransactions']:
-                break
+                break  # current indy app implementation is : get pages until transactions=[]
             kwargs['params']['page'] += 1
 
 
@@ -176,7 +176,7 @@ class IndyApiBrowser(APIBrowser, StatesMixin):
 
     @need_login
     def iter_subscription(self):
-        response = self.request(f'/api/documents?periodId={datetime.today().year}', method='GET').json()
+        response = self.request(f'/api/documents?year={datetime.today().year}', method='GET').json()
         for a in [t for r in response['documents'] if r['key'] == 'compteProAccountStatements' for t in r['tags']]:
             sub = Subscription()
             sub.id = '_indy_%s' % a
