@@ -361,9 +361,7 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
             },
         )
 
-        raise BrowserQuestion(
-            Value("sca_code", label=f"Entrez le code reçu au {media['numero_masque']}", masked=True)
-        )
+        raise BrowserQuestion(Value("sca_code", label=f"Entrez le code reçu au {media['numero_masque']}", masked=True))
 
     def first_login_step(self):
         if not self.login_page.is_here():
