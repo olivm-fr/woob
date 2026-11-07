@@ -46,6 +46,7 @@ class FortuneoModule(Module, CapBankWealth, CapBankTransferAddRecipient, CapProf
         ValueBackendPassword("login", label="Identifiant", masked=False, required=True),
         ValueBackendPassword("password", label="Mot de passe", required=True),
         ValueTransient("code"),
+        ValueTransient("sca_code", masked=True),
         ValueTransient("request_information"),
     )
     BROWSER = FortuneoBrowser

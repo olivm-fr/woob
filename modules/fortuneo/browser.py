@@ -276,24 +276,94 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
 
     @retry(BrowserUnavailable)
     def request_authorization(self):
+        # Resume a pending SCA challenge: reuse the session_id from the
+        # request that triggered it instead of starting a new one. Fortuneo's
+        # own front-end does the same -- a fresh session_id would not be
+        # bound to the operation the owner is confirming.
+        #
+        # This cannot be driven through AUTHENTICATION_METHODS /
+        # do_double_authentication: OAuth2Mixin.do_login() calls
+        # request_authorization() directly and never reaches
+        # TwoFactorBrowser.do_login (= do_double_authentication).
+        sca_code = self.config["sca_code"].get()
+        if sca_code:
+            self._submit_authorization_code(
+                password=sca_code,
+                authenticationMethod=self.sca_auth_method,
+                operationId=self.sca_operation_id,
+            )
+            return self._finish_authorization()
+
         self.session.cookies.clear()
 
         self.location(self.build_authorization_uri())
         location_params = dict(parse_qsl(urlparse(self.url).fragment))
         self.session_id = location_params["session_id"]
 
+        try:
+            self._submit_authorization_code()
+        except ClientError as e:
+            if e.response.status_code == 403:
+                try:
+                    payload = e.response.json()
+                except ValueError:
+                    payload = {}
+                if payload.get("error_code") == "SCA_REQUESTED":
+                    return self.handle_sca(payload)
+            raise
+
+        self._finish_authorization()
+
+    def _submit_authorization_code(self, **extra_fields):
+        data = {"access_code": self.username, "password": self.password, "space": "PART"}
+        data.update(extra_fields)
         self.location(
             self.authorization_code_uri,
             params={"session_id": self.session_id},
-            data={"access_code": self.username, "password": self.password, "space": "PART"},
+            data=data,
             allow_redirects=False,
         )
+
+    def _finish_authorization(self):
         redirect_uri = self.response.headers.get("Location")
         if redirect_uri:
             location_params = dict(parse_qsl(urlparse(redirect_uri).fragment))
             self.code = location_params["code"]
             self.request_access_token({"code": self.code})
             self.checkaccess.go(data={})
+
+    def handle_sca(self, payload):
+        """Handle Fortuneo's PSD2 Strong Customer Authentication step.
+
+        Only SMS is implemented; the first offered medium is used
+        unconditionally. ``sca_tmp_token`` doubles as the bearer credential
+        for the otp-send call below -- there is no separate access token at
+        this point in the login, since the OAuth exchange has not completed.
+        """
+        medias = payload.get("sca_medias") or []
+        if not medias:
+            raise ActionNeeded("No SCA media available for this account.")
+        media = medias[0]
+        self.sca_operation_id = payload["operationId"]
+        self.sca_auth_method = media["type_media"]
+
+        self.location(
+            "https://api.fortuneo.fr/security/operation/otp",
+            json={
+                "operationId": self.sca_operation_id,
+                "valueMedia": media["numero_crypte"],
+                "typeMedia": self.sca_auth_method,
+                "template": "FTOFROTP",
+            },
+            headers={
+                "apikey": self.client_id,
+                "Authorization": f"Bearer {payload['sca_tmp_token']}",
+            },
+        )
+
+        raise BrowserQuestion(
+            Value("sca_code", label=f"Entrez le code reçu au {media['numero_masque']}", masked=True)
+        )
 
     def first_login_step(self):
         if not self.login_page.is_here():
