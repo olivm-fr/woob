@@ -307,7 +307,7 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                 try:
                     payload = e.response.json()
                 except ValueError:
-                    payload = {}
+                    raise e from None
                 if payload.get("error_code") == "SCA_REQUESTED":
                     return self.handle_sca(payload)
             raise
