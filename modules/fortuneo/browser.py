@@ -88,7 +88,7 @@ __all__ = ["FortuneoBrowser"]
 class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
     HAS_CREDENTIALS_ONLY = True
     BASEURL = "https://mabanque.fortuneo.fr"
-    STATE_DURATION = 5
+    STATE_DURATION = 60
 
     env_page = URL(r"/env.json", EnvPage)
     landing_page = URL(r"/mon-espace(#session_id=(?P<account_id>.*))?", LoginLandingPage)
@@ -196,7 +196,8 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
         self.action_needed_processed = False
         self.add_recipient_form = None
         self.sms_form = None
-        self._fetch_auth_parameters()
+        self.api_url = None
+        self.client_id = None  # these 2 can only be fetched after the browser is finished building, with its status restored
 
         self.AUTHENTICATION_METHODS = {
             "code": self.handle_sms,
@@ -209,6 +210,8 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
         self.api_url = self.page.api_url()
 
     def do_login(self):
+        if not self.api_url:
+            self._fetch_auth_parameters()
         self.AUTHORIZATION_URI = self._authorize.with_base(self.api_url).build(browser=self)
         self.authorization_code_uri = self._authorization_code.with_base(self.api_url).build(browser=self)
         self.ACCESS_TOKEN_URI = self._access_token.with_base(self.api_url).build(browser=self)
@@ -437,11 +440,11 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
             raise AuthMethodNotImplemented("Authentification with sms is not supported")
 
     def load_state(self, state):
-        # reload state only for new recipient and 2fa features
         if state.get("need_reload_state") or state.get("sms_form"):
             # don't use locate browser for add recipient step and 2fa validation
             state.pop("url", None)
-            super().load_state(state)
+        # in all cases, restore cookies to get the current logged-in session
+        super().load_state(state)
 
     def process_skippable_message(self):
         global_error_message = self.page.get_global_error_message()
@@ -531,6 +534,8 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                 else:
                     account_api_id = self.page.get_account_api_id()
                     if account_api_id:
+                        if not self.client_id:
+                            self._fetch_auth_parameters()
                         self.portal_sso.go(headers={"apikey": self.client_id})
                         self.api_account.go(id=account_api_id, headers={"apikey": self.client_id})
                         self.page.fill_account(obj=account)
@@ -621,6 +626,8 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
             # Checking account: use REST API
             account_api_id = self.page.get_account_api_id()
             if account_api_id:
+                if not self.client_id:
+                    self._fetch_auth_parameters()
                 self.portal_sso.go(headers={"apikey": self.client_id})
                 self.api_transactions.go(
                     id=account_api_id,
